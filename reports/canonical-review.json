@@ -2,20 +2,60 @@
   "note": "What full-content reviews of hub canonical content have covered, one entry per unit, holding the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git keeps the history. A unit is covered while its digest here matches the content's, so an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists.",
   "passes": [
     {
-      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
-      "digest": "sha256:d000a7b3f3fc3a90c7f2c5516424aaf1a3b97a3b47c3fc3310d34aa676d2a65d",
+      "unit": ".agents/skills/agent-conduct/SKILL.md > (preamble)",
+      "digest": "sha256:ac019bedc804c3bba57aed7ed2bc1272ae7cc5701e66fa3ee3e97706d939996e",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:23:10Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
+      "digest": "sha256:9de845ccd2449f1a86528f52c2ce581afec7311a0757755620805b2aa93a701d",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:21Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
+      "digest": "sha256:5a3128345565bdbc3f4af16ac4262b4cf88c5e1640385325a4a4ae4fd33ab988",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:21Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
+      "digest": "sha256:dccb7b425fbee654152fdb64f63b9a438ae2da607a4c8be88c2b58878be3bdbc",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:35Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
-      "digest": "sha256:7bb4825e38c44c74366d2f0051d521968d87df765144bb080ca059a417e2cd75",
+      "digest": "sha256:09fe765939d60461b11fecc4584aa32a78c51720424c8a5ccd66bfa685e628c2",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
-      "stamp": "2026-09-02T01:11:56Z"
+      "findings": 1,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Why This Exists",
+      "digest": "sha256:61b40202de51514aa2c67b106900451d65de170de98fefd2e88a13a2a8eafafa",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:35Z"
+    },
+    {
+      "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
+      "digest": "sha256:641112a85d02d327be4e7d1154b26a19f116a8087c993de516a760857b1a6ed4",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:51:13Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > (preamble)",
@@ -27,27 +67,27 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding a Prose Group",
-      "digest": "sha256:b94ebeced663da22a9a5b0b32f494d6dbe2045bb8d54ecab5484eb049e9a52d7",
+      "digest": "sha256:7d5647dcd838c8eaca1d342749f7ebaecbad10263919ad17e629be88431d356b",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:46Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Bounding the Wait on a Worker",
-      "digest": "sha256:6af6a85a17f9671f6ba50f622a34769e7c8c6fce2100496cd2f9330523755daa",
+      "digest": "sha256:668f48bfe9c6e2b1eadd7d19f3c9cafcc3aa25695587f2e5537cc1fff16cb3dc",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:04:25Z"
+      "findings": 3,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:41:14Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Dispatching a Worker",
-      "digest": "sha256:bd825f92555e4d0a762afe4a2de5ac6a9873b14eed1221a4c2f87d9a70f71489",
+      "digest": "sha256:84dda6ae64210c2403ae84ce2f345d27865f68f341146c2c006ef6d8379c62de",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:41:40Z"
+      "findings": 2,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
@@ -59,11 +99,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
-      "digest": "sha256:c6c315f4141dd986741e51c290867a8721f3313087e9ff62554681d4b56ca2b1",
+      "digest": "sha256:54c22333992b900419d97a0e01764bfa67113511a5cf3e8b5a354c8d24a7c75a",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:41:40Z"
+      "findings": 2,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:28:22Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Mechanics Live Elsewhere",
@@ -75,43 +115,43 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Raising a Blocked Question",
-      "digest": "sha256:86282c469754ae2c1b5ba5e6694f7d54325e19b2978d5fbef3b50a95a6831c74",
+      "digest": "sha256:5406ec6bf4c8b4941dbb88d475545e5521ca37ae64e0a21f7fbd7967e9889aa9",
       "reviewer": "agent-skill",
-      "findings": 7,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-03T23:11:32Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:40Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:e58cd0555581811e82a9796072cefc5c3ef14f265f5e4791104a71935cd1de15",
+      "digest": "sha256:5ce2044cd7e78e86a24a15d3b8d939cf922c8fce60841bd37f659feaa51726a5",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:06:41Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
-      "digest": "sha256:6b0b57e0f06237d6f134af15a356aa3ec21bb54c5f2e6bd8460087f392ed20c8",
+      "digest": "sha256:375a886f08433f80e7788bdb394a72ce2afe0e9f922ff9fd3972451a297643b1",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:50Z"
+      "findings": 1,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Scope",
-      "digest": "sha256:1db5bb5cdd672089c306c59c2776b672ba09541b093fe9e05f4e713c4bc8b530",
+      "digest": "sha256:1bd758ddc437afe836ddf20b00adfd919c41f95548e92ccdf4b0f5485161f820",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:50Z"
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:55:41Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Promotion Boundary",
-      "digest": "sha256:4b802ff18e55a38f6027b443bebe63c0721e84bf0234b7262aaad726dc005f77",
+      "digest": "sha256:3c4a3cda775b840ca28d5b59963a93edc86f678a444ac52c3e1987958719ba95",
       "reviewer": "agent-skill",
-      "findings": 8,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:33:58Z"
+      "findings": 7,
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T18:43:00Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Round",
@@ -123,19 +163,19 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > The Two Seats",
-      "digest": "sha256:988e9cc3aee1ab6aa7c9ada41827a4903f7ae6d06f8051178456888a39c9cb82",
+      "digest": "sha256:e1595ccf33b05823e811b41c2a21aed95c6be91b5bbe55ffa135f8a940adbf0d",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:51Z"
+      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
+      "stamp": "2026-09-05T17:57:05Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > What Invoking This Skill Authorizes",
-      "digest": "sha256:00d0aff29a7a73bf5575aa0753aac923fdc1364c17968d8e87c96f3658e3ef77",
+      "digest": "sha256:b6e8b635c80e201590f8babbebd29bf9ef63c931466241e6a599a29ce6dd7c30",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:52Z"
+      "findings": 3,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:11:49Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Why This Exists",
@@ -162,12 +202,28 @@
       "stamp": "2026-09-01T05:45:31Z"
     },
     {
+      "unit": ".agents/skills/comment-and-doc-style/references/line-endings.md > Scripts and extensionless executables",
+      "digest": "sha256:8fd106b584bef3810e28f35f1e0e94c18bc3992f38233c6765557e1c1800c99a",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
+      "stamp": "2026-09-06T02:24:00Z"
+    },
+    {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Build requirements",
       "digest": "sha256:96e6651c2e024fae3bca713f4a8cab34b37a9bb9eb693a3e25de04465b03113c",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "a2c9dab3bfde574d179b0765f9bb50f413ce7a80",
       "stamp": "2026-09-02T03:33:05Z"
+    },
+    {
+      "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Testing conventions",
+      "digest": "sha256:8090b7a015bad6707b54bb9d3c2a62d40ca2d95b499a70f712668dbeb82f9275",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:27Z"
     },
     {
       "unit": ".agents/skills/dotnet-codestyle/SKILL.md > Tooling and editor",
@@ -178,20 +234,36 @@
       "stamp": "2026-09-02T13:41:40Z"
     },
     {
-      "unit": ".agents/skills/drive-pr/SKILL.md > (preamble)",
-      "digest": "sha256:5c6af4cd25e9aeaafbfe460691d87bbddf80b4c164f29791fe42df931749e5bb",
+      "unit": ".agents/skills/dotnet-codestyle/references/testing.md > (preamble)",
+      "digest": "sha256:2f477f9122d71f3070f272c5e9ba2e227482eff06a1463ca0ac5cef3d68ebcca",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:58:37Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:27Z"
+    },
+    {
+      "unit": ".agents/skills/dotnet-codestyle/references/testing.md > Microsoft.Testing.Platform and coverage",
+      "digest": "sha256:37d08392e883923be61ddfa87d05d268c41e565f1dccfa387d89727f7c654b90",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:31:52Z"
+    },
+    {
+      "unit": ".agents/skills/drive-pr/SKILL.md > (preamble)",
+      "digest": "sha256:71a5535d07debc9fa5cd679296a83c096b9eef5280aa2b3fc8ae707b86c67335",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:11:49Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > Disposing of Every Finding",
-      "digest": "sha256:ae3a4a85828fbe73e68906cecfab20bf0c801c22482126c3e16f530aa8b71737",
+      "digest": "sha256:883689d8b9529430556667c1eba4d2d9aeba2760982697d999244a486a252a73",
       "reviewer": "agent-skill",
-      "findings": 4,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:58:38Z"
+      "findings": 2,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:30:52Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > How Far to Drive",
@@ -203,11 +275,11 @@
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > The Drive Loop",
-      "digest": "sha256:f05bc847db251e692cf5e3a4e9aecd74448705aa7b9f478efbdb6908721c99be",
+      "digest": "sha256:d1a39100cc4e8a03f6386e763f734a1b8298897be960074f51d01566a143192c",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "dded739ff0ae8614b52b187a95b00460c0fad8ce",
-      "stamp": "2026-09-01T17:57:39Z"
+      "findings": 7,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:11:49Z"
     },
     {
       "unit": ".agents/skills/drive-pr/SKILL.md > What Invoking This Skill Authorizes",
@@ -227,11 +299,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Disposing of Findings",
-      "digest": "sha256:568da8c763e51795bff9e294a07976fd1479b93b48d383e6d5b60fe23901d6b3",
+      "digest": "sha256:04502d7245f620e87df6a5d28e7ee6e4b92dd748c1dc86b9a884f0310b697d62",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T00:58:38Z"
+      "findings": 2,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:11:49Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Mechanics Live Elsewhere",
@@ -251,19 +323,19 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > Running It",
-      "digest": "sha256:612b1fed21acfd0fd5d1adf78109b4abcb4fe497218b30fbd99e3263f7b197d3",
+      "digest": "sha256:f9e0ed6fcb2b798cbf46efa239a5c0a039cf261f3b917ab8d110e2cc0e59136c",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "16f2e32a037857dfcd68b114f006ca2d0cf12ada",
-      "stamp": "2026-09-04T02:11:36Z"
+      "findings": 3,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T21:20:13Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > The Carried-Content Pass",
-      "digest": "sha256:1bd1396389709aa388ba5b984cd11cc1335bb7b13da107c32bcc336feb816154",
+      "digest": "sha256:0e2902a43d228b74045c7310325fbd7f399f279855e261bbce12cb4f0161ab0d",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "e97708dfe4c92e275118a0705556822993de9f32",
-      "stamp": "2026-08-31T16:17:12Z"
+      "findings": 3,
+      "hubCommit": "ddca03490f0517fe786ef1d58aff3b8eaf19616b",
+      "stamp": "2026-09-04T16:24:35Z"
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > What It Does",
@@ -275,11 +347,11 @@
     },
     {
       "unit": ".agents/skills/local-strict-review/SKILL.md > When to Run It",
-      "digest": "sha256:2de88c5663772d0b2c255fa44a567d6ab04d3b50c67f038af194e910650c83ab",
+      "digest": "sha256:b0c7bff2d7fc345ab99ca9cbf33208fcb3afdd8d985418995f1d3186d4df3f4c",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "44ae00bd432e1eeaafeb00208d8e713a22f49076",
-      "stamp": "2026-09-01T18:51:57Z"
+      "findings": 3,
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:11:49Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > (preamble)",
@@ -288,6 +360,22 @@
       "findings": 0,
       "hubCommit": "eb6d2a055dc590113f515aed7cac1e019b7d2111",
       "stamp": "2026-09-03T18:32:16Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > Publishing (release model)",
+      "digest": "sha256:0274bfe3eba4544b3680c4fd25da9da161adcba4269345b2f08bb60ce3688730",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:27Z"
+    },
+    {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > (preamble)",
+      "digest": "sha256:03b65b37ef0079e48a7628641dab7f0b79b326782127ed841928aa9235703e8b",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:27Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Map your outputs to the right seam",
@@ -322,6 +410,14 @@
       "stamp": "2026-09-01T14:33:08Z"
     },
     {
+      "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Recovering a failed registry push",
+      "digest": "sha256:78f378a68cb9bb4401ebb9815103a4a973a100e507c64eb9a62137c1c454c5b6",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:31:52Z"
+    },
+    {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
       "digest": "sha256:7d1d9acd0646b16f9a41debbc44b97926a8bb43b515ab00e1298d32efb898fc7",
       "reviewer": "agent-skill",
@@ -339,19 +435,19 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes",
-      "digest": "sha256:f7292e072c812adc3d9f3d7302181978eaf5c313c6c60efd6c7deece6578b1da",
+      "digest": "sha256:26a9201900a60d33f5b89ed5a7b274d430b62dad1136a0b80ef45af4dfc8c9f6",
       "reviewer": "agent-skill",
       "findings": 4,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:06:00Z"
+      "hubCommit": "fbf1f6d9dc713d6e187d2c3d6542490a2839fe55",
+      "stamp": "2026-09-05T16:30:52Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Expected review loop",
-      "digest": "sha256:129b6445b11e494700c899653ebd57db9efd000053e16662bec6de650719abb4",
+      "digest": "sha256:efde1221d83911ef2a0e72b45729130ab9e8f10950f9546697190c5074bb141f",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "0e6aacf45334149f6158aa23b8132d6aee1d1eb0",
-      "stamp": "2026-09-01T16:37:57Z"
+      "findings": 4,
+      "hubCommit": "28872b4ab08d10d48e8dc0eecd94cdf257633e7d",
+      "stamp": "2026-09-04T23:44:02Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Mechanics Live Elsewhere",
@@ -360,6 +456,14 @@
       "findings": 0,
       "hubCommit": "b03a838ad24e3ff23ae6eeedb89571130a285ce6",
       "stamp": "2026-09-01T17:49:26Z"
+    },
+    {
+      "unit": ".agents/skills/pr-review-conduct/SKILL.md > Merge Gate, check this before merging or enabling auto-merge",
+      "digest": "sha256:9fec3aa6f4a0c13134d0c41183b4ada8dcb70a544e6796e7f558996969edae73",
+      "reviewer": "agent-skill",
+      "findings": 10,
+      "hubCommit": "4ee4669af5930d842c07ff5daabda6ee0ef621bd",
+      "stamp": "2026-09-05T00:57:49Z"
     },
     {
       "unit": ".agents/skills/python-codestyle/SKILL.md > Local development loop",
@@ -371,11 +475,11 @@
     },
     {
       "unit": ".agents/skills/python-codestyle/references/testing.md",
-      "digest": "sha256:58de79a2634bd61f5d3d411b550b99537bba437a23a36f0e6995dd74ea67b1c2",
+      "digest": "sha256:94f61df9b261dbbce373b216b2393492ebd547778dee92d2bac61c892e30a00d",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "e56d99db54bd0d89f44904b7e76de366ca41c124",
-      "stamp": "2026-09-03T17:48:49Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:31:52Z"
     },
     {
       "unit": ".agents/skills/repo-worktree/SKILL.md > Creating a Worktree",
@@ -418,6 +522,38 @@
       "stamp": "2026-09-01T06:46:39Z"
     },
     {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > (preamble)",
+      "digest": "sha256:6f8099d2cba08c13cc553b4d9b0e8d3d1388d5436777965b9abeeac838d9b9c3",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T03:54:48Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > Changing or Retiring a Skill",
+      "digest": "sha256:fd8c57baf48d969a67218d1defdf7be10f277baa832190aba32dedbb9d8001a2",
+      "reviewer": "agent-skill",
+      "findings": 4,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T03:58:10Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Doc-Packaging Pattern",
+      "digest": "sha256:357a856eed4481c8c1a75b87928b00b69d5b7cdd4866b82fd84134b179138dd0",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
+    },
+    {
+      "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
+      "digest": "sha256:bb0710a02060264e1b093e5f2863d5d327d0c80aa4dd629c8e1ea24eac222a1a",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:16:36Z"
+    },
+    {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",
       "digest": "sha256:47ca6dfccbb8527b464aaa2c8fd113d536b8102f35635407b7b4e62663226425",
       "reviewer": "agent-skill",
@@ -427,91 +563,91 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > After Any Workflow Edit",
-      "digest": "sha256:7dc31b8f1e7e25effd4b85078f9099b89cf3663452ed0400cf255df019fbef0e",
+      "digest": "sha256:923c54f5bc02cf735badb6e0a897af7b26e15b8dd4e44418e52e4b8528241cff",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "f858a194ce29fa5702e2ce1c6ff8d1f3b221b2ee",
-      "stamp": "2026-09-01T23:24:57Z"
+      "findings": 0,
+      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
+      "stamp": "2026-09-05T19:46:56Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > How the Contract Is Read",
-      "digest": "sha256:89bd7614cb37469788ec836234482c1be2ebc6905bd786ad031504bfe3dd2239",
+      "digest": "sha256:d1c4af2c63eae9841c3ca5755a76f94f290367f5fb7cb5be1810d7e3be5ef028",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:23:11Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:18:39Z"
     },
     {
-      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules That Break in One-Line Diffs",
-      "digest": "sha256:d96271fbc25a48086cf32de4df0bc16b224a553a704aa44dfbd93654bd27c2b2",
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Style Rules",
+      "digest": "sha256:6494d55d844f4dceebab5ca006f7319848f8120ce925cbcba73db36861e42dee",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:33:08Z"
+      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
+      "stamp": "2026-09-06T00:53:56Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Contract Text",
+      "digest": "sha256:442d4210b0725f9df860f2a7c770c3a829e9bb28213f2c0f8aa2e27f13b11c31",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > The Core Behavioral Spine",
-      "digest": "sha256:91fbccc9e042f0ad82322b032f1efbd30590db572ae022b13c0ef537a6928ce9",
+      "digest": "sha256:c67f5b8b324d7a796098ba4bb04174b1c07b7da05627416cefe7d149a93a1719",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "3f1cb6a107d860b6dec65357fdc4787a8492ba39",
-      "stamp": "2026-09-03T18:56:39Z"
+      "findings": 2,
+      "hubCommit": "ee4c1ce3dc1a67520b00f2038136c252172f52f5",
+      "stamp": "2026-09-05T19:43:31Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > Why This Exists",
-      "digest": "sha256:713456da9774e1d979fdef3a31cf90099bd3287e28715754a2d8266979311a53",
+      "digest": "sha256:d89e6f3b20c6ec6ca8307fae5346303fc0e0c9eb439f3b960b75f0733a7d836c",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/architecture.md > (preamble)",
+      "digest": "sha256:6d9507914d458b12d94684f297b13de873beae3f48dc0a040a5757ca90e8b566",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T17:51:06Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/architecture.md > The Architecture",
+      "digest": "sha256:aab6516648fdedbce7acaa83f91b0fea64accb7aa82a67e43a1f58a52e14649f",
       "reviewer": "agent-skill",
       "findings": null,
-      "hubCommit": "a6c7bb1d0831b5c41a905b0c957661dc14f5f566",
-      "stamp": "2026-09-03T22:06:23Z"
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
-      "digest": "sha256:f5ff09431c97a4c1c86d29b387a686805c467e7761d54e37ca61e75d4d0b2173",
-      "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
-      "stamp": "2026-09-02T18:38:20Z"
-    },
-    {
-      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D1: PR Fast-Feedback (Smoke)",
-      "digest": "sha256:6c57b1c6eed34177bc1f1dacef05725efc19e0b385b103a6d0a01c9265b41e93",
+      "digest": "sha256:62ab330411b5d4fb24146921d173bf78005af48b9abffb00dce980f06947ae87",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "4fdc718663d0149994e496e890c20c7a77f27c96",
-      "stamp": "2026-09-03T03:12:20Z"
+      "hubCommit": "0f9114282e9202db6f22a1ab23a9e8b73f02be11",
+      "stamp": "2026-09-06T18:08:47Z"
     },
     {
-      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D4: Release and Publish",
-      "digest": "sha256:2c8b0653258589c31a3f84491da60752deb95131bb5d2a2154a8465bacab69bf",
+      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
+      "digest": "sha256:94614a4246ec43214b8043e09521dccd0932f5fa035cf6be3103902befa6d1d0",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
+    },
+    {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
+      "digest": "sha256:12773b882e5a37f82e1f710eb8081887a46daf54e7da5535509f46a77d24d18d",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "16daf0dc20e9f11a1485b6835b4f064d6907b273",
-      "stamp": "2026-09-03T01:05:09Z"
-    },
-    {
-      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D5: Resource Cleanup",
-      "digest": "sha256:37ab54b40d243ff4d1f3864dedcf6e0342a0091003ea28d1283f46f16857bd0e",
-      "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
-    },
-    {
-      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D6: Seam Conformance",
-      "digest": "sha256:6d5a39e3a432df61b6a8a0a839584a25edb8d30db4d7e768cc3232fc83b26b74",
-      "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "37d116a2fa0cecf85a220c9005375091db240a8d",
-      "stamp": "2026-09-01T14:23:11Z"
-    },
-    {
-      "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > D7: Concurrency, Permissions, Safety",
-      "digest": "sha256:c033b50b73c24d96575a7abe6b481323d7b4107eae174340a27430db49af936f",
-      "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:21:42Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > 5A: Static Audit",
@@ -538,6 +674,14 @@
       "stamp": "2026-09-03T18:19:22Z"
     },
     {
+      "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > The Test Methodology",
+      "digest": "sha256:37b196d79a98a292065b666a6be490736688646025e2f15d768034bff3725b00",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
+    },
+    {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > Verdict",
       "digest": "sha256:fca3f384bfead20bbf4da5381ada9abf417451d72f8e88a51a246fa910faf4a2",
       "reviewer": "agent-skill",
@@ -547,11 +691,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
-      "digest": "sha256:83570e2b15143c6f9b79e4d381b7a578d3ae7970d74ae676405a402f6d13630f",
+      "digest": "sha256:afb6352526c16cf708b82426214bf0b15725da70b85e2e053335263947a3573b",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "f0ff674ec0d59bb2c9ec3736ef22d9de205059c8",
-      "stamp": "2026-09-02T03:21:55Z"
+      "findings": 5,
+      "hubCommit": "00832f397a18c656fb15d6972a6acab7ecbcc078",
+      "stamp": "2026-09-05T04:49:01Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
@@ -563,11 +707,19 @@
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:ee899615c15fae90078977de131abbbbc4f461ec6a751db26e5a63eaf8aa1961",
+      "digest": "sha256:ce4edaf6e8818b89bab224a63e6c4b7df0616d7f1f27a5fef17b7eda7e47b7dc",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:54Z"
+      "findings": 5,
+      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
+      "stamp": "2026-09-06T05:06:22Z"
+    },
+    {
+      "unit": "AUDIT.md > (preamble)",
+      "digest": "sha256:a2ef5c014adb4303ae7eac8a6bdf8569964529a5733ef6ce65c35efef6147454",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
@@ -578,12 +730,44 @@
       "stamp": "2026-09-01T13:57:20Z"
     },
     {
+      "unit": "AUDIT.md > 3. Applicability Gate",
+      "digest": "sha256:5a93264a923298617dc9ed670ff4a3acd3640012370d8453904825083ac2c0bd",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "2d63d52cbb8bd8a6d42846ddbdda18737c069187",
+      "stamp": "2026-09-06T20:42:51Z"
+    },
+    {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
       "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
       "stamp": "2026-09-01T14:48:23Z"
+    },
+    {
+      "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
+      "digest": "sha256:f4f013b448b1e2cf76519c624db36cecdc7288eb5235f077d708f4079df0d54c",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
+    },
+    {
+      "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
+      "digest": "sha256:cadbf5a3b36bdc9ec871eb907565c582bed70c2e4098c6a99fd756cd2b623489",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "db9e5695f1501cc894953bdd57db46e4faf74159",
+      "stamp": "2026-09-05T02:20:07Z"
+    },
+    {
+      "unit": "CODESTYLE.md > .NET",
+      "digest": "sha256:df1c9031b93a98e07f6b4ff3a211b61d9938e04b7fbf305d7a60384f02892e66",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
     },
     {
       "unit": "CODESTYLE.md > General",
@@ -594,6 +778,14 @@
       "stamp": "2026-09-02T03:09:17Z"
     },
     {
+      "unit": "CODESTYLE.md > Python",
+      "digest": "sha256:6afed757bc277970b32d5b61b8850bd6282ebd19e86e7fa6588b8b2c66558db8",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
+    },
+    {
       "unit": "CODESTYLE.md > Shell",
       "digest": "sha256:7cf33c9cf26f21399d2de62d1219da67a16f28acfacf81cbe349948d502cb7ef",
       "reviewer": "agent-skill",
@@ -602,12 +794,20 @@
       "stamp": "2026-09-01T05:45:32Z"
     },
     {
-      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:cd5ef7be0c674a9ba29c3196ae81757ae18f7bb8ca82f573ffd77f96d363cc8e",
+      "unit": "GOVERNANCE.md > Communicating with the User",
+      "digest": "sha256:bd373e66ff3c0aff366b81958997a4fdf8b4e289549e0fddd94d28ba7bdaa503",
       "reviewer": "agent-skill",
-      "findings": 11,
-      "hubCommit": "52b0c550ab07ab58b940a353a83247d7451e76e5",
-      "stamp": "2026-09-02T01:11:58Z"
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
+      "digest": "sha256:1bc2f0a6ab7fec3315c3ce57bdbeec6a645832b27c9fb4c3b13ec281b39f76e0",
+      "reviewer": "agent-skill",
+      "findings": 5,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
     },
     {
       "unit": "GOVERNANCE.md > PR Review Etiquette",
@@ -616,6 +816,14 @@
       "findings": 6,
       "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
       "stamp": "2026-09-03T18:28:40Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Release Model",
+      "digest": "sha256:c06ac302758a576aa8f05777766a194e7e9da4756a821aa0bb43948e7ec25624",
+      "reviewer": "agent-skill",
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:28Z"
     },
     {
       "unit": "GOVERNANCE.md > Repository Layout",
@@ -627,75 +835,75 @@
     },
     {
       "unit": "GOVERNANCE.md > Verification Discipline",
-      "digest": "sha256:d62a160f347578c5c2f922f280f21ced2e1d4a1adc9df6aed124ea2dce637628",
+      "digest": "sha256:bc13f5bc89894a95d7c4957e036ad8a09226a8587ee6ce6ed2fc1e62fefeef50",
       "reviewer": "agent-skill",
-      "findings": 15,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:39:43Z"
+      "findings": 2,
+      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
+      "stamp": "2026-09-05T14:21:22Z"
     },
     {
       "unit": "GOVERNANCE.md > Workflow YAML Conventions",
-      "digest": "sha256:cbeb861edab7ed851e66c772f148c6102b5c1fe9ae8724d2fbd681a76fab673b",
+      "digest": "sha256:ab4254985a70c3cb81d8081b6dc493c225c3ffebf32f284e5b58b81a7609e409",
       "reviewer": "agent-skill",
-      "findings": 14,
-      "hubCommit": "30c465ae79de328d2745c31df1b05f0d960c42b7",
-      "stamp": "2026-09-02T15:40:54Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:39:31Z"
     },
     {
       "unit": "WORKFLOW.md > (preamble)",
-      "digest": "sha256:ea8cdbdf569d5476aa300eee0f797f0318b1a488ea690955f1cc2244b620d3b3",
+      "digest": "sha256:2b31490cc52ca158dc3f4c089472d1f9a0fa8d9e0ac6d4ecd3e827fcbd18849b",
       "reviewer": "agent-skill",
-      "findings": 8,
-      "hubCommit": "99f8de2209405d2dfa8b6d648dc42d55ee3de060",
-      "stamp": "2026-09-02T19:16:34Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 1. Purpose and How to Use This Document",
-      "digest": "sha256:35a8c77043da983af04a46300f652d4e3b8a454815b10c380524832cfdbe4a70",
+      "digest": "sha256:037855116da21001793779382cb2def5105fd8043f9ba5df203e8adb2d0e60f6",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 2. Workflow Style Conventions",
-      "digest": "sha256:047d124867942f07a0e1ce0128de5664ac12b06046336dccf6d59139cff68297",
+      "digest": "sha256:65d2e1c4353d1e4ce2ed4ec4b544718411b9b288143a8af4db57b7d0af4f9e97",
       "reviewer": "agent-skill",
-      "findings": 11,
-      "hubCommit": "3cd97cf0ef28d000c83ddd54fa7925fe0c4623f9",
-      "stamp": "2026-09-02T15:56:03Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
-      "digest": "sha256:cbdfc5161d7951fc9f968257f9090aa8086f10f5fcb869d3a632d12ccfdb2dbe",
+      "digest": "sha256:563658039c240fa0c4c437f54ccaee046be759ddceaa1c58d5d5f516595fa2c3",
       "reviewer": "agent-skill",
-      "findings": 62,
-      "hubCommit": "9b33edb7e0f55fe2a05630a49d5be99ba1e3eb26",
-      "stamp": "2026-09-02T15:16:10Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:3616be733206b40f62b360374e08056785038ec7b528c7746ab0a5dfaffc34c3",
+      "digest": "sha256:5dc3d6cf3a20d039fc41f9cd26df5fb84f21d1a8f8b11dfdfd18fabf87e1db5a",
       "reviewer": "agent-skill",
-      "findings": 16,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:21:27Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
-      "digest": "sha256:e4c043871a8fe90f89741b36893a0a4b8cf8ddba18ca8259a4513a300931ed24",
+      "digest": "sha256:98172b5a40068285b2b37666bfe85032168f78aa5f402f7cdb54caf2a083e941",
       "reviewer": "agent-skill",
-      "findings": 12,
-      "hubCommit": "28dafdf46ee35cc9901e845a317991d909a94fac",
-      "stamp": "2026-09-03T18:21:33Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:17:29Z"
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:dcf042d329e97ac6f76e08664a00776c3d68f20a4980b513eee76925d7a6d1d8",
+      "digest": "sha256:aa0bd2d323f81f253c79fab3ebd8d0015912aba1760233f7fcc6c3d79a958d16",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "398abeedb76d01d87437993255c49ade98d72c99",
-      "stamp": "2026-09-02T16:58:05Z"
+      "findings": null,
+      "hubCommit": "88053791e5c76fbc4dc753ad3f21d3c3e6c80fcf",
+      "stamp": "2026-09-06T23:46:53Z"
     }
   ]
 }

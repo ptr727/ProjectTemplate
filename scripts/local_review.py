@@ -642,11 +642,12 @@ def break_stale_lock(lock: Path) -> bool:
 
 
 def held_lock(path: Path, timeout: float = 10.0) -> int:
-    """Take an exclusive lock beside the receipt, or raise once waiting has gone on too long.
+    """Take an exclusive lock at `<path>.lock`, or raise once waiting has gone on too long.
 
-    Recording is a read, a merge, and a replace. The replace is atomic on its own, but two
-    backends recording concurrently over one unchanged diff would both read a receipt without the
-    other's pass and the second write would drop it, which is exactly the accumulation this file
+    Recording is a read, a merge, and a write, here and in `canonical_review.py`, which guards its
+    ledger with this same helper. The replace below is atomic on its own, but two backends
+    recording concurrently over one unchanged diff would both read a receipt without the other's
+    pass and the second write would drop it, which is exactly the accumulation this file
     promises. The lock is what makes the promise true rather than usually true.
     """
     lock = Path(str(path) + ".lock")

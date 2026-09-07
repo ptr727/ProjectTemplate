@@ -12,7 +12,7 @@
 # `repo_gate.py --check sha-pin` is absent for a different reason.
 # It resolves same-owner pins against the GitHub API, and a hook needing a network fails offline.
 # The doc linters that need Docker stay in CI and in the VS Code Lint tasks.
-set -e
+set -eu
 
 # Git already runs a hook from the top level, measured by committing from `scripts/` and printing `pwd`.
 # This is belt and braces for an invocation that does not come from git.

@@ -1,31 +1,59 @@
 # Testing a Repo's Workflows
 
-The three escalating verification modes from `WORKFLOW.md` section 5, which keeps authority. N/A items (a check or scenario for an absent construct) are recorded and excluded, never failed.
+The section below is `WORKFLOW.md` section 5, whole. Its items and scenarios answer to the D-guarantees in `WORKFLOW.md` section 4, carried whole in `d-guarantees.md` beside this file.
 
-## 5A: Static Audit
+## The Test Methodology
 
-Read the workflow files, `version.json`, and whatever else a check names as its own evidence: a project or dependency file, `global.json`, `codecov.yml`, `.gitignore`, the branch ruleset, and the repo's Actions and Dependabot secret names. Assert the structural fact behind each applicable D-guarantee, each pass, fail, or N/A with a `file:line` citation, cite a repository setting by its own name where that setting rather than a file is the evidence, and remember the two layers, asserting each input in the layer that declares it. `WORKFLOW.md` 5A carries the whole core list and the per-type addenda, and the sibling `d-guarantees.md` carries the guarantees each item answers to, so read this as an index into them rather than as the sweep itself.
+<!-- include: WORKFLOW.md > 5. Test Methodology -->
 
-The core sweep reaches the paths-filter, naming each target's own build paths so a change touching none marks nothing. It reaches smoke gating on every upload. It reaches the aggregator's `needs:` and its skip and fail handling. It reaches coverage collection and its best-effort Codecov upload in every C# and Python repo that has tests at a profile other than `lint-only`, since a repo whose coverage never reaches Codecov passes every other check in this list. It reaches the entry validation jobs and the two-directional release gate. It reaches the single-branch NBGV classification, with the gate's default-branch literal, the `prerelease` expression, and `version.json`'s `publicReleaseRefSpec` all naming the repo's actual default branch. It reaches `target_commitish` from `GitCommitId`. It reaches the consume-then-delete artifact lifecycle, with `retention-days: 1` everywhere and no blanket delete. It reaches the `pattern:` handoff and `inputs.branch` config. It reaches the publisher's serialized concurrency and the SHA pins. Those are entry points into `WORKFLOW.md` 5A's core list rather than the whole of it.
+An agent verifies a project in three escalating modes, then renders a verdict. **Skip N/A items** (`WORKFLOW.md` section 1): a guarantee or scenario for an absent construct is recorded N/A, not failed.
 
-The per-type addenda cover .NET publish, NuGet, PyPI, Docker, and a static site deployed to a host, several assertions each. Apply only the ones the repo's types imply, and read them in `WORKFLOW.md` 5A rather than from this list.
+### 5A. Static Audit (No Execution)
 
-## 5B: Trace Scenarios
+Assert the structural fact each *applicable* D-guarantee implies, and record **pass**, **fail**, or **N/A** per item. This section says how an audit is run and recorded rather than what must hold: a guarantee names its own constructs, and the requirement is `WORKFLOW.md` section 4's item together with whatever that item defers to.
 
-For each applicable scenario, evaluate every job's `if:`/`needs:` against the inputs and compare the predicted run/skip, version, release, and artifact end state to the expected table in `WORKFLOW.md` 5B. The load-bearing ones:
+Most of the evidence is in the workflow files and the composite actions they reach. Where a guarantee's evidence lies outside them, it is in practice the repo's branch ruleset, its Actions and Dependabot secret names, a workflow the repo only calls, a project or dependency file, or a committed file such as `version.json`, `.github/dependabot.yml`, `global.json`, `codecov.yml`, `.gitignore`, or `.editorconfig`.
 
-- **S1** a PR touching a target: that target smoke-builds, nothing uploads, the aggregator succeeds.
-- **S5/S6** a bot push to `main`: publishes only when code-affecting, and a human push never does.
-- **S7** a publish run builds the one trigger branch with the right classification and leaves no dangling artifacts.
-- **S8** a dispatch from a ref other than `main`/`develop` fails fast.
-- **S9** a no-op re-run on a schedule or push trigger: release-create skipped, registries dedupe, package build artifacts still deleted, Docker still re-pushes. A dispatch re-run refreshes the release instead.
-- **S10** branch and version classification disagree: the gate fails loud and everything downstream skips.
-- **S12/S13** a deploy dispatch: ref gate first, environment re-asserted, pointer flip separate, live check names the release, and a production deploy from a non-default ref fails before anything is written.
+Cite what each verdict rests on. That is `file:line` for a file in the audited repo, its own name where a setting, a ruleset, or a secret name rather than a file is the evidence, and `<owner>/<repo>@<sha>` plus the `file:line` in that repo where the guarantee binds a workflow or composite action the audited repo only reaches, read at the SHA the caller pins. An **N/A** verdict names the absent construct instead, there being no line to cite.
 
-## 5C: Live Probe
+### 5B. End-to-End Trace Scenarios (No Execution, Deterministic from the YAML)
 
-Only for what a static trace cannot settle. Every probe that dispatches a workflow, re-runs a real publish, or acts on the deploy host directly is the maintainer's to run: the agent prepares the command and reads the result back afterwards, and a harness refusal to fire one is the control working, never something to re-shape. The probes are a trivial PR to confirm S1, which runs same-repo only wherever the repo has a Docker leg, since that leg logs in to the registry even on smoke, registry queries after a real publish, the version classification and artifact lifecycle read from a real publish's logs, and the deploy ref gate, which is verified only by tripping it. That gate's evidence is four items, the gate job's conclusion, its error text naming the expected and the received ref, every downstream job recorded skipped rather than passed, and the production environment's deployment list carrying no deployment from the dispatched ref, because a gate that fails open and a gate nobody tripped leave the same empty run history behind.
+For each *applicable* scenario, evaluate every job's `if:`/`needs:` against the inputs and emit the predicted **run/skip + version + release + artifact-end-state** table, then compare to the expected. A scenario governing a construct the repo does not contain is N/A, per `WORKFLOW.md` section 1, and an absent trigger is such a construct. Each scenario's trigger belongs to one workflow, so read that workflow's own `on:` block rather than the repo's type: S1 to S4 the pull request workflow's, S5 to S10 the publisher's, S11 the upstream tracker's, and S12 and S13 the deploy workflow's. A publisher carrying only `workflow_dispatch` therefore records S5, S6 and S9 N/A, their push and schedule paths never firing there, and a repo with no publisher at all records S5 to S10 N/A together. Where a scenario's path runs through a workflow or composite action the repo only **calls**, trace that callee as the repo reaches it, read at the SHA the caller pins rather than at the callee's current default branch, which is the same evidence rule 5A states. Predicting from the callee's `main` predicts a table for YAML the audited repo never runs. A local (`./`) or self-repository (`$/`) call carries no pin of its own and runs at the workflow commit, so it is traced at whatever SHA the outermost pinning caller fixed. Minimum set:
 
-## Verdict
+| # | Input | Expected output | Exercises |
+| --- | --- | --- | --- |
+| S1 | PR touching a build target | `changes` flags it; validation runs; that target's smoke build runs; no push, **no uploads**; validate-release **succeeds**, its check exiting early on smoke per D2.2; release **skipped**; aggregator **success**; version = prerelease; no release; no dangling artifacts | D1, D2.2, D3 |
+| S2 | PR changing only docs | smoke-build **skipped**, validation runs, aggregator **success** | D1.1, D1.2, D1.5 |
+| S3 | PR changing only `.github/workflows/**` | the filter marks no target -> smoke-build **skipped**, validation runs, aggregator **success** | D1.2, D1.4, D1.5 |
+| S4 | PR base = default branch, carrying a build target | smoke versions as prerelease, validate-release **succeeds** with its check exited early per D2.2, so the default-branch arm does **not** fire, aggregator **success**, promotion not blocked | D1.5, D2.2, D3.2 |
+| S5 | bot push to `main` not touching a release path (e.g. an Actions bump) | the paths filter excludes it, so nothing publishes | D4.1 |
+| S6 | code-affecting **bot** push to `main` (a human push/promotion, or any develop push, does not) | the `plan` job gates it to the App/Dependabot actor, and `main` publishes a release | D3, D4 |
+| S7 | publish run (schedule, a bot push to main, or a dispatch) | builds the **one** trigger branch: `main` -> `X.Y.Z`, `prerelease=false`, registry stable, readme run; `develop` -> `X.Y.Z-g<sha>`, `prerelease=true`, registry prerelease; `release-asset-*` consumed-then-deleted; each package build-artifact (`nuget-build-*`, `pypi-build-*`) deleted after its publish; **no dangling artifacts** | D3, D4, D5, D6, D7 |
+| S8 | dispatch from a ref other than `main` or `develop` | **fails fast** | D2.3 |
+| S9 | re-run publish on a schedule or push trigger, version unchanged (a dispatch re-run refreshes the release instead, per D4.4) | release-create **skipped**, `release-asset-*` delete **skipped**; NuGet/PyPI pushes no-op (server dedupe); **package build-artifacts still deleted** (their download succeeded); **Docker still re-pushes** the image; no duplicate release | D4.4, D5.2 |
+| S10 | branch/version classification disagree | validate-release **fails loud**, build/publish skip | D2.2 |
+| S11 | scheduled upstream-version bump (wrapper) | resolver detects a change -> commits the state file -> opens a per-branch bump PR -> the merge-bot auto-merges it, or leaves it for the maintainer where the tracker sets `auto-merge: false` (D8.3) -> the `main` pin publishes via the gate (a develop pin does not auto-publish, shipping instead via a develop dispatch or promotion) | D8.3, D3.5 |
+| S12 | deploy dispatch naming an environment | the ref gate runs **first** (production from the default branch only, any ref to a non-production environment); validation runs; the callee re-asserts the environment name; a release installs under its own id; the pointer flips as a separate step; retention is bounded by whichever of the two D5.6 shapes the repo uses, so a deploy whose credential can observe the destination asserts the count converged and one confined write-only leaves it to the host; the live check asserts the environment and the release id, waiting out the reload, then the URL contract; **no tag and no release are created** | D2.1, D4.6, D5.6 |
+| S13 | deploy dispatch of a production environment from a non-default ref | **fails fast**, before anything is installed or written | D2.1 |
 
-Record the workflow operational when every applicable 5A item passes, every applicable 5B scenario's predicted output equals the expected, and no 5C probe that was run contradicts either. Any applicable mismatch is a defect. The verdict names the failing guarantees with the triggering input for each, the items recorded N/A, and the 5C probes prepared but not run, so a static-only audit and a fully probed one do not read alike. Per-project-type walkthroughs mapping scenarios onto targets, including source-only, static-site, and operational shapes, are `WORKFLOW.md` section 6.
+### 5C. Live Probe (Where Warranted)
+
+Every probe here that opens a pull request, dispatches a workflow, or re-runs a real publish is the maintainer's to run, with the agent preparing the command and reading the result back afterwards. A harness that refuses such a write is the harness working as intended, and the refusal is neither re-shaped into a raw API call nor talked around (`GOVERNANCE.md` "Repository Boundaries and Write Safety").
+
+- Open a trivial-change PR touching one target and confirm S1. *Caveat: the Docker leg logs in to the registry even on smoke and reads the buildcache, so it needs `DOCKER_HUB_*` secrets and cannot run on a fork PR (same-repo only).*
+- Per registry: after a real publish, query NuGet.org for the expected version + prerelease classification (and the `.snupkg` on the symbol server), and confirm a re-run added no duplicate. For PyPI read the built `dist/*` filenames out of the build job's log, `.dev0` off `develop` vs a plain version on the default branch.
+- Inspect the latest real publish's logs for `PublicRelease`/`SemVer2` per leg and confirm the artifact lifecycle (uploaded, consumed, deleted, with none left behind).
+- **The deploy ref gate (S13) is verified only by tripping it.** Dispatch the production environment from a non-default ref and expect the run to fail at the gate. The evidence is four things, and each of them matters: the gate job's conclusion, its error text naming the expected and the received ref, every downstream job recorded as **skipped** rather than passed, and the production environment's deployment list carrying no deployment from the dispatched ref. Capture all four, because a gate that fails open and a gate nobody tripped produce the same empty run history, so "we have never seen it fail" is not evidence about the one control standing between a mis-dispatch and the live site. **The agent prepares the command and reads all four back afterwards. It does not fire it.** The same split applies to any probe that acts on the deploy host directly, an outbound SSH exercising a forced command among them.
+
+### Assessment
+
+Record the workflow **operational** when every *applicable* 5A item passes, every *applicable* 5B scenario's predicted output equals the expected, and no 5C probe that was run contradicts either. N/A items are excluded, never counted as failures. Any *applicable* mismatch is a **defect** -> **not operational**. Procedure:
+
+1. **Audit** with 5A, recording each item's verdict and its evidence in the form 5A sets out.
+2. **Trace** the applicable S-scenarios with 5B. Diff predicted vs expected.
+3. **Probe** with 5C where a live signal exists that the static trace cannot produce, running the probes that only read and preparing the writing ones for the maintainer: live version classification, registry state, the artifact lifecycle of a real run, and the deploy ref gate.
+4. **Verdict:** operational / not operational, with the failing guarantee(s) and the triggering input for each, the list of items recorded N/A, and the 5C probes prepared but not run.
+
+`WORKFLOW.md` section 5 keeps the test methodology, and the `workflow-ci-contract` Skill at `.agents/skills/workflow-ci-contract/references/test-methodology.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo, carries this section whole as a generated include.
+
+<!-- /include -->
