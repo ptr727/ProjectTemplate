@@ -489,7 +489,7 @@ function Show-Menu {
     log '   9  Report fleet Skills install status'
     log '  10  Install or update the fleet Skills'
     log ''
-    log "Hub, ${HUB_REPO}:"
+    log "Hub, $($script:HUB_REPO):"
     log '  11  Audit a cataloged repo'
     log '  12  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
