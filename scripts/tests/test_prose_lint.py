@@ -2973,18 +2973,68 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
 
     A repository reaches this gate at whatever hub commit its own workflow pins, so CI and a hub
-    checkout run different copies from the moment a rule changes until that pin moves. On
-    #1412 that gap cost a full investigation: three dead-path findings raised by a pin one commit
-    behind the exemption that silences them reproduced against no local run, and with neither
-    verdict naming its copy the only available readings were a wrong invocation or a defect in
-    the action, which is what the issue proposed. Both were wrong and the version gap was not
-    among the candidates, because nothing in the output pointed at one.
+    checkout run different copies from the moment a rule changes until that pin moves. On #1412
+    that gap cost a full investigation: three dead-path findings raised by a pin one commit behind
+    the exemption that silences them reproduced against no local run, and with neither verdict
+    naming its copy the only available readings were a wrong invocation or a defect in the action,
+    which is what the issue proposed. Both were wrong and the version gap was not among the
+    candidates, because nothing in the output pointed at one.
 
-    So the property under test is that every verdict carries an attribution, and that the
-    attribution is never guessed: an unresolvable source reports unknown rather than a plausible
-    value, since a wrong attribution sends the next investigation somewhere worse than no
-    attribution does.
+    So the property under test is that every verdict carries an attribution and that the
+    attribution is never guessed. The second half is the harder one and it is where the cases
+    concentrate: a checkout containing the script is not a commit describing it, and both ways
+    those come apart produce a well-formed value naming content that was never run.
     """
+
+    def repo_with_script(self, tracked: bool = True) -> tuple[Path, Path, str]:
+        """A throwaway repository holding a copy of the gate, tracked or merely present."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "seed.txt").write_text("seed\n", encoding="utf-8")
+        script = root / "prose_lint.py"
+        script.write_text(
+            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        add = ["add", "seed.txt", "prose_lint.py"] if tracked else ["add", "seed.txt"]
+        for args in (add, ["commit", "-qm", "base"]):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.email=gate@example.invalid",
+                    "-c",
+                    "user.name=gate test",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *args,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return root, script, head
+
+    def verdict(self, script: Path) -> str:
+        """The scope line the given copy prints, read from a real run rather than from a call."""
+        target = script.parent / "sample.md"
+        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        r = subprocess.run(
+            [sys.executable, str(script), "--check", "dead-path", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        return r.stderr
 
     def test_an_explicit_value_outranks_the_environment(self) -> None:
         """The action knows the pin and the environment does not, so the action's value wins."""
@@ -2996,36 +3046,42 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PROSE_GATE_PROVENANCE": "owner/repo@ccccccc"}):
             self.assertEqual("owner/repo@ccccccc", prose_lint.gate_provenance())
 
-    def test_a_checkout_answers_for_itself(self) -> None:
-        """A local run reads its own commit, which is the value a CI verdict is compared against."""
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("PROSE_GATE_PROVENANCE", None)
-            got = prose_lint.gate_provenance()
-        self.assertRegex(got, r"^local [0-9a-f]{7,40}$")
+    def test_a_checkout_that_tracks_the_script_names_its_own_commit(self) -> None:
+        """The value is asserted against that repository's actual HEAD, not against a shape."""
+        _, script, head = self.repo_with_script()
+        self.assertIn(f"gate local {head}", self.verdict(script))
+
+    def test_an_edited_working_copy_is_named_as_moved(self) -> None:
+        """The commit no longer describes the file, which is the state of any branch changing a rule.
+
+        Without this the run that most needs an accurate attribution, the one made while editing
+        the rule, is the one that gets the pre-edit commit and no sign that it moved.
+        """
+        _, script, head = self.repo_with_script()
+        with script.open("a", encoding="utf-8") as fh:
+            fh.write("# Edited after the commit.\n")
+        self.assertIn(f"gate local {head}-dirty", self.verdict(script))
+
+    def test_a_copy_in_an_unrelated_checkout_is_attributed_to_nothing(self) -> None:
+        """The failure a bare HEAD read cannot see, since it returns a well-formed wrong answer.
+
+        The repository's HEAD resolves and describes content this copy never held, and the value
+        is indistinguishable from a genuine hub checkout's own.
+        """
+        _, script, head = self.repo_with_script(tracked=False)
+        out = self.verdict(script)
+        self.assertIn("gate unknown", out)
+        self.assertNotIn(head, out)
 
     def test_a_copy_under_no_checkout_reports_unknown_rather_than_guessing(self) -> None:
-        """The one case where a plausible value would be worse than an absent one.
-
-        Run as a subprocess against a copy outside any repository, because the resolution keys on
-        the module file's own location and an in-process call cannot move it.
-        """
+        """The plain case, a copy extracted to a scratch directory, which the runbook documents."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        detached = tmp / "prose_lint.py"
-        detached.write_text(
+        script = tmp / "prose_lint.py"
+        script.write_text(
             (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
-        target = tmp / "sample.md"
-        target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
-        r = subprocess.run(
-            [sys.executable, str(detached), "--check", "dead-path", str(target)],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-        self.assertIn("gate unknown", r.stderr)
+        self.assertIn("gate unknown", self.verdict(script))
 
     def test_both_scope_shapes_carry_the_attribution(self) -> None:
         """A whole-tree verdict and a diff-scoped one are two formats, so each is asserted."""
@@ -3034,18 +3090,93 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         self.assertIn("gate owner/repo@ddddddd", whole)
         self.assertIn("gate owner/repo@ddddddd", scoped)
 
-    def test_the_action_passes_its_own_pin_to_the_script(self) -> None:
-        """The action is the only surface that knows the pin, so the wiring is gated here.
 
-        A checked-out action carries no history of its own, so the script cannot read the pin
-        even though it stands inside the checkout. Losing this wiring returns every CI verdict to
-        the unattributed state without failing anything else.
+class TestTheActionPassesItsOwnPin(unittest.TestCase):
+    """The one surface that knows the pin, gated by running its script rather than by reading it.
+
+    A checked-out action carries no history of its own, so the script standing inside it cannot
+    resolve the pin and only the action can state it. Asserting that the file mentions the right
+    identifiers passes just as well when the guard is inverted, when the `@` is dropped, or when
+    the argument moves after the `--` that ends option parsing, so the block is executed and the
+    argument vector it builds is what the cases read.
+    """
+
+    def run_block(self, extra: dict[str, str]) -> list[str]:
+        """The action's own shell, against a stub that reports the argument vector it received."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "sample.md").write_text("Clean prose.\n", encoding="utf-8")
+        for args in (["add", "-A"], ["commit", "-qm", "base"]):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "user.email=gate@example.invalid",
+                    "-c",
+                    "user.name=gate test",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *args,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        stub_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (stub_dir / "prose_lint.py").write_text(
+            "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8"
+        )
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        _, block = action.split("      run: |\n", 1)
+        lines = []
+        for line in block.splitlines():
+            if line.startswith("        "):
+                lines.append(line.removeprefix("        "))
+            elif not line:
+                lines.append(line)
+            else:
+                break
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("ACTION_", "GITHUB_"))}
+        env |= {"BASE": "HEAD", "PATHS": ".", "GITHUB_ACTION_PATH": str(stub_dir)}
+        env |= extra
+        r = subprocess.run(
+            ["bash", "-c", "\n".join(lines)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_the_context_value_reaches_the_script_before_the_path_separator(self) -> None:
+        """After `--` the argument is read as a path, so its position is as load-bearing as its value."""
+        argv = self.run_block({"ACTION_REPOSITORY": "owner/repo", "ACTION_REF": "deadbee"})
+        self.assertIn("--provenance", argv)
+        self.assertEqual("owner/repo@deadbee", argv[argv.index("--provenance") + 1])
+        self.assertLess(argv.index("--provenance"), argv.index("--"))
+
+    def test_the_default_environment_variables_answer_when_the_context_is_empty(self) -> None:
+        """A reference form populating only the environment still names the pin.
+
+        The context's value for a repository-relative reference is undocumented, and this is the
+        fallback that keeps a downstream verdict attributed if it turns out to be empty.
         """
-        text = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-        self.assertIn("github.action_repository", text)
-        self.assertIn("github.action_ref", text)
-        self.assertIn("--provenance", text)
-        self.assertIn('"${provenance_args[@]}"', text)
+        argv = self.run_block(
+            {"GITHUB_ACTION_REPOSITORY": "owner/repo", "GITHUB_ACTION_REF": "cafe123"}
+        )
+        self.assertEqual("owner/repo@cafe123", argv[argv.index("--provenance") + 1])
+
+    def test_neither_source_set_passes_no_flag_rather_than_half_a_value(self) -> None:
+        """A local action, this repository's own run among them, where the script answers instead."""
+        self.assertNotIn("--provenance", self.run_block({}))
+
+    def test_half_a_value_is_not_passed(self) -> None:
+        """A repository with no ref names no commit, so it is worse than naming nothing."""
+        self.assertNotIn("--provenance", self.run_block({"ACTION_REPOSITORY": "owner/repo"}))
+        self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
 
 
 class TestHarness(unittest.TestCase):

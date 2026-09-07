@@ -279,27 +279,54 @@ def gate_provenance(explicit: str | None = None) -> str:
     Three sources answer, in the order they can be trusted. An explicit value is the composite
     action stating its own `owner/repo@ref`, which is the only source that knows the pin, since
     a checked-out action carries no history of its own. The environment carries the same value
-    for a caller that invokes the script directly. Otherwise this script's own directory answers,
-    because a local run is made from a checkout. None of the three resolving is reported as
-    unknown rather than guessed, since a wrong attribution is worse here than an absent one.
+    for a caller that invokes the script directly. Otherwise this script's own checkout answers,
+    under the conditions `checkout_provenance` states. None of the three resolving is reported as
+    unknown rather than guessed, since a wrong attribution is worse here than an absent one: it
+    sends the next investigation at a copy nobody ran, where no attribution at least leaves the
+    question open.
     """
     if explicit:
         return explicit.strip()
     env = os.environ.get("PROSE_GATE_PROVENANCE", "").strip()
     if env:
         return env
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except (OSError, ValueError):
+    return checkout_provenance(Path(__file__).resolve())
+
+
+def checkout_provenance(script: Path) -> str:
+    """The commit that describes this file's content, or unknown where no commit does.
+
+    A checkout containing the script is not the same fact as a commit describing it, and reading
+    HEAD alone conflates the two. Dropping a copy into an unrelated repository resolves that
+    repository's HEAD, which is a well-formed answer naming content it never held, and the value
+    is indistinguishable from a hub checkout's own. Editing the file in place resolves the commit
+    before the edit, which is the ordinary state of any branch that changes a rule, so the run
+    that most needs an accurate attribution is the one that would get a stale one.
+
+    Both are closed by asking what HEAD actually says about this path rather than what it says
+    about the repository: an untracked path is attributed to nothing, and a tracked path whose
+    working copy has moved is named as moved rather than as its commit.
+    """
+
+    def git(*args: str) -> str | None:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(script.parent), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except (OSError, ValueError):
+            return None
+        return r.stdout if r.returncode == 0 else None
+
+    if git("ls-files", "--error-unmatch", "--", str(script)) is None:
         return "unknown"
-    if r.returncode != 0 or not r.stdout.strip():
+    head = (git("rev-parse", "--short", "HEAD") or "").strip()
+    if not head:
         return "unknown"
-    return f"local {r.stdout.strip()}"
+    moved = (git("status", "--porcelain", "--", str(script)) or "").strip()
+    return f"local {head}-dirty" if moved else f"local {head}"
 
 
 def scope_note(
