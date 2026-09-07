@@ -402,6 +402,20 @@ def terminator(line: str) -> str:
     return "\n" if line.endswith("\n") else ""
 
 
+def file_ending(lines: list[str]) -> str:
+    """The terminator this file uses, read from its first terminated line.
+
+    A replacement takes its ending from the section's own heading line, which carries none when
+    that heading is the last line of a file with no final newline. Falling back to LF there would
+    write LF into a CRLF file and leave it mixed, so the file answers for itself and LF is the
+    answer only for a file that has no terminated line at all.
+    """
+    for line in lines:
+        if terminator(line):
+            return terminator(line)
+    return "\n"
+
+
 def normalize_eol(text: str) -> str:
     """`text` with every line ending as LF.
 
@@ -608,8 +622,9 @@ def replace_sections(
                 " so one replacement would splice over the other"
             )
     out = list(target_lines)
+    default_ending = file_ending(target_lines)
     for (start, end), source_span in ordered:
-        ending = terminator(out[start]) or "\n"
+        ending = terminator(out[start]) or default_ending
         region = []
         for line in source_lines[source_span[0] : source_span[1]]:
             body = line[: len(line) - len(terminator(line))]

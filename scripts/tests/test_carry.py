@@ -422,6 +422,26 @@ class CarrySectionTests(unittest.TestCase):
         self.assertNotIn("\n", result.replace("\r\n", ""))
         self.assertIn("The hub's current wording.\r\n", result)
 
+    def test_replace_sections_reads_the_ending_from_a_file_whose_heading_ends_it(self) -> None:
+        """A heading that is the last line of a file with no final newline carries no terminator, so
+        the ending has to come from the file rather than defaulting to LF and leaving it mixed."""
+        hub = carry.split_lines("# T\n\n## X\n\nhub body\n")
+        target = carry.split_lines("# T\r\n\r\n## X")
+
+        result = "".join(carry.replace_sections(target, hub, ["X"], "AGENTS.md"))
+
+        crlf = result.count("\r\n")
+        self.assertEqual(
+            result.count("\n") - crlf, 0, f"bare LF written into a CRLF file: {result!r}"
+        )
+        self.assertEqual(result, "# T\r\n\r\n## X\r\n\r\nhub body\r\n")
+
+    def test_file_ending_falls_back_to_lf_only_when_no_line_is_terminated(self) -> None:
+        self.assertEqual(carry.file_ending(carry.split_lines("a\r\nb\r\n")), "\r\n")
+        self.assertEqual(carry.file_ending(carry.split_lines("a\nb\n")), "\n")
+        self.assertEqual(carry.file_ending(carry.split_lines("only line")), "\n")
+        self.assertEqual(carry.file_ending([]), "\n")
+
     def test_replace_sections_terminates_a_region_the_hub_ended_unterminated(self) -> None:
         source = carry.split_lines(HUB_DOC.rstrip("\n"))
         target = carry.split_lines(
