@@ -14,7 +14,7 @@ description: >-
   full diff, or left a suppressed low-confidence finding, which opens no thread at all,
   unanswered. Also triggers when a review loop looks stuck
   (no review landing, findings that keep reappearing) or when deciding a finding is real, false,
-  deferred, or a deliberate decline. Also triggers when a reviewer looks missing or skipped.
+  deferred, or a deliberate decline, and when a reviewer looks missing or skipped.
   Provider-specific mechanics are implemented by
   scripts/pr_review.py and bootstrapped by .github/copilot-instructions.md. This skill is the
   contract those surfaces implement, not a replacement for them.

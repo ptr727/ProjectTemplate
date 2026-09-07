@@ -443,11 +443,11 @@
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > (preamble)",
-      "digest": "sha256:04908e46a01f31acf9c07c36df5ad3d4fcec0322dbf6ebd0af82f947cb1cd74b",
+      "digest": "sha256:ddc49b339ed567bf5adf4605699a7340089aed261919739a24d8c3df6f7f4a29",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "aaaae368fcf0653f37069a3adee97606a5f072ca",
-      "stamp": "2026-09-07T03:35:12Z"
+      "hubCommit": "34f00e240120f84bcd950166a27090ae0ec22e01",
+      "stamp": "2026-09-07T15:28:53Z"
     },
     {
       "unit": ".agents/skills/pr-review-conduct/SKILL.md > Answering a suppressed finding",
