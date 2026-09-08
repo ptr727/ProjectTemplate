@@ -11,11 +11,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
-      "digest": "sha256:f80dbfa3570d265fb5583d0b1361045c11e7bbf84af0ecd56217e7dffe5b0b88",
+      "digest": "sha256:936b4a58aab3baa0d9851597491b208503490891b99fb84f3856c70fcee7ad30",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 0,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T02:40:45Z"
+      "stamp": "2026-09-08T03:59:42Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
@@ -843,11 +843,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Communicating with the User",
-      "digest": "sha256:5ad2c23ad75a0b41824f6b068fd15b1c360a4c6663ca4b4140a465fa10327ed0",
+      "digest": "sha256:2ce2ba3c51351503f26ad0a015a9dda0236d9d64c58e64064e34770077a98230",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 0,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T02:40:45Z"
+      "stamp": "2026-09-08T03:59:42Z"
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
