@@ -21,7 +21,8 @@ Usage: python3 scripts/build_dist.py           fill include regions, then regene
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
                                                  failure (a symlink under .agents/skills/, an
                                                  unreadable file, an include region it cannot
-                                                 render), so a caller reading the exit
+                                                 render, a stale INCLUDE_DESTINATIONS entry), so a
+                                                 caller reading the exit
                                                  code can tell a finding apart from the check
                                                  itself not having run.
 """
@@ -165,7 +166,10 @@ INCLUDE_ROOT = ROOT
 # The files outside .agents/skills/ that may hold an include region, declared one at a time rather than discovered.
 # Only a walked file is written, so a region in a file on neither this tuple nor skill_documents() reads filled to whatever includes it while staying empty on disk, which is the refusal filled_lines() raises.
 # Discovery is wrong here even though it would spare the maintenance: whether a file may hold generated text is a judgment about where that text ends up, not a property of where the file sits.
-# Nothing spec/files.json carries hub content from belongs here, because a carrying repository holds the markers and runs no build, so the region would ship to it as an empty pair of comments.
+# Nothing spec/files.json carries hub content from belongs here, and manifest_carried_destination() refuses one rather than leaving the rule to a reader.
+# A carrier receives the filled text either way, since carriage copies this repository's committed bytes and a fill has already written them, so a region never arrives empty and markers reaching a carrier are not themselves the problem.
+# The generated mirrors already carry live markers to every repository, and are safe doing it because regenerate() rebuilds them wholesale from the authored tree on every run, so nothing in them can hold text its source no longer renders.
+# A carried authored file is copied rather than rebuilt, so a region in one would put generated text into a file its carrier holds as its own, which is what this refuses.
 # Empty today, deliberately: the surfaces that drift restate a rule in their own words for their own audience rather than copying it, and an include fills a region with a heading's whole body, so every one of them is a pointer instead (ptr727/ProjectTemplate#1317).
 # Declared empty rather than left out, because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
 INCLUDE_DESTINATIONS: tuple[str, ...] = ()
@@ -409,8 +413,10 @@ def filled_lines(rel, stack=()):
             raise ValueError(
                 f"{rel} mixes line endings, so a region in it cannot be rendered without rewriting the rest"
             )
-        if rel not in include_documents():
+        if rel not in INCLUDE_DESTINATIONS and rel not in skill_documents():
             # Only the files the walk visits are written, so a region anywhere else would read filled to an includer while staying empty on disk.
+            # The tuple is read directly rather than through include_documents(), because this test runs once per region while the validation behind that call answers the same question for every declared path each time.
+            # Nothing is lost by skipping it here, since include_drift() and fill_includes() both walk include_documents() before any region is read, so a stale declaration has already raised.
             raise ValueError(
                 f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled,"
                 f" so add {rel!r} to INCLUDE_DESTINATIONS or move the region under .agents/skills/"
@@ -461,16 +467,68 @@ def skill_documents():
     return sorted(out)
 
 
-def include_destinations():
-    """The declared non-skill destinations, each held to the same path rules a source is held to.
+def manifest_carried_destination(rel, manifest):
+    """The `manifest` entry that would carry `rel`'s bytes to another repository, or None.
 
-    A destination is checked the way include_source() checks a source, because filling a region
-    rewrites the file it sits in: a path that does not exist, is spelled differently from the tree,
-    is reached through a symlink, or lands in a generated tree is worse to write than to read. A
-    stale entry therefore fails the build rather than quietly naming nothing.
+    A destination is written by the fill and then committed, and carriage copies committed bytes,
+    so a carried destination hands every carrying repository generated text inside a file that
+    repository holds as its own and never rebuilds. The generated mirrors carry markers to every
+    repository already and are safe doing it for the opposite reason, that regenerate() rebuilds
+    them wholesale from the authored tree on every run, so the manifest decides this rather than
+    the author of the tuple. A baseline entry naming a path alone carries no content and is
+    therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here.
     """
+    for entry in manifest.get("baseline", ()):
+        if entry.get("path") == rel and (
+            entry.get("fidelity") or entry.get("sections") or entry.get("reference")
+        ):
+            return entry
+    for tree in manifest.get("trees", ()):
+        source = tree.get("source")
+        # A tree carries everything under it, so a destination inside one is carried whether or not the manifest names the file.
+        if source and (rel == source or rel.startswith(f"{source}/")):
+            return tree
+    return None
+
+
+def include_destinations():
+    """The declared non-skill destinations, refused where writing generated text into one would be wrong.
+
+    Each is held to the path rules include_source() holds a source to, because filling a region
+    rewrites the file it sits in, so a path that does not exist, is spelled differently from the
+    tree, is reached through a symlink, or lands in a generated tree is worse to write than to
+    read. Each is then held to the manifest, per manifest_carried_destination() above.
+
+    What this proves is that every declared path is one a region may be written into, not that any
+    of them holds a region: a declaration left behind after its region was deleted names a real
+    file and passes here, and nothing detects it.
+
+    The manifest is read once, and only where the tuple has an entry, so a checkout holding no
+    spec/files.json still imports and installs skills, which is what scripts/skills_install.py does
+    with this module. Where the tuple does have one, a manifest that cannot be read is refused
+    rather than read as carrying nothing, since a check that waves a declaration through because it
+    could not run has stopped checking.
+    """
+    if not INCLUDE_DESTINATIONS:
+        return []
+    path = INCLUDE_ROOT / "spec" / "files.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"INCLUDE_DESTINATIONS is not empty and {path} could not be read, so whether a"
+            f" declared destination is carried to other repositories cannot be decided: {exc}"
+        ) from exc
     for rel in INCLUDE_DESTINATIONS:
-        include_source(rel)
+        try:
+            include_source(rel)
+        except ValueError as exc:
+            raise ValueError(f"INCLUDE_DESTINATIONS entry {rel!r}: {exc}") from exc
+        if manifest_carried_destination(rel, manifest) is not None:
+            raise ValueError(
+                f"INCLUDE_DESTINATIONS entry {rel!r} is carried to other repositories by"
+                " spec/files.json, which would hand each of them a region no build of theirs can refresh"
+            )
     return list(INCLUDE_DESTINATIONS)
 
 

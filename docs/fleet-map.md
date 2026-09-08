@@ -243,7 +243,7 @@ flowchart LR
 ### G12: General Conduct Rules Have No Skill (Closed)
 
 - **Gap** - The conduct layer (ask when unsure, never assume, verification before claiming done, delegation and token discipline) lived in carried [`AGENTS.md`][agents] sections and doc-only GOVERNANCE sections, with no skill firing at the moments those rules are violated.
-- **Resolution** - The `agent-conduct` skill ships to the contract the "Proposed Skills" `agent-conduct` block states, which is where this doc keeps that skill's triggers and the sections it packages. Those sections are carried whole as generated includes now, rather than as the summaries the skill first shipped with, and they keep the full rules and the surfacing pointer while the carried [`AGENTS.md`][agents] sections stay the always-on layer.
+- **Resolution** - The `agent-conduct` skill ships to the contract the "Proposed Skills" `agent-conduct` block states. The sections it packages are carried whole as generated includes now, rather than as the summaries the skill first shipped with, and they keep the full rules and the surfacing pointer while the carried [`AGENTS.md`][agents] sections stay the always-on layer.
 
 ### G13: The Local Review Gate Reaches the Hub Only (Open)
 
@@ -279,7 +279,7 @@ Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skil
 ### agent-conduct
 
 - **Scope** - The conduct rules with no skill surface: verification before claiming done, asking instead of assuming, recording a lesson when a failure surfaces one, accounting at handoff for the questions parked rather than asked, and the delegation summary.
-- **Trigger** - **Narrow, at decision moments** rather than always-on, each moment being one where a conduct rule is about to be broken and nothing else fires. The skill's own description names which moments, and that list has grown since this contract was settled, so read it there rather than here. Deliberately not always-on: the carried [`AGENTS.md`][agents] sections are the always-on layer, and an always-on conduct skill would duplicate them and spend the tokens the delegation rules exist to save.
+- **Trigger** - **Narrow, at decision moments** rather than always-on, each moment being one where a conduct rule is about to be broken and nothing else fires. Which moments those are is the skill's own `description` frontmatter, which the skill may add to without this contract changing, so read the count and the wording there. Deliberately not always-on: the carried [`AGENTS.md`][agents] sections are the always-on layer, and an always-on conduct skill would duplicate them and spend the tokens the delegation rules exist to save.
 - **Packages** - `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement` from [`GOVERNANCE.md`][governance], which keep authority.
 - **Overlap** - The commit, review, and doc skills each carry their own conduct rules already, and this skill points rather than restates where one of those owns the moment.
 

@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,20 @@ class TreeCase(unittest.TestCase):
         build_dist.PLUGIN_MANIFEST = manifest
         build_dist.DIGEST_DIR = stamp
         build_dist.GITHUB_SKILLS = github_skills
+
+    def declare_destinations(self, *rels: str, manifest: dict | None = None) -> None:
+        """Declare `rels` and give the temp tree the manifest include_destinations() reads.
+
+        A declaration is refused where no manifest can be read, so a case exercising one supplies
+        it. The default carries nothing, which is the shape a destination has to have.
+        """
+        spec = self.tmp / "spec"
+        spec.mkdir(parents=True, exist_ok=True)
+        (spec / "files.json").write_text(
+            json.dumps(manifest if manifest is not None else {"baseline": [], "trees": []}),
+            encoding="utf-8",
+        )
+        build_dist.INCLUDE_DESTINATIONS = rels
 
     def make_skill(self, name: str, body: str = "content") -> None:
         d = self.skills_src / name
@@ -732,7 +747,7 @@ class IncludeCase(TreeCase):
         doc = self.tmp / "docs" / "map.md"
         doc.parent.mkdir(parents=True, exist_ok=True)
         doc.write_text("# Map\n\n" + self.region("RULES.md > Alpha"), encoding="utf-8")
-        build_dist.INCLUDE_DESTINATIONS = ("docs/map.md",)
+        self.declare_destinations("docs/map.md")
         self.make_skill("foo")
 
         build_dist.regenerate()
@@ -756,7 +771,7 @@ class IncludeCase(TreeCase):
             "## Own\n\n" + self.region("RULES.md > Alpha") + "\n## Other\n\nOther.\n",
             encoding="utf-8",
         )
-        build_dist.INCLUDE_DESTINATIONS = ("DOC.md",)
+        self.declare_destinations("DOC.md")
         self.make_skill("foo", self.region("DOC.md > Own"))
 
         build_dist.regenerate()
@@ -775,7 +790,6 @@ class IncludeCase(TreeCase):
         a generated tree is worse to write than it is to read.
         """
         self.make_skill("foo", self.region("RULES.md > Alpha"))
-        (self.tmp / "Cased.md").write_text("## A\n\na\n", encoding="utf-8")
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
         outside.write_text("## A\n\na\n", encoding="utf-8")
         (self.tmp / "link.md").symlink_to(outside)
@@ -783,16 +797,17 @@ class IncludeCase(TreeCase):
         (self.dist_plugin / "GEN.md").write_text("## A\n\na\n", encoding="utf-8")
         cases = {
             "missing": "docs/absent.md",
-            "re-cased": "cased.md",
             "through a symlink": "link.md",
             "under a generated tree": ".claude-plugin/fleet-skills/GEN.md",
             "outside the root": "../outside.md",
         }
         for label, rel in cases.items():
             with self.subTest(label):
-                build_dist.INCLUDE_DESTINATIONS = (rel,)
-                with self.assertRaises(ValueError):
+                self.declare_destinations(rel)
+                with self.assertRaises(ValueError) as caught:
                     build_dist.regenerate()
+                # Named, because include_source() raises the same words for a source and the message surfaces mid-scan of an unrelated skill.
+                self.assertIn("INCLUDE_DESTINATIONS", str(caught.exception))
 
     def test_the_refusal_names_the_declaration_that_would_admit_the_file(self) -> None:
         """The message says how to make the region live, since the fix is one line away and invisible."""
@@ -919,34 +934,87 @@ class IncludeCase(TreeCase):
         self.assertEqual(after, "False", "importing build_dist pulled in audit")
 
 
-class DeclaredDestinationCase(unittest.TestCase):
+class DeclaredDestinationCase(TreeCase):
+    """The manifest rule on a destination, exercised on tuples this case declares.
+
+    The shipped tuple is empty, so a case reading only it would assert over nothing. These build
+    the manifest and the destination instead, which is what makes the rule fail when it is wrong,
+    and RealDestinationCase below holds the shipped tuple to the same function.
+    """
+
+    def declare_doc(self, payload: dict) -> None:
+        (self.tmp / "DOC.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        self.declare_destinations("DOC.md", manifest=payload)
+
+    def test_a_destination_the_manifest_carries_content_from_is_refused(self) -> None:
+        """A carrier receives the filled text and holds markers no build of its own can refresh."""
+        cases = {
+            "whole-file fidelity": {"path": "DOC.md", "fidelity": "verbatim", "whole": True},
+            "named sections": {"path": "DOC.md", "sections": ["Own"]},
+            "a reference body": {"path": "DOC.md", "reference": "catalog/snippets/doc.md"},
+        }
+        for label, entry in cases.items():
+            with self.subTest(label):
+                self.declare_doc({"baseline": [entry], "trees": []})
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_a_destination_under_a_carried_tree_is_refused(self) -> None:
+        """A tree carries everything beneath it, so the manifest need not name the file itself."""
+        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        self.declare_destinations(
+            "docs/map.md",
+            manifest={"baseline": [], "trees": [{"source": "docs", "target": "docs"}]},
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            build_dist.include_destinations()
+
+        self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_a_baseline_entry_naming_a_path_alone_is_not_carried_content(self) -> None:
+        """Presence alone requires the file to exist and carries none of this repository's text."""
+        self.declare_doc({"baseline": [{"path": "DOC.md", "appliesTo": "*"}], "trees": []})
+
+        self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
+
+    def test_the_manifest_is_read_only_when_a_destination_is_declared(self) -> None:
+        """skills_install.py imports this module in checkouts that need not hold spec/files.json."""
+        self.assertFalse((self.tmp / "spec" / "files.json").exists())
+
+        self.assertEqual(build_dist.include_destinations(), [])
+
+    def test_a_manifest_that_cannot_be_read_refuses_rather_than_carrying_nothing(self) -> None:
+        """A check that waves a declaration through because it could not run has stopped checking."""
+        (self.tmp / "DOC.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        build_dist.INCLUDE_DESTINATIONS = ("DOC.md",)
+        for label, payload in {"absent": None, "not json": "{"}.items():
+            with self.subTest(label):
+                spec = self.tmp / "spec"
+                if payload is None:
+                    shutil.rmtree(spec, ignore_errors=True)
+                else:
+                    spec.mkdir(parents=True, exist_ok=True)
+                    (spec / "files.json").write_text(payload, encoding="utf-8")
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("could not be read", str(caught.exception))
+
+
+class RealDestinationCase(unittest.TestCase):
     """This repository's own INCLUDE_DESTINATIONS, read rather than crafted.
 
     A destination is a path typed by hand, so a file renamed or moved leaves the tuple naming
-    nothing. build_dist.py --check catches that in CI, and this case catches it in the test run
-    that a change to either surface already has to pass. Read-only: it resolves paths and writes
-    nothing.
+    nothing, and the manifest can grow an entry over a path already declared here. Both are caught
+    by running the real check against the real tree. Read-only: it resolves paths and writes
+    nothing. It asserts nothing while the tuple is empty, which is the shipped state, and arms
+    itself on the first entry.
     """
 
-    def test_every_declared_destination_resolves_in_this_tree(self) -> None:
+    def test_the_shipped_tuple_passes_its_own_check(self) -> None:
         self.assertEqual(build_dist.include_destinations(), list(build_dist.INCLUDE_DESTINATIONS))
-
-    def test_no_declared_destination_carries_hub_content_into_another_repository(self) -> None:
-        """A carrier holds the markers and runs no build, so a region there would ship empty.
-
-        A baseline entry naming a path alone requires the file to exist and carries none of this
-        repository's text into it, which is why README.md is a destination while a file with a
-        fidelity or a sections list could never be one.
-        """
-        manifest = json.loads((build_dist.ROOT / "spec" / "files.json").read_text(encoding="utf-8"))
-        carried = {
-            entry["path"]: entry
-            for entry in manifest["baseline"]
-            if entry.get("fidelity") or entry.get("sections") or entry.get("reference")
-        }
-        for rel in build_dist.INCLUDE_DESTINATIONS:
-            with self.subTest(rel):
-                self.assertNotIn(rel, carried)
 
 
 if __name__ == "__main__":
