@@ -42,11 +42,16 @@ jobs:
         # A run id sits in the reviewer's own environment, so an answer carrying one proves nothing.
         run: |
           set -Eeuo pipefail
-          : "${NONCE:?probe nonce is empty, so this environment receives no repository secret}"
+          # Both failures name the secret.
+          # This log is what tells a missing secret apart from a review that did not look.
+          if [[ -z "${NONCE:-}" ]]; then
+            printf 'probe: secrets.PROBE_NONCE is empty or absent in this environment\n' >&2
+            exit 1
+          fi
           # The reader matches decimal digits.
           # A nonce that is not decimal would read as a defect in the reader rather than the secret.
           case "$NONCE" in
-            *[!0-9]*) printf 'probe: nonce is not decimal\n' >&2; exit 1 ;;
+            *[!0-9]*) printf 'probe: secrets.PROBE_NONCE is not decimal\n' >&2; exit 1 ;;
           esac
           token="PROBE-SETUP-${NONCE}"
           write_probe() {
