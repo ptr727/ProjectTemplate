@@ -63,7 +63,7 @@ class TreeCase(unittest.TestCase):
         build_dist.DIGEST_DIR = stamp
         build_dist.GITHUB_SKILLS = github_skills
 
-    def declare_destinations(self, *rels: str, manifest: dict | None = None) -> None:
+    def declare_destinations(self, *rels: str, manifest: object = None) -> None:
         """Declare `rels` and give the temp tree the manifest include_destinations() reads.
 
         A declaration is refused where no manifest can be read, so a case exercising one supplies
@@ -806,7 +806,7 @@ class IncludeCase(TreeCase):
                 self.declare_destinations(rel)
                 with self.assertRaises(ValueError) as caught:
                     build_dist.regenerate()
-                # Named, because include_source() raises the same words for a source and the message surfaces mid-scan of an unrelated skill.
+                # Named, because include_source() raises the same words for a source, so a reader of the bare message cannot tell which of the two named the path.
                 self.assertIn("INCLUDE_DESTINATIONS", str(caught.exception))
 
     def test_the_refusal_names_the_declaration_that_would_admit_the_file(self) -> None:
@@ -942,7 +942,7 @@ class DeclaredDestinationCase(TreeCase):
     and RealDestinationCase below holds the shipped tuple to the same function.
     """
 
-    def declare_doc(self, payload: dict) -> None:
+    def declare_doc(self, payload: object) -> None:
         (self.tmp / "DOC.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
         self.declare_destinations("DOC.md", manifest=payload)
 
@@ -959,6 +959,67 @@ class DeclaredDestinationCase(TreeCase):
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
                 self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_presence_fidelity_is_admitted_however_it_is_spelled(self) -> None:
+        """presence carries no content and is also the default, so the two spellings are one declaration.
+
+        Refusing the explicit spelling while admitting the bare one would refuse README.md, which
+        spec/fidelity-model.md names as a presence file and which this check exists to admit.
+        """
+        for label, entry in {
+            "path alone": {"path": "DOC.md", "appliesTo": "*"},
+            "presence declared": {"path": "DOC.md", "fidelity": "presence", "appliesTo": "*"},
+        }.items():
+            with self.subTest(label):
+                self.declare_doc({"baseline": [entry], "trees": []})
+                self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
+
+    def test_a_tree_source_is_matched_however_it_is_spelled(self) -> None:
+        """The schema bounds a source's length rather than its spelling, so a raw prefix test lets one through."""
+        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        for label, source in {"trailing slash": "docs/", "dot prefix": "./docs"}.items():
+            with self.subTest(label):
+                self.declare_destinations(
+                    "docs/map.md",
+                    manifest={"baseline": [], "trees": [{"source": source, "target": "docs"}]},
+                )
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_a_tree_source_does_not_match_a_longer_sibling_directory(self) -> None:
+        """ "doc" and "docs" are different trees, so the prefix test compares whole path segments."""
+        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        self.declare_destinations(
+            "docs/map.md",
+            manifest={"baseline": [], "trees": [{"source": "doc", "target": "doc"}]},
+        )
+
+        self.assertEqual(build_dist.include_destinations(), ["docs/map.md"])
+
+    def test_a_manifest_of_the_wrong_shape_refuses_rather_than_raising_past_the_caller(
+        self,
+    ) -> None:
+        """json.loads accepts any JSON, and main() catches ValueError and OSError and nothing else.
+
+        An AttributeError from .get() on a list would leave the run as an uncaught traceback,
+        exiting 1, which is the code a caller reads as stale rather than as a check that could not
+        run.
+        """
+        cases: dict[str, object] = {
+            "manifest is a list": [],
+            "baseline is not a list": {"baseline": {}},
+            "baseline holds a string": {"baseline": ["x"]},
+            "trees is not a list": {"baseline": [], "trees": {}},
+        }
+        for label, payload in cases.items():
+            with self.subTest(label):
+                self.declare_doc(payload)
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("spec/files.json", str(caught.exception))
 
     def test_a_destination_under_a_carried_tree_is_refused(self) -> None:
         """A tree carries everything beneath it, so the manifest need not name the file itself."""
@@ -1004,17 +1065,18 @@ class DeclaredDestinationCase(TreeCase):
 
 
 class RealDestinationCase(unittest.TestCase):
-    """This repository's own INCLUDE_DESTINATIONS, read rather than crafted.
+    """This repository's own INCLUDE_DESTINATIONS, run against this repository's own tree.
 
     A destination is a path typed by hand, so a file renamed or moved leaves the tuple naming
     nothing, and the manifest can grow an entry over a path already declared here. Both are caught
-    by running the real check against the real tree. Read-only: it resolves paths and writes
-    nothing. It asserts nothing while the tuple is empty, which is the shipped state, and arms
+    by running the real check against the real tree, and a raise is the only way this can fail,
+    since the value returned is the tuple itself. Read-only. While the tuple is empty the call
+    returns before it reads or resolves anything, so this asserts nothing about the tree and arms
     itself on the first entry.
     """
 
     def test_the_shipped_tuple_passes_its_own_check(self) -> None:
-        self.assertEqual(build_dist.include_destinations(), list(build_dist.INCLUDE_DESTINATIONS))
+        build_dist.include_destinations()
 
 
 if __name__ == "__main__":

@@ -13,18 +13,20 @@ A skill reads whole in isolation and a rule has one home, so the text a skill ne
 home is generated into it rather than copied: a region between `<!-- include: <path> > <heading> -->`
 and `<!-- /include -->` is filled with the body under that heading, and --check fails when a region
 differs from what its source renders now. The key is the root-relative path, then ` > `, then the
-heading text, the delimiter canonical_review.py also keys a unit on. A region sits in .agents/skills/,
-which this script walks anyway, or in a file INCLUDE_DESTINATIONS declares, which is how a surface
-outside the skills tree stops restating a rule by hand.
+heading text, the delimiter canonical_review.py also keys a unit on. A region sits in a file this
+script walks, which is the Markdown under each .agents/skills/<name>/ directory carrying a SKILL.md,
+plus the files INCLUDE_DESTINATIONS declares, which is how a surface the walk would otherwise miss
+stops restating a rule by hand.
 
 Usage: python3 scripts/build_dist.py           fill include regions, then regenerate distributions
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
                                                  failure (a symlink under .agents/skills/, an
                                                  unreadable file, an include region it cannot
-                                                 render, a stale INCLUDE_DESTINATIONS entry), so a
-                                                 caller reading the exit
-                                                 code can tell a finding apart from the check
-                                                 itself not having run.
+                                                 render, an INCLUDE_DESTINATIONS entry that is
+                                                 stale, carried, or measured against a manifest it
+                                                 cannot read), so a caller reading the exit code can
+                                                 tell a finding apart from the check itself not
+                                                 having run.
 """
 
 from __future__ import annotations
@@ -157,13 +159,14 @@ def write_plugin_manifest(names):
 # A skill has to read whole in isolation, and a rule has one home, so the text a skill needs from that home is generated into it rather than copied.
 # The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly and a region left empty there would hand them a skill with a hole in it.
 # The generated trees then mirror the filled source.
-# A file outside that tree holds a region only where INCLUDE_DESTINATIONS names it, since the same rule with one home is restated on hub surfaces that are not skills at all.
+# A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it, since the same rule with one home is restated on hub surfaces that are not skills at all.
+# .agents/skills/README.md is such a file despite sitting in that tree, because the walk visits the skill directories rather than the tree containing them.
 
 # The same `<path> > <heading>` vocabulary canonical_review.py keys a unit on, defined here because that engine imports this module.
 SECTION_DELIM = " > "
 # Sources resolve against the repository root, so a key reads the same in a skill, a finding, and the review ledger.
 INCLUDE_ROOT = ROOT
-# The files outside .agents/skills/ that may hold an include region, declared one at a time rather than discovered.
+# The files the walk would otherwise miss that may hold an include region, declared one at a time rather than discovered.
 # Only a walked file is written, so a region in a file on neither this tuple nor skill_documents() reads filled to whatever includes it while staying empty on disk, which is the refusal filled_lines() raises.
 # Discovery is wrong here even though it would spare the maintenance: whether a file may hold generated text is a judgment about where that text ends up, not a property of where the file sits.
 # Nothing spec/files.json carries hub content from belongs here, and manifest_carried_destination() refuses one rather than leaving the rule to a reader.
@@ -467,6 +470,39 @@ def skill_documents():
     return sorted(out)
 
 
+# The fidelities that carry content, which is every one but presence, per spec/fidelity-model.md.
+# Presence carries none and is also the default, so an entry declaring it and one naming a path alone are the same declaration spelled two ways.
+# Refusing the explicit spelling while admitting the bare one would refuse README.md, the entry manifest_carried_destination() exists to admit.
+_CARRYING_FIDELITIES = frozenset({"intent", "verbatim", "interface"})
+
+
+def _manifest_entries(manifest, key):
+    """The list under `key`, refused rather than coerced where the manifest is not the shape expected.
+
+    json.loads accepts any JSON, so a manifest that is a list, or one whose baseline holds a
+    string, would otherwise reach .get() and raise AttributeError, which main() does not catch and
+    which therefore surfaces as an uncaught traceback exiting 1, the code a caller reads as stale.
+    scripts/carry.py validates the same manifest the same way for the same reason. ValueError
+    rather than the TypeError ruff prefers, and the noqa below is what holds it: main() catches
+    ValueError and OSError, so a TypeError raised here would escape as the uncaught traceback this
+    function exists to prevent. A malformed data file is a bad value in it, not a caller's type
+    error.
+    """
+    if not isinstance(manifest, dict):
+        raise ValueError(  # noqa: TRY004
+            "spec/files.json is not an object, so its declarations cannot be read"
+        )
+    entries = manifest.get(key, ())
+    if not isinstance(entries, list):
+        raise ValueError(  # noqa: TRY004
+            f"spec/files.json {key!r} is not a list, so its declarations cannot be read"
+        )
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"spec/files.json {key!r} holds a non-object entry")  # noqa: TRY004
+    return entries
+
+
 def manifest_carried_destination(rel, manifest):
     """The `manifest` entry that would carry `rel`'s bytes to another repository, or None.
 
@@ -478,13 +514,21 @@ def manifest_carried_destination(rel, manifest):
     the author of the tuple. A baseline entry naming a path alone carries no content and is
     therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here.
     """
-    for entry in manifest.get("baseline", ()):
+    for entry in _manifest_entries(manifest, "baseline"):
         if entry.get("path") == rel and (
-            entry.get("fidelity") or entry.get("sections") or entry.get("reference")
+            entry.get("fidelity") in _CARRYING_FIDELITIES
+            or entry.get("sections")
+            or entry.get("reference")
         ):
             return entry
-    for tree in manifest.get("trees", ()):
+    for tree in _manifest_entries(manifest, "trees"):
         source = tree.get("source")
+        if not isinstance(source, str):
+            continue
+        # Normalized because the schema bounds a source's length and not its spelling, so "docs/" and "./docs" are the same tree named two ways and a raw prefix test would admit a destination inside either.
+        source = source.rstrip("/")
+        # Sliced rather than str.removeprefix(), which needs 3.9, for the same 3.7 floor the lru_cache above records.
+        source = source[2:] if source.startswith("./") else source  # noqa: FURB188
         # A tree carries everything under it, so a destination inside one is carried whether or not the manifest names the file.
         if source and (rel == source or rel.startswith(f"{source}/")):
             return tree
