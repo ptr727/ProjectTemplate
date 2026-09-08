@@ -516,8 +516,8 @@ def tree_source(source):
     """`source` reduced to the plain root-relative form the prefix test compares, or None if unusable.
 
     The schema requires a source to be a non-empty string other than ".", and constrains its
-    spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "docs//sub",
-    and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
+    spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "//docs",
+    "docs//sub", and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
     every spelling but the plainest, and a lone "./" reduces under a naive strip to "." and matches
     nothing at all, which is the whole repository declared as a carried tree while every
     destination inside it is admitted. Splitting into path segments answers all of them at once,
@@ -528,7 +528,12 @@ def tree_source(source):
     """
     if not isinstance(source, str):
         return None
-    parts = [part for part in PurePosixPath(source.strip()).parts if part not in ("/", ".")]
+    # An anchor is matched on its leading slash rather than by name, since POSIX keeps a doubled one as its own "//" part and dropping only "/" leaves that anchor in the join.
+    parts = [
+        part
+        for part in PurePosixPath(source.strip()).parts
+        if part != "." and not part.startswith("/")
+    ]
     if ".." in parts:
         raise ValueError(f"spec/files.json tree source {source!r} carries a '..' segment")
     return "/".join(parts)

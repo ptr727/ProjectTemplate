@@ -990,6 +990,7 @@ class DeclaredDestinationCase(TreeCase):
             "docs/": "docs/map.md",
             "./docs": "docs/map.md",
             "/docs": "docs/map.md",
+            "//docs": "docs/map.md",
             ".//docs": "docs/map.md",
             " docs ": "docs/map.md",
             "docs/.": "docs/map.md",
@@ -997,6 +998,7 @@ class DeclaredDestinationCase(TreeCase):
             "docs/./sub": "docs/sub/map.md",
             "./": "docs/map.md",
             "/": "docs/map.md",
+            "//": "docs/map.md",
         }
         for source, rel in cases.items():
             with self.subTest(source):
