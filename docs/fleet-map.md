@@ -243,7 +243,7 @@ flowchart LR
 ### G12: General Conduct Rules Have No Skill (Closed)
 
 - **Gap** - The conduct layer (ask when unsure, never assume, verification before claiming done, delegation and token discipline) lived in carried [`AGENTS.md`][agents] sections and doc-only GOVERNANCE sections, with no skill firing at the moments those rules are violated.
-- **Resolution** - The `agent-conduct` skill ships with the narrow decision-moment triggers the proposal specifies (about to claim done, about to assume, a failure or review finding just surfaced a lesson, and, added later, about to write a handoff with a question still parked), carrying `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement` whole as generated includes (as summaries, before the include mechanism landed), the sections keeping the full rules and the surfacing pointer, while the carried AGENTS.md sections stay the always-on layer.
+- **Resolution** - The `agent-conduct` skill ships with the narrow decision-moment triggers the proposal specifies (about to claim done, about to assume, a failure or review finding just surfaced a lesson, and, added later, about to write a handoff, and about to file a question as an issue instead of asking it), carrying `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement` whole as generated includes (as summaries, before the include mechanism landed), the sections keeping the full rules and the surfacing pointer, while the carried AGENTS.md sections stay the always-on layer.
 
 ### G13: The Local Review Gate Reaches the Hub Only (Open)
 
