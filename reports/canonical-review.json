@@ -3,19 +3,19 @@
   "passes": [
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > (preamble)",
-      "digest": "sha256:ac019bedc804c3bba57aed7ed2bc1272ae7cc5701e66fa3ee3e97706d939996e",
+      "digest": "sha256:17a08a343fd14998af6331fc79e73d6e8af3ee23de61e58ada4a1500f18f0fbb",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:23:10Z"
+      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
+      "stamp": "2026-09-08T00:05:13Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
-      "digest": "sha256:9de845ccd2449f1a86528f52c2ce581afec7311a0757755620805b2aa93a701d",
+      "digest": "sha256:971d108574937c6d187e2dbaf71022abe7d06515065974db770af8259ca05ab3",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:21:21Z"
+      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
+      "stamp": "2026-09-08T00:05:13Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
@@ -24,6 +24,14 @@
       "findings": 2,
       "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
       "stamp": "2026-09-05T14:21:21Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > Before Writing a Handoff",
+      "digest": "sha256:bd79040dfd139893633e7ce57dd29ea8aed8848ee4e1c44ea248205f8968fe37",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
+      "stamp": "2026-09-08T00:05:13Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
@@ -43,11 +51,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Why This Exists",
-      "digest": "sha256:61b40202de51514aa2c67b106900451d65de170de98fefd2e88a13a2a8eafafa",
+      "digest": "sha256:7b15784955af8a8c407da6e59addc11350ea2d2aff8a7a88f0f4c4b8d1c4bdca",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:16:35Z"
+      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
+      "stamp": "2026-09-08T00:05:14Z"
     },
     {
       "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
@@ -835,11 +843,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Communicating with the User",
-      "digest": "sha256:bd373e66ff3c0aff366b81958997a4fdf8b4e289549e0fddd94d28ba7bdaa503",
+      "digest": "sha256:7b1a7e7e6052c7591219992a0bf9b1f2cbd9383827d6ffc47a6e60508c49107c",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:21:22Z"
+      "findings": 0,
+      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
+      "stamp": "2026-09-08T00:05:14Z"
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
