@@ -23,13 +23,16 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Labels
 
-The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these five, or `enhancement` for a feature, beside whatever surface labels it also carries.
+The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries.
 
 - **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
 - **`prose`**: a defect in rule or procedure text.
-- **`decision`**: needs the maintainer's decision before it can be worked.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
+
+`decision` is a marker rather than a class, so it sits beside one of the four rather than replacing it, and an issue that is a prose defect and also holds a choice for the maintainer carries both. It marks every question waiting on the maintainer, whether or not the work it sits on is blocked, since the queue `GOVERNANCE.md` "Communicating with the User" has a session present at handoff is enumerated from it and a question that kept its work moving is owed an answer exactly as one that stopped it is.
+
+- **`decision`**: a question waiting on the maintainer, beside whatever class the issue also carries.
 
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
