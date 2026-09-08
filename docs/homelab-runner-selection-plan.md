@@ -88,9 +88,9 @@ The fleet runner variable never reaches Copilot configuration. Homelab labels ne
 
 The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled. Before rollout, verify these effective organization settings rather than relying on the planned values.
 
-The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. It pins `copilot-setup-steps` to `ubuntu-24.04` and begins with a step that fails unless `runner.environment` is `github-hosted`.
+The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. Its `copilot-setup-steps` job runs on `ubuntu-latest`, the label every GitHub-hosted job in the fleet uses, and it asserts nothing about the runner it was given.
 
-The organization policy is the authorization boundary. The workflow pin and runtime assertion detect configuration drift. The assertion does not make a job safe after GitHub has assigned it to the wrong runner.
+The organization policy is the authorization boundary, and it is the whole of it. A pinned image and a runtime assertion were tried while the homelab runners were being evaluated, and neither is kept: an assertion cannot make a job safe once GitHub has already assigned it to the wrong runner, so it buys nothing the policy does not already give, and it costs a rule restricting which runner a job may accept. The fleet has no such rule anywhere, and this plan introduces none.
 
 ## Configuration Contract
 
@@ -110,14 +110,14 @@ The explicit target leaves room for future values such as `arc`. A boolean would
 
 ## Selection Architecture
 
-A small selector job runs on `ubuntu-24.04` before any selectable validation job.
+A small selector job runs on `ubuntu-latest` before any selectable validation job.
 
 The selector validates the requested target, event, actor, and ref. It emits one JSON `runs-on` value.
 
 GitHub-hosted output:
 
 ```json
-["ubuntu-24.04"]
+["ubuntu-latest"]
 ```
 
 Homelab output:
