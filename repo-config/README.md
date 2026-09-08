@@ -30,7 +30,7 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 - **`prose`**: a defect in rule or procedure text.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-`decision` is a marker rather than a class, so it sits beside one of the four rather than replacing it, and an issue that is a prose defect and also holds a choice for the maintainer carries both. It marks every question waiting on the maintainer, whether or not the work it sits on is blocked, since the queue `GOVERNANCE.md` "Communicating with the User" has a session present at handoff is enumerated from it and a question that kept its work moving is owed an answer exactly as one that stopped it is.
+`decision` is a marker rather than a class, so it sits beside whatever class the issue also carries rather than replacing one, and an issue holding nothing but the question carries it alone. An issue that is a prose defect and also holds a choice for the maintainer carries both. It marks every question waiting on the maintainer, whether or not the work it sits on is blocked, since the queue `GOVERNANCE.md` "Communicating with the User" has a session present at handoff is enumerated from it and a question that kept its work moving is owed an answer exactly as one that stopped it is.
 
 - **`decision`**: a question waiting on the maintainer, beside whatever class the issue also carries.
 
