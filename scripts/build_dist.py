@@ -470,7 +470,8 @@ def skill_documents():
     return sorted(out)
 
 
-# The fidelities that carry content, which is every one but presence, per spec/fidelity-model.md.
+# The baseline fidelities that carry content, which is that enum's every value but presence, per spec/fidelity-model.md.
+# Scoped to baseline deliberately: a trees entry declares verbatim-tree, which carries content too, and is matched on its source below rather than through this set.
 # Presence carries none and is also the default, so an entry declaring it and one naming a path alone are the same declaration spelled two ways.
 # Refusing the explicit spelling while admitting the bare one would refuse README.md, the entry manifest_carried_destination() exists to admit.
 _CARRYING_FIDELITIES = frozenset({"intent", "verbatim", "interface"})
@@ -492,7 +493,8 @@ def _manifest_entries(manifest, key):
         raise ValueError(  # noqa: TRY004
             "spec/files.json is not an object, so its declarations cannot be read"
         )
-    entries = manifest.get(key, ())
+    # Defaulted to a list rather than an empty tuple, which the isinstance check below would refuse, so a manifest simply not declaring this key reads as declaring nothing.
+    entries = manifest.get(key, [])
     if not isinstance(entries, list):
         raise ValueError(  # noqa: TRY004
             f"spec/files.json {key!r} is not a list, so its declarations cannot be read"
@@ -501,6 +503,24 @@ def _manifest_entries(manifest, key):
         if not isinstance(entry, dict):
             raise ValueError(f"spec/files.json {key!r} holds a non-object entry")  # noqa: TRY004
     return entries
+
+
+def tree_source(source):
+    """`source` reduced to the plain root-relative form the prefix test compares, or None if unusable.
+
+    The schema bounds a source's length and forbids exactly ".", and constrains its spelling no
+    further, so one tree is spellable "docs", "docs/", "./docs", and "/docs". A raw prefix test
+    admits a destination inside every spelling but the first, and "./" reduces to "." and matches
+    nothing at all, which is the whole repository declared as a carried tree while admitting every
+    destination in it. An empty result is that root tree, which carries every path there is.
+    """
+    if not isinstance(source, str):
+        return None
+    while source.startswith("./"):
+        # Sliced rather than str.removeprefix(), which needs 3.9, for the same 3.7 floor the lru_cache above records.
+        source = source[2:]
+    source = source.strip("/")
+    return "" if source == "." else source
 
 
 def manifest_carried_destination(rel, manifest):
@@ -515,22 +535,23 @@ def manifest_carried_destination(rel, manifest):
     therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here.
     """
     for entry in _manifest_entries(manifest, "baseline"):
+        fidelity = entry.get("fidelity")
+        if fidelity is not None and not isinstance(fidelity, str):
+            # Hashed against the set below, so a list or an object here raises TypeError, which main() does not catch.
+            raise ValueError(
+                f"spec/files.json baseline entry for {entry.get('path')!r} declares a non-string fidelity"
+            )
         if entry.get("path") == rel and (
-            entry.get("fidelity") in _CARRYING_FIDELITIES
-            or entry.get("sections")
-            or entry.get("reference")
+            fidelity in _CARRYING_FIDELITIES or entry.get("sections") or entry.get("reference")
         ):
             return entry
     for tree in _manifest_entries(manifest, "trees"):
-        source = tree.get("source")
-        if not isinstance(source, str):
+        source = tree_source(tree.get("source"))
+        if source is None:
             continue
-        # Normalized because the schema bounds a source's length and not its spelling, so "docs/" and "./docs" are the same tree named two ways and a raw prefix test would admit a destination inside either.
-        source = source.rstrip("/")
-        # Sliced rather than str.removeprefix(), which needs 3.9, for the same 3.7 floor the lru_cache above records.
-        source = source[2:] if source.startswith("./") else source  # noqa: FURB188
         # A tree carries everything under it, so a destination inside one is carried whether or not the manifest names the file.
-        if source and (rel == source or rel.startswith(f"{source}/")):
+        # The empty case is the repository root declared as a tree, which carries every destination there could be.
+        if source == "" or rel == source or rel.startswith(f"{source}/"):
             return tree
     return None
 
@@ -547,11 +568,11 @@ def include_destinations():
     of them holds a region: a declaration left behind after its region was deleted names a real
     file and passes here, and nothing detects it.
 
-    The manifest is read once, and only where the tuple has an entry, so a checkout holding no
-    spec/files.json still imports and installs skills, which is what scripts/skills_install.py does
-    with this module. Where the tuple does have one, a manifest that cannot be read is refused
-    rather than read as carrying nothing, since a check that waves a declaration through because it
-    could not run has stopped checking.
+    The manifest is read once, and only where the tuple has an entry, since include_documents()
+    reaches this on every walk and an ordinary build declares nothing for it to answer about.
+    Where the tuple does have an entry, a manifest that cannot be read, or that parses into
+    something other than the shape it declares, is refused rather than read as carrying nothing,
+    since a check that waves a declaration through because it could not run has stopped checking.
     """
     if not INCLUDE_DESTINATIONS:
         return []

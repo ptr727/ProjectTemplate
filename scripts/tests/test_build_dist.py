@@ -974,12 +974,17 @@ class DeclaredDestinationCase(TreeCase):
                 self.declare_doc({"baseline": [entry], "trees": []})
                 self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
 
-    def test_a_tree_source_is_matched_however_it_is_spelled(self) -> None:
-        """The schema bounds a source's length rather than its spelling, so a raw prefix test lets one through."""
+    def test_a_tree_source_is_matched_at_every_spelling_the_schema_allows(self) -> None:
+        """The schema bounds a source's length and forbids only ".", so one tree has many spellings.
+
+        The two root spellings matter most, since a lone dot-slash reduces to a bare dot under a
+        naive strip and then matches nothing, which is the whole repository declared as a carried
+        tree while every destination inside it is admitted.
+        """
         (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
         (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
-        for label, source in {"trailing slash": "docs/", "dot prefix": "./docs"}.items():
-            with self.subTest(label):
+        for source in ("docs", "docs/", "./docs", "/docs", ".//docs", "./", "/"):
+            with self.subTest(source):
                 self.declare_destinations(
                     "docs/map.md",
                     manifest={"baseline": [], "trees": [{"source": source, "target": "docs"}]},
@@ -987,6 +992,27 @@ class DeclaredDestinationCase(TreeCase):
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
                 self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_a_non_string_fidelity_refuses_rather_than_raising_past_the_caller(self) -> None:
+        """It is hashed against the carrying set, so a list or an object raises TypeError uncaught."""
+        cases: dict[str, object] = {"a list": [], "an object": {}}
+        for label, fidelity in cases.items():
+            with self.subTest(label):
+                self.declare_doc({"baseline": [{"path": "DOC.md", "fidelity": fidelity}]})
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("non-string fidelity", str(caught.exception))
+
+    def test_a_manifest_declaring_neither_key_carries_nothing(self) -> None:
+        """A missing key is a manifest declaring nothing there, never a manifest of the wrong shape."""
+        for label, payload in {
+            "no trees": {"baseline": [{"path": "DOC.md", "fidelity": "presence"}]},
+            "no baseline": {"trees": []},
+            "neither": {},
+        }.items():
+            with self.subTest(label):
+                self.declare_doc(payload)
+                self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
 
     def test_a_tree_source_does_not_match_a_longer_sibling_directory(self) -> None:
         """ "doc" and "docs" are different trees, so the prefix test compares whole path segments."""
@@ -1042,7 +1068,7 @@ class DeclaredDestinationCase(TreeCase):
         self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
 
     def test_the_manifest_is_read_only_when_a_destination_is_declared(self) -> None:
-        """skills_install.py imports this module in checkouts that need not hold spec/files.json."""
+        """include_documents() reaches this on every walk, and an ordinary build declares nothing."""
         self.assertFalse((self.tmp / "spec" / "files.json").exists())
 
         self.assertEqual(build_dist.include_destinations(), [])
@@ -1070,7 +1096,7 @@ class RealDestinationCase(unittest.TestCase):
     A destination is a path typed by hand, so a file renamed or moved leaves the tuple naming
     nothing, and the manifest can grow an entry over a path already declared here. Both are caught
     by running the real check against the real tree, and a raise is the only way this can fail,
-    since the value returned is the tuple itself. Read-only. While the tuple is empty the call
+    since the value returned is built from the tuple rather than read from anywhere. Read-only. While the tuple is empty the call
     returns before it reads or resolves anything, so this asserts nothing about the tree and arms
     itself on the first entry.
     """
