@@ -11,11 +11,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
-      "digest": "sha256:936b4a58aab3baa0d9851597491b208503490891b99fb84f3856c70fcee7ad30",
+      "digest": "sha256:90ef963b15a9351c7c5cc39d46de7c936f6250f791c5af2099ed395f7a1e8d6e",
       "reviewer": "agent-skill",
-      "findings": 0,
+      "findings": 1,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T03:59:42Z"
+      "stamp": "2026-09-08T04:23:10Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
@@ -27,11 +27,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Writing a Handoff",
-      "digest": "sha256:bd79040dfd139893633e7ce57dd29ea8aed8848ee4e1c44ea248205f8968fe37",
+      "digest": "sha256:b63feb05d2ea84541dd3e6add3895326a8bcc6bec9f1df38d8c2ad3b17df6231",
       "reviewer": "agent-skill",
-      "findings": 0,
+      "findings": 1,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T00:05:13Z"
+      "stamp": "2026-09-08T04:23:10Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
@@ -747,11 +747,11 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:a11cbd57735fffddd4d68c9aa28d97cf5208f8f5a7c73d17aff5ad350b369624",
+      "digest": "sha256:e690f84e1628ddb5fc78e6d2bd2b5bc5995126630ca3a5f9908acb69ab093e63",
       "reviewer": "agent-skill",
-      "findings": 5,
+      "findings": 1,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T00:35:07Z"
+      "stamp": "2026-09-08T04:23:10Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
@@ -843,11 +843,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Communicating with the User",
-      "digest": "sha256:2ce2ba3c51351503f26ad0a015a9dda0236d9d64c58e64064e34770077a98230",
+      "digest": "sha256:678e7f48e82be9aca5ff15a93c5ac0fb1cabb0384fd96b1f833be67556769926",
       "reviewer": "agent-skill",
-      "findings": 0,
+      "findings": 1,
       "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T03:59:42Z"
+      "stamp": "2026-09-08T04:23:10Z"
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",

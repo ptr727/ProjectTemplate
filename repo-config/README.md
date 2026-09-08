@@ -30,7 +30,7 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 - **`prose`**: a defect in rule or procedure text.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-`decision` is a marker rather than a fifth triage label, and the bullet below defines it. It applies whether or not the work the question sits on is blocked, because a session presents that queue at handoff per `GOVERNANCE.md` "Communicating with the User" and enumerates it from this label, and a question that kept its work moving is owed an answer exactly as one that stopped it is.
+`decision` is a marker rather than a fifth triage label, and the bullet below defines it. `decision` applies whether or not the question has blocked the work it came out of, because at handoff a session presents the parked queue that `GOVERNANCE.md` "Communicating with the User" requires, and enumerates that queue from this label. A question that kept its work moving is owed an answer just as much as one that stopped it.
 
 - **`decision`**: a question waiting on the maintainer, beside whatever else the issue carries, or alone where the issue holds nothing but the question.
 
