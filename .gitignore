@@ -29,3 +29,6 @@ coverage.xml
 .coverage
 .coverage.*
 htmlcov/
+
+# Written by the temporary Copilot review environment probe, #1321.
+.copilot-probe/

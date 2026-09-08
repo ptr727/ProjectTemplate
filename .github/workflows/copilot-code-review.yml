@@ -1,7 +1,10 @@
 name: Copilot code review environment action
 
-# Measures whether Copilot code review reads files a setup step writes.
-# The job id is the key GitHub matches, so it is fixed by the mechanism rather than by convention.
+# Temporary measurement for #1321.
+# It asks whether a setup step can place content where the Copilot reviewer reads it.
+# GitHub matches this file by path and the job by id, so neither name is a convention.
+# Copilot checks the repository out after these steps, and that checkout cleans untracked files.
+# The token is therefore written to three locations rather than to the workspace alone.
 
 on:
   workflow_dispatch:
@@ -23,17 +26,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout code step
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      # No checkout is needed here.
+      # It would also persist a credential in the workspace a reviewer then reads.
       - name: Write probe token step
-        # The run id is not derivable from the tree.
-        # An empty one would write a token that is, so it fails the step instead.
+        # The token is never printed, since a log on this public repository would publish it.
+        # A review could then quote it without having read any file.
         run: |
           set -Eeuo pipefail
           : "${RUN_ID:?run id is empty, which would write a forgeable token}"
-          mkdir -p .copilot-probe
-          echo "PROBE-SETUP-${RUN_ID}" > .copilot-probe/setup-token.txt
-          cat .copilot-probe/setup-token.txt
+          token="PROBE-SETUP-${RUN_ID}"
+          mkdir -p "${GITHUB_WORKSPACE}/.copilot-probe"
+          printf '%s\n' "$token" > "${GITHUB_WORKSPACE}/.copilot-probe/setup-token.txt"
+          printf '%s\n' "$token" > "${RUNNER_TEMP}/copilot-probe-setup-token.txt"
+          printf '%s\n' "$token" > "${HOME}/.copilot-probe-setup-token.txt"
         env:
           RUN_ID: ${{ github.run_id }}
