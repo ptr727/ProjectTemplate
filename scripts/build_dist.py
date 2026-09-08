@@ -513,7 +513,7 @@ def _manifest_entries(manifest, key):
 
 
 def tree_source(source):
-    """`source` reduced to the plain root-relative form the prefix test compares, or None if unusable.
+    """`source` reduced to the plain root-relative form the prefix test compares.
 
     The schema requires a source to be a non-empty string other than ".", and constrains its
     spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "//docs",
@@ -523,11 +523,16 @@ def tree_source(source):
     destination inside it is admitted. Splitting into path segments answers all of them at once,
     and an empty result is that root tree, which carries every path there is.
 
-    A ".." segment is refused rather than resolved, since a source reaching outside the tree it
-    names is a manifest defect, and resolving it here would decide silently what that source meant.
+    A source that is absent or not a string is refused for the same reason a non-string fidelity
+    is, and a ".." segment is refused rather than resolved, since a source reaching outside the
+    tree it names is a manifest defect and resolving it here would decide silently what that source
+    meant. Skipping any of them would leave the tree unmatched, so every destination inside it
+    would read as uncarried, which is the answer this must never give by accident.
     """
     if not isinstance(source, str):
-        return None
+        raise ValueError(  # noqa: TRY004
+            f"spec/files.json declares a tree whose source is {source!r} rather than a string"
+        )
     # An anchor is matched on its leading slash rather than by name, since POSIX keeps a doubled one as its own "//" part and dropping only "/" leaves that anchor in the join.
     parts = [
         part
@@ -568,8 +573,6 @@ def manifest_carried_destination(rel, manifest):
             return entry
     for tree in _manifest_entries(manifest, "trees"):
         source = tree_source(tree.get("source"))
-        if source is None:
-            continue
         # A tree carries everything under it, so a destination inside one is carried whether or not the manifest names the file.
         # The empty case is the repository root declared as a tree, which carries every destination there could be.
         if source == "" or rel == source or rel.startswith(f"{source}/"):

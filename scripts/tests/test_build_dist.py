@@ -1010,6 +1010,27 @@ class DeclaredDestinationCase(TreeCase):
                     build_dist.include_destinations()
                 self.assertIn("carried to other repositories", str(caught.exception))
 
+    def test_a_tree_whose_source_is_missing_or_not_a_string_is_refused(self) -> None:
+        """Skipping it would leave the tree unmatched, so its destinations would read as uncarried.
+
+        Both top-level keys can be present and well shaped while one tree entry is not, which the
+        shape check on the containers above does not reach.
+        """
+        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        cases: dict[str, dict] = {
+            "absent": {"target": "docs"},
+            "null": {"source": None, "target": "docs"},
+            "a number": {"source": 7, "target": "docs"},
+            "a list": {"source": [], "target": "docs"},
+        }
+        for label, tree in cases.items():
+            with self.subTest(label):
+                self.declare_destinations("docs/map.md", manifest={"baseline": [], "trees": [tree]})
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("rather than a string", str(caught.exception))
+
     def test_a_tree_source_reaching_outside_itself_is_refused_rather_than_resolved(self) -> None:
         """Resolving it here would decide silently what a manifest defect was supposed to mean."""
         (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
