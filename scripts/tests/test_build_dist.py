@@ -978,8 +978,9 @@ class DeclaredDestinationCase(TreeCase):
         """The schema requires a non-empty string other than "." and constrains the spelling no further.
 
         These are not every spelling it allows, which is unbounded, but one of each shape a prefix
-        test over the raw string gets wrong. A spelling that names the repository root is refused
-        rather than matched, and the case below covers those.
+        test over the raw string gets wrong. A spelling that reduces to the repository root is
+        refused rather than matched, and
+        test_a_tree_source_reducing_to_the_repository_root_is_refused_by_its_own_name covers those.
         """
         (self.tmp / "docs" / "sub").mkdir(parents=True, exist_ok=True)
         (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
@@ -1027,12 +1028,13 @@ class DeclaredDestinationCase(TreeCase):
                     build_dist.include_destinations()
                 self.assertIn("rather than a string", str(caught.exception))
 
-    def test_a_tree_source_naming_the_repository_root_is_refused_by_its_own_name(self) -> None:
-        """The schema forbids it, so no valid source reduces to nothing and reading one as a tree misleads.
+    def test_a_tree_source_reducing_to_the_repository_root_is_refused_by_its_own_name(self) -> None:
+        """A tree carrying everything is not a thing the manifest can mean, however it is spelled.
 
-        Read as the root tree it would refuse every declared destination under it, reporting a
-        schema-invalid source as though the destination were the thing at fault, which names the
-        wrong file to whoever has to fix the manifest.
+        The schema forbids "" and "." and permits "./", which reduces the same way, so the
+        reduction decides this rather than the spelling. Read as the root tree it would refuse
+        every declared destination under it while blaming the destination, where the source is
+        what needs fixing.
         """
         (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
         (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
@@ -1044,7 +1046,7 @@ class DeclaredDestinationCase(TreeCase):
                 )
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
-                self.assertIn("names the repository root", str(caught.exception))
+                self.assertIn("reduces to the repository root", str(caught.exception))
 
     def test_a_tree_source_reaching_outside_itself_is_refused_rather_than_resolved(self) -> None:
         """Resolving it here would decide silently what a manifest defect was supposed to mean."""

@@ -520,10 +520,12 @@ def tree_source(source):
     "docs//sub", and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
     every spelling but the plainest, so splitting into path segments answers all of them at once.
 
-    A reduction that comes back empty is refused, since every spelling that produces one names the
-    repository root and the schema forbids that outright, requiring a non-empty string other than
-    ".". Reading it as a tree instead would refuse every declared destination under it, reporting
-    a schema-invalid source as though the destination were carried, which names the wrong file.
+    A reduction that comes back empty is refused, since it names the repository root and a tree
+    carrying everything is not a thing the manifest can mean. The schema forbids the two plainest
+    spellings of it, "" and ".", and permits others that reduce the same way, "./" among them, so
+    the reduction decides this rather than the spelling. Reading one as a tree instead would refuse
+    every declared destination under it while blaming the destination, where the source is what
+    needs fixing.
 
     A source that is absent or not a string is refused for the same reason a non-string fidelity
     is, and a ".." segment is refused rather than resolved, since a source reaching outside the
@@ -545,7 +547,7 @@ def tree_source(source):
         raise ValueError(f"spec/files.json tree source {source!r} carries a '..' segment")
     if not parts:
         raise ValueError(
-            f"spec/files.json tree source {source!r} names the repository root, which its schema forbids"
+            f"spec/files.json tree source {source!r} reduces to the repository root, which no tree may name"
         )
     return "/".join(parts)
 
