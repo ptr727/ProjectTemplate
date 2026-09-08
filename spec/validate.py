@@ -127,6 +127,14 @@ def escapes_repo_root(value):
     )
 
 
+def reduces_to_repo_root(value):
+    """Whether `value` reduces to the repository root under POSIX path rules.
+
+    A raw-string compare against "." accepts "./" and ".///.", which the schema also allows and which `scripts/carry.py` then refuses, so a manifest author gets a green validator and a failing carrier. Backslash and drive-letter spellings are `escapes_repo_root`'s subject and are not read here.
+    """
+    return pathlib.PurePosixPath(value) == pathlib.PurePosixPath(".")
+
+
 def canonical_file_in_root(rel_path):
     """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file under ROOT.
 
@@ -756,9 +764,9 @@ def main():
             continue
         for field, value in (("source", source), ("target", target)):
             parts = pathlib.PurePosixPath(value).parts
-            if value == "." or value.startswith("/") or ".." in parts:
+            if reduces_to_repo_root(value) or value.startswith("/") or ".." in parts:
                 errors.append(
-                    f"files.json: tree {source} {field} '{value}' must be below the repository root (no leading /, . or ..)"
+                    f"files.json: tree {source} {field} '{value}' must be a path below the repository root"
                 )
         if tree.get("fidelity") != "verbatim-tree":
             errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")
