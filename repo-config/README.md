@@ -23,7 +23,7 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Labels
 
-The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries.
+The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries, unless it holds nothing but a question for the maintainer, which carries `decision` alone.
 
 - **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
