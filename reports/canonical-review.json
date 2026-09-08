@@ -739,11 +739,11 @@
     },
     {
       "unit": ".github/copilot-instructions.md > Review Probe",
-      "digest": "sha256:7549d60019a0b413ff0963d37533fae1f999d279bab2042b6c938b443aaaad18",
+      "digest": "sha256:19052310af9a8da845b758c8d0f5350e128ef5350b7ca688eb192b6ab66d3ed6",
       "reviewer": "agent-skill",
-      "findings": 6,
+      "findings": 10,
       "hubCommit": "6ee0224e2aee25cc338e2f66401cfe9b51d3881b",
-      "stamp": "2026-09-08T22:37:29Z"
+      "stamp": "2026-09-08T23:06:09Z"
     },
     {
       "unit": ".github/copilot-instructions.md > Reviewing Carried Fleet Content",
