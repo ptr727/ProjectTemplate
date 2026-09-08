@@ -595,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/skill-lifecycle/SKILL.md > The Pipeline",
-      "digest": "sha256:bb0710a02060264e1b093e5f2863d5d327d0c80aa4dd629c8e1ea24eac222a1a",
+      "digest": "sha256:c92f85d9c192246cfc6dfa8388faced059f0700b6a8ef93e600ffaf026b0b9de",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:16:36Z"
+      "findings": 4,
+      "hubCommit": "82758ed3206799d34ffaa89765de2a508a716cc6",
+      "stamp": "2026-09-08T15:00:00Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/SKILL.md > (preamble)",

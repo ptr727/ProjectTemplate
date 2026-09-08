@@ -25,14 +25,14 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue recording work to be done carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries. An issue holding nothing but a question for the maintainer records no such work, so it carries no triage label at all.
 
-- **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
+- **`gate`**: a rule with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
 - **`prose`**: a defect in rule or procedure text.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-`decision` is a marker rather than a fifth triage label, and the bullet below defines it. `decision` applies whether or not the question has blocked the work it came out of, because at handoff a session presents the parked queue that `GOVERNANCE.md` "Communicating with the User" requires, and enumerates that queue from this label. A question that kept its work moving is owed an answer just as much as one that stopped it.
+`decision` is a marker rather than a fifth triage label. When it goes on an issue, and when it comes off again, are set by [GOVERNANCE.md "Communicating with the User"][governance-communicating-with-the-user], which is also what reads the label back, so nothing here decides either.
 
-- **`decision`**: a question waiting on the maintainer, beside whatever else the issue carries, or alone where the issue holds nothing but the question.
+- **`decision`**: a question waiting on the maintainer, alone or beside whatever else the issue carries.
 
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
@@ -50,5 +50,6 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 <!-- Repo -->
 
 [governance-branching-model]: ../GOVERNANCE.md#branching-model
+[governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [settings-json]: ./settings.json
