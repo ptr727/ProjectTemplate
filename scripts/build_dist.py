@@ -11,9 +11,11 @@ the files they name.
 
 A skill reads whole in isolation and a rule has one home, so the text a skill needs from that
 home is generated into it rather than copied: a region between `<!-- include: <path> > <heading> -->`
-and `<!-- /include -->` is filled with the body under that heading, in .agents/skills/ itself, and
---check fails when a region differs from what its source renders now. The key is the root-relative
-path, then ` > `, then the heading text, the delimiter canonical_review.py also keys a unit on.
+and `<!-- /include -->` is filled with the body under that heading, and --check fails when a region
+differs from what its source renders now. The key is the root-relative path, then ` > `, then the
+heading text, the delimiter canonical_review.py also keys a unit on. A region sits in .agents/skills/,
+which this script walks anyway, or in a file INCLUDE_DESTINATIONS declares, which is how a surface
+outside the skills tree stops restating a rule by hand.
 
 Usage: python3 scripts/build_dist.py           fill include regions, then regenerate distributions
        python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
@@ -154,11 +156,19 @@ def write_plugin_manifest(names):
 # A skill has to read whole in isolation, and a rule has one home, so the text a skill needs from that home is generated into it rather than copied.
 # The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly and a region left empty there would hand them a skill with a hole in it.
 # The generated trees then mirror the filled source.
+# A file outside that tree holds a region only where INCLUDE_DESTINATIONS names it, since the same rule with one home is restated on hub surfaces that are not skills at all.
 
 # The same `<path> > <heading>` vocabulary canonical_review.py keys a unit on, defined here because that engine imports this module.
 SECTION_DELIM = " > "
 # Sources resolve against the repository root, so a key reads the same in a skill, a finding, and the review ledger.
 INCLUDE_ROOT = ROOT
+# The files outside .agents/skills/ that may hold an include region, declared one at a time rather than discovered.
+# Only a walked file is written, so a region in a file on neither this tuple nor skill_documents() reads filled to whatever includes it while staying empty on disk, which is the refusal filled_lines() raises.
+# Discovery is wrong here even though it would spare the maintenance: whether a file may hold generated text is a judgment about where that text ends up, not a property of where the file sits.
+# Nothing spec/files.json carries hub content from belongs here, because a carrying repository holds the markers and runs no build, so the region would ship to it as an empty pair of comments.
+# Empty today, deliberately: the surfaces that drift restate a rule in their own words for their own audience rather than copying it, and an include fills a region with a heading's whole body, so every one of them is a pointer instead (ptr727/ProjectTemplate#1317).
+# Declared empty rather than left out, because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
+INCLUDE_DESTINATIONS: tuple[str, ...] = ()
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
 # A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too, and on any run of dashes so the three-dash opener a hand types on both markers is caught rather than read as content.
@@ -399,10 +409,11 @@ def filled_lines(rel, stack=()):
             raise ValueError(
                 f"{rel} mixes line endings, so a region in it cannot be rendered without rewriting the rest"
             )
-        if rel not in skill_documents():
+        if rel not in include_documents():
             # Only the files the walk visits are written, so a region anywhere else would read filled to an includer while staying empty on disk.
             raise ValueError(
-                f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled"
+                f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled,"
+                f" so add {rel!r} to INCLUDE_DESTINATIONS or move the region under .agents/skills/"
             )
         key = opens.group("key")
         end = None
@@ -434,7 +445,7 @@ def filled_bytes(rel):
 
 
 def skill_documents():
-    """Every Markdown file under the authored tree, as root-relative POSIX paths, the files a region can sit in.
+    """Every Markdown file under the authored skills tree, as root-relative POSIX paths.
 
     Symlinks are refused before the walk, since a fill writes through whatever the walk found and
     a skill directory that is a symlink would put generated text into the tree it points at.
@@ -450,6 +461,31 @@ def skill_documents():
     return sorted(out)
 
 
+def include_destinations():
+    """The declared non-skill destinations, each held to the same path rules a source is held to.
+
+    A destination is checked the way include_source() checks a source, because filling a region
+    rewrites the file it sits in: a path that does not exist, is spelled differently from the tree,
+    is reached through a symlink, or lands in a generated tree is worse to write than to read. A
+    stale entry therefore fails the build rather than quietly naming nothing.
+    """
+    for rel in INCLUDE_DESTINATIONS:
+        include_source(rel)
+    return list(INCLUDE_DESTINATIONS)
+
+
+def include_documents():
+    """Every file an include region may sit in: the authored skills tree, plus the declared destinations.
+
+    The two halves are found differently on purpose. A skill document is discovered, since the walk
+    that copies it into both mirrors visits it anyway and every Markdown file under an authored
+    skill is already generated content downstream of this script. A destination outside that tree is
+    named in INCLUDE_DESTINATIONS instead, since nothing else would visit it and the choice to put
+    generated text there is a decision to review rather than a directory to scan.
+    """
+    return sorted({*skill_documents(), *include_destinations()})
+
+
 def include_drift():
     """Authored files whose include regions differ from what their sources render now.
 
@@ -457,14 +493,14 @@ def include_drift():
     heading that no longer resolves raises instead, since regenerating cannot repair a key.
     """
     return [
-        rel for rel in skill_documents() if filled_bytes(rel) != (INCLUDE_ROOT / rel).read_bytes()
+        rel for rel in include_documents() if filled_bytes(rel) != (INCLUDE_ROOT / rel).read_bytes()
     ]
 
 
 def fill_includes():
     """Rewrite every authored file whose include regions are behind their sources, and return those paths."""
     changed = []
-    for rel in skill_documents():
+    for rel in include_documents():
         path = INCLUDE_ROOT / rel
         rendered = filled_bytes(rel)
         if rendered != path.read_bytes():

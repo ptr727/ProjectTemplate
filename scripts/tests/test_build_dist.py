@@ -21,7 +21,12 @@ import build_dist
 
 
 class TreeCase(unittest.TestCase):
-    """Redirects every module path onto a temp tree so a case never touches this repo's own."""
+    """Redirects every module path onto a temp tree so a case never touches this repo's own.
+
+    The declared destinations are emptied along with the paths, since they name this repository's
+    own files and validating them against a temp tree would fail every case here for a reason
+    none of them is about. A case that wants one declares it.
+    """
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
@@ -36,16 +41,21 @@ class TreeCase(unittest.TestCase):
             build_dist.DIGEST_DIR,
             build_dist.GITHUB_SKILLS,
             build_dist.INCLUDE_ROOT,
+            build_dist.INCLUDE_DESTINATIONS,
         )
         build_dist.INCLUDE_ROOT = self.tmp
+        build_dist.INCLUDE_DESTINATIONS = ()
         build_dist.SKILLS_SRC = self.skills_src
         build_dist.DIST_PLUGIN = self.dist_plugin
         build_dist.PLUGIN_MANIFEST = self.dist_plugin / ".claude-plugin" / "plugin.json"
         build_dist.DIGEST_DIR = self.dist_plugin / ".source-digests"
         build_dist.GITHUB_SKILLS = self.github_skills
 
-    def _restore(self, src, dist, manifest, stamp, github_skills, include_root) -> None:
+    def _restore(
+        self, src, dist, manifest, stamp, github_skills, include_root, destinations
+    ) -> None:
         build_dist.INCLUDE_ROOT = include_root
+        build_dist.INCLUDE_DESTINATIONS = destinations
         build_dist.SKILLS_SRC = src
         build_dist.DIST_PLUGIN = dist
         build_dist.PLUGIN_MANIFEST = manifest
@@ -713,6 +723,89 @@ class IncludeCase(TreeCase):
             "<!-- include: .agents/skills/bar/SKILL.md > Shared -->\n\nIntro.\n\nBeta rule.\n\nOutro.\n\n<!-- /include -->\n",
         )
 
+    def test_a_region_in_a_declared_destination_is_filled_and_held_to_its_source(self) -> None:
+        """A declared destination is written like a skill document, and --check holds it to its source.
+
+        This is the whole point of the declaration: a surface outside the skills tree stops
+        restating a rule by hand and carries the home's own text instead.
+        """
+        doc = self.tmp / "docs" / "map.md"
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text("# Map\n\n" + self.region("RULES.md > Alpha"), encoding="utf-8")
+        build_dist.INCLUDE_DESTINATIONS = ("docs/map.md",)
+        self.make_skill("foo")
+
+        build_dist.regenerate()
+
+        self.assertEqual(
+            doc.read_text(encoding="utf-8"),
+            "# Map\n\n<!-- include: RULES.md > Alpha -->\n\nAlpha rule.\n\n- One\n- Two\n\n<!-- /include -->\n",
+        )
+        self.assertFalse(build_dist.include_drift())
+        doc.write_text(
+            doc.read_text(encoding="utf-8").replace("Alpha rule.", "Alpha rule, edited by hand."),
+            encoding="utf-8",
+        )
+        self.assertEqual(build_dist.include_drift(), ["docs/map.md"])
+        self.assertTrue(build_dist.is_stale())
+
+    def test_a_declared_destination_is_a_source_the_skills_tree_can_include(self) -> None:
+        """One file both holds a region and answers a key, so a two-surface rule renders once."""
+        doc = self.tmp / "DOC.md"
+        doc.write_text(
+            "## Own\n\n" + self.region("RULES.md > Alpha") + "\n## Other\n\nOther.\n",
+            encoding="utf-8",
+        )
+        build_dist.INCLUDE_DESTINATIONS = ("DOC.md",)
+        self.make_skill("foo", self.region("DOC.md > Own"))
+
+        build_dist.regenerate()
+
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: DOC.md > Own -->\n\nAlpha rule.\n\n- One\n- Two\n\n<!-- /include -->\n",
+        )
+        self.assertIn("Alpha rule.", doc.read_text(encoding="utf-8"))
+
+    def test_a_declared_destination_that_is_not_in_the_tree_is_refused(self) -> None:
+        """A stale declaration fails the build rather than quietly naming nothing.
+
+        Named at the same rules a source is named at, since filling a region rewrites the file it
+        sits in, so a destination that is missing, mis-spelled, reached through a symlink, or under
+        a generated tree is worse to write than it is to read.
+        """
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        (self.tmp / "Cased.md").write_text("## A\n\na\n", encoding="utf-8")
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
+        outside.write_text("## A\n\na\n", encoding="utf-8")
+        (self.tmp / "link.md").symlink_to(outside)
+        self.dist_plugin.mkdir(parents=True, exist_ok=True)
+        (self.dist_plugin / "GEN.md").write_text("## A\n\na\n", encoding="utf-8")
+        cases = {
+            "missing": "docs/absent.md",
+            "re-cased": "cased.md",
+            "through a symlink": "link.md",
+            "under a generated tree": ".claude-plugin/fleet-skills/GEN.md",
+            "outside the root": "../outside.md",
+        }
+        for label, rel in cases.items():
+            with self.subTest(label):
+                build_dist.INCLUDE_DESTINATIONS = (rel,)
+                with self.assertRaises(ValueError):
+                    build_dist.regenerate()
+
+    def test_the_refusal_names_the_declaration_that_would_admit_the_file(self) -> None:
+        """The message says how to make the region live, since the fix is one line away and invisible."""
+        (self.tmp / "DOC.md").write_text(
+            "## Own\n\n" + self.region("RULES.md > Alpha"), encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("DOC.md > Own"))
+
+        with self.assertRaises(ValueError) as caught:
+            build_dist.regenerate()
+
+        self.assertIn("INCLUDE_DESTINATIONS", str(caught.exception))
+
     def test_a_region_in_a_file_the_walk_does_not_visit_is_refused(self) -> None:
         """Such a region would read filled to an includer and stay empty on disk."""
         (self.tmp / "RULES.md").write_text(
@@ -824,6 +917,36 @@ class IncludeCase(TreeCase):
                 "this interpreter imports a module named audit at startup, so the import delta cannot be read here"
             )
         self.assertEqual(after, "False", "importing build_dist pulled in audit")
+
+
+class DeclaredDestinationCase(unittest.TestCase):
+    """This repository's own INCLUDE_DESTINATIONS, read rather than crafted.
+
+    A destination is a path typed by hand, so a file renamed or moved leaves the tuple naming
+    nothing. build_dist.py --check catches that in CI, and this case catches it in the test run
+    that a change to either surface already has to pass. Read-only: it resolves paths and writes
+    nothing.
+    """
+
+    def test_every_declared_destination_resolves_in_this_tree(self) -> None:
+        self.assertEqual(build_dist.include_destinations(), list(build_dist.INCLUDE_DESTINATIONS))
+
+    def test_no_declared_destination_carries_hub_content_into_another_repository(self) -> None:
+        """A carrier holds the markers and runs no build, so a region there would ship empty.
+
+        A baseline entry naming a path alone requires the file to exist and carries none of this
+        repository's text into it, which is why README.md is a destination while a file with a
+        fidelity or a sections list could never be one.
+        """
+        manifest = json.loads((build_dist.ROOT / "spec" / "files.json").read_text(encoding="utf-8"))
+        carried = {
+            entry["path"]: entry
+            for entry in manifest["baseline"]
+            if entry.get("fidelity") or entry.get("sections") or entry.get("reference")
+        }
+        for rel in build_dist.INCLUDE_DESTINATIONS:
+            with self.subTest(rel):
+                self.assertNotIn(rel, carried)
 
 
 if __name__ == "__main__":
