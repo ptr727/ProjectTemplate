@@ -1,0 +1,39 @@
+name: Copilot code review environment action
+
+# Measures whether Copilot code review reads files a setup step writes.
+# The job id is the key GitHub matches, so it is fixed by the mechanism rather than by convention.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - .github/workflows/copilot-code-review.yml
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  copilot-setup-steps:
+    name: Copilot setup steps job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Write probe token step
+        # The run id is not derivable from the tree.
+        # An empty one would write a token that is, so it fails the step instead.
+        run: |
+          set -Eeuo pipefail
+          : "${RUN_ID:?run id is empty, which would write a forgeable token}"
+          mkdir -p .copilot-probe
+          echo "PROBE-SETUP-${RUN_ID}" > .copilot-probe/setup-token.txt
+          cat .copilot-probe/setup-token.txt
+        env:
+          RUN_ID: ${{ github.run_id }}
