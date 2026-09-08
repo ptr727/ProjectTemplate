@@ -23,16 +23,16 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ## Labels
 
-The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries, unless it holds nothing but a question for the maintainer, which carries `decision` alone.
+The triage labels classify an issue by the kind of work it needs, so a backlog sweep can pick the gates and scripts, which converge, ahead of the prose defects, which re-enter the review loop when worked one bundle at a time. An issue carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries. The `decision` marker is not one of them and is described below.
 
 - **`gate`**: a rule that exists in prose with no mechanical check, or a check that misses a shape.
 - **`script`**: a defect in hub tooling.
 - **`prose`**: a defect in rule or procedure text.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-`decision` is a marker rather than one of the four, so it sits beside whichever of them the issue also carries rather than replacing one, and an issue holding nothing but the question carries it alone. An issue that is a prose defect and also holds a choice for the maintainer carries both. The marker records that a question is waiting on the maintainer, whether or not the work it sits on is blocked, since a session presents that queue at handoff per `GOVERNANCE.md` "Communicating with the User" and enumerates it from this label, and a question that kept its work moving is owed an answer exactly as one that stopped it is.
+`decision` is a marker rather than a fifth triage label, and the bullet below is where it is defined. It records that a question is waiting on the maintainer, whether or not the work it sits on is blocked, since a session presents that queue at handoff per `GOVERNANCE.md` "Communicating with the User" and enumerates it from this label, and a question that kept its work moving is owed an answer exactly as one that stopped it is.
 
-- **`decision`**: a question waiting on the maintainer, beside whichever of the four the issue also carries.
+- **`decision`**: a question waiting on the maintainer, beside whatever else the issue carries, or alone where the issue holds nothing but the question.
 
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
