@@ -518,10 +518,12 @@ def tree_source(source):
     The schema requires a source to be a non-empty string other than ".", and constrains its
     spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "//docs",
     "docs//sub", and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
-    every spelling but the plainest, and a lone "./" reduces under a naive strip to "." and matches
-    nothing at all, which is the whole repository declared as a carried tree while every
-    destination inside it is admitted. Splitting into path segments answers all of them at once,
-    and an empty result is that root tree, which carries every path there is.
+    every spelling but the plainest, so splitting into path segments answers all of them at once.
+
+    A reduction that comes back empty is refused, since every spelling that produces one names the
+    repository root and the schema forbids that outright, requiring a non-empty string other than
+    ".". Reading it as a tree instead would refuse every declared destination under it, reporting
+    a schema-invalid source as though the destination were carried, which names the wrong file.
 
     A source that is absent or not a string is refused for the same reason a non-string fidelity
     is, and a ".." segment is refused rather than resolved, since a source reaching outside the
@@ -541,6 +543,10 @@ def tree_source(source):
     ]
     if ".." in parts:
         raise ValueError(f"spec/files.json tree source {source!r} carries a '..' segment")
+    if not parts:
+        raise ValueError(
+            f"spec/files.json tree source {source!r} names the repository root, which its schema forbids"
+        )
     return "/".join(parts)
 
 
@@ -574,8 +580,7 @@ def manifest_carried_destination(rel, manifest):
     for tree in _manifest_entries(manifest, "trees"):
         source = tree_source(tree.get("source"))
         # A tree carries everything under it, so a destination inside one is carried whether or not the manifest names the file.
-        # The empty case is the repository root declared as a tree, which carries every destination there could be.
-        if source == "" or rel == source or rel.startswith(f"{source}/"):
+        if rel == source or rel.startswith(f"{source}/"):
             return tree
     return None
 
