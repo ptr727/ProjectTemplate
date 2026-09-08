@@ -938,8 +938,7 @@ class DeclaredDestinationCase(TreeCase):
     """The manifest rule on a destination, exercised on tuples this case declares.
 
     The shipped tuple is empty, so a case reading only it would assert over nothing. These build
-    the manifest and the destination instead, which is what makes the rule fail when it is wrong,
-    and RealDestinationCase below holds the shipped tuple to the same function.
+    the manifest and the destination instead, which is what makes the rule fail when it is wrong.
     """
 
     def declare_doc(self, payload: object) -> None:
@@ -963,8 +962,9 @@ class DeclaredDestinationCase(TreeCase):
     def test_presence_fidelity_is_admitted_however_it_is_spelled(self) -> None:
         """presence carries no content and is also the default, so the two spellings are one declaration.
 
-        Refusing the explicit spelling while admitting the bare one would refuse README.md, which
-        spec/fidelity-model.md names as a presence file and which this check exists to admit.
+        Reading any fidelity as carrying would answer differently for the two, so a manifest edit
+        respelling one entry would change what this check says about it. README.md, which
+        spec/fidelity-model.md names as a presence file, is spelled the bare way today.
         """
         for label, entry in {
             "path alone": {"path": "DOC.md", "appliesTo": "*"},
@@ -1082,6 +1082,29 @@ class DeclaredDestinationCase(TreeCase):
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
                 self.assertIn("spec/files.json", str(caught.exception))
+
+    def test_a_destination_that_is_a_reference_target_is_refused(self) -> None:
+        """A reference names the hub file a carrier's own copy is made from, under another name there.
+
+        The entry's own path is the carrier's name for it, so testing that alone leaves the hub
+        file the copy is made from admitted, which hands every carrier of that entry a region.
+        """
+        (self.tmp / "catalog").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "catalog" / "snippet.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        self.declare_destinations(
+            "catalog/snippet.md",
+            manifest={
+                "baseline": [
+                    {"path": "Docker/README.md", "reference": "catalog/snippet.md"},
+                ],
+                "trees": [],
+            },
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            build_dist.include_destinations()
+
+        self.assertIn("carried to other repositories", str(caught.exception))
 
     def test_a_destination_under_a_carried_tree_is_refused(self) -> None:
         """A tree reaches beneath itself, so the manifest need not name the destination file.

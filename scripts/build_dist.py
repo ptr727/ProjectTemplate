@@ -422,7 +422,7 @@ def filled_lines(rel, stack=()):
             # Nothing is lost by skipping it here, since include_drift() and fill_includes() both walk include_documents() before any region is read, so a stale declaration has already raised.
             raise ValueError(
                 f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled,"
-                f" so add {rel!r} to INCLUDE_DESTINATIONS or move the region under .agents/skills/"
+                f" so add {rel!r} to INCLUDE_DESTINATIONS or move the region under a skill's own directory"
             )
         key = opens.group("key")
         end = None
@@ -474,7 +474,8 @@ def skill_documents():
 # The interface level is in the set although spec/fidelity-model.md checks only its contract rather than its body, since a region inside a declared contract is content this repository still wrote.
 # Scoped to baseline deliberately: a trees entry declares verbatim-tree, which carries content too, and is matched on its source below rather than through this set.
 # Presence carries none and is also the default, so an entry declaring it and one naming a path alone are the same declaration spelled two ways.
-# Refusing the explicit spelling while admitting the bare one would refuse README.md, the entry manifest_carried_destination() exists to admit.
+# Reading any fidelity as carrying would answer differently for the two, so a manifest edit respelling one entry would change what this function says about it.
+# README.md, which spec/fidelity-model.md names as a presence file, is spelled the bare way today.
 _CARRYING_FIDELITIES = frozenset({"intent", "verbatim", "interface"})
 
 
@@ -542,9 +543,14 @@ def manifest_carried_destination(rel, manifest):
     repository already and are safe doing it for the opposite reason, that regenerate() rebuilds
     them wholesale from the authored tree on every run, so the manifest decides this rather than
     the author of the tuple. A baseline entry naming a path alone carries no content and is
-    therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here.
+    therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here. An
+    entry's reference is read as well as its path, since a reference names the hub file a carrier's
+    own copy is made from, so declaring one hands every carrier of that entry a region under
+    whatever name it holds the copy under.
     """
     for entry in _manifest_entries(manifest, "baseline"):
+        if entry.get("reference") == rel:
+            return entry
         fidelity = entry.get("fidelity")
         if fidelity is not None and not isinstance(fidelity, str):
             # Hashed against the set below, so a list or an object here raises TypeError, which main() does not catch.
