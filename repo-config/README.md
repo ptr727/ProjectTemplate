@@ -30,9 +30,9 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 - **`prose`**: a defect in rule or procedure text.
 - **`chore`**: registry, labels, rollout, and other fleet housekeeping.
 
-`decision` is a marker rather than a class, so it sits beside whatever class the issue also carries rather than replacing one, and an issue holding nothing but the question carries it alone. An issue that is a prose defect and also holds a choice for the maintainer carries both. It marks every question waiting on the maintainer, whether or not the work it sits on is blocked, since the queue `GOVERNANCE.md` "Communicating with the User" has a session present at handoff is enumerated from it and a question that kept its work moving is owed an answer exactly as one that stopped it is.
+`decision` is a marker rather than one of the four, so it sits beside whichever of them the issue also carries rather than replacing one, and an issue holding nothing but the question carries it alone. An issue that is a prose defect and also holds a choice for the maintainer carries both. The marker records that a question is waiting on the maintainer, whether or not the work it sits on is blocked, since a session presents that queue at handoff per `GOVERNANCE.md` "Communicating with the User" and enumerates it from this label, and a question that kept its work moving is owed an answer exactly as one that stopped it is.
 
-- **`decision`**: a question waiting on the maintainer, beside whatever class the issue also carries.
+- **`decision`**: a question waiting on the maintainer, beside whichever of the four the issue also carries.
 
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
