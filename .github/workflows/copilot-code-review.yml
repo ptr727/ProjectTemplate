@@ -43,6 +43,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           : "${NONCE:?probe nonce is empty, so this environment receives no repository secret}"
+          # The reader matches decimal digits.
+          # A nonce that is not decimal would read as a defect in the reader rather than the secret.
+          case "$NONCE" in
+            *[!0-9]*) printf 'probe: nonce is not decimal\n' >&2; exit 1 ;;
+          esac
           token="PROBE-SETUP-${NONCE}"
           write_probe() {
             local label="$1" base="$2" rel="$3" path
