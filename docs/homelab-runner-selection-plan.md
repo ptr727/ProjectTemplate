@@ -88,9 +88,9 @@ The fleet runner variable never reaches Copilot configuration. Homelab labels ne
 
 The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled. Before rollout, verify these effective organization settings rather than relying on the planned values.
 
-The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. Its `copilot-setup-steps` job runs on `ubuntu-latest`, the label every GitHub-hosted job in the fleet uses, and it asserts nothing about the runner it was given.
+The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. Its `copilot-setup-steps` job runs on `ubuntu-latest`. That path is occupied by a temporary measurement for #1321 until that issue is answered.
 
-The organization policy is the authorization boundary, and it is the whole of it. A pinned image and a runtime assertion were tried while the homelab runners were being evaluated, and neither is kept: an assertion cannot make a job safe once GitHub has already assigned it to the wrong runner, so it buys nothing the policy does not already give, and it costs a rule restricting which runner a job may accept. The fleet has no such rule anywhere, and this plan introduces none.
+The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime, and neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
 ## Configuration Contract
 
@@ -240,7 +240,6 @@ Automated tests cover:
 - A direct-label workflow cannot use the homelab runner group.
 - An unapproved workflow ref cannot use the homelab runner group.
 - Public-repository access follows the explicit opt-in exactly.
-- A fixed GitHub-hosted Copilot runner.
 - Absence of the fleet variable from Copilot configuration.
 - Absence of homelab labels from Copilot configuration.
 

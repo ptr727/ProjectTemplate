@@ -10,6 +10,10 @@ name: Copilot code review environment action
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths:
+      - .github/workflows/copilot-code-review.yml
   pull_request:
     branches: [main, develop]
     paths:
@@ -25,8 +29,11 @@ jobs:
   copilot-setup-steps:
     name: Copilot setup steps job
     runs-on: ubuntu-latest
+    # Declared on the job as well as the workflow.
+    # GitHub documents the job's own keys as the surface a setup step is read from.
+    permissions: {}
     steps:
-      # No checkout, so the job needs no token scope and inherits none.
+      # No checkout, so the job needs no token scope.
       # A checkout would also persist a credential in the workspace a reviewer then reads.
       - name: Write probe token step
         shell: bash
