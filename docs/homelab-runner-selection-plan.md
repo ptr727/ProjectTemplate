@@ -333,9 +333,9 @@ Implementation waits for an explicit decision on each item.
 
 <!-- GitHub -->
 
-[issue-889]: https://github.com/ptr727/ProjectTemplate/issues/889
 [issue-1321]: https://github.com/ptr727/ProjectTemplate/issues/1321
 [issue-1448]: https://github.com/ptr727/ProjectTemplate/issues/1448
+[issue-889]: https://github.com/ptr727/ProjectTemplate/issues/889
 
 <!-- External -->
 
