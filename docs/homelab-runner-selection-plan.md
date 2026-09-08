@@ -86,11 +86,11 @@ Ordinary fleet CI and Copilot code review therefore have separate runner policie
 
 The fleet runner variable never reaches Copilot configuration. Homelab labels never appear in the Copilot workflow.
 
-The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled. Before rollout, verify these effective organization settings rather than relying on the planned values.
+The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled, which a setup step's own `runs-on` appears to contradict. Which of the two wins is unresolved and tracked in [issue #1448][issue-1448]. Before rollout, verify these effective organization settings rather than relying on the planned values.
 
-The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. It pins `copilot-setup-steps` to `ubuntu-24.04` and begins with a step that fails unless `runner.environment` is `github-hosted`.
+The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. Its `copilot-setup-steps` job runs on `ubuntu-latest`. That path is occupied by a temporary measurement for [issue #1321][issue-1321] until that issue is answered.
 
-The organization policy is the authorization boundary. The workflow pin and runtime assertion detect configuration drift. The assertion does not make a job safe after GitHub has assigned it to the wrong runner.
+The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime, and neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
 ## Configuration Contract
 
@@ -110,14 +110,14 @@ The explicit target leaves room for future values such as `arc`. A boolean would
 
 ## Selection Architecture
 
-A small selector job runs on `ubuntu-24.04` before any selectable validation job.
+A small selector job runs on `ubuntu-latest` before any selectable validation job.
 
 The selector validates the requested target, event, actor, and ref. It emits one JSON `runs-on` value.
 
 GitHub-hosted output:
 
 ```json
-["ubuntu-24.04"]
+["ubuntu-latest"]
 ```
 
 Homelab output:
@@ -240,7 +240,6 @@ Automated tests cover:
 - A direct-label workflow cannot use the homelab runner group.
 - An unapproved workflow ref cannot use the homelab runner group.
 - Public-repository access follows the explicit opt-in exactly.
-- A fixed GitHub-hosted Copilot runner.
 - Absence of the fleet variable from Copilot configuration.
 - Absence of homelab labels from Copilot configuration.
 
@@ -334,6 +333,8 @@ Implementation waits for an explicit decision on each item.
 
 <!-- GitHub -->
 
+[issue-1321]: https://github.com/ptr727/ProjectTemplate/issues/1321
+[issue-1448]: https://github.com/ptr727/ProjectTemplate/issues/1448
 [issue-889]: https://github.com/ptr727/ProjectTemplate/issues/889
 
 <!-- External -->

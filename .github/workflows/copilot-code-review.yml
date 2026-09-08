@@ -1,0 +1,64 @@
+name: Copilot code review environment action
+
+# Temporary measurement for #1321.
+# It asks whether a setup step can place content where the Copilot reviewer reads it.
+# GitHub matches this workflow by its file path and its job by the job id, so neither is free.
+# The workflow, job and step names follow the ordinary fleet convention and are not part of that.
+# GitHub documents that it checks the repository out after these steps, where they did not.
+# Whether that checkout removes an untracked file here is one of the things being measured.
+# The token is written to three places for that reason, and each write reports its own outcome.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths:
+      - .github/workflows/copilot-code-review.yml
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - .github/workflows/copilot-code-review.yml
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  copilot-setup-steps:
+    name: Copilot setup steps job
+    runs-on: ubuntu-latest
+    # Declared on the job as well as the workflow.
+    # GitHub documents the job's own keys as the surface a setup step is read from.
+    permissions: {}
+    steps:
+      # No checkout, so the job needs no token scope.
+      # A checkout would also persist a credential in the workspace a reviewer then reads.
+      - name: Write probe token step
+        shell: bash
+        # The token is never printed, since a log on this public repository would publish it.
+        # A review could then quote it without having read any file.
+        run: |
+          set -Eeuo pipefail
+          : "${RUN_ID:?run id is empty, which would write a forgeable token}"
+          token="PROBE-SETUP-${RUN_ID}"
+          write_probe() {
+            local label="$1" base="$2" rel="$3" path
+            if [[ -z "$base" ]]; then
+              printf 'probe: %s has no base directory in this environment\n' "$label"
+              return 0
+            fi
+            path="$base/$rel"
+            if mkdir -p "$(dirname "$path")" && rm -f "$path" && printf '%s\n' "$token" > "$path"; then
+              printf 'probe: %s written\n' "$label"
+            else
+              printf 'probe: %s could not be written\n' "$label"
+            fi
+            return 0
+          }
+          write_probe workspace "${GITHUB_WORKSPACE:-}" '.copilot-probe/setup-token.txt'
+          write_probe temp "${RUNNER_TEMP:-}" 'copilot-probe-setup-token.txt'
+          write_probe home "${HOME:-}" '.copilot-probe-setup-token.txt'
+        env:
+          RUN_ID: ${{ github.run_id }}
