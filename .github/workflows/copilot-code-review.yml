@@ -38,11 +38,12 @@ jobs:
       - name: Write probe token step
         shell: bash
         # The token is never printed, since a log on this public repository would publish it.
-        # A review could then quote it without having read any file.
+        # The value is a repository secret rather than the run id.
+        # A run id sits in the reviewer's own environment, so an answer carrying one proves nothing.
         run: |
           set -Eeuo pipefail
-          : "${RUN_ID:?run id is empty, which would write a forgeable token}"
-          token="PROBE-SETUP-${RUN_ID}"
+          : "${NONCE:?probe nonce is empty, so this environment receives no repository secret}"
+          token="PROBE-SETUP-${NONCE}"
           write_probe() {
             local label="$1" base="$2" rel="$3" path
             if [[ -z "$base" ]]; then
@@ -61,4 +62,4 @@ jobs:
           write_probe temp "${RUNNER_TEMP:-}" 'copilot-probe-setup-token.txt'
           write_probe home "${HOME:-}" '.copilot-probe-setup-token.txt'
         env:
-          RUN_ID: ${{ github.run_id }}
+          NONCE: ${{ secrets.PROBE_NONCE }}
