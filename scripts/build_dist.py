@@ -159,7 +159,7 @@ def write_plugin_manifest(names):
 # A skill has to read whole in isolation, and a rule has one home, so the text a skill needs from that home is generated into it rather than copied.
 # The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly and a region left empty there would hand them a skill with a hole in it.
 # The generated trees then mirror the filled source.
-# A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it, since the same rule with one home is restated on hub surfaces that are not skills at all.
+# A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it, which is the mechanism for a rule with one home that a hub surface outside the skills tree would otherwise restate.
 # .agents/skills/README.md is such a file despite sitting in that tree, because the walk visits the skill directories rather than the tree containing them.
 
 # The same `<path> > <heading>` vocabulary canonical_review.py keys a unit on, defined here because that engine imports this module.
@@ -470,7 +470,8 @@ def skill_documents():
     return sorted(out)
 
 
-# The baseline fidelities that carry content, which is that enum's every value but presence, per spec/fidelity-model.md.
+# The baseline fidelities under which this repository hands a carrier any content of its own, which is that enum's every value but presence.
+# The interface level is in the set although spec/fidelity-model.md checks only its contract rather than its body, since a region inside a declared contract is content this repository still wrote.
 # Scoped to baseline deliberately: a trees entry declares verbatim-tree, which carries content too, and is matched on its source below rather than through this set.
 # Presence carries none and is also the default, so an entry declaring it and one naming a path alone are the same declaration spelled two ways.
 # Refusing the explicit spelling while admitting the bare one would refuse README.md, the entry manifest_carried_destination() exists to admit.
@@ -483,7 +484,11 @@ def _manifest_entries(manifest, key):
     json.loads accepts any JSON, so a manifest that is a list, or one whose baseline holds a
     string, would otherwise reach .get() and raise AttributeError, which main() does not catch and
     which therefore surfaces as an uncaught traceback exiting 1, the code a caller reads as stale.
-    scripts/carry.py validates the same manifest the same way for the same reason. ValueError
+
+    A key that is absent is refused rather than read as declaring nothing, because both are
+    required by spec/files.schema.json and spec/validate.py names each one it does not find. A
+    truncated manifest read as declaring nothing would report every carried file as uncarried,
+    which is the one answer this function must never give by accident. ValueError
     rather than the TypeError ruff prefers, and the noqa below is what holds it: main() catches
     ValueError and OSError, so a TypeError raised here would escape as the uncaught traceback this
     function exists to prevent. A malformed data file is a bad value in it, not a caller's type
@@ -493,8 +498,9 @@ def _manifest_entries(manifest, key):
         raise ValueError(  # noqa: TRY004
             "spec/files.json is not an object, so its declarations cannot be read"
         )
-    # Defaulted to a list rather than an empty tuple, which the isinstance check below would refuse, so a manifest simply not declaring this key reads as declaring nothing.
-    entries = manifest.get(key, [])
+    if key not in manifest:
+        raise ValueError(f"spec/files.json declares no {key!r}, which its schema requires")
+    entries = manifest[key]
     if not isinstance(entries, list):
         raise ValueError(  # noqa: TRY004
             f"spec/files.json {key!r} is not a list, so its declarations cannot be read"
@@ -508,19 +514,23 @@ def _manifest_entries(manifest, key):
 def tree_source(source):
     """`source` reduced to the plain root-relative form the prefix test compares, or None if unusable.
 
-    The schema bounds a source's length and forbids exactly ".", and constrains its spelling no
-    further, so one tree is spellable "docs", "docs/", "./docs", and "/docs". A raw prefix test
-    admits a destination inside every spelling but the first, and "./" reduces to "." and matches
-    nothing at all, which is the whole repository declared as a carried tree while admitting every
-    destination in it. An empty result is that root tree, which carries every path there is.
+    The schema requires a source to be a non-empty string other than ".", and constrains its
+    spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "docs//sub",
+    and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
+    every spelling but the plainest, and a lone "./" reduces under a naive strip to "." and matches
+    nothing at all, which is the whole repository declared as a carried tree while every
+    destination inside it is admitted. Splitting into path segments answers all of them at once,
+    and an empty result is that root tree, which carries every path there is.
+
+    A ".." segment is refused rather than resolved, since a source reaching outside the tree it
+    names is a manifest defect, and resolving it here would decide silently what that source meant.
     """
     if not isinstance(source, str):
         return None
-    while source.startswith("./"):
-        # Sliced rather than str.removeprefix(), which needs 3.9, for the same 3.7 floor the lru_cache above records.
-        source = source[2:]
-    source = source.strip("/")
-    return "" if source == "." else source
+    parts = [part for part in PurePosixPath(source.strip()).parts if part not in ("/", ".")]
+    if ".." in parts:
+        raise ValueError(f"spec/files.json tree source {source!r} carries a '..' segment")
+    return "/".join(parts)
 
 
 def manifest_carried_destination(rel, manifest):

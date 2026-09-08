@@ -974,24 +974,53 @@ class DeclaredDestinationCase(TreeCase):
                 self.declare_doc({"baseline": [entry], "trees": []})
                 self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
 
-    def test_a_tree_source_is_matched_at_every_spelling_the_schema_allows(self) -> None:
-        """The schema bounds a source's length and forbids only ".", so one tree has many spellings.
+    def test_a_tree_source_is_matched_whichever_way_its_segments_are_spelled(self) -> None:
+        """The schema requires a non-empty string other than "." and constrains the spelling no further.
 
-        The two root spellings matter most, since a lone dot-slash reduces to a bare dot under a
-        naive strip and then matches nothing, which is the whole repository declared as a carried
-        tree while every destination inside it is admitted.
+        These are not every spelling it allows, which is unbounded, but one of each shape a prefix
+        test over the raw string gets wrong. The two root spellings matter most, since a lone
+        dot-slash reduces to a bare dot under a naive strip and then matches nothing, which is the
+        whole repository declared as a carried tree while every destination inside it is admitted.
         """
-        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "sub").mkdir(parents=True, exist_ok=True)
         (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
-        for source in ("docs", "docs/", "./docs", "/docs", ".//docs", "./", "/"):
+        (self.tmp / "docs" / "sub" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        cases = {
+            "docs": "docs/map.md",
+            "docs/": "docs/map.md",
+            "./docs": "docs/map.md",
+            "/docs": "docs/map.md",
+            ".//docs": "docs/map.md",
+            " docs ": "docs/map.md",
+            "docs/.": "docs/map.md",
+            "docs//sub": "docs/sub/map.md",
+            "docs/./sub": "docs/sub/map.md",
+            "./": "docs/map.md",
+            "/": "docs/map.md",
+        }
+        for source, rel in cases.items():
             with self.subTest(source):
                 self.declare_destinations(
-                    "docs/map.md",
+                    rel,
                     manifest={"baseline": [], "trees": [{"source": source, "target": "docs"}]},
                 )
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
                 self.assertIn("carried to other repositories", str(caught.exception))
+
+    def test_a_tree_source_reaching_outside_itself_is_refused_rather_than_resolved(self) -> None:
+        """Resolving it here would decide silently what a manifest defect was supposed to mean."""
+        (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
+        self.declare_destinations(
+            "docs/map.md",
+            manifest={"baseline": [], "trees": [{"source": "docs/../docs", "target": "docs"}]},
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            build_dist.include_destinations()
+
+        self.assertIn("'..' segment", str(caught.exception))
 
     def test_a_non_string_fidelity_refuses_rather_than_raising_past_the_caller(self) -> None:
         """It is hashed against the carrying set, so a list or an object raises TypeError uncaught."""
@@ -1003,8 +1032,13 @@ class DeclaredDestinationCase(TreeCase):
                     build_dist.include_destinations()
                 self.assertIn("non-string fidelity", str(caught.exception))
 
-    def test_a_manifest_declaring_neither_key_carries_nothing(self) -> None:
-        """A missing key is a manifest declaring nothing there, never a manifest of the wrong shape."""
+    def test_a_manifest_missing_a_required_key_is_refused_rather_than_read_as_empty(self) -> None:
+        """Both keys are required, and a truncated manifest read as empty carries nothing at all.
+
+        That answer would report every carried file as uncarried, admitting a destination this
+        check exists to refuse, so a key that is absent is a manifest that cannot be read rather
+        than one declaring nothing there.
+        """
         for label, payload in {
             "no trees": {"baseline": [{"path": "DOC.md", "fidelity": "presence"}]},
             "no baseline": {"trees": []},
@@ -1012,7 +1046,9 @@ class DeclaredDestinationCase(TreeCase):
         }.items():
             with self.subTest(label):
                 self.declare_doc(payload)
-                self.assertEqual(build_dist.include_destinations(), ["DOC.md"])
+                with self.assertRaises(ValueError) as caught:
+                    build_dist.include_destinations()
+                self.assertIn("which its schema requires", str(caught.exception))
 
     def test_a_tree_source_does_not_match_a_longer_sibling_directory(self) -> None:
         """ "doc" and "docs" are different trees, so the prefix test compares whole path segments."""
@@ -1048,7 +1084,11 @@ class DeclaredDestinationCase(TreeCase):
                 self.assertIn("spec/files.json", str(caught.exception))
 
     def test_a_destination_under_a_carried_tree_is_refused(self) -> None:
-        """A tree carries everything beneath it, so the manifest need not name the file itself."""
+        """A tree reaches beneath itself, so the manifest need not name the destination file.
+
+        Its `include` globs can narrow what it actually carries, and this refuses on the source
+        alone rather than reading them, which over-refuses in the direction that is safe.
+        """
         (self.tmp / "docs").mkdir(parents=True, exist_ok=True)
         (self.tmp / "docs" / "map.md").write_text("## Own\n\nOwn.\n", encoding="utf-8")
         self.declare_destinations(
@@ -1088,21 +1128,6 @@ class DeclaredDestinationCase(TreeCase):
                 with self.assertRaises(ValueError) as caught:
                     build_dist.include_destinations()
                 self.assertIn("could not be read", str(caught.exception))
-
-
-class RealDestinationCase(unittest.TestCase):
-    """This repository's own INCLUDE_DESTINATIONS, run against this repository's own tree.
-
-    A destination is a path typed by hand, so a file renamed or moved leaves the tuple naming
-    nothing, and the manifest can grow an entry over a path already declared here. Both are caught
-    by running the real check against the real tree, and a raise is the only way this can fail,
-    since the value returned is built from the tuple rather than read from anywhere. Read-only. While the tuple is empty the call
-    returns before it reads or resolves anything, so this asserts nothing about the tree and arms
-    itself on the first entry.
-    """
-
-    def test_the_shipped_tuple_passes_its_own_check(self) -> None:
-        build_dist.include_destinations()
 
 
 if __name__ == "__main__":
