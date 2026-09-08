@@ -3,7 +3,7 @@
     { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
     { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
     { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },
-    { "name": "decision", "color": "b60205", "description": "Needs the maintainer's decision before it can be worked" },
+    { "name": "decision", "color": "b60205", "description": "A question waiting on the maintainer, alone or beside whatever else the issue carries" },
     { "name": "dependencies", "color": "0366d6", "description": "Pull requests that update a dependency file" },
     { "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation" },
     { "name": "duplicate", "color": "cfd3d7", "description": "This issue or pull request already exists" },
