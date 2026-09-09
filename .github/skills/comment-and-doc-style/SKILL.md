@@ -40,6 +40,24 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   disables (for example `MD013` line length) stays disabled, do not "fix" it. `MD033` inline HTML
   stays enabled: HTML comments, and `details`/`summary` (no Markdown equivalent for a
   collapsible), are allowed, everything else with a native Markdown equivalent uses the Markdown.
+- **A repo-local exclusion goes in a nested config, never in the root one.** The shared
+  `.markdownlint-cli2.jsonc` at the repo root is fleet-fixed, and its `ignores` list covers only
+  what every repo has, third-party Markdown under `node_modules`. A repo excluding a subtree of
+  its own that it does not treat as authored prose, a committed data archive, a vendored theme,
+  or a hand-maintained record, puts a `.markdownlint-cli2.jsonc` carrying its own `ignores`
+  beside that content. A config inside a
+  tree that is re-imported or re-vendored wholesale is deleted by the next refresh, so it is
+  re-added with the import. Excluding through the CI workflow's negated glob input instead is a
+  CI-only fix, and leaves those same files flagged for anyone who runs the linter locally.
+- **What decides whether a nested config works.** It applies to the directory it sits in and to
+  every subdirectory below it, and it filters those files even when a run names them explicitly
+  as arguments, so a bare local run and the CI step honor it alike. Its `ignores` patterns
+  resolve against that directory rather than against the repo root, so an entry written
+  repo-root-relative matches nothing and reports no error saying so. Its settings
+  merge with those above it rather than replacing them, so the fleet rule block still governs
+  the files it does not exclude. And the exclusion has to be expressed as `ignores`: the `globs`
+  and `gitignore` keys are read only from the config in the directory the linter is run from, so
+  a nested copy of either is inert.
 - **Spelling is US English**, checked by CSpell against the shared `cspell.json`
   (`"language": "en-US"`, so a British spelling is flagged). Add a project term to `cspell.json`'s
   `words` list, never to a `.code-workspace`'s own `cspell.words` block.

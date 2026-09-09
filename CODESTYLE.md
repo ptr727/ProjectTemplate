@@ -31,7 +31,7 @@ Each language defines a **clean-compile** verification: the combination of build
 
 ### Markdown and Spelling
 
-These apply repo-wide, in every directory: Markdown lints clean via `markdownlint-cli2` against the shared config, spelling is US English via CSpell against the shared `cspell.json`, the CI spelling gate covers `README.md` and `HISTORY.md` only, `HISTORY.md` mirrors the README's opening, and "Markdown" is a proper noun in prose. The full rules are in the `comment-and-doc-style` Skill referenced above.
+These apply repo-wide, in every directory: Markdown lints clean via `markdownlint-cli2` against the shared config, spelling is US English via CSpell against the shared `cspell.json`, the CI spelling gate covers `README.md` and `HISTORY.md` only, `HISTORY.md` mirrors the README's opening, and "Markdown" is a proper noun in prose. A repo excluding a subtree of its own that it does not treat as authored prose, a committed data archive, a vendored theme, or a hand-maintained record, puts a `.markdownlint-cli2.jsonc` carrying its own `ignores` beside that content rather than editing the shared root config, whose contents are fleet-fixed. Those `ignores` patterns resolve against the directory holding them rather than against the repo root, so a repo-root-relative entry there matches nothing and reports no error saying so, and excluding through the CI workflow's own negated Markdown glob input instead is a CI-only fix that leaves the same files flagged for anyone running the linter locally. The full rules are in the `comment-and-doc-style` Skill referenced above.
 
 ## .NET
 

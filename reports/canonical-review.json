@@ -202,6 +202,14 @@
       "stamp": "2026-09-01T05:45:31Z"
     },
     {
+      "unit": ".agents/skills/comment-and-doc-style/SKILL.md > Markdown files: linting and spelling",
+      "digest": "sha256:a3a16ca8160209a4f1775bf6f7b90c469f8ed8da8389b390f1d3f07dc2b51bf3",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
+    },
+    {
       "unit": ".agents/skills/comment-and-doc-style/SKILL.md > PR titles and commit messages",
       "digest": "sha256:5e23928ad9f6093b65d9a9fa1ecb68b8705770f3ce7937944416095c8186dd10",
       "reviewer": "agent-skill",
@@ -530,6 +538,14 @@
       "stamp": "2026-09-02T03:51:13Z"
     },
     {
+      "unit": ".agents/skills/python-codestyle/references/profiles.md > Adapt before propagating",
+      "digest": "sha256:49fd21f32dcc50815b7de679cd07d618867e85111227ba4f973f6901bef32514",
+      "reviewer": "agent-skill",
+      "findings": 12,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T20:49:22Z"
+    },
+    {
       "unit": ".agents/skills/python-codestyle/references/testing.md",
       "digest": "sha256:94f61df9b261dbbce373b216b2393492ebd547778dee92d2bac61c892e30a00d",
       "reviewer": "agent-skill",
@@ -755,11 +771,11 @@
     },
     {
       "unit": ".markdownlint-cli2.jsonc",
-      "digest": "sha256:e21f58b41c76850388ee4324bb1765b6b44aae7defaaf7ef6dd1ce7855f93913",
+      "digest": "sha256:826753ef2717b77ccc1fef5cd20ee7f2437a8b5c9218cd25f9a66fbfa8390509",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:30:01Z"
+      "findings": 3,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:02:31Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
@@ -803,11 +819,11 @@
     },
     {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
-      "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
+      "digest": "sha256:f46131566b2d3c4ff86385251415c54c449093da6c0aed928ed21704c22344e5",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
-      "stamp": "2026-09-01T14:48:23Z"
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
     },
     {
       "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
@@ -835,11 +851,11 @@
     },
     {
       "unit": "CODESTYLE.md > General",
-      "digest": "sha256:54fcc07fc743507089e95ab8f1e7aeb64f0d83e31716514dadb666871a495684",
+      "digest": "sha256:b4ec0b5eb8387f8247d0e8e0cc3f737d82e8d0a7396ab4c756e13b3e417d17e0",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "112ffd874eaec3784a747b341fbdd0b19d75502c",
-      "stamp": "2026-09-02T03:09:17Z"
+      "findings": 0,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
     },
     {
       "unit": "CODESTYLE.md > Python",
