@@ -370,7 +370,20 @@ jobs:
           fi
 ```
 
-A repo that vendors a theme or imports content it does not author narrows the Lint Markdown step's glob instead. Blog carries a WordPress archive and the PaperMod theme, for instance. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so it is not locally editable:
+A repo that vendors a theme or imports content it does not author excludes it from the Markdown lint rather than fixing it. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so the root config is not locally editable, and the exclusion goes in a nested `.markdownlint-cli2.jsonc` inside the excluded directory. `markdownlint-cli2` applies a nested config to the directory it sits in and to every subdirectory below it, so the exclusion holds for a bare local run and for the CI step alike. A nested glob resolves against the directory holding it rather than against the repo root. Blog excludes all of `content/` today, its imported WordPress archive, so `content/.markdownlint-cli2.jsonc` excludes that whole subtree:
+
+```jsonc
+{
+    // Imported WordPress content, not authored prose.
+    "ignores": ["**/*.md"]
+}
+```
+
+`themes/` is the case where that glob would reach too far, since Blog authors `themes/README.md` and vendors only the theme directories under it. `themes/.markdownlint-cli2.jsonc` excludes one level down instead, with `"ignores": ["*/**"]`, which leaves that README linted.
+
+Only `ignores` works from a nested config, and its settings merge with the root config's rather than replacing them, so the fleet rule block still governs the files it does not exclude. `globs` and `gitignore` are read only from the config in the directory the linter is run from, so a nested copy of either is inert.
+
+The Lint Markdown step's `markdown-exclude-globs` input narrows the CI run instead, leaving the same files flagged for anyone who runs the linter locally:
 
 ```yaml
   validate:
