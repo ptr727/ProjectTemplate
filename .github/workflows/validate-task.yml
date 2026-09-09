@@ -285,8 +285,8 @@ jobs:
       # An entry holding no non-whitespace character is the value that would otherwise run green on an interpreter nobody chose, since setup-uv trims what it reads and then reads an empty input as an absent one.
       # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well, which is why the entry test is for content rather than for length.
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
-      # An integer resolves to whatever interpreter of that major version uv happens to find, so that one is a second silent pass this check prevents rather than a cause it names.
-      # A decimal runs the right interpreter where its form survives the round trip and fails where a trailing zero does not, in the dependency sync below rather than in setup-uv, which exports the version rather than resolving it.
+      # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
+      # The rest fail in the dependency sync below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
       - name: Validate python-versions input step
         env:

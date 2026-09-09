@@ -304,8 +304,9 @@ gh() {
         """fromJSON admits a JSON array of numbers, which is not a list of interpreter versions.
 
         An empty entry is the value that would otherwise carry a run green on an interpreter nobody
-        chose, since setup-uv reads an empty input as an absent one. An unquoted entry announces
-        itself either way. The step's whole script is run here, not just its filter, since
+        chose, since setup-uv reads an empty input as an absent one. An unquoted entry is admitted
+        by fromJSON as a number, and uv resolves some of those rather than refusing them, so that
+        shape carries a run green too. The step's whole script is run here, not just its filter, since
         inverting the condition or exiting zero would leave a filter-only assertion green while
         the step admitted everything.
         """
@@ -344,7 +345,7 @@ gh() {
             '[" "]': 1,
             # The plausible slip, the input being a quoted string already, and well-formed JSON.
             "[3.13, 3.14]": 1,
-            # The integer form of it, which uv resolves to whatever interpreter of that major version it finds.
+            # The integer form of it, which uv resolves rather than refuses.
             "[3]": 1,
             # Unreachable today: each of these fails while the matrix is expanded, before the step runs.
             # They pin the rest of the filter's contract, which moving the check into a job of its own would ask for.
