@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
@@ -278,6 +279,116 @@ class TreeSourceRootCase(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertFalse(validate.reduces_to_repo_root(value))
+
+
+class RegistryEnvironmentCase(unittest.TestCase):
+    """A registry `environments` entry is shape-checked here, since CI runs no JSON-schema validation."""
+
+    def errors(self, envs) -> list[str]:
+        return validate.environment_errors_for_repo({"environments": envs}, "Fixture")
+
+    def test_a_repo_declaring_no_environments_is_clean(self) -> None:
+        self.assertEqual(validate.environment_errors_for_repo({}, "Fixture"), [])
+
+    def test_each_valid_branch_policy_form_is_clean(self) -> None:
+        for env in (
+            {"name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"]},
+            {"name": "production", "branchPolicy": "none"},
+        ):
+            with self.subTest(policy=env["branchPolicy"]):
+                self.assertEqual(self.errors([env]), [])
+
+    def test_a_custom_policy_declaring_no_branches_is_rejected(self) -> None:
+        self.assertEqual(
+            self.errors([{"name": "pypi", "branchPolicy": "custom"}]),
+            ["Fixture: environments[0] branchPolicy custom must declare 'branches'"],
+        )
+
+    def test_a_custom_policy_declaring_an_empty_branch_set_is_accepted(self) -> None:
+        """Presence is the test, so an empty list declares that the environment allows nothing."""
+        self.assertEqual(
+            self.errors([{"name": "pypi", "branchPolicy": "custom", "branches": []}]), []
+        )
+
+    def test_a_policy_naming_no_branch_set_may_not_declare_one(self) -> None:
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "none", "branches": ["main"]}]),
+            [
+                (
+                    "Fixture: environments[0] branchPolicy none names no branch set, "
+                    "so it must not declare 'branches'"
+                )
+            ],
+        )
+
+    def test_githubs_protected_branches_form_is_not_declarable(self) -> None:
+        """It counts classic branch protection, which the fleet removes, so declaring it would assert a gate that does not exist."""
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "protected"}]),
+            [("Fixture: environments[0] branchPolicy 'protected' invalid (expected custom, none)")],
+        )
+
+    def test_an_unknown_branch_policy_is_rejected(self) -> None:
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "everything"}]),
+            [
+                (
+                    "Fixture: environments[0] branchPolicy 'everything' invalid "
+                    "(expected custom, none)"
+                )
+            ],
+        )
+
+    def test_a_missing_branch_policy_is_reported_as_absent(self) -> None:
+        """Absence goes through its own branch: the repr of a missing field differs from the valid "none" by case alone."""
+        self.assertEqual(
+            self.errors([{"name": "e"}]),
+            ["Fixture: environments[0] missing 'branchPolicy' (expected custom, none)"],
+        )
+
+    def test_an_explicit_null_is_declared_but_invalid_not_absent(self) -> None:
+        """Presence is the test, matching description_errors_for_repo, so a null cannot pass as a repo declaring none."""
+        self.assertEqual(
+            validate.environment_errors_for_repo({"environments": None}, "Fixture"),
+            ["Fixture: environments must be a list"],
+        )
+
+    def test_a_missing_or_empty_name_is_rejected(self) -> None:
+        for env in ({"branchPolicy": "none"}, {"name": "  ", "branchPolicy": "none"}):
+            with self.subTest(env=env):
+                self.assertEqual(
+                    self.errors([env]),
+                    ["Fixture: environments[0] missing or empty 'name'"],
+                )
+
+    def test_two_entries_for_one_environment_are_rejected(self) -> None:
+        self.assertEqual(
+            self.errors(
+                [{"name": "pypi", "branchPolicy": "none"}, {"name": "pypi", "branchPolicy": "none"}]
+            ),
+            ["Fixture: environments[1] duplicate environment 'pypi'"],
+        )
+
+    def test_a_non_list_and_a_non_object_entry_are_rejected(self) -> None:
+        self.assertEqual(self.errors({"name": "e"}), ["Fixture: environments must be a list"])
+        self.assertEqual(self.errors(["pypi"]), ["Fixture: environments[0] must be an object"])
+
+    def test_branches_must_be_non_empty_strings(self) -> None:
+        for branches in (["main", ""], [1], "main"):
+            with self.subTest(branches=branches):
+                self.assertEqual(
+                    self.errors([{"name": "e", "branchPolicy": "custom", "branches": branches}]),
+                    ["Fixture: environments[0] branches must be a list of non-empty strings"],
+                )
+
+    def test_the_live_registry_declares_only_shapes_this_check_accepts(self) -> None:
+        """The fixtures above prove the rule, and this proves the registry the rule is applied to."""
+        registry = json.loads(
+            (validate.ROOT / "registry" / "repos.json").read_text(encoding="utf-8")
+        )
+        for repo in registry["repos"]:
+            with self.subTest(repo=repo.get("name")):
+                self.assertEqual(validate.environment_errors_for_repo(repo, repo["name"]), [])
 
 
 if __name__ == "__main__":

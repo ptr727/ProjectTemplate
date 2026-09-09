@@ -835,11 +835,11 @@
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
-      "digest": "sha256:cadbf5a3b36bdc9ec871eb907565c582bed70c2e4098c6a99fd756cd2b623489",
+      "digest": "sha256:acab766390d45e079b50713cc3a7a19892fb8622f0d5a2f1ad36536aad675d27",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "db9e5695f1501cc894953bdd57db46e4faf74159",
-      "stamp": "2026-09-05T02:20:07Z"
+      "findings": 11,
+      "hubCommit": "c23a4b8acb933e91368709a05811478c59113078",
+      "stamp": "2026-09-09T20:04:13Z"
     },
     {
       "unit": "CODESTYLE.md > .NET",
@@ -888,6 +888,14 @@
       "findings": 5,
       "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
       "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Hub-Hosted Tooling",
+      "digest": "sha256:12b540ba3e43aa2315985970a66588dd4832856c8f106a6d5386507897dec143",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "c23a4b8acb933e91368709a05811478c59113078",
+      "stamp": "2026-09-09T17:32:13Z"
     },
     {
       "unit": "GOVERNANCE.md > PR Review Etiquette",
