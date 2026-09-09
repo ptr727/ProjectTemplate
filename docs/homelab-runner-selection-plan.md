@@ -88,7 +88,7 @@ The fleet runner variable never reaches Copilot configuration. Homelab labels ne
 
 The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled, which a setup step's own `runs-on` appears to contradict. Which of the two wins is unresolved and tracked in [issue #1448][issue-1448]. Before rollout, verify these effective organization settings rather than relying on the planned values.
 
-The proposed implementation adds a dedicated `.github/workflows/copilot-code-review.yml`. Its `copilot-setup-steps` job runs on `ubuntu-latest`. That path is occupied by a temporary measurement for [issue #1321][issue-1321] until that issue is answered.
+The proposed implementation adds a dedicated `copilot-code-review.yml` workflow, which does not exist yet. Its `copilot-setup-steps` job runs on `ubuntu-latest`.
 
 The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime, and neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
@@ -255,7 +255,7 @@ Implementation is expected to touch these ProjectTemplate surfaces:
 
 - A canonical runner-selector action and its tests.
 - `.github/workflows/validate-task.yml` for the first selectable jobs.
-- `.github/workflows/copilot-code-review.yml` for the explicit Copilot boundary.
+- A `copilot-code-review.yml` workflow for the explicit Copilot boundary.
 - `.github/actionlint.yaml` for custom homelab labels.
 - `WORKFLOW.md` for the behavioral and security contract.
 - `docs/reusable-workflows.md` for selector ownership and caller behavior.
@@ -333,7 +333,6 @@ Implementation waits for an explicit decision on each item.
 
 <!-- GitHub -->
 
-[issue-1321]: https://github.com/ptr727/ProjectTemplate/issues/1321
 [issue-1448]: https://github.com/ptr727/ProjectTemplate/issues/1448
 [issue-889]: https://github.com/ptr727/ProjectTemplate/issues/889
 
