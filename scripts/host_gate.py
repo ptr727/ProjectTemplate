@@ -413,7 +413,7 @@ def package_source(tool: dict) -> str | None:
 
 
 def overlay_above(start: Path) -> Path | None:
-    """The nearest ancestor of `start` whose host-tools.json this bare run should name, or None.
+    """The nearest ancestor of `start` carrying a host-tools.json, or None where the nearest declares nothing.
 
     A bare run layers only the declaration at the working directory itself, so an overlay at the
     root of the repo the run is inside goes unapplied without a word when the run starts in a
@@ -434,7 +434,7 @@ def overlay_above(start: Path) -> Path | None:
             continue
         tools = read_declaration(overlay, "repository host tool declaration")
         # Written out rather than folded into the truthiness below, which a diagnostic already satisfies by being a non-empty string.
-        # No test can tell the two apart, so this line is for a reader and for a read_declaration that one day returns an empty diagnostic.
+        # It is what holds if read_declaration ever returns an empty diagnostic, which the truthiness alone would read as a declaration adding nothing.
         if isinstance(tools, str):
             return parent
         return parent if tools else None
