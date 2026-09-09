@@ -137,6 +137,11 @@ class FakeGh:
         return f"https://github.com/o/r/issues/{argv[2]}\n"
 
 
+def doubled(track: str) -> str:
+    """A body carrying two metadata blocks, which is the shape a hand edit produces."""
+    return f"{handoff.render_marker(track, 1, None)}\n{handoff.render_marker(track, 2, None)}\n"
+
+
 def link(number: int, track: str, round_: int, previous: int | None, **over) -> dict:
     """One handoff issue as `gh` renders it, adopted unless a case overrides the body."""
     row = {
@@ -338,6 +343,13 @@ class ExitCodeCase(unittest.TestCase):
             handoff.main(["current", "--repo", "justaname"])
         self.assertEqual(caught.exception.code, 1)
         self.assertIn("refused:", err.getvalue())
+
+    def test_a_below_one_argument_names_the_flag_the_caller_typed(self) -> None:
+        """`new` and `previous` without their dashes name no flag the caller could have passed."""
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            handoff.main(["link", "--repo", "o/r", "--new", "0", "--previous", "1"])
+        self.assertIn("--new takes an issue number", err.getvalue())
 
     def test_an_unknown_flag_refuses_at_one_too(self) -> None:
         with self.assertRaises(SystemExit) as caught, contextlib.redirect_stderr(io.StringIO()):
@@ -718,6 +730,62 @@ class TracksCase(unittest.TestCase):
         self.assertIn("no open", out)
 
 
+class MalformedCase(unittest.TestCase):
+    """One unreadable block must not take down the lanes that have nothing to do with it."""
+
+    def test_tracks_surveys_a_doubled_block_rather_than_dying_on_it(self) -> None:
+        fake = FakeGh({50: link(50, "foo", 1, None, body=doubled("foo"))})
+        code, out, _ = run(fake, "tracks", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("(malformed)", out)
+
+    def test_a_reader_refuses_over_a_doubled_block_rather_than_guessing(self) -> None:
+        fake = FakeGh({50: link(50, "foo", 1, None, body=doubled("foo"))})
+        code, _, err = run(fake, "current", "--repo", "o/r", "--track", "foo")
+        self.assertEqual(code, 1)
+        self.assertIn("2 handoff metadata blocks", err)
+
+    def test_a_doubled_closed_link_does_not_refuse_a_track_that_was_found(self) -> None:
+        """`newest_closed` scans every lane, so one bad link must not block the others."""
+        fake = FakeGh(
+            {
+                50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo")),
+                51: link(51, "bar", 4, None, state="CLOSED"),
+            }
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "bar")
+        self.assertEqual(code, 0)
+        self.assertIn("#51", out)
+
+    def test_a_doubled_closed_link_refuses_only_where_the_track_was_not_found(self) -> None:
+        fake = FakeGh({50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo"))})
+        code, _, err = run(fake, "chain", "--repo", "o/r", "--track", "bar")
+        self.assertEqual(code, 1)
+        self.assertIn("could be one of those", err)
+
+    def test_a_doubled_block_mid_chain_ends_the_walk_with_a_phrase(self) -> None:
+        """`walk` promises a stop phrase for every early end, so this is not an exception."""
+        fake = FakeGh(
+            {
+                60: link(60, "default", 1, None, state="CLOSED", body=doubled("default")),
+                61: link(61, "default", 2, 60),
+            }
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#61", out)
+        self.assertIn("cannot be read", out)
+
+    def test_a_zero_predecessor_is_not_a_block_at_all(self) -> None:
+        """Zero is no issue number, and reaching gh with it exits 2 for a fixable block."""
+        self.assertIsNone(
+            handoff.parse_marker("<!-- handoff: v1 track=a round=1 previous=0 -->\n", 1)
+        )
+        self.assertIsNone(
+            handoff.parse_marker("<!-- handoff: v1 track=a round=0 previous=none -->\n", 1)
+        )
+
+
 class LinkCase(unittest.TestCase):
     """A half-applied chain finishes without a second issue being filed for it."""
 
@@ -771,6 +839,25 @@ class LinkCase(unittest.TestCase):
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
         self.assertEqual(code, 1)
         self.assertIn("adopt", err)
+
+    def test_a_transposed_pair_refuses_rather_than_closing_the_newer_link(self) -> None:
+        """The ordinary slip under the one condition `link` exists for."""
+        fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 20)})
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "20", "--previous", "21")
+        self.assertEqual(code, 1)
+        self.assertIn("transposed", err)
+        self.assertEqual(fake.issues[21]["state"], "OPEN")
+
+    def test_a_predecessor_already_naming_the_successor_refuses(self) -> None:
+        fake = FakeGh(
+            {
+                20: link(20, "default", 3, 21),
+                21: link(21, "default", 9, None, body=marked("orphan", "default", 9, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
+        self.assertEqual(code, 1)
+        self.assertIn("cycle", err)
 
     def test_a_different_predecessor_refuses_rather_than_overwriting(self) -> None:
         fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 19)})
@@ -848,20 +935,40 @@ class AdoptCase(unittest.TestCase):
         fake = FakeGh(
             {
                 39: link(39, "lane", 2, None, state="CLOSED"),
-                40: link(40, "default", 1, None, body="hand-written"),
+                40: link(40, "default", 1, None, body="hand-written", labels=[]),
             }
         )
-        run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane", "--previous", "39")
+        run(
+            fake,
+            "adopt",
+            "40",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--round",
+            "3",
+            "--previous",
+            "39",
+        )
         views = [c[2] for c in fake.calls if c[:2] == ["issue", "view"]]
         self.assertIn("39", views)
 
-    def test_a_predecessor_that_does_not_resolve_stops_before_the_write(self) -> None:
-        fake = FakeGh({40: link(40, "default", 1, None, body="hand-written")})
+    def test_a_predecessor_that_does_not_resolve_stops_before_every_write(self) -> None:
+        """The fixture carries no label, so the label write is a write this can actually rule out.
+
+        With it, an ordering that labelled first left #40 labeled and block-less, and
+        `require_adopted` then refused every read on every track in the repository.
+        """
+        fake = FakeGh({40: link(40, "default", 1, None, body="hand-written", labels=[])})
         code, _, _ = run(
             fake, "adopt", "40", "--repo", "o/r", "--track", "lane", "--previous", "999"
         )
         self.assertEqual(code, 2)
-        self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
+        flat = [arg for call in fake.calls for arg in call]
+        self.assertNotIn("--body-file", flat)
+        self.assertNotIn("--add-label", flat)
+        self.assertEqual(fake.issues[40]["labels"], [])
 
     def test_adopting_onto_an_occupied_track_refuses(self) -> None:
         """`adopt` takes its track from a human, so it is the likeliest source of an ambiguity."""
@@ -876,6 +983,13 @@ class AdoptCase(unittest.TestCase):
         self.assertIn("#30", err)
         self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
 
+    def test_adopt_numbers_its_steps_from_one(self) -> None:
+        """A run opening at step 2 reads as one that was interrupted."""
+        fake = FakeGh({40: link(40, "default", 1, None, body="hand-written", labels=[])})
+        code, out, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("1. "), out.splitlines()[0])
+
     def test_adopting_a_closed_issue_ignores_the_open_invariant(self) -> None:
         """A closed link joins a lane's history rather than competing to be its current one."""
         fake = FakeGh(
@@ -887,6 +1001,50 @@ class AdoptCase(unittest.TestCase):
         code, _, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
         self.assertEqual(code, 0)
         self.assertEqual(read_marker(fake.issues[40]["body"], 40)["track"], "lane")
+
+    def test_adopt_refuses_an_issue_named_as_its_own_predecessor(self) -> None:
+        fake = FakeGh({40: link(40, "default", 1, None, body="hand-written")})
+        code, _, err = run(
+            fake, "adopt", "40", "--repo", "o/r", "--track", "lane", "--previous", "40"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("cannot succeed itself", err)
+
+    def test_adopt_refuses_a_cross_track_predecessor(self) -> None:
+        fake = FakeGh(
+            {
+                39: link(39, "other", 1, None, state="CLOSED"),
+                40: link(40, "default", 1, None, body="hand-written"),
+            }
+        )
+        code, _, err = run(
+            fake, "adopt", "40", "--repo", "o/r", "--track", "lane", "--previous", "39"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("'other'", err)
+
+    def test_adopt_refuses_a_predecessor_it_would_not_succeed(self) -> None:
+        fake = FakeGh(
+            {
+                39: link(39, "lane", 9, None, state="CLOSED"),
+                40: link(40, "default", 1, None, body="hand-written"),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "adopt",
+            "40",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--round",
+            "2",
+            "--previous",
+            "39",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("would not succeed it", err)
 
     def test_an_already_adopted_issue_refuses(self) -> None:
         fake = FakeGh({40: link(40, "default", 1, None)})

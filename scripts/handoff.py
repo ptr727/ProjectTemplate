@@ -96,7 +96,7 @@ TRACK = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 # Matched anywhere in the body and required to occur once, then rewritten onto the last line.
 MARKER = re.compile(
     r"^<!--\s*handoff:\s*v1\s+track=(?P<track>[a-z0-9]+(?:-[a-z0-9]+)*)\s+"
-    r"round=(?P<round>\d+)\s+previous=(?P<previous>\d+|none)\s*-->[ \t]*\r?$",
+    r"round=(?P<round>[1-9]\d*)\s+previous=(?P<previous>[1-9]\d*|none)\s*-->[ \t]*\r?$",
     re.MULTILINE,
 )
 
@@ -364,11 +364,11 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
     `resume`, since a message naming the other one sends a reader to a flag that subcommand
     rejects.
 
-    Three things end a walk short. The cap, a link whose body carries no metadata block, which
-    names nothing before it and is not guessed past, and a number already seen, since a cycle
-    would otherwise read as an endless chain. Each returns its own phrase rather than the clean
-    end's None, because all three leave links unread and only the first is a number the caller
-    chose.
+    Four things end a walk short. The cap, a link whose body carries no metadata block, which
+    names nothing before it and is not guessed past, a link whose block cannot be read at all, and
+    a number already seen, since a cycle would otherwise read as an endless chain. Each returns its
+    own phrase rather than the clean end's None, because all four leave links unread and only the
+    first is a number the caller chose.
     """
     links: list[dict] = []
     seen: set[int] = set()
@@ -380,7 +380,12 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
             return links, f"the {cap} cap of {limit}, with #{number} and earlier unread"
         seen.add(number)
         data = issue(repo, number)
-        data["marker"] = parse_marker(data.get("body") or "", data["number"])
+        try:
+            data["marker"] = parse_marker(data.get("body") or "", data["number"])
+        except Refusal as exc:
+            data["marker"] = None
+            links.append(data)
+            return links, f"#{number}, whose block cannot be read: {exc}"
         links.append(data)
         marker = data["marker"]
         if marker is None:
@@ -630,11 +635,22 @@ def newest_closed(repo: str, track: str) -> dict | None:
     )
     if not isinstance(rows, list):
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    unreadable: list[str] = []
     for row in sorted(rows, key=lambda row: row["number"], reverse=True):
-        marker = parse_marker(row.get("body") or "", row["number"])
+        try:
+            marker = parse_marker(row.get("body") or "", row["number"])
+        except Refusal as exc:
+            unreadable.append(str(exc))
+            continue
         if marker and marker["track"] == track:
             row["marker"] = marker
             return row
+    if unreadable:
+        raise Refusal(
+            f"no closed link on track {track!r} was readable, and "
+            + " ".join(unreadable)
+            + f" A link on {track!r} could be one of those, so this cannot say the track has none."
+        )
     # Only a full window leaves "no link on this track" unproven, and only then is it refused.
     # Refusing on a full window regardless would wall off a brand-new track for good.
     # A repository reaches that many closed handoffs by working rather than by going wrong.
@@ -802,8 +818,29 @@ def cmd_adopt(a: argparse.Namespace) -> int:
     # `require_adopted` then refuses every read on every track in the repository until this re-runs.
     previous = None
     if a.previous is not None:
-        previous = int(issue(a.repo, a.previous)["number"])
+        if a.previous == target["number"]:
+            raise Refusal(
+                f"--previous is #{a.previous}, the issue being adopted, and an issue cannot "
+                "succeed itself. That writes a chain that reads one link forever."
+            )
+        before = issue(a.repo, a.previous)
+        earlier = parse_marker(before.get("body") or "", before["number"])
+        if earlier is not None:
+            if earlier["track"] != a.track:
+                raise Refusal(
+                    f"#{before['number']} is on track {earlier['track']!r} and this would adopt "
+                    f"#{target['number']} onto {a.track!r}. A chain does not cross lanes."
+                )
+            if int(earlier["round"]) >= a.round:
+                raise Refusal(
+                    f"#{before['number']} is round {earlier['round']} and this would make "
+                    f"#{target['number']} round {a.round}, so it would not succeed it. Check "
+                    "--round and --previous."
+                )
+        previous = int(before["number"])
         print(f"1. read #{previous}, the predecessor this block will name")
+    else:
+        print("1. no --previous given, so this block names none")
     names = {row["name"] for row in target.get("labels") or []}
     if LABEL in names:
         print(f"2. #{target['number']} already carries the `{LABEL}` label")
