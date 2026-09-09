@@ -753,6 +753,15 @@ def cmd_link(a: argparse.Namespace) -> int:
             f"#{new['number']} carries no handoff metadata block, so it is not a chain link. "
             "Run `adopt` on it first."
         )
+    if LABEL not in {row["name"] for row in new.get("labels") or []}:
+        raise Refusal(
+            f"#{new['number']} carries a handoff metadata block and no `{LABEL}` label, so no "
+            "read here can find it. Closing the predecessor would leave this track with no "
+            f"findable head. Run `adopt {new['number']} --track {marker['track']} --round "
+            f"{marker['round']}"
+            + ("" if marker["previous"] == "none" else f" --previous {marker['previous']}")
+            + "` to finish labeling it first."
+        )
     # `link` takes no --track, so the two blocks are all that can say they are one lane.
     # Without this it comments on and closes another lane's open handoff and exits 0.
     before = parse_marker(previous.get("body") or "", previous["number"])
@@ -847,10 +856,19 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         require_track_free(a.repo, a.track, target["number"])
     if standing_block is not None:
         wanted = {"track": a.track, "round": str(a.round), "previous": str(a.previous or "none")}
-        if labeled or standing_block != wanted:
+        if labeled:
             raise Refusal(
-                f"#{target['number']} already carries a handoff metadata block, so there is "
-                "nothing to adopt. Edit the block in place where a field is wrong."
+                f"#{target['number']} already carries a handoff metadata block and the "
+                f"`{LABEL}` label, so there is nothing to adopt. Edit the block in place where a "
+                "field is wrong."
+            )
+        if standing_block != wanted:
+            block = standing_block
+            raise Refusal(
+                f"#{target['number']} carries a block reading track={block['track']} "
+                f"round={block['round']} previous={block['previous']} and no `{LABEL}` label, so "
+                "the label is the step still owed. Re-run with exactly those values to finish it, "
+                "or edit the block in place where a field is wrong."
             )
         # The block is this run's own, written before a label write that did not land.
         # Finishing it is what makes the body-first order recoverable rather than a dead end.

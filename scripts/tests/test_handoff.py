@@ -524,6 +524,22 @@ class NewCase(unittest.TestCase):
         self.assertIn("nothing to link or close", out)
         self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "none")
 
+    def test_the_new_issue_carries_the_handoff_it_was_given(self) -> None:
+        """A write that keeps the marker and drops the prose files an empty handoff."""
+        fake = FakeGh()
+        run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--title",
+            "First",
+            "--body-file",
+            self.body_file("## Next steps\n\nthe actual handoff\n"),
+        )
+        self.assertIn("the actual handoff", fake.issues[1001]["body"])
+        self.assertIn("## Next steps", fake.issues[1001]["body"])
+
     def test_the_new_issue_carries_the_label(self) -> None:
         """An unlabeled handoff is invisible to every read this script makes."""
         fake = FakeGh()
@@ -612,6 +628,17 @@ class NewCase(unittest.TestCase):
         self.assertIn("<the new issue>", out)
         self.assertNotIn("#0", out)
         self.assertIn("--body-file <body-file>", out)
+
+    def test_an_unadopted_open_issue_refuses_before_any_write(self) -> None:
+        """`require_adopted` guards `new` as well as the read side, and only the read side was
+        covered."""
+        fake = FakeGh({10: link(10, "lane", 1, None, body="bare, labeled, and open")})
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("w")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#10", err)
+        self.assertNotIn(["issue", "create"], [c[:2] for c in fake.calls])
 
     def test_an_ambiguous_track_refuses_before_any_write(self) -> None:
         fake = FakeGh({4: link(4, "default", 1, None), 5: link(5, "default", 2, 4)})
@@ -746,6 +773,12 @@ class ChainCase(unittest.TestCase):
         code, out, _ = run(fake, "chain", "--repo", "o/r")
         self.assertEqual(code, 0)
         self.assertIn("#13", out)
+
+    def test_an_unadopted_open_issue_refuses_the_walk_too(self) -> None:
+        fake = FakeGh({10: link(10, "lane", 1, None, body="bare, labeled, and open")})
+        code, _, err = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 1)
+        self.assertIn("#10", err)
 
     def test_a_track_with_no_link_at_all_refuses(self) -> None:
         code, _, err = run(self.repo(), "chain", "--repo", "o/r", "--track", "absent")
@@ -1085,13 +1118,22 @@ class LinkCase(unittest.TestCase):
         fake = FakeGh(
             {
                 20: link(20, "default", 1, None),
-                21: link(21, "default", 2, None, body=marked("orphan", "default", 2, None)),
+                21: link(
+                    21,
+                    "default",
+                    2,
+                    None,
+                    body=marked("## Next steps\n\nthe orphan's own prose", "default", 2, None),
+                ),
             }
         )
         code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
         self.assertEqual(code, 0)
         self.assertEqual(read_marker(fake.issues[21]["body"], 21)["previous"], "20")
         self.assertEqual(fake.issues[20]["state"], "CLOSED")
+        # The body edit rewrites the whole body, so the handoff it was pointing has to survive it.
+        self.assertIn("the orphan's own prose", fake.issues[21]["body"])
+        self.assertIn("## Next steps", fake.issues[21]["body"])
 
     def test_an_already_linked_pair_only_finishes_what_is_left(self) -> None:
         fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 20)})
@@ -1157,6 +1199,20 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("#19", err)
 
+    def test_a_successor_with_no_label_refuses_rather_than_closing_the_lane(self) -> None:
+        """A block with no label is invisible to every read, so the lane would lose its head."""
+        fake = FakeGh(
+            {
+                39: link(39, "lane", 1, None),
+                40: link(40, "lane", 2, 39, labels=[]),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "40", "--previous", "39")
+        self.assertEqual(code, 1)
+        self.assertIn("no findable head", err)
+        self.assertIn("adopt 40 --track lane --round 2 --previous 39", err)
+        self.assertEqual(fake.issues[39]["state"], "OPEN")
+
     def test_a_successor_with_no_block_refuses(self) -> None:
         fake = FakeGh(
             {
@@ -1185,6 +1241,8 @@ class LinkCase(unittest.TestCase):
         posted = [c for c in fake.calls if c[:2] == ["issue", "comment"]]
         self.assertEqual(len(posted), 1)
         self.assertIn("Continued in #21", posted[0][posted[0].index("--body") + 1])
+        # The early return is the point: a closed predecessor must not be closed a second time.
+        self.assertNotIn(["issue", "close"], [c[:2] for c in fake.calls])
 
 
 class AdoptCase(unittest.TestCase):
@@ -1321,6 +1379,10 @@ class AdoptCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("only the label is left", out)
         self.assertIn({"name": handoff.LABEL}, fake.issues[40]["labels"])
+        # The early return is the point: falling through rewrites the body and labels it twice.
+        edits = [c for c in fake.calls if c[:2] == ["issue", "edit"]]
+        self.assertEqual(len(edits), 1)
+        self.assertIn("--add-label", edits[0])
 
     def test_the_recovery_still_refuses_a_lane_that_has_since_filled(self) -> None:
         """A lane can acquire an open link between a half-applied run and the re-run.
@@ -1340,14 +1402,18 @@ class AdoptCase(unittest.TestCase):
         self.assertIn("#50", err)
         self.assertEqual(fake.issues[40]["labels"], [])
 
-    def test_a_block_that_is_not_this_run_s_still_refuses(self) -> None:
+    def test_a_block_that_does_not_match_names_the_values_it_holds(self) -> None:
+        """The label is the step still owed, so saying there is nothing to adopt misdiagnoses it."""
         fake = FakeGh(
-            {
-                40: link(
-                    40, "lane", 9, None, body=marked("someone else's", "lane", 9, None), labels=[]
-                )
-            }
+            {40: link(40, "lane", 9, None, body=marked("half applied", "lane", 9, None), labels=[])}
         )
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("round=9", err)
+        self.assertIn("the label is the step still owed", err)
+
+    def test_a_block_beside_the_label_is_nothing_to_adopt(self) -> None:
+        fake = FakeGh({40: link(40, "lane", 9, None)})
         code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
         self.assertEqual(code, 1)
         self.assertIn("nothing to adopt", err)
