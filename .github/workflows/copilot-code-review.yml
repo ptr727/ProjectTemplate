@@ -50,7 +50,9 @@ jobs:
             printf 'probe: could not generate a nonce of usable length\n' >&2
             exit 1
           fi
-          printf 'probe: token digest %s\n' "$(printf '%s' "$nonce" | sha256sum | cut -d' ' -f1)"
+          # The digest covers the nonce rather than the whole token.
+          # The reader is asked for the digits alone, and the prefix is public anyway.
+          printf 'probe: nonce digest %s\n' "$(printf '%s' "$nonce" | sha256sum | cut -d' ' -f1)"
           token="PROBE-SETUP-${nonce}"
           write_probe() {
             local label="$1" base="$2" rel="$3" path
