@@ -31,6 +31,9 @@ class Linter:
     discover_shebang: bool = False
 
 
+# Under `glob` magic the leading `**/` also matches zero directories, which is what reaches the root copy as well as a nested one.
+NODE_MODULES_EXCLUDE = ":(glob,exclude)**/node_modules/**"
+
 LINTERS = (
     Linter("editorconfig-checker", "mstruebing/editorconfig-checker:latest", (), "/check"),
     Linter(
@@ -113,7 +116,13 @@ def run_command(
 def ls_files(
     root: Path, patterns: Sequence[str] = (), *, include_untracked: bool = True
 ) -> list[str]:
-    """Return tracked paths, plus unignored untracked ones unless told to skip those."""
+    """Return tracked paths, plus unignored untracked ones unless told to skip those.
+
+    A local `npm install` is untracked and unignored in a repository whose `.gitignore` omits it,
+    so its third-party files would otherwise be lint targets.
+    Dropping them here rather than in a linter config is what reaches shellcheck and shfmt, which
+    have no ignore config of their own to carry.
+    """
     command = [
         "git",
         "-C",
@@ -124,8 +133,7 @@ def ls_files(
     ]
     if include_untracked:
         command.extend(["--others", "--exclude-standard"])
-    if patterns:
-        command.extend(["--", *patterns])
+    command.extend(["--", *patterns, NODE_MODULES_EXCLUDE])
     try:
         result = subprocess.run(command, check=True, capture_output=True)
     except FileNotFoundError as error:
