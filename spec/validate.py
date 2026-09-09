@@ -21,6 +21,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
+# The deployment-branch-policy forms a repo's `environments` entry may declare, kept in sync with the $defs in registry/repos.schema.json.
+# This is not a scope selector: it names no audit scope and selects nothing in spec/files.json, so it sits outside the disjointness rule above.
+BRANCH_POLICIES = ("custom", "protected", "none")
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
 # A query character or a fragment character is excluded from both groups too.
@@ -145,6 +148,58 @@ def canonical_file_in_root(rel_path):
     except OSError:
         return False
     return resolved.is_file() and resolved.is_relative_to(ROOT)
+
+
+def environment_errors_for_repo(repo, name):
+    """Shape errors for a registry entry's optional `environments` (a repo using no deployment environment declares none).
+
+    Absence is not checked, since most of the fleet uses no environment. What is checked is that a declared entry
+    carries the two fields repo-config/configure.sh's check mode reads, and that `branches` is present exactly when
+    `branchPolicy` is "custom". The other two forms name no branch set: "protected" defers to branch protection and
+    "none" admits every ref, so a `branches` beside either would be a declaration nothing compares against.
+
+    Presence (`"branches" in env`) is the test rather than truthiness, so a declared empty list under "custom" is
+    read as declaring that the environment allows nothing, which configure.sh then asserts, rather than as absent.
+    """
+    envs = repo.get("environments")
+    if envs is None:
+        return []
+    if not isinstance(envs, list):
+        return [f"{name}: environments must be a list"]
+    errors = []
+    seen = set()
+    for i, env in enumerate(envs):
+        where = f"{name}: environments[{i}]"
+        if not isinstance(env, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        env_name = env.get("name")
+        if not isinstance(env_name, str) or not env_name.strip():
+            errors.append(f"{where} missing or empty 'name'")
+        elif env_name in seen:
+            # Two entries for one environment would have configure.sh assert the same live state twice, against declarations that may disagree.
+            errors.append(f"{where} duplicate environment '{env_name}'")
+        else:
+            seen.add(env_name)
+        policy = env.get("branchPolicy")
+        if policy not in BRANCH_POLICIES:
+            errors.append(
+                f"{where} branchPolicy '{policy}' invalid (expected {', '.join(BRANCH_POLICIES)})"
+            )
+            continue
+        branches = env.get("branches")
+        if policy == "custom":
+            if "branches" not in env:
+                errors.append(f"{where} branchPolicy custom must declare 'branches'")
+            elif not isinstance(branches, list) or not all(
+                isinstance(b, str) and b.strip() for b in branches
+            ):
+                errors.append(f"{where} branches must be a list of non-empty strings")
+        elif "branches" in env:
+            errors.append(
+                f"{where} branchPolicy {policy} names no branch set, so it must not declare 'branches'"
+            )
+    return errors
 
 
 def description_errors_for_repo(repo, name):
@@ -616,6 +671,10 @@ def main():
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
+        # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
+        # CI runs no JSON-schema validation, so the schema's own required-fields and branches-iff-custom rules are enforced here or nowhere.
+        # A malformed entry would otherwise reach configure.sh, where a missing branchPolicy asserts against the literal "null" jq prints and reports drift on a repo that has none.
+        errors.extend(environment_errors_for_repo(repo, name))
 
         status = repo.get("status")
         if status is None:

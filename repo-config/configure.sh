@@ -27,6 +27,11 @@
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
 # What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
+# The check mode also asserts one group apply never writes, the deployment-branch policy of every environment the registry declares for the repo.
+# It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository, so an apply would create an environment that cannot publish and report success.
+# Their names are enumerable through the API, and a variable's value too, so what this script does not check is a choice about what it owns rather than a limit the API imposes.
+# The policy is worth checking on its own because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
+# A repo declaring no environment is not checked, and an environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
@@ -450,6 +455,67 @@ check_labels() {
     note "labels not declared by labels.json: ${extra:-none} (left alone by this script)"
 }
 
+check_environments() {
+    local entries count i row ename policy live_envs env_live got want policies extra
+    if [ ! -f "$registry" ]; then
+        note "deployment environments: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
+        return
+    fi
+    # Yields null rather than [] where the repo has no single registry entry, so "declares none" and "is not registered" stay distinguishable below.
+    # Fail rather than default on a read error, matching the model lookup: a registry that will not parse is a broken run, not a repo with no environments.
+    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+    if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)] | if length == 1 then (.[0].environments // []) else null end' "$registry")"; then
+        fail "could not read the declared deployment environments from $registry"
+        return
+    fi
+    if [ "$entries" = null ]; then
+        note "deployment environments: no single registry entry named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
+        return
+    fi
+    # One list read serves both the per-environment assertions and the undeclared-environment note, and it is the call that surfaces an API or permission failure.
+    # Reading each environment individually instead would let a 404 for a missing environment and a 403 for a token without admin arrive as the same result.
+    if ! live_envs="$(gh api --paginate "repos/$repo/environments" --jq '.environments[]' | jq -s '.')"; then
+        echo "Failed to list environments for $repo (check auth and repo access)." >&2
+        fail "could not list the deployment environments on $repo"
+        return
+    fi
+    count="$(jqr 'length' <<<"$entries")"
+    for ((i = 0; i < count; i++)); do
+        row="$(jq -c ".[$i]" <<<"$entries")"
+        ename="$(jqr '.name' <<<"$row")"
+        policy="$(jqr '.branchPolicy' <<<"$row")"
+        # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+        env_live="$(jq -c --arg n "$ename" '[.[] | select(.name == $n)] | first // empty' <<<"$live_envs")"
+        if [ -z "$env_live" ]; then
+            fail "environment '$ename' missing"
+            continue
+        fi
+        # Read the live shape as the one token the registry declares, rather than asserting two booleans a reader then has to recombine into a policy.
+        # "unrecognized" is deliberate and never matches a declaration, so a fourth form GitHub adds later fails loudly instead of being folded into one of these three.
+        got="$(jqr 'if .deployment_branch_policy == null then "none" elif .deployment_branch_policy.custom_branch_policies then "custom" elif .deployment_branch_policy.protected_branches then "protected" else "unrecognized" end' <<<"$env_live")"
+        assert "environment '$ename' branch policy = $policy" test "$got" = "$policy"
+        # The allowed set exists only under a custom policy, so a mismatch above skips it rather than reporting a second failure for the same cause.
+        if [ "$policy" != custom ] || [ "$got" != custom ]; then continue; fi
+        if ! policies="$(gh api --paginate "repos/$repo/environments/$ename/deployment-branch-policies" --jq '.branch_policies[]' | jq -s '.')"; then
+            fail "environment '$ename' - could not read its deployment branch policies"
+            continue
+        fi
+        # A tag policy shares this endpoint with a branch policy, so the type is compared rather than filtered out, and a tag added by hand reads as drift instead of vanishing from the set.
+        # Both sides are sorted, since the endpoint's order is not the registry's.
+        want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"
+        got="$(jqr '[.[] | "\(.type // "branch"):\(.name)"] | sort | join(", ")' <<<"$policies")"
+        assert "environment '$ename' allows exactly [$want]" test "$got" = "$want"
+    done
+    # An environment the registry does not declare is reported rather than asserted, matching the label list and the bypass actors: the fleet set is a floor.
+    # GitHub creates some without being asked, a Copilot coding-agent environment among them, so asserting the set both ways would report drift on every repo that has ever run one.
+    # shellcheck disable=SC2016  # $live is a jq --argjson variable, not a shell expansion
+    if ! extra="$(jqr --argjson live "$live_envs" '([$live[].name] - [.[].name]) | join(", ")' <<<"$entries")"; then
+        fail "could not compute the undeclared deployment environment list"
+        return
+    fi
+    note "deployment environments not declared by the registry: ${extra:-none} (reported, not asserted)"
+}
+
 cmd_check() {
     echo "Validating configuration for $repo (model: $model)"
     check_ruleset "$develop_ruleset"
@@ -457,6 +523,7 @@ cmd_check() {
     check_settings
     check_security
     check_labels
+    check_environments
     # Secret names are asserted by spec/audit.py, not here.
     # Values are never readable via the API regardless.
     note "run spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"

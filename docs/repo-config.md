@@ -13,7 +13,7 @@ The hub holds all fleet-wide repository configuration:
 - `labels.json` declares the fleet label set.
 - `configure.sh` applies or checks those payloads through the GitHub API.
 
-Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload. Commands that operate before registry enrollment pass the model explicitly.
+Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts, both read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
 
 The carried `AUDIT.md` reaches the hub at `main` for its configuration check. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
 
@@ -31,7 +31,19 @@ Remove all classic branch-protection rules and stray rulesets. Run `configure.sh
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, label, and security feature and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, label, and security feature, plus the deployment environments described below, and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+
+## Deployment Environments
+
+`check` asserts the deployment-branch policy of every environment the registry entry's `environments` declares, and `apply` writes none. The asymmetry is deliberate. An environment's secrets and variables are credentials that exist nowhere in the hub, so an `apply` could create the environment and set its policy and still leave it unable to publish, while reporting success. Their names are enumerable through the API, and their values in the case of a variable, but no tool here queries those stores, which is a choice about what this script owns rather than a limit the API imposes. The policy is checkable on its own and worth checking, because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
+
+Each entry names the environment and one of three `branchPolicy` forms. `custom` also declares `branches`, the exact set the environment allows, and the check compares the live set to it in both directions. Branches are the whole vocabulary a `custom` entry has: GitHub's custom policies admit a tag entry too, and one has no declaration here, so an environment allowing a tag under a `custom` policy reads as drift until this field grows a way to say so. `protected` defers to branch protection and `none` admits every ref, and neither declares a branch set, so a repository whose gate lives in its deploy workflow instead records `none` and gets a policy appearing later read as a change rather than as the gate arriving.
+
+```json
+"environments": [{ "name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"] }]
+```
+
+A repository declaring no environment is not checked, and an environment the registry declares nothing about is reported rather than asserted, since GitHub creates some without being asked (the Copilot coding agent's is the one every fleet repository has). What no tool covers either way is whether an environment's secrets and variables are present and valid, so read a clean run as a statement about the policy each declared environment carries and never as one about whether the deploy can succeed.
 
 ## Regenerating the Payloads
 

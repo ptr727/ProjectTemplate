@@ -28,6 +28,7 @@
         "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release", "self-hosted"] },
+        "branchPolicy": { "enum": ["custom", "protected", "none"] },
         "repo": {
             "type": "object",
             "required": ["name", "url", "status"],
@@ -76,6 +77,27 @@
                     }
                 },
                 "requiredSecrets": { "type": "array", "items": { "type": "string" } },
+                "environments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "branchPolicy"],
+                        "additionalProperties": false,
+                        "allOf": [
+                            {
+                                "$comment": "A custom policy names the exact branch set it allows, and the other two forms name none: protected defers to branch protection, and none allows every ref.",
+                                "if": { "properties": { "branchPolicy": { "const": "custom" } }, "required": ["branchPolicy"] },
+                                "then": { "required": ["branches"] },
+                                "else": { "not": { "required": ["branches"] } }
+                            }
+                        ],
+                        "properties": {
+                            "name": { "type": "string" },
+                            "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
+                            "branches": { "type": "array", "items": { "type": "string" } }
+                        }
+                    }
+                },
                 "consumerModel": { "enum": ["push", "pull"] },
                 "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
                 "configLayout": {

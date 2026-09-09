@@ -85,7 +85,7 @@ repo-config/configure.sh apply owner/repo release|operational
 
 **Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. An omitted target resolves to the hub repository, and applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
 
-`check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
+`check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo. `check` also asserts one group `apply` never writes, the deployment-branch policy of every environment the registry's `environments` declares for the repo, so the two are not exact inverses. [docs/repo-config.md](./docs/repo-config.md) "Deployment Environments" says why.
 
 `apply` is not a narrow toggle. One run patches every key in `repo-config/settings.json`, sets the default branch, enables both Dependabot features, creates or updates every label in `repo-config/labels.json`, and creates or updates both branch rulesets. On a repository that has deliberately drifted it silently reasserts the fleet configuration.
 
