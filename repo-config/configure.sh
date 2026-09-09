@@ -557,7 +557,7 @@ cmd_check() {
     check_labels
     check_environments
     # Secret names are asserted by spec/audit.py, not here.
-    # Values are never readable via the API regardless.
+    # A secret's value is never readable via the API regardless, whether it is repository-scoped or environment-scoped, which an environment variable's value is not: that one reads, and no tool here asks for it.
     note "run spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"
     if [ "$FAILED" -ne 0 ]; then
         echo "Configuration drift detected on $repo."
