@@ -14,5 +14,10 @@
         // (`|a|b|`) and padded (`| a | b |`) table pipe spacing.
         "MD060": false
     },
-    "gitignore": true
+    "gitignore": true,
+    // Declared here rather than only as the CI action's globs input, since an ignores entry with nothing positive to subtract from lints no files and exits clean.
+    "globs": ["**/*.md"],
+    // Third-party Markdown under node_modules is not authored prose, and a repository's .gitignore does not reliably exclude it.
+    // A bare `node_modules` entry would match the root copy only.
+    "ignores": ["**/node_modules/**"]
 }

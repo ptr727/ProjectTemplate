@@ -268,7 +268,7 @@ Run the hub-hosted wrapper from the repository it checks:
 python3 /path/to/ProjectTemplate/scripts/docker_lint.py --root "$PWD"
 ```
 
-The wrapper discovers tracked and unignored targets before it pulls applicable images. It reports a zero-target skip without pulling or mounting the repository. It pulls each applicable image in a distinct pull phase, then resolves the pulled repository digest. A digest prevents the tag from changing between the pull and execution. It does not make third-party code trusted.
+The wrapper discovers tracked and unignored targets, excluding any path under `node_modules` at any depth, before it pulls applicable images. It reports a zero-target skip without pulling or mounting the repository. It pulls each applicable image in a distinct pull phase, then resolves the pulled repository digest. A digest prevents the tag from changing between the pull and execution. It does not make third-party code trusted.
 
 After all pulls, the wrapper reports that repository mounts are about to begin. Each execution uses the resolved digest, disabled networking, and a read-only checkout mount. PSScriptAnalyzer installs its pinned module in a separate container without the checkout mount. File-argument linters receive each tracked path as a distinct argument, split across bounded batches before host command-line limits become relevant.
 

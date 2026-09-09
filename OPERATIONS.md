@@ -44,7 +44,7 @@ The cache directory is unique to this verification run and remains outside the c
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 
-The Docker runner discovers tracked and unignored targets with `git ls-files`. File-argument linters receive each path as one argument, so a path that contains whitespace remains one target. The runner splits long target lists into bounded batches before host command-line limits become relevant.
+The Docker runner discovers tracked and unignored targets with `git ls-files`, excluding any path under `node_modules` at any depth. File-argument linters receive each path as one argument, so a path that contains whitespace remains one target. The runner splits long target lists into bounded batches before host command-line limits become relevant.
 
 Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
