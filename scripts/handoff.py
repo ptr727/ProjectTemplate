@@ -612,11 +612,8 @@ def cmd_chain(a: argparse.Namespace) -> int:
     return 0
 
 
-def newest_closed(repo: str, track: str, ignore: int | None = None) -> dict | None:
+def newest_closed(repo: str, track: str) -> dict | None:
     """The newest closed handoff on a track, or None where the track has never had one.
-
-    `ignore` is an issue to leave out of the scan, which `adopt` passes so a closed issue does not
-    count as an unreadable link blocking its own adoption.
 
     A track with no open handoff is either one that has never had a handoff or one whose lane was
     closed out, and the two are not the same. Reading the second as the first makes the next `new`
@@ -643,8 +640,6 @@ def newest_closed(repo: str, track: str, ignore: int | None = None) -> dict | No
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
     unreadable: list[str] = []
     for row in sorted(rows, key=lambda row: row["number"], reverse=True):
-        if row["number"] == ignore:
-            continue
         try:
             marker = parse_marker(row.get("body") or "", row["number"])
         except Refusal as exc:
@@ -826,6 +821,46 @@ def cmd_link(a: argparse.Namespace) -> int:
     return 0
 
 
+def track_links(repo: str, track: str, ignore: int | None = None) -> list[dict]:
+    """Every readable link on a track, open and closed, newest first.
+
+    `adopt` needs both sides at once. A lane's chain can be one open head with nothing closed
+    behind it, which is the ordinary state after the first `new`, so a check that reads only the
+    closed side reports a live lane as having no chain and files a second root beside it.
+    """
+    closed = gh_json(
+        [
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--label",
+            LABEL,
+            "--state",
+            "closed",
+            "--limit",
+            str(CLOSED_WINDOW),
+            "--json",
+            "number,body,state",
+        ]
+    )
+    if not isinstance(closed, list):
+        raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    links: list[dict] = []
+    for row in [*open_handoffs(repo), *closed]:
+        if row["number"] == ignore:
+            continue
+        marker = row.get("marker")
+        if marker is None:
+            with contextlib.suppress(Refusal):
+                marker = parse_marker(row.get("body") or "", row["number"])
+        if marker and marker["track"] == track:
+            row["marker"] = marker
+            links.append(row)
+    links.sort(key=lambda row: row["number"], reverse=True)
+    return links
+
+
 def require_track_free(repo: str, track: str, adopting: int, superseded: int | None = None) -> None:
     """Refuse where adopting onto `track` would leave two open handoffs on it.
 
@@ -921,17 +956,30 @@ def cmd_adopt(a: argparse.Namespace) -> int:
                     f"#{target['number']} round {a.round}, so it would not succeed it. Check "
                     "--round and --previous."
                 )
+            taken = [
+                row
+                for row in track_links(a.repo, a.track, ignore=target["number"])
+                if row["marker"]["previous"] == str(before["number"])
+            ]
+            if taken:
+                raise Refusal(
+                    f"#{taken[0]['number']} already succeeds #{before['number']} on track "
+                    f"{a.track!r}, so adopting #{target['number']} onto it would fork the chain "
+                    "there. Name the newest link as --previous instead."
+                )
         previous = int(before["number"])
         print(f"1. read #{previous}, the predecessor this block will name")
     else:
-        standing_closed = newest_closed(a.repo, a.track, ignore=target["number"])
-        if standing_closed is not None:
+        # Both sides, since a lane's whole chain can be one open head and nothing closed.
+        # That is the ordinary state after the first `new` on a track.
+        standing = track_links(a.repo, a.track, ignore=target["number"])
+        if standing:
+            newest = standing[0]
             raise Refusal(
-                f"track {a.track!r} already has a chain, whose newest closed link is "
-                f"#{standing_closed['number']} at round {standing_closed['marker']['round']}. "
-                f"Adopting #{target['number']} with no --previous would start a second chain "
-                "beside it. Pass --previous and --round to join the chain, or name a track of "
-                "its own."
+                f"track {a.track!r} already has a chain, whose newest link is "
+                f"#{newest['number']} at round {newest['marker']['round']}. Adopting "
+                f"#{target['number']} with no --previous would start a second chain beside it. "
+                "Pass --previous and --round to join the chain, or name a track of its own."
             )
         print("1. no --previous given, and this track has no chain, so this block names none")
     print(f"2. write the metadata block on #{target['number']}")
@@ -1068,7 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
     owner, _, name = a.repo.partition("/")
     if not owner or not name or "/" in name:
         ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
-    if getattr(a, "track", None) is not None and not TRACK.match(a.track):
+    if getattr(a, "track", None) is not None and not TRACK.fullmatch(a.track):
         ap.error(f"--track takes a kebab-case slug, not {a.track!r}")
     for flag in ("history", "limit", "round"):
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:

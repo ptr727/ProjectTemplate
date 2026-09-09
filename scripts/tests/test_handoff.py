@@ -441,8 +441,13 @@ class ExitCodeCase(unittest.TestCase):
         self.assertIn("unmodeled", err.getvalue())
 
     def test_a_track_that_is_not_a_slug_is_a_usage_error(self) -> None:
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            handoff.main(["current", "--repo", "o/r", "--track", "Not A Slug"])
+        for track in ("Not A Slug", "sess\n", "lane\ttwo"):
+            with (
+                self.subTest(track=track),
+                self.assertRaises(SystemExit),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                handoff.main(["current", "--repo", "o/r", "--track", track])
 
 
 class NewCase(unittest.TestCase):
@@ -1456,17 +1461,72 @@ class AdoptCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith("1. "), out.splitlines()[0])
 
-    def test_adopting_a_closed_issue_ignores_the_open_invariant(self) -> None:
-        """A closed link joins a lane's history rather than competing to be its current one."""
+    def test_a_lane_whose_only_link_is_its_open_head_still_has_a_chain(self) -> None:
+        """The ordinary state after the first `new`, and a closed-side-only check misses it.
+
+        The target being closed skips the open-invariant guard, so nothing else catches this.
+        """
         fake = FakeGh(
             {
-                30: link(30, "lane", 2, None),
-                40: link(40, "default", 1, None, body="hand-written", state="CLOSED"),
+                30: link(30, "lane", 1, None),
+                40: link(40, "default", 1, None, body="hand-written", state="CLOSED", labels=[]),
             }
         )
-        code, _, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("#30", err)
+        self.assertIn("second chain beside it", err)
+        self.assertEqual(fake.issues[40]["labels"], [])
+
+    def test_a_closed_issue_joins_a_lane_as_a_successor_of_its_newest_link(self) -> None:
+        fake = FakeGh(
+            {
+                30: link(30, "lane", 1, None, state="CLOSED"),
+                40: link(40, "default", 1, None, body="hand-written", state="CLOSED", labels=[]),
+            }
+        )
+        code, _, _ = run(
+            fake,
+            "adopt",
+            "40",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--round",
+            "2",
+            "--previous",
+            "30",
+        )
         self.assertEqual(code, 0)
-        self.assertEqual(read_marker(fake.issues[40]["body"], 40)["track"], "lane")
+        marker = read_marker(fake.issues[40]["body"], 40)
+        self.assertEqual(marker, {"track": "lane", "round": "2", "previous": "30"})
+
+    def test_a_predecessor_that_already_has_a_successor_refuses(self) -> None:
+        """Two links naming one predecessor is a fork, and the second is unreachable."""
+        fake = FakeGh(
+            {
+                41: link(41, "lane", 1, None, state="CLOSED"),
+                42: link(42, "lane", 2, 41),
+                50: link(50, "default", 1, None, body="hand-written", state="CLOSED", labels=[]),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "adopt",
+            "50",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--round",
+            "2",
+            "--previous",
+            "41",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#42 already succeeds #41", err)
+        self.assertEqual(fake.issues[50]["labels"], [])
 
     def test_adopt_refuses_to_start_a_second_chain_on_a_closed_out_lane(self) -> None:
         """`new` consults the closed side for this reason, and `adopt` is the other starter.
