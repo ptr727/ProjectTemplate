@@ -819,11 +819,11 @@
     },
     {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
-      "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
+      "digest": "sha256:63d0425be0340e75602bceaee7ac5854687c7ce07e85c578b997bde1f0295b6c",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
-      "stamp": "2026-09-01T14:48:23Z"
+      "findings": 15,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:18:04Z"
     },
     {
       "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
