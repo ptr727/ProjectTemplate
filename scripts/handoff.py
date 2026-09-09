@@ -645,7 +645,15 @@ def newest_closed(repo: str, track: str) -> dict | None:
         except Refusal as exc:
             unreadable.append(str(exc))
             continue
-        if marker and marker["track"] == track:
+        if marker is None:
+            # A block that is absent and one that cannot be read are the same hazard here.
+            # Either way the link's track is unknown, so either could be this track's real newest.
+            unreadable.append(
+                f"#{row['number']} carries the `{LABEL}` label and no metadata block, so its "
+                "track cannot be read."
+            )
+            continue
+        if marker["track"] == track:
             if unreadable:
                 raise Refusal(
                     f"#{row['number']} is the newest readable link on track {track!r}, and "
@@ -804,11 +812,39 @@ def cmd_link(a: argparse.Namespace) -> int:
     return 0
 
 
+def require_track_free(repo: str, track: str, adopting: int) -> None:
+    """Refuse where adopting onto `track` would leave two open handoffs on it.
+
+    Both of `adopt`'s branches run this, the first-order one and the half-applied recovery, since
+    a recovery is not a licence to skip the invariant. A lane can acquire an open link between a
+    half-applied run and the re-run that finishes it, and finishing regardless is how a silent
+    fork becomes a hard ambiguity.
+    """
+    rows = open_handoffs(repo)
+    broken = [row for row in rows if row.get("malformed")]
+    if broken:
+        listed = ", ".join(f"#{row['number']}" for row in broken)
+        raise Refusal(
+            f"{listed} is open, carries the `{LABEL}` label, and has an unreadable block, so "
+            f"whether track {track!r} already has one open cannot be read. Repair that block "
+            "before adopting onto any track."
+        )
+    standing = on_track(rows, track)
+    if standing is not None and standing["number"] != adopting:
+        raise Refusal(
+            f"track {track!r} already has #{standing['number']} open, so adopting #{adopting} "
+            "onto it would make two. Adopt it onto a track of its own, or close the standing "
+            "link first."
+        )
+
+
 def cmd_adopt(a: argparse.Namespace) -> int:
     """Put the label and the metadata block on a handoff that predates both."""
     target = issue(a.repo, a.issue)
     labeled = LABEL in {row["name"] for row in target.get("labels") or []}
     standing_block = parse_marker(target.get("body") or "", target["number"])
+    if target["state"] == "OPEN":
+        require_track_free(a.repo, a.track, target["number"])
     if standing_block is not None:
         wanted = {"track": a.track, "round": str(a.round), "previous": str(a.previous or "none")}
         if labeled or standing_block != wanted:
@@ -827,23 +863,6 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         if not a.dry_run:
             print(f"  labeled: {out or '#' + str(target['number'])}")
         return 0
-    if target["state"] == "OPEN":
-        rows = open_handoffs(a.repo)
-        broken = [row for row in rows if row.get("malformed")]
-        if broken:
-            listed = ", ".join(f"#{row['number']}" for row in broken)
-            raise Refusal(
-                f"{listed} is open, carries the `{LABEL}` label, and has an unreadable block, so "
-                f"whether track {a.track!r} already has one open cannot be read. Repair that block "
-                "before adopting onto any track."
-            )
-        standing = on_track(rows, a.track)
-        if standing is not None:
-            raise Refusal(
-                f"track {a.track!r} already has #{standing['number']} open, so adopting "
-                f"#{target['number']} onto it would make two. Adopt it onto a track of its own, "
-                "or close the standing link first."
-            )
     # The predecessor is read live before its number is stamped into the block.
     # A number nothing read is an identifier the write consumes and the caller constructed.
     # An issue number resolves in every repository, so a mistyped one is well formed, not absent.

@@ -283,10 +283,23 @@ class LabelCase(unittest.TestCase):
         self.assertIn("fills the read window", err.getvalue())
 
     def test_the_label_is_checked_before_every_subcommand(self) -> None:
-        for cmd in ("current", "tracks"):
+        """Every one of them, read off the parser, rather than the two that are easy to drive."""
+        extra = {
+            "resume": [],
+            "chain": [],
+            "new": ["--title", "T", "--body-file", body_file(self, "w")],
+            "link": ["--new", "2", "--previous", "1"],
+            "adopt": ["1", "--track", "lane"],
+        }
+        names = set(subcommands())
+        self.assertGreaterEqual(len(names), 7)
+        for cmd in sorted(names):
             with self.subTest(cmd=cmd):
                 fake = FakeGh(label=False)
-                self.assertEqual(run(fake, cmd, "--repo", "o/r")[0], 1)
+                argv = [cmd, *extra.get(cmd, [])]
+                if cmd == "adopt":
+                    argv = ["adopt", "1", "--track", "lane"]
+                self.assertEqual(run(fake, *argv, "--repo", "o/r")[0], 1)
                 self.assertEqual(fake.calls[0][:2], ["label", "list"])
 
 
@@ -384,6 +397,25 @@ class ExitCodeCase(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
             handoff.main(["link", "--repo", "o/r", "--new", "0", "--previous", "1"])
         self.assertIn("--new takes an issue number", err.getvalue())
+
+    def test_a_round_below_one_never_reaches_the_block(self) -> None:
+        """`round=0` parses nowhere, so writing it labels an issue no read can ever see again."""
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            handoff.main(["adopt", "1", "--repo", "o/r", "--track", "lane", "--round", "0"])
+
+    def test_a_history_or_limit_below_one_is_a_usage_error(self) -> None:
+        for flag, cmd in (("--history", "resume"), ("--limit", "chain")):
+            with (
+                self.subTest(flag=flag),
+                self.assertRaises(SystemExit),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                handoff.main([cmd, "--repo", "o/r", flag, "0"])
+
+    def test_a_three_part_repo_is_a_usage_error(self) -> None:
+        """OWNER/NAME has one slash, and `o/r/x` is the near-miss a bare check still admits."""
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            handoff.main(["current", "--repo", "o/r/x"])
 
     def test_an_unknown_flag_refuses_at_one_too(self) -> None:
         with self.assertRaises(SystemExit) as caught, contextlib.redirect_stderr(io.StringIO()):
@@ -892,6 +924,49 @@ class GhBoundaryCase(unittest.TestCase):
             handoff.run_gh(["issue", "list"])
         self.assertEqual(err.getvalue().count("x"), handoff.STDERR_CAP)
 
+    def test_gh_output_is_decoded_as_utf8_rather_than_the_platform_locale(self) -> None:
+        """A Windows console locale is cp1252, and `gh` emits UTF-8 on every platform."""
+        with unittest.mock.patch("subprocess.run") as ran:
+            ran.return_value = self.completed(0, "ok")
+            handoff.run_gh(["issue", "list", "--repo", "o/r"])
+        self.assertEqual(ran.call_args.kwargs["encoding"], "utf-8")
+
+    def test_a_body_file_is_written_with_lf_whatever_the_platform_does(self) -> None:
+        """Text mode translates LF to CRLF on Windows, and the marker would stop parsing.
+
+        The newline argument is asserted rather than the bytes, because on Linux the two are
+        identical and the check would pass without the argument on the only platform CI runs.
+        """
+        with (
+            unittest.mock.patch.object(Path, "write_text") as wrote,
+            handoff.body_arg("one\ntwo\n", dry_run=False),
+        ):
+            pass
+        self.assertEqual(wrote.call_args.kwargs.get("newline"), "\n")
+        with handoff.body_arg("one\ntwo\n", dry_run=False) as path:
+            self.assertEqual(Path(path).read_bytes(), b"one\ntwo\n")
+
+    def test_a_view_that_is_not_an_object_is_an_execution_failure(self) -> None:
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: "[]"),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.issue("o/r", 5)
+        self.assertIn("did not read as an object", str(caught.exception))
+
+    def test_a_list_that_is_not_an_array_is_an_execution_failure(self) -> None:
+        for reader, phrase in (
+            (handoff.open_handoffs, "handoff list"),
+            (lambda repo: handoff.newest_closed(repo, "lane"), "closed handoff list"),
+        ):
+            with self.subTest(phrase=phrase):
+                with (
+                    unittest.mock.patch.object(handoff, "run_gh", lambda argv: '{"a": 1}'),
+                    self.assertRaises(handoff.Execution) as caught,
+                ):
+                    reader("o/r")
+                self.assertIn(phrase, str(caught.exception))
+
     def test_a_create_returning_no_url_is_not_taken_as_filed(self) -> None:
         with (
             unittest.mock.patch.object(handoff, "run_gh", lambda argv: "queued\n"),
@@ -946,6 +1021,21 @@ class MalformedCase(unittest.TestCase):
             "Next",
             "--body-file",
             body_file(self, "work"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("would fork the chain", err)
+        self.assertNotIn(1001, fake.issues)
+
+    def test_a_bare_closed_link_newer_than_the_match_refuses_too(self) -> None:
+        """A block absent and a block unreadable are the same hazard, so both must refuse."""
+        fake = FakeGh(
+            {
+                59: link(59, "default", 3, None, state="CLOSED"),
+                60: link(60, "default", 4, None, state="CLOSED", body="block edited out"),
+            }
+        )
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", body_file(self, "w")
         )
         self.assertEqual(code, 1)
         self.assertIn("would fork the chain", err)
@@ -1231,6 +1321,24 @@ class AdoptCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("only the label is left", out)
         self.assertIn({"name": handoff.LABEL}, fake.issues[40]["labels"])
+
+    def test_the_recovery_still_refuses_a_lane_that_has_since_filled(self) -> None:
+        """A lane can acquire an open link between a half-applied run and the re-run.
+
+        Finishing regardless converts the silent fork into two open handoffs on one track.
+        """
+        fake = FakeGh(
+            {
+                40: link(
+                    40, "lane", 1, None, body=marked("half applied", "lane", 1, None), labels=[]
+                ),
+                50: link(50, "lane", 1, None),
+            }
+        )
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("#50", err)
+        self.assertEqual(fake.issues[40]["labels"], [])
 
     def test_a_block_that_is_not_this_run_s_still_refuses(self) -> None:
         fake = FakeGh(
