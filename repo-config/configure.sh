@@ -469,8 +469,13 @@ check_environments() {
         fail "could not read $registry to resolve the entry for $name"
         return
     fi
+    # The two non-one counts are different states with different remedies, so they render separately rather than sharing one sentence that can only be true of one of them.
+    if [ "$entry_count" = 0 ]; then
+        note "deployment environments: no registry entry named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
+        return
+    fi
     if [ "$entry_count" != 1 ]; then
-        note "deployment environments: $entry_count registry entries named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
+        note "deployment environments: $entry_count registry entries named '$name', so which entry declares them cannot be resolved. Resolve the duplicate (spec/validate.py refuses it once run)."
         return
     fi
     # The declared value is emitted verbatim, invalid shapes included, so each one reaches the test that judges it rather than being defaulted away here.

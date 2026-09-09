@@ -92,9 +92,9 @@
                             }
                         ],
                         "properties": {
-                            "name": { "type": "string" },
+                            "name": { "type": "string", "minLength": 1 },
                             "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
-                            "branches": { "type": "array", "items": { "type": "string" } }
+                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1 } }
                         }
                     }
                 },
