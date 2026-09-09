@@ -43,8 +43,9 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
 - **A repo-local exclusion goes in a nested config, never in the root one.** The shared
   `.markdownlint-cli2.jsonc` at the repo root is fleet-fixed, and its `ignores` list covers only
   what every repo has, third-party Markdown under `node_modules`. A repo excluding a subtree of
-  its own, a committed data archive or a vendored theme it does not author, puts a
-  `.markdownlint-cli2.jsonc` carrying its own `ignores` beside that content. A config inside a
+  its own that it does not treat as authored prose, a committed data archive, a vendored theme,
+  or a hand-maintained record, puts a `.markdownlint-cli2.jsonc` carrying its own `ignores`
+  beside that content. A config inside a
   tree that is re-imported or re-vendored wholesale is deleted by the next refresh, so it is
   re-added with the import. Excluding through the CI workflow's negated glob input instead is a
   CI-only fix, and leaves those same files flagged for anyone who runs the linter locally.
