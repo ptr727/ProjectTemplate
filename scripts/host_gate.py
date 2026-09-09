@@ -413,7 +413,7 @@ def package_source(tool: dict) -> str | None:
 
 
 def overlay_above(start: Path) -> Path | None:
-    """The nearest ancestor of `start` carrying a host-tools.json, or None where the nearest declares nothing.
+    """The nearest ancestor of `start` carrying a host-tools.json, or None.
 
     A bare run layers only the declaration at the working directory itself, so an overlay at the
     root of the repo the run is inside goes unapplied without a word when the run starts in a
