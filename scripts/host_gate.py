@@ -413,15 +413,31 @@ def package_source(tool: dict) -> str | None:
 
 
 def overlay_above(start: Path) -> Path | None:
-    """The nearest ancestor of `start` carrying a host-tools.json, or None where none does.
+    """The nearest ancestor of `start` carrying a host-tools.json, or None.
 
-    A bare run reads only the declaration at the working directory itself, so an overlay at the
-    root of the repo the run is inside goes unread without a word when the run starts in a
-    subdirectory. Naming that directory lets the run say what it skipped and which re-run counts it.
+    A bare run layers only the declaration at the working directory itself, so an overlay at the
+    root of the repo the run is inside goes unapplied without a word when the run starts in a
+    subdirectory. Naming that directory lets the run say what it skipped and which re-run applies it.
+
+    An overlay declaring no tool is passed over in silence, because every repository carries the
+    file whether or not it adds anything, so warning on presence alone would tell the operator to
+    re-run a command that applies a declaration adding nothing. An overlay this cannot parse is
+    named rather than passed over, since whether it declares anything is exactly what the failed
+    parse leaves unknown, and the re-run is what turns that into the diagnostic read_declaration
+    already writes.
+
+    The walk stops at the nearest carrier either way, empty or not.
     """
     for parent in start.resolve().parents:
-        if (parent / "host-tools.json").is_file():
+        overlay = parent / "host-tools.json"
+        if not overlay.is_file():
+            continue
+        tools = read_declaration(overlay, "repository host tool declaration")
+        # Written out rather than folded into the truthiness below, which a diagnostic already satisfies by being a non-empty string.
+        # It is what holds if read_declaration ever returns an empty diagnostic, which the truthiness alone would read as a declaration adding nothing.
+        if isinstance(tools, str):
             return parent
+        return parent if tools else None
     return None
 
 
@@ -525,7 +541,8 @@ def main(argv: list[str] | None = None) -> int:
     NOTES.clear()
     rejected: list[str] = []
     local_path = Path(a.repo or ".") / "host-tools.json"
-    # A repository layering onto the hub is the normal case, and carrying no local file is the common one, so its absence is silent.
+    # Every repository carries this file, an empty tools list where it adds nothing, so an absence is a conformance miss rather than the ordinary case.
+    # It is still silent here, because this gate measures a host against floors and spec/audit.py is what reports a baseline file a repository does not carry.
     if not a.no_local and local_path.is_file():
         local = read_declaration(local_path, "repository host tool declaration")
         if isinstance(local, str):
@@ -558,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     if skipped is not None:
         # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
         print(
-            f"         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} so its floors count"
+            f"         warning: {skipped} carries a host-tools.json overlay this bare run did not apply - re-run with --repo {quote_argument(str(skipped))}"
         )
     return 1 if issues else 0
 

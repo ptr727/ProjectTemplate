@@ -526,6 +526,9 @@ class TestBareRunOverlayWarning(unittest.TestCase):
     The default --repo reads the working directory alone, so a run started in a subdirectory reads
     nothing and used to say nothing, which is the silent skip the warning closes. An explicit
     --repo and --no-local each stay silent, since both are a choice the caller made.
+
+    An overlay declaring nothing stays silent too. Every repository carries the file whether or not
+    it adds anything, so warning on presence alone asks for a re-run that would change no floor.
     """
 
     def spec_with_one_passing_tool(self, d):
@@ -548,9 +551,17 @@ class TestBareRunOverlayWarning(unittest.TestCase):
         finally:
             os.chdir(old)
 
-    def repo_with_overlay(self, d):
+    def repo_with_overlay(self, d, payload=None):
+        """A repo root carrying an overlay, and a subdirectory to run from.
+
+        The default overlay declares a tool, since an empty one is deliberately not warned about.
+        That would leave the cases asserting silence passing for the wrong reason, and the cases
+        asserting a warning failing outright.
+        """
         root = Path(d)
-        (root / "host-tools.json").write_text('{"tools": []}', encoding="utf-8")
+        if payload is None:
+            payload = json.dumps({"tools": [tool("extra")]})
+        (root / "host-tools.json").write_text(payload, encoding="utf-8")
         sub = root / "scripts"
         sub.mkdir()
         return root, sub
@@ -620,17 +631,84 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             root, sub = self.repo_with_overlay(d)
             out = self.run_from(sub, ["--spec", self.spec_with_one_passing_tool(d), "--quiet"])
             self.assertIn(f"--repo {host_gate.quote_argument(str(root.resolve()))}", out)
-            self.assertNotIn(f"--repo {root.resolve()} ", out)
+            self.assertNotIn(f"--repo {root.resolve()}\n", out)
 
     def test_overlay_above_returns_the_nearest_carrier(self):
         import tempfile
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "host-tools.json").write_text('{"tools": []}', encoding="utf-8")
+            (root / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("ok")]}), encoding="utf-8"
+            )
             deep = root / "a" / "b"
             deep.mkdir(parents=True)
             self.assertEqual(host_gate.overlay_above(deep), root.resolve())
+
+    def test_an_overlay_declaring_nothing_is_not_named(self):
+        """The stub every repository carries would otherwise ask for a re-run changing no floor."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d, '{"tools": []}')
+            self.assertIsNone(host_gate.overlay_above(sub))
+            out = self.run_from(sub, ["--spec", self.spec_with_one_passing_tool(d)])
+            self.assertNotIn("warning:", out)
+
+    def test_an_unreadable_overlay_is_named_like_a_declaring_one(self):
+        """The failed parse leaves open whether it declares anything, so the run names it."""
+        import tempfile
+
+        for payload in ("{not json", '{"tools": {"gh": {}}}'):
+            with tempfile.TemporaryDirectory() as d:
+                root, sub = self.repo_with_overlay(d, payload)
+                self.assertEqual(host_gate.overlay_above(sub), root.resolve(), payload)
+                out = self.run_from(sub, ["--spec", self.spec_with_one_passing_tool(d)])
+                self.assertIn("warning:", out)
+
+    def test_the_nearer_of_two_declaring_carriers_is_the_one_returned(self):
+        """One carrier proves a carrier is found, so the nearest claim needs two of them."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            outer = Path(d)
+            (outer / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("outer")]}), encoding="utf-8"
+            )
+            inner = outer / "inner"
+            inner.mkdir()
+            (inner / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("inner")]}), encoding="utf-8"
+            )
+            deep = inner / "scripts"
+            deep.mkdir()
+            self.assertEqual(host_gate.overlay_above(deep), inner.resolve())
+
+    def test_an_empty_diagnostic_is_named_rather_than_read_as_an_empty_declaration(self):
+        """The one input separating the isinstance branch from the truthiness check under it."""
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            _, sub = self.repo_with_overlay(d, '{"tools": []}')
+            with patch.object(host_gate, "read_declaration", return_value=""):
+                self.assertEqual(host_gate.overlay_above(sub), Path(d).resolve())
+
+    def test_an_empty_overlay_nearer_than_a_declaring_one_stops_the_walk(self):
+        """The nearest carrier decides, so an empty one is silence rather than a walk past it."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            outer = Path(d)
+            (outer / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("ok")]}), encoding="utf-8"
+            )
+            inner = outer / "inner"
+            inner.mkdir()
+            (inner / "host-tools.json").write_text('{"tools": []}', encoding="utf-8")
+            deep = inner / "scripts"
+            deep.mkdir()
+            self.assertIsNone(host_gate.overlay_above(deep))
 
 
 class TestMalformedLocalFile(unittest.TestCase):
