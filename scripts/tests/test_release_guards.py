@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
 import unittest
 from pathlib import Path
 from subprocess import run
@@ -261,6 +264,104 @@ gh() {
         # Without it a src-layout repo fails collection on its own package instead of running its tests.
         self.assertIn("uv pip install -e .", job)
         self.assertIn(r"grep -Eq '^[[:space:]]*\[project\]' pyproject.toml", job)
+
+    def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
+        """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
+
+        The required check goes green on the one version the task ran while the repository goes on
+        claiming the rest, so the fan-out is asserted here rather than left to be read by eye.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+
+        # The default's shape is asserted and its content is not.
+        # Neither bumping the fleet default nor adding a second interpreter to it is a regression here.
+        declaration = workflow.split("      python-versions:\n", 1)[1].split("\n    secrets:", 1)[0]
+        default = re.search(r"(?m)^        default: ['\"](.*)['\"]$", declaration)
+        self.assertIsNotNone(default)
+        assert default is not None
+        versions = json.loads(default.group(1))
+        self.assertTrue(versions)
+        self.assertTrue(all(isinstance(version, str) for version in versions))
+
+        # An explicit name: is used verbatim rather than falling back to a matrix-suffixed default.
+        # Without the interpolation every leg renders one indistinguishable check name.
+        self.assertIn("    name: Unit test job (Python ${{ matrix.python-version }})\n", job)
+
+        # The matrix reads the input and the uv setup reads the matrix, so no literal survives between them.
+        self.assertIn("        python-version: ${{ fromJSON(inputs.python-versions) }}\n", job)
+        self.assertIn("          python-version: ${{ matrix.python-version }}\n", job)
+        self.assertNotIn('python-version: "', job)
+
+        # One interpreter failing must not cancel the others, which is what a second leg is run to learn.
+        self.assertIn("      fail-fast: false\n", job)
+
+        # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
+        self.assertIn("          flags: python-${{ matrix.python-version }}\n", job)
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is what the step under test runs")
+    def test_validator_refuses_a_python_versions_value_fromjson_would_admit(self) -> None:
+        """fromJSON admits a JSON array of numbers, which is not a list of interpreter versions.
+
+        An empty entry is the value that would otherwise carry a run green on an interpreter nobody
+        chose, since setup-uv reads an empty input as an absent one. An unquoted entry announces
+        itself either way. The step's whole script is run here, not just its filter, since
+        inverting the condition or exiting zero would leave a filter-only assertion green while
+        the step admitted everything.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+
+        # The guard has to precede the steps it guards, so its position is asserted, not just its presence.
+        # Matched on the dash rather than on a name: key, or a step leading with uses: would slip in ahead unseen.
+        first_step = re.search(r"(?m)^      - (.*)$", job)
+        self.assertIsNotNone(first_step)
+        assert first_step is not None
+        self.assertEqual("name: Validate python-versions input step", first_step.group(1))
+
+        marker = "      - name: Validate python-versions input step\n"
+        self.assertIn(marker, job)
+        body = job.split(marker, 1)[1]
+        opener = re.search(r"(?m)^        run: \|-?\n", body)
+        self.assertIsNotNone(opener, "the guard's script must be a literal block scalar")
+        assert opener is not None
+        script = body[opener.end() :]
+        lines: list[str] = []
+        for line in script.splitlines():
+            if line and not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+        self.assertIn("jq -e", script)
+
+        cases = {
+            # Reachable: a non-empty JSON array expands into legs whatever its entries hold.
+            '["3.13"]': 0,
+            '["3.13", "3.14"]': 0,
+            # Reached by interpolating an unset value, and green on an unpinned interpreter if admitted.
+            '[""]': 1,
+            # The same path, since setup-uv trims before it decides an input is absent.
+            '[" "]': 1,
+            # The plausible slip, the input being a quoted string already, and well-formed JSON.
+            "[3.13, 3.14]": 1,
+            # Unreachable today: each of these fails while the matrix is expanded, before the step runs.
+            # They pin the rest of the filter's contract, which moving the check into a job of its own would ask for.
+            "[]": 1,
+            '"3.13"': 1,
+            "{}": 1,
+            "3.13": 1,
+            "": 1,
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                verdict = run(
+                    ["bash", "-c", script],
+                    env={**os.environ, "PYTHON_VERSIONS": value},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(expected, verdict.returncode)
 
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
         audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
