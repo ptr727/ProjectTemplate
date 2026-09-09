@@ -452,13 +452,13 @@ Neither package push runs inside the hub task, and that is a constraint rather t
 
 The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
-The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, for a NuGet-library repo:
 
 ```yaml
 name: Publish project release action
 
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
-# This is the NuGet-library shape whose merges publish, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
+# This is the NuGet-library shape, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 
 on:
   push:

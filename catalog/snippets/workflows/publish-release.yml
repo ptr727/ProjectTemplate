@@ -1,7 +1,7 @@
 name: Publish project release action
 
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
-# This is the NuGet-library shape whose merges publish, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
+# This is the NuGet-library shape, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 
 on:
   push:
