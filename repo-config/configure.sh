@@ -464,7 +464,7 @@ check_environments() {
     # Yields null rather than [] where the repo has no single registry entry, so "declares none" and "is not registered" stay distinguishable below.
     # Fail rather than default on a read error, matching the model lookup: a registry that will not parse is a broken run, not a repo with no environments.
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)] | if length == 1 then (.[0].environments // []) else null end' "$registry")"; then
+    if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)] | if length == 1 then (.[0] | if has("environments") then .environments else [] end) else null end' "$registry")"; then
         fail "could not read the declared deployment environments from $registry"
         return
     fi
@@ -481,7 +481,7 @@ check_environments() {
     fi
     # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has, so every read below is preceded by one test rather than left bare.
     # A bare read of a malformed entry aborts the whole run under set -e, mid-check, after the four groups above have printed their pass lines and before cmd_check reaches its drift summary.
-    # Testing the whole entry once, rather than guarding each read, is what makes a shape this misses a shape that fails loudly rather than one that reports the wrong thing.
+    # This test is narrower than spec/validate.py's: a duplicate environment name and a whitespace-only branch pass here and are refused there, so a registry that never ran the validator can still report drift rather than the malformation causing it.
     if ! jq_has 'type == "array"' <<<"$entries"; then
         fail "registry environments for $name is not a list"
         return
@@ -528,7 +528,8 @@ check_environments() {
     # An environment the registry does not declare is reported rather than asserted, matching the label list and the bypass actors: the fleet set is a floor.
     # GitHub creates some without being asked, a Copilot coding-agent environment among them, so asserting the set both ways would report drift on every repo that has ever run one.
     # shellcheck disable=SC2016  # $live is a jq --argjson variable, not a shell expansion
-    if ! extra="$(jqr --argjson live "$live_envs" '([$live[].name] - [.[].name]) | join(", ")' <<<"$entries")"; then
+    # Names are taken only from entries shaped like one, since a malformed entry the loop already refused would otherwise raise here, replacing this note with a second failure naming the wrong cause.
+    if ! extra="$(jqr --argjson live "$live_envs" '([$live[].name] - [.[] | objects | .name | strings]) | join(", ")' <<<"$entries")"; then
         fail "could not compute the undeclared deployment environment list"
         return
     fi

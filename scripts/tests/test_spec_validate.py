@@ -339,11 +339,18 @@ class RegistryEnvironmentCase(unittest.TestCase):
             ],
         )
 
-    def test_a_missing_branch_policy_is_rejected(self) -> None:
-        """The one shape that would otherwise reach configure.sh and assert against the literal jq prints for null."""
+    def test_a_missing_branch_policy_is_reported_as_absent(self) -> None:
+        """Absence goes through its own branch: the repr of a missing field differs from the valid "none" by case alone."""
         self.assertEqual(
             self.errors([{"name": "e"}]),
-            [("Fixture: environments[0] branchPolicy 'None' invalid (expected custom, none)")],
+            ["Fixture: environments[0] missing 'branchPolicy' (expected custom, none)"],
+        )
+
+    def test_an_explicit_null_is_declared_but_invalid_not_absent(self) -> None:
+        """Presence is the test, matching description_errors_for_repo, so a null cannot pass as a repo declaring none."""
+        self.assertEqual(
+            validate.environment_errors_for_repo({"environments": None}, "Fixture"),
+            ["Fixture: environments must be a list"],
         )
 
     def test_a_missing_or_empty_name_is_rejected(self) -> None:

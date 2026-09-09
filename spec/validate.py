@@ -161,10 +161,13 @@ def environment_errors_for_repo(repo, name):
 
     Presence (`"branches" in env`) is the test rather than truthiness, so a declared empty list under "custom" is
     read as declaring that the environment allows nothing, which configure.sh then asserts, rather than as absent.
+    Presence is the test for the field itself too, matching description_errors_for_repo: an explicit
+    `"environments": null` is declared-but-invalid, not absent, so it reaches the list check below rather than
+    passing as a repo that declares none.
     """
-    envs = repo.get("environments")
-    if envs is None:
+    if "environments" not in repo:
         return []
+    envs = repo["environments"]
     if not isinstance(envs, list):
         return [f"{name}: environments must be a list"]
     errors = []
@@ -182,10 +185,14 @@ def environment_errors_for_repo(repo, name):
             errors.append(f"{where} duplicate environment '{env_name}'")
         else:
             seen.add(env_name)
-        policy = env.get("branchPolicy")
+        # Absence is reported as absence rather than through the value branch, whose repr of a missing field differs from the valid value "none" by case alone.
+        if "branchPolicy" not in env:
+            errors.append(f"{where} missing 'branchPolicy' (expected {', '.join(BRANCH_POLICIES)})")
+            continue
+        policy = env["branchPolicy"]
         if policy not in BRANCH_POLICIES:
             errors.append(
-                f"{where} branchPolicy '{policy}' invalid (expected {', '.join(BRANCH_POLICIES)})"
+                f"{where} branchPolicy {policy!r} invalid (expected {', '.join(BRANCH_POLICIES)})"
             )
             continue
         branches = env.get("branches")
