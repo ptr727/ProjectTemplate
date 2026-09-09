@@ -665,6 +665,24 @@ class TestBareRunOverlayWarning(unittest.TestCase):
                 out = self.run_from(sub, ["--spec", self.spec_with_one_passing_tool(d)])
                 self.assertIn("warning:", out)
 
+    def test_the_nearer_of_two_declaring_carriers_is_the_one_returned(self):
+        """One carrier proves a carrier is found, so the nearest claim needs two of them."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            outer = Path(d)
+            (outer / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("outer")]}), encoding="utf-8"
+            )
+            inner = outer / "inner"
+            inner.mkdir()
+            (inner / "host-tools.json").write_text(
+                json.dumps({"tools": [tool("inner")]}), encoding="utf-8"
+            )
+            deep = inner / "scripts"
+            deep.mkdir()
+            self.assertEqual(host_gate.overlay_above(deep), inner.resolve())
+
     def test_an_empty_overlay_nearer_than_a_declaring_one_stops_the_walk(self):
         """A further ancestor carrying one is a different repository, and the run is in the nearer."""
         import tempfile
