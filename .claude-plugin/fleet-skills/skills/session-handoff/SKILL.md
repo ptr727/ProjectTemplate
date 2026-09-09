@@ -193,26 +193,30 @@ falls to the next session that has one. The rules below settle which case applie
 The mechanics are the hub's `scripts/handoff.py`, run from a hub checkout, per `GOVERNANCE.md`
 "Hub-Hosted Tooling". Every subcommand takes `--repo`, with no default, because an issue number
 resolves in every repository and a chain read out of the wrong one is well formed. `current`,
-`resume`, `chain`, and `new` each take an optional `--track` defaulting to `default`, `adopt`
-requires one rather than defaulting, and `link` and `tracks` take none, since a pair of issue
-numbers and a whole-repository survey each name their own scope. A session working a named lane
-passes `--track` on each of the five that accept it. Omitting it does more than read the wrong
-chain, since `new` then files onto `default` and comments on and closes whatever that lane had
-open.
+`resume`, `chain`, and `new` each take an optional `--track` defaulting to `default`, and `link`
+and `tracks` take none, since a pair of issue numbers and a whole-repository survey each name
+their own scope. A session working a named lane passes `--track` on each of the four that accept
+it. Omitting it does more than read the wrong chain, since `new` then files onto `default` and
+comments on whatever link that lane has, closing it too where it was open.
 
-- **`current` and `resume`** are the read side, `resume` adding the body itself and an index of the
-  closed links behind it.
+- **`current` and `resume`** answer where a track stands, `resume` adding the body itself and an
+  index of the closed links behind it.
 - **`chain`** starts at one track's newest link and walks `previous=` backwards from there,
   following whatever the markers name and saying so where that leaves the track, `--grep`
   filtering the listing by a regular expression over the bodies while the notices print
   regardless.
 - **`tracks`** surveys every open handoff, one carrying no metadata block included, and it is the
-  one command that reports that state rather than refusing over it.
-- **`new`** performs the chain's three steps, and **`link`** finishes a `new` that stopped between
-  them.
-- **`adopt`** puts the label and the metadata block on an issue predating both. It is the one
-  subcommand that writes to an issue this chain did not create, which is why the authorization
-  paragraph below holds it apart from the rest.
+  one command that reports that state rather than refusing over it. That state is settled by a
+  hand edit, adding the block to the issue's body or taking the label off it, since no read can
+  place an issue on a track until its own block says which track that is.
+- **`new`** performs as many of the chain's three steps as the track has links for. On a track
+  with no link at all it creates and stops, since there is nothing to comment on or close. On one
+  whose newest link is closed it creates and comments, since the close already happened. Only a
+  track with an open head takes all three. **`link`** finishes a run that stopped between them,
+  and separately repairs a successor whose block names no predecessor, so its own writes are the
+  comment, the close, and that body edit. The edit reaches only the repair case, since `new`
+  embeds the predecessor in the block at create time, so a run interrupted after the create
+  already names it.
 
 ```sh
 python3 scripts/handoff.py current --repo OWNER/NAME --track <slug>
@@ -220,33 +224,37 @@ python3 scripts/handoff.py resume  --repo OWNER/NAME --track <slug> --history 5
 python3 scripts/handoff.py chain   --repo OWNER/NAME --track <slug> --grep "an escaped regex"
 python3 scripts/handoff.py new     --repo OWNER/NAME --track <slug> --title "<subject>" \
   --body-file <path> --dry-run
-python3 scripts/handoff.py link    --repo OWNER/NAME --new <n> --previous <n>
+python3 scripts/handoff.py link    --repo OWNER/NAME --new <successor> --previous <predecessor>
 python3 scripts/handoff.py tracks  --repo OWNER/NAME
-python3 scripts/handoff.py adopt   <n> --repo OWNER/NAME --track <slug>
 ```
 
-Read `--dry-run` output before the first real `new` of a session, since the run closes an issue.
-It is accepted by `new`, `link`, and `adopt`, the three subcommands that write, and by no other.
+Read `--dry-run` output before the first real `new` of a session, since the run can close an issue.
+It is accepted by `new` and `link`, the two subcommands that write, and by no other.
 
 Exit `0` is success, `1` a refusal the caller can act on, a usage error included, and `2` the
 command not having run to an answer, so a refusal and a failure to reach one never share a code. A
-repository missing the `handoff` label is a refusal naming the command that applies the fleet label
-set, never a degraded empty answer.
+repository missing the `handoff` label is a refusal rather than a degraded empty answer, and it
+names the command that applies the fleet label set except where the label read filled its window,
+which is the one case where the label's absence is unproven rather than established.
 
-Creating an issue, commenting on one, closing one, editing a body, and adding a label are each
-outward-facing writes, and `new`, `link`, and `adopt` between them do all five. Filing a handoff
-link is authorized standing by `AGENTS.md` "Session Scope", which requires one at every session
-close and allows no substitute that records the round, so a session ending unattended can comply
-with it. **That
-authorization reaches `new`'s three writes, and `link` completing an interrupted run of them,
-which is those same three plus the body edit that points the successor at its predecessor, and
-nothing else.** It covers no other issue and no other repository, and reading it wider is the self-grant
-`GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids. `adopt` sits outside it, since
-adding a label to and editing the body of an issue the chain did not create is not the close-time
-link the rule requires, so it needs a go-ahead of its own.
+Creating an issue, commenting on one, closing one, and editing a body are each outward-facing
+writes. `new` creates, comments, and closes, the label riding inside the one create call rather
+than being a write of its own. `link` edits a body, comments, and closes. Filing a handoff link is authorized standing by `AGENTS.md` "Session Scope", which
+requires one at every session close and allows no substitute that records the round, so a session
+ending unattended can comply with it. **That authorization reaches the filing and nothing else**,
+meaning the three writes that rule enumerates and the two of them `link` makes where it completes
+a filing that stopped part way. It covers the repository `AGENTS.md` "Session Scope" sends the link to, the one holding the work
+the next session resumes, and no other, and reading it wider is the self-grant `GOVERNANCE.md`
+"Repository Boundaries and Write Safety" forbids. `link`'s body edit is outside it, since that
+rule has the new link name its predecessor at create time and so describes no after-the-fact edit,
+which makes the repair its own act needing its own go-ahead. `link` also reaches an issue this
+chain never created, since the caller names both numbers and its refusals ask for a block and a
+label to be added by hand first, so the two issues it is given are chosen deliberately rather than
+swept up.
 
-Where the caller names an issue, `link` and `adopt` read it live before writing and write only what
-that read returned, and every other identifier a write consumes is captured from a read in the same
-run rather than constructed. No write's output is suppressed or forced to success, and a close is
+Where the caller names an issue, which is `link` alone, it reads both live before writing and
+writes only what those reads returned. Every other identifier a write targets is captured from a
+read in the same run, and the one identifier no read could have supplied, the new issue's own
+number, is parsed from the create's confirmation rather than constructed. No write's output is suppressed or forced to success, and a close is
 confirmed by reading the state back, because a write that appears to have failed may have succeeded
 on the server.

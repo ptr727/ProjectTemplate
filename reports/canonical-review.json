@@ -571,11 +571,11 @@
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > Running the Chain",
-      "digest": "sha256:41a1cf78eaaa71bc837f958cb576314bdd96d2b6b8e6a4fb8f53277df1ee8176",
+      "digest": "sha256:27d277294b1768fbf193704fdb95d6ee489859581c64f03ad76a60b595c8d552",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T16:36:58Z"
+      "stamp": "2026-09-09T22:20:55Z"
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > The Chain",

@@ -36,7 +36,6 @@ Subcommands
            issue.
   tracks   Every open handoff with its track and age, so an abandoned lane is visible rather
            than silently current. Read-only.
-  adopt    Put the label and the metadata block on an existing hand-written handoff.
 
 Exit codes
   0  the command did what it says.
@@ -55,7 +54,6 @@ Usage
   python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
   python3 scripts/handoff.py link    --repo OWNER/NAME --new N --previous N
   python3 scripts/handoff.py tracks  --repo OWNER/NAME
-  python3 scripts/handoff.py adopt   ISSUE --repo OWNER/NAME --track T [--round N] [--previous N]
 
 Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one: an
 issue number resolves in every repository, and a chain read out of the wrong one is well formed.
@@ -309,12 +307,13 @@ def open_handoffs(repo: str) -> list[dict]:
     return rows
 
 
-def require_adopted(rows: list[dict]) -> None:
+def require_marked(rows: list[dict]) -> None:
     """Refuse while any open handoff carries no metadata block.
 
     Such an issue belongs to an unknown track, so it could be the one the caller asked about, and
-    picking around it would answer a question the data does not settle. `adopt` is the fix, and
-    `tracks` surveys without refusing.
+    picking around it would answer a question the data does not settle. Settling it is a hand edit,
+    adding the block to that issue's body or taking the label off it, and `tracks` surveys without
+    refusing so an operator can see the state at all.
     """
     broken = [row["malformed"] for row in rows if row.get("malformed")]
     if broken:
@@ -324,7 +323,8 @@ def require_adopted(rows: list[dict]) -> None:
         listed = ", ".join(f"#{row['number']}" for row in bare)
         raise Refusal(
             f"{listed} carries the `{LABEL}` label and no metadata block, so its track is unknown "
-            "and no track can be read as unambiguous. Run `adopt` on it first."
+            "and no track can be read as unambiguous. Add the block to its body by hand, or "
+            "take the label off it."
         )
 
 
@@ -342,7 +342,7 @@ def on_track(rows: list[dict], track: str) -> dict | None:
 
 def current_or_refuse(repo: str, track: str) -> dict:
     rows = open_handoffs(repo)
-    require_adopted(rows)
+    require_marked(rows)
     found = on_track(rows, track)
     if found is None:
         raise Refusal(
@@ -416,11 +416,11 @@ def describe(link: dict) -> str:
     """One walked link as a line, carrying its own track.
 
     The track is printed rather than assumed from the track the walk started on, because `walk`
-    follows each marker's `previous=` and nothing stops a hand-edited or adopted link naming a
+    follows each marker's `previous=` and nothing stops a hand-edited link naming a
     predecessor on another lane. Printing it is what makes that visible to the reader.
     """
     marker = link.get("marker")
-    round_ = f"{marker['track']} round {marker['round']}" if marker else "unadopted"
+    round_ = f"{marker['track']} round {marker['round']}" if marker else "unmarked"
     state = link.get("state", "OPEN")
     return (
         f"#{link['number']:<6} {state:<6} {day(link.get('createdAt'))}  "
@@ -584,7 +584,7 @@ def cmd_chain(a: argparse.Namespace) -> int:
     except re.error as exc:
         raise Refusal(f"--grep is not a valid regular expression: {exc}") from exc
     rows = open_handoffs(a.repo)
-    require_adopted(rows)
+    require_marked(rows)
     head = on_track(rows, a.track) or newest_closed(a.repo, a.track)
     if head is None:
         raise Refusal(
@@ -690,9 +690,7 @@ def cmd_tracks(a: argparse.Namespace) -> int:
     for row in rows:
         marker = row["marker"]
         track = (
-            marker["track"]
-            if marker
-            else ("(malformed)" if row.get("malformed") else "(unadopted)")
+            marker["track"] if marker else ("(malformed)" if row.get("malformed") else "(unmarked)")
         )
         updated = age_days(row["updatedAt"])
         print(f"{track:<20} #{row['number']:<6} updated {updated}d ago  {row['title']}")
@@ -712,7 +710,7 @@ def cmd_new(a: argparse.Namespace) -> int:
     """
     body = body_from(Path(a.body_file))
     rows = open_handoffs(a.repo)
-    require_adopted(rows)
+    require_marked(rows)
     previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
@@ -751,16 +749,13 @@ def cmd_link(a: argparse.Namespace) -> int:
     if marker is None:
         raise Refusal(
             f"#{new['number']} carries no handoff metadata block, so it is not a chain link. "
-            "Run `adopt` on it first."
+            "Add one to its body by hand before linking it."
         )
     if LABEL not in {row["name"] for row in new.get("labels") or []}:
         raise Refusal(
             f"#{new['number']} carries a handoff metadata block and no `{LABEL}` label, so no "
             "read here can find it. Closing the predecessor would leave this track with no "
-            f"findable head. Run `adopt {new['number']} --track {marker['track']} --round "
-            f"{marker['round']}"
-            + ("" if marker["previous"] == "none" else f" --previous {marker['previous']}")
-            + "` to finish labeling it first."
+            f"findable head. Put the `{LABEL}` label on #{new['number']} first."
         )
     # `link` takes no --track, so the two blocks are all that can say they are one lane.
     # Without this it comments on and closes another lane's open handoff and exits 0.
@@ -768,7 +763,7 @@ def cmd_link(a: argparse.Namespace) -> int:
     if before is None:
         raise Refusal(
             f"#{previous['number']} carries no handoff metadata block, so nothing says it is on "
-            f"track {marker['track']!r}. Run `adopt` on it first."
+            f"track {marker['track']!r}. Add one to its body by hand before linking it."
         )
     if before["track"] != marker["track"]:
         raise Refusal(
@@ -818,187 +813,6 @@ def cmd_link(a: argparse.Namespace) -> int:
         return 0
     print(f"3. close #{previous['number']}")
     close(a.repo, previous["number"], a.dry_run)
-    return 0
-
-
-def track_links(repo: str, track: str, ignore: int | None = None) -> list[dict]:
-    """Every readable link on a track, open and closed, newest first.
-
-    `adopt` needs both sides at once. A lane's chain can be one open head with nothing closed
-    behind it, which is the ordinary state after the first `new`, so a check that reads only the
-    closed side reports a live lane as having no chain and files a second root beside it.
-    """
-    closed = gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--label",
-            LABEL,
-            "--state",
-            "closed",
-            "--limit",
-            str(CLOSED_WINDOW),
-            "--json",
-            "number,body,state",
-        ]
-    )
-    if not isinstance(closed, list):
-        raise Execution(f"the closed handoff list for {repo} did not read as an array")
-    links: list[dict] = []
-    for row in [*open_handoffs(repo), *closed]:
-        if row["number"] == ignore:
-            continue
-        marker = row.get("marker")
-        if marker is None:
-            with contextlib.suppress(Refusal):
-                marker = parse_marker(row.get("body") or "", row["number"])
-        if marker and marker["track"] == track:
-            row["marker"] = marker
-            links.append(row)
-    links.sort(key=lambda row: row["number"], reverse=True)
-    return links
-
-
-def require_track_free(repo: str, track: str, adopting: int, superseded: int | None = None) -> None:
-    """Refuse where adopting onto `track` would leave two open handoffs on it.
-
-    Both of `adopt`'s branches run this, the first-order one and the half-applied recovery, since
-    a recovery is not a licence to skip the invariant. A lane can acquire an open link between a
-    half-applied run and the re-run that finishes it, and finishing regardless is how a silent
-    fork becomes a hard ambiguity.
-
-    `superseded` is the link the issue being adopted names as its own predecessor. That one is
-    the link this issue replaces rather than a second one competing with it, so counting it makes
-    the recovery `link` prints refuse in exactly the state that printed it, which leaves the
-    operator with `new` and a silent fork as the only way forward.
-    """
-    rows = open_handoffs(repo)
-    broken = [row for row in rows if row.get("malformed")]
-    if broken:
-        listed = ", ".join(f"#{row['number']}" for row in broken)
-        raise Refusal(
-            f"{listed} is open, carries the `{LABEL}` label, and has an unreadable block, so "
-            f"whether track {track!r} already has one open cannot be read. Repair that block "
-            "before adopting onto any track."
-        )
-    standing = on_track(rows, track)
-    if standing is None or standing["number"] in {adopting, superseded}:
-        return
-    raise Refusal(
-        f"track {track!r} already has #{standing['number']} open, so adopting #{adopting} onto "
-        "it would make two. Adopt it onto a track of its own, or close the standing link first."
-    )
-
-
-def cmd_adopt(a: argparse.Namespace) -> int:
-    """Put the label and the metadata block on a handoff that predates both."""
-    target = issue(a.repo, a.issue)
-    labeled = LABEL in {row["name"] for row in target.get("labels") or []}
-    standing_block = parse_marker(target.get("body") or "", target["number"])
-    if target["state"] == "OPEN":
-        replacing = None
-        if standing_block is not None and standing_block["previous"] != "none":
-            replacing = int(standing_block["previous"])
-        require_track_free(a.repo, a.track, target["number"], replacing)
-    if standing_block is not None:
-        wanted = {"track": a.track, "round": str(a.round), "previous": str(a.previous or "none")}
-        if labeled:
-            raise Refusal(
-                f"#{target['number']} already carries a handoff metadata block and the "
-                f"`{LABEL}` label, so there is nothing to adopt. Edit the block in place where a "
-                "field is wrong."
-            )
-        if standing_block != wanted:
-            block = standing_block
-            raise Refusal(
-                f"#{target['number']} carries a block reading track={block['track']} "
-                f"round={block['round']} previous={block['previous']} and no `{LABEL}` label, so "
-                "the label is the step still owed. Re-run with exactly those values to finish it, "
-                "or edit the block in place where a field is wrong."
-            )
-        # The block is this run's own, written before a label write that did not land.
-        # Finishing it is what makes the body-first order recoverable rather than a dead end.
-        print(f"1. #{target['number']} already carries this block, so only the label is left")
-        print(f"2. add the `{LABEL}` label to #{target['number']}")
-        out = gh(
-            ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
-            dry_run=a.dry_run,
-        ).strip()
-        if not a.dry_run:
-            print(f"  labeled: {out or '#' + str(target['number'])}")
-        return 0
-    # The predecessor is read live before its number is stamped into the block.
-    # A number nothing read is an identifier the write consumes and the caller constructed.
-    # An issue number resolves in every repository, so a mistyped one is well formed, not absent.
-    # This read comes before the label write rather than after it.
-    # A failure between the two leaves a labeled issue carrying no block.
-    # `require_adopted` then refuses every read on every track in the repository until this re-runs.
-    previous = None
-    if a.previous is not None:
-        if a.previous == target["number"]:
-            raise Refusal(
-                f"--previous is #{a.previous}, the issue being adopted, and an issue cannot "
-                "succeed itself. That writes a chain that reads one link forever."
-            )
-        before = issue(a.repo, a.previous)
-        earlier = parse_marker(before.get("body") or "", before["number"])
-        if earlier is not None:
-            if earlier["track"] != a.track:
-                raise Refusal(
-                    f"#{before['number']} is on track {earlier['track']!r} and this would adopt "
-                    f"#{target['number']} onto {a.track!r}. A chain does not cross lanes."
-                )
-            if int(earlier["round"]) >= a.round:
-                raise Refusal(
-                    f"#{before['number']} is round {earlier['round']} and this would make "
-                    f"#{target['number']} round {a.round}, so it would not succeed it. Check "
-                    "--round and --previous."
-                )
-            taken = [
-                row
-                for row in track_links(a.repo, a.track, ignore=target["number"])
-                if row["marker"]["previous"] == str(before["number"])
-            ]
-            if taken:
-                raise Refusal(
-                    f"#{taken[0]['number']} already succeeds #{before['number']} on track "
-                    f"{a.track!r}, so adopting #{target['number']} onto it would fork the chain "
-                    "there. Name the newest link as --previous instead."
-                )
-        previous = int(before["number"])
-        print(f"1. read #{previous}, the predecessor this block will name")
-    else:
-        # Both sides, since a lane's whole chain can be one open head and nothing closed.
-        # That is the ordinary state after the first `new` on a track.
-        standing = track_links(a.repo, a.track, ignore=target["number"])
-        if standing:
-            newest = standing[0]
-            raise Refusal(
-                f"track {a.track!r} already has a chain, whose newest link is "
-                f"#{newest['number']} at round {newest['marker']['round']}. Adopting "
-                f"#{target['number']} with no --previous would start a second chain beside it. "
-                "Pass --previous and --round to join the chain, or name a track of its own."
-            )
-        print("1. no --previous given, and this track has no chain, so this block names none")
-    print(f"2. write the metadata block on #{target['number']}")
-    edit_body(
-        a.repo,
-        target["number"],
-        with_marker(target.get("body") or "", a.track, a.round, previous),
-        a.dry_run,
-    )
-    if labeled:
-        print(f"3. #{target['number']} already carries the `{LABEL}` label")
-        return 0
-    print(f"3. add the `{LABEL}` label to #{target['number']}")
-    out = gh(
-        ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
-        dry_run=a.dry_run,
-    ).strip()
-    if not a.dry_run:
-        print(f"  labeled: {out or '#' + str(target['number'])}")
     return 0
 
 
@@ -1085,15 +899,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tracks", help="every open handoff with its track and age")
     add_repo(p)
 
-    p = sub.add_parser("adopt", help="label and mark an existing hand-written handoff")
-    p.add_argument("issue", type=int, metavar="ISSUE", help="the issue to adopt")
-    add_repo(p)
-    add_track(p, required=True)
-    add_dry_run(p)
-    p.add_argument("--round", type=int, default=1, metavar="N", help="its round number (default 1)")
-    p.add_argument(
-        "--previous", type=int, default=None, metavar="N", help="the issue it succeeds, if any"
-    )
     return ap
 
 
@@ -1104,7 +909,6 @@ HANDLERS = {
     "new": cmd_new,
     "link": cmd_link,
     "tracks": cmd_tracks,
-    "adopt": cmd_adopt,
 }
 
 
@@ -1118,13 +922,12 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
     if getattr(a, "track", None) is not None and not TRACK.fullmatch(a.track):
         ap.error(f"--track takes a kebab-case slug, not {a.track!r}")
-    for flag in ("history", "limit", "round"):
+    for flag in ("history", "limit"):
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
-            ap.error(f"--{flag} counts links or rounds, so it cannot be below 1")
-    for flag in ("issue", "new", "previous"):
+            ap.error(f"--{flag} counts links, so it cannot be below 1")
+    for flag in ("new", "previous"):
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
-            named = flag if flag == "issue" else f"--{flag}"
-            ap.error(f"{named} takes an issue number, so it cannot be below 1")
+            ap.error(f"--{flag} takes an issue number, so it cannot be below 1")
     try:
         require_label(a.repo)
         return HANDLERS[a.cmd](a)
