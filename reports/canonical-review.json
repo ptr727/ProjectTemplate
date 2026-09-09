@@ -11,11 +11,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
-      "digest": "sha256:90ef963b15a9351c7c5cc39d46de7c936f6250f791c5af2099ed395f7a1e8d6e",
+      "digest": "sha256:f135d0393e4de217ad4f9039fc669f5833f343802592b04070937ed2d8ebca93",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
@@ -27,11 +27,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Writing a Handoff",
-      "digest": "sha256:b63feb05d2ea84541dd3e6add3895326a8bcc6bec9f1df38d8c2ad3b17df6231",
+      "digest": "sha256:2c798c3c915c511d41fc69eec75a9c8b451ffbb3df3fc34ab5a6f4cc379cb435",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
@@ -131,11 +131,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:5ce2044cd7e78e86a24a15d3b8d939cf922c8fce60841bd37f659feaa51726a5",
+      "digest": "sha256:4d027a5c4c394a3c4d907586c434610ac95cf261f801deaf1a9445d2cb899dc2",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T17:55:41Z"
+      "findings": 2,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -554,6 +554,70 @@
       "stamp": "2026-09-01T05:45:32Z"
     },
     {
+      "unit": ".agents/skills/session-handoff/SKILL.md > (preamble)",
+      "digest": "sha256:59209ea209086098829c360156e8de08c536ae624fd9991df35bf51a1ad329d7",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Resuming",
+      "digest": "sha256:345411acb94fa8db3b406c2b89ab464b165feb856a075af4853fc19baeb1b722",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Running the Chain",
+      "digest": "sha256:a5a6783127ce6fe6b6b881f4fddefd66a33690afa4638acea395fd98f795dfd5",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > The Chain",
+      "digest": "sha256:a6ffd166799910953794d4d4e7e9be6f0cebc9f2b6c87ef9aeb3a259819dbee3",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > The Parked Decision Queue",
+      "digest": "sha256:7f26cc53bfa10d8d51cf3fe8dc54a0418c5eed4c12d1a4682e3f7dc36108a1d3",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > What Goes in the Body",
+      "digest": "sha256:c90136eee4bcba3f0a16440544bb3224b714537361abdfdba641068d882bac64",
+      "reviewer": "agent-skill",
+      "findings": 2,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > What a Handoff Is, and Is Not",
+      "digest": "sha256:c2950c7bbc8986d08825a59ac9f526d8fe5cfa08ba84a5805d632ad733390cbd",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Why This Exists",
+      "digest": "sha256:3fa268357934640835b12f9f7def579c890560e5ddb1032cef1a4141370f72ea",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
       "unit": ".agents/skills/shell-codestyle/SKILL.md > Rules",
       "digest": "sha256:11e0a976d220ac43ba707327c1212a74bd605c37d66b880c703ed20f51072117",
       "reviewer": "agent-skill",
@@ -747,19 +811,19 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:e690f84e1628ddb5fc78e6d2bd2b5bc5995126630ca3a5f9908acb69ab093e63",
+      "digest": "sha256:9017325a26b7bf890c3c3a7d82fee6d797f71b4d41f3e718d9dce25832b02820",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:ce4edaf6e8818b89bab224a63e6c4b7df0616d7f1f27a5fef17b7eda7e47b7dc",
+      "digest": "sha256:a651e4c18072c8d3526bb44bba12b0cba448bddca7a15068b0bc080b9011b303",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T05:06:22Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": "AUDIT.md > (preamble)",
@@ -843,11 +907,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Communicating with the User",
-      "digest": "sha256:678e7f48e82be9aca5ff15a93c5ac0fb1cabb0384fd96b1f833be67556769926",
+      "digest": "sha256:e16b3fa4a65bfb7acac452ca91785921957422e9d5299a0d1ab043cf8d1039d1",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 2,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
