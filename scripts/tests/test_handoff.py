@@ -155,8 +155,6 @@ class FakeGh:
 
     def _edit(self, argv: list[str]) -> str:
         row = self.issues[int(argv[2])]
-        if "--add-label" in argv:
-            row["labels"] = [*row["labels"], {"name": argv[argv.index("--add-label") + 1]}]
         if "--body-file" in argv:
             row["body"] = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
         return f"https://github.com/o/r/issues/{argv[2]}\n"
@@ -195,9 +193,14 @@ def body_file(case: unittest.TestCase, text: str) -> str:
 
 def run(fake: FakeGh, *argv: str) -> tuple[int, str, str]:
     """One `main` call against the fake, returning its code and both streams."""
+    return run_with(fake, *argv)
+
+
+def run_with(transport, *argv: str) -> tuple[int, str, str]:
+    """One `main` call against any `run_gh` stand-in, so a case can wrap the fake."""
     out, err = io.StringIO(), io.StringIO()
     with (
-        unittest.mock.patch.object(handoff, "run_gh", fake),
+        unittest.mock.patch.object(handoff, "run_gh", transport),
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(err),
     ):
@@ -1200,6 +1203,62 @@ class LinkCase(unittest.TestCase):
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
         self.assertEqual(code, 1)
         self.assertIn("#19", err)
+
+    def test_a_successor_carrying_no_label_refuses(self) -> None:
+        """The anti-orphan guard: a block with no label is invisible to every read here."""
+        fake = FakeGh(
+            {
+                20: link(20, "lane", 1, None),
+                21: link(21, "lane", 2, 20, labels=[]),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
+        self.assertEqual(code, 1)
+        self.assertIn("no findable head", err)
+        self.assertEqual(fake.issues[20]["state"], "OPEN")
+
+    def test_a_body_that_moved_since_the_read_refuses_rather_than_overwriting(self) -> None:
+        """The edit replaces the whole body, so an edit landing since the read would be lost."""
+        fake = FakeGh(
+            {
+                20: link(20, "lane", 1, None),
+                21: link(21, "lane", 2, None, body=marked("orphan", "lane", 2, None)),
+            }
+        )
+        seen: list[int] = []
+        inner = fake.__call__
+
+        def racing(argv: list[str]) -> str:
+            out = inner(argv)
+            if argv[:2] == ["issue", "view"] and int(argv[2]) == 21:
+                seen.append(1)
+                if len(seen) == 1:
+                    fake.issues[21]["body"] += "\na line a maintainer added\n"
+            return out
+
+        code, _, err = run_with(racing, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
+        self.assertEqual(code, 1)
+        self.assertIn("changed since this run read it", err)
+        self.assertIn("a line a maintainer added", fake.issues[21]["body"])
+        self.assertEqual(fake.issues[20]["state"], "OPEN")
+
+    def test_link_dry_run_previews_every_step_and_writes_nothing(self) -> None:
+        """The one preview a caller is told to read before trusting this to close an issue."""
+        fake = FakeGh(
+            {
+                20: link(20, "lane", 1, None),
+                21: link(21, "lane", 2, None, body=marked("orphan", "lane", 2, None)),
+            }
+        )
+        code, out, _ = run(
+            fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20", "--dry-run"
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("would run: gh issue edit 21", out)
+        self.assertIn("--body-file <body-file>", out)
+        self.assertIn("would run: gh issue comment 20", out)
+        self.assertIn("would run: gh issue close 20", out)
+        self.assertEqual(fake.issues[20]["state"], "OPEN")
 
     def test_a_successor_with_no_block_refuses(self) -> None:
         fake = FakeGh(

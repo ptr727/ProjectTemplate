@@ -372,8 +372,10 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
     """
     links: list[dict] = []
     seen: set[int] = set()
-    number: int | None = start
-    while number is not None:
+    number = start
+    # `number` starts as an int and is only reassigned from a `\d+` capture.
+    # Every exit from this loop is therefore one of the returns inside it.
+    while True:
         if number in seen:
             return links, f"a cycle back to #{number}, so the chain does not end where it should"
         if len(links) >= limit:
@@ -399,7 +401,6 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
         if marker["previous"] == "none":
             return links, None
         number = int(marker["previous"])
-    return links, None
 
 
 def age_days(stamp: str) -> int:
@@ -791,11 +792,21 @@ def cmd_link(a: argparse.Namespace) -> int:
         )
     if marker["previous"] == "none":
         print(f"1. point #{new['number']} at #{previous['number']}")
+        # The body is re-read immediately before the write and refused where it moved.
+        # This replaces the whole body from a copy read earlier in the run.
+        # An edit landing since that read would otherwise be discarded without a word.
+        fresh = issue(a.repo, new["number"])
+        if (fresh.get("body") or "") != (new.get("body") or ""):
+            raise Refusal(
+                f"#{new['number']}'s body changed since this run read it, and pointing it at "
+                f"#{previous['number']} rewrites the whole body. Re-run to work from the current "
+                "text rather than overwriting an edit nobody here has seen."
+            )
         edit_body(
             a.repo,
             new["number"],
             with_marker(
-                new.get("body") or "", marker["track"], int(marker["round"]), previous["number"]
+                fresh.get("body") or "", marker["track"], int(marker["round"]), previous["number"]
             ),
             a.dry_run,
         )
@@ -828,11 +839,10 @@ def add_repo(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_track(parser: argparse.ArgumentParser, *, required: bool = False) -> None:
+def add_track(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--track",
-        default=None if required else DEFAULT_TRACK,
-        required=required,
+        default=DEFAULT_TRACK,
         metavar="SLUG",
         help=f"the lane of work this handoff belongs to, kebab-case (default {DEFAULT_TRACK!r})",
     )
