@@ -258,5 +258,27 @@ class DescriptionErrorsCase(unittest.TestCase):
         )
 
 
+class TreeSourceRootCase(unittest.TestCase):
+    """A tree source naming the repository root is refused however it is spelled."""
+
+    def test_rejects_every_spelling_that_reduces_to_the_root(self) -> None:
+        for value in (".", "./", ".//.", ".///.", "./."):
+            with self.subTest(value=value):
+                self.assertTrue(validate.reduces_to_repo_root(value))
+
+    def test_accepts_a_source_below_the_root(self) -> None:
+        for value in (
+            ".github/skills",
+            "spec",
+            "a/b/c",
+            ".github",
+            "./docs",
+            "docs//sub",
+            "docs/./sub",
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(validate.reduces_to_repo_root(value))
+
+
 if __name__ == "__main__":
     unittest.main()
