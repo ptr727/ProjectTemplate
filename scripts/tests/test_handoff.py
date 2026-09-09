@@ -310,15 +310,26 @@ class ExitCodeCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("window", err)
 
-    def test_a_full_closed_window_refuses_rather_than_orphaning(self) -> None:
+    def test_a_full_closed_window_refuses_only_where_no_link_was_found(self) -> None:
         """A closed link past the window reads as a track that never had one, which orphans it."""
         rows = {
-            n: link(n, f"lane-{n}", 1, None, state="CLOSED") for n in range(1, handoff.WINDOW + 1)
+            n: link(n, f"lane-{n}", 1, None, state="CLOSED")
+            for n in range(1, handoff.CLOSED_WINDOW + 1)
         }
-        code, _, err = run(FakeGh(rows), "chain", "--repo", "o/r", "--track", "lane-1")
+        code, _, err = run(FakeGh(rows), "chain", "--repo", "o/r", "--track", "absent-lane")
         self.assertEqual(code, 1)
-        self.assertIn("window", err)
+        self.assertIn("fills the read window", err)
         self.assertIn("second chain beside the first", err)
+
+    def test_a_full_closed_window_does_not_block_a_track_it_did_contain(self) -> None:
+        """Closed links accumulate one per round, so refusing on a full page alone is a wall."""
+        rows = {
+            n: link(n, f"lane-{n}", 1, None, state="CLOSED")
+            for n in range(1, handoff.CLOSED_WINDOW + 1)
+        }
+        code, out, _ = run(FakeGh(rows), "chain", "--repo", "o/r", "--track", "lane-7")
+        self.assertEqual(code, 0)
+        self.assertIn("#7", out)
 
     def test_a_usage_error_refuses_at_one_rather_than_sharing_argparse_s_two(self) -> None:
         """Two is the command not having run, so a mistyped flag must not land on it."""

@@ -114,6 +114,17 @@ MAX_BYTES = 60 * 1024
 # A result filling the page is reported as truncated rather than treated as whole.
 WINDOW = 100
 
+# The closed side needs its own, much larger window, for a reason about the shape of the data.
+# Open handoffs are bounded by the one-per-track invariant.
+# Closed ones accumulate one per round and nothing prunes them.
+# A window sized for the first is therefore a wall the second reaches by working.
+# `gh issue list` paginates internally above one page, so this costs requests rather than accuracy.
+CLOSED_WINDOW = 1000
+
+# How much of `gh`'s own stderr is passed through before it is cut.
+# The cut says how much it left, and the count is of characters, since that is what is measured.
+STDERR_CAP = 2000
+
 # How many closed links `resume` indexes and `chain` walks unless told otherwise.
 HISTORY = 5
 CHAIN_LIMIT = 20
@@ -158,9 +169,10 @@ def run_gh(argv: list[str]) -> str:
         raise Execution(f"could not run gh: {exc}") from exc
     if r.returncode != 0:
         detail = r.stderr.strip()
-        sys.stderr.write(detail[:2000])
-        if len(detail) > 2000:
-            sys.stderr.write(f"\n... {len(detail) - 2000} more byte(s) of gh stderr not shown\n")
+        sys.stderr.write(detail[:STDERR_CAP])
+        if len(detail) > STDERR_CAP:
+            sys.stderr.write(f" ... {len(detail) - STDERR_CAP} more character(s) not shown")
+        sys.stderr.write("\n")
         raise Execution(f"gh {argv[0]} {argv[1] if len(argv) > 1 else ''} failed rc={r.returncode}")
     return r.stdout
 
@@ -286,7 +298,13 @@ def open_handoffs(repo: str) -> list[dict]:
             "no count here is whole. The chain is meant to hold one open issue per track."
         )
     for row in rows:
-        row["marker"] = parse_marker(row.get("body") or "", row["number"])
+        try:
+            row["marker"] = parse_marker(row.get("body") or "", row["number"])
+        except Refusal as exc:
+            # `tracks` is the survey, and it is how an operator sees this state at all.
+            # The refusal rides on the row and is raised by the callers that must not guess past it.
+            row["marker"] = None
+            row["malformed"] = str(exc)
     rows.sort(key=lambda row: row["number"], reverse=True)
     return rows
 
@@ -298,6 +316,9 @@ def require_adopted(rows: list[dict]) -> None:
     picking around it would answer a question the data does not settle. `adopt` is the fix, and
     `tracks` surveys without refusing.
     """
+    broken = [row["malformed"] for row in rows if row.get("malformed")]
+    if broken:
+        raise Refusal(" ".join(broken))
     bare = [row for row in rows if row["marker"] is None]
     if bare:
         listed = ", ".join(f"#{row['number']}" for row in bare)
@@ -602,24 +623,28 @@ def newest_closed(repo: str, track: str) -> dict | None:
             "--state",
             "closed",
             "--limit",
-            str(WINDOW),
+            str(CLOSED_WINDOW),
             "--json",
-            "number,title,body,state,url",
+            "number,body,state",
         ]
     )
     if not isinstance(rows, list):
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
-    if len(rows) >= WINDOW:
-        raise Refusal(
-            f"{repo} has at least {WINDOW} closed `{LABEL}` issues, which fills the read window, "
-            f"so a link on track {track!r} could sit past it unseen. Reading a track that has one "
-            "as a track that has none is what files a second chain beside the first."
-        )
     for row in sorted(rows, key=lambda row: row["number"], reverse=True):
         marker = parse_marker(row.get("body") or "", row["number"])
         if marker and marker["track"] == track:
             row["marker"] = marker
             return row
+    # Only a full window leaves "no link on this track" unproven, and only then is it refused.
+    # Refusing on a full window regardless would wall off a brand-new track for good.
+    # A repository reaches that many closed handoffs by working rather than by going wrong.
+    if len(rows) >= CLOSED_WINDOW:
+        raise Refusal(
+            f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "
+            f"window, and none on track {track!r} was in it, so a link could sit past it unseen. "
+            "Reading a track that has one as a track that has none files a second chain beside "
+            "the first."
+        )
     return None
 
 
@@ -630,7 +655,11 @@ def cmd_tracks(a: argparse.Namespace) -> int:
         return 0
     for row in rows:
         marker = row["marker"]
-        track = marker["track"] if marker else "(unadopted)"
+        track = (
+            marker["track"]
+            if marker
+            else ("(malformed)" if row.get("malformed") else "(unadopted)")
+        )
         updated = age_days(row["updatedAt"])
         print(f"{track:<20} #{row['number']:<6} updated {updated}d ago  {row['title']}")
     return 0
@@ -703,6 +732,20 @@ def cmd_link(a: argparse.Namespace) -> int:
             f"#{new['number']} is on track {marker['track']!r} and #{previous['number']} is on "
             f"{before['track']!r}. Linking them would close one lane's handoff into another's."
         )
+    # A chain runs one way, and transposing the two numbers is the ordinary slip here.
+    # Without this the older link is rewritten to name the newer.
+    # The newer is then closed and the run exits 0 over a two-link cycle.
+    if int(marker["round"]) <= int(before["round"]):
+        raise Refusal(
+            f"#{new['number']} is round {marker['round']} and #{previous['number']} is round "
+            f"{before['round']}, so #{new['number']} does not succeed it. Check --new and "
+            "--previous are not transposed."
+        )
+    if before["previous"] == str(new["number"]):
+        raise Refusal(
+            f"#{previous['number']} already names #{new['number']} as its predecessor, so linking "
+            "them this way would close the chain into a cycle."
+        )
     if marker["previous"] not in ("none", str(previous["number"])):
         raise Refusal(
             f"#{new['number']} already names #{marker['previous']} as its predecessor, not "
@@ -745,30 +788,33 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         )
     if target["state"] == "OPEN":
         standing = on_track(open_handoffs(a.repo), a.track)
-        if standing is not None and standing["number"] != target["number"]:
+        if standing is not None:
             raise Refusal(
                 f"track {a.track!r} already has #{standing['number']} open, so adopting "
                 f"#{target['number']} onto it would make two. Adopt it onto a track of its own, "
                 "or close the standing link first."
             )
+    # The predecessor is read live before its number is stamped into the block.
+    # A number nothing read is an identifier the write consumes and the caller constructed.
+    # An issue number resolves in every repository, so a mistyped one is well formed, not absent.
+    # This read comes before the label write rather than after it.
+    # A failure between the two leaves a labeled issue carrying no block.
+    # `require_adopted` then refuses every read on every track in the repository until this re-runs.
+    previous = None
+    if a.previous is not None:
+        previous = int(issue(a.repo, a.previous)["number"])
+        print(f"1. read #{previous}, the predecessor this block will name")
     names = {row["name"] for row in target.get("labels") or []}
     if LABEL in names:
-        print(f"1. #{target['number']} already carries the `{LABEL}` label")
+        print(f"2. #{target['number']} already carries the `{LABEL}` label")
     else:
-        print(f"1. add the `{LABEL}` label to #{target['number']}")
+        print(f"2. add the `{LABEL}` label to #{target['number']}")
         out = gh(
             ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
             dry_run=a.dry_run,
         ).strip()
         if not a.dry_run:
             print(f"  labeled: {out or '#' + str(target['number'])}")
-    # The predecessor is read live before its number is stamped into the block.
-    # A number nothing read is an identifier the write consumes and the caller constructed.
-    # An issue number resolves in every repository, so a mistyped one is well formed rather than absent.
-    previous = None
-    if a.previous is not None:
-        previous = int(issue(a.repo, a.previous)["number"])
-        print(f"2. read #{previous}, the predecessor this block will name")
     print(f"3. write the metadata block on #{target['number']}")
     edit_body(
         a.repo,
@@ -900,7 +946,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--{flag} counts links or rounds, so it cannot be below 1")
     for flag in ("issue", "new", "previous"):
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
-            ap.error(f"{flag} takes an issue number, so it cannot be below 1")
+            named = flag if flag == "issue" else f"--{flag}"
+            ap.error(f"{named} takes an issue number, so it cannot be below 1")
     try:
         require_label(a.repo)
         return HANDLERS[a.cmd](a)
