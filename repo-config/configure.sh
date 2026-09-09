@@ -31,7 +31,7 @@
 # It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository, so an apply would create an environment that cannot publish and report success.
 # Their names are enumerable through the API, and a variable's value too, so what this script does not check is a choice about what it owns rather than a limit the API imposes.
 # The policy is worth checking on its own because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
-# A repo declaring no environment is not checked, and an environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
+# A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run, and an environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for values, which are never readable via the API.
 set -Eeuo pipefail
@@ -479,9 +479,27 @@ check_environments() {
         fail "could not list the deployment environments on $repo"
         return
     fi
+    # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has, so every read below is preceded by one test rather than left bare.
+    # A bare read of a malformed entry aborts the whole run under set -e, mid-check, after the four groups above have printed their pass lines and before cmd_check reaches its drift summary.
+    # Testing the whole entry once, rather than guarding each read, is what makes a shape this misses a shape that fails loudly rather than one that reports the wrong thing.
+    if ! jq_has 'type == "array"' <<<"$entries"; then
+        fail "registry environments for $name is not a list"
+        return
+    fi
     count="$(jqr 'length' <<<"$entries")"
     for ((i = 0; i < count; i++)); do
         row="$(jq -c ".[$i]" <<<"$entries")"
+        # The branches test is by element type, not just by container: a non-string element renders through string interpolation without erroring, so [1, 2] would otherwise be asserted against the live set as the branch names "1" and "2".
+        if ! jq_has '
+            type == "object"
+            and (.name | type == "string" and length > 0)
+            and (.branchPolicy | . == "custom" or . == "none")
+            and (if .branchPolicy == "custom"
+                 then (.branches | type == "array" and all(type == "string" and length > 0))
+                 else (has("branches") | not) end)' <<<"$row"; then
+            fail "registry environments[$i] for $name is malformed (expected a name, a branchPolicy of custom or none, and branches of non-empty strings under custom only)"
+            continue
+        fi
         ename="$(jqr '.name' <<<"$row")"
         policy="$(jqr '.branchPolicy' <<<"$row")"
         # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
@@ -503,11 +521,7 @@ check_environments() {
         fi
         # A tag policy shares this endpoint with a branch policy, so the type is compared rather than filtered out, and a tag added by hand reads as drift instead of vanishing from the set.
         # Both sides are sorted, since the endpoint's order is not the registry's.
-        # Guarded like every other read here rather than left bare: spec/validate.py requires branches under a custom policy, but this script runs against whatever hub checkout the operator has, and an entry that slipped through would abort the whole run on `Cannot iterate over null` after a pass line had already printed.
-        if ! want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"; then
-            fail "environment '$ename' - declares a custom policy with no branches"
-            continue
-        fi
+        want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"
         got="$(jqr '[.[] | "\(.type // "branch"):\(.name)"] | sort | join(", ")' <<<"$policies")"
         assert "environment '$ename' allows exactly [$want]" test "$got" = "$want"
     done

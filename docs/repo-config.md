@@ -45,7 +45,7 @@ GitHub offers a third form, protected branches only, and this field deliberately
 "environments": [{ "name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"] }]
 ```
 
-A repository declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run, and an environment the registry declares nothing about is reported rather than asserted, since GitHub creates some without being asked (the Copilot coding agent's is the one every fleet repository has). What no tool covers either way is whether an environment's secrets and variables are present and valid, so read a clean run as a statement about the policy each declared environment carries and never as one about whether the deploy can succeed.
+A repository declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run, and an environment the registry declares nothing about is reported rather than asserted, since GitHub creates some without being asked (the Copilot coding agent's is the one every fleet repository has). What no tool covers either way is whether an environment's secrets and variables are present and valid, so read a clean run as a statement about each declared environment existing and carrying the policy declared for it, and never as one about whether the deploy can succeed.
 
 ## Regenerating the Payloads
 
