@@ -344,6 +344,8 @@ gh() {
             '[" "]': 1,
             # The plausible slip, the input being a quoted string already, and well-formed JSON.
             "[3.13, 3.14]": 1,
+            # The integer form of it, which uv resolves to whatever interpreter of that major version it finds.
+            "[3]": 1,
             # Unreachable today: each of these fails while the matrix is expanded, before the step runs.
             # They pin the rest of the filter's contract, which moving the check into a job of its own would ask for.
             "[]": 1,
