@@ -33,7 +33,7 @@
 # The policy is worth checking on its own because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
 # A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run, and an environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
-# This script leaves them a manual-verify note for values, which are never readable via the API.
+# This script leaves them a manual-verify note for their values, which are never readable via the API.
 set -Eeuo pipefail
 
 # ----- Command + target + model -----
@@ -557,7 +557,7 @@ cmd_check() {
     check_labels
     check_environments
     # Secret names are asserted by spec/audit.py, not here.
-    # A secret's value is never readable via the API regardless, whether it is repository-scoped or environment-scoped, which an environment variable's value is not: that one reads, and no tool here asks for it.
+    # A secret's value is never readable via the API regardless, repository-scoped and environment-scoped alike.
     note "run spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"
     if [ "$FAILED" -ne 0 ]; then
         echo "Configuration drift detected on $repo."

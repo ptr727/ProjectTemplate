@@ -155,8 +155,8 @@ def environment_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `environments` (a repo using no deployment environment declares none).
 
     Absence is not checked, since most of the fleet uses no environment. What is checked is that a declared entry
-    carries the fields repo-config/configure.sh's check mode reads, meaning `name` and `branchPolicy` always and
-    `branches` under a "custom" policy, and that `branches` is present exactly when `branchPolicy` is "custom".
+    carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads, and that
+    `branches` is present exactly when `branchPolicy` is "custom", which that check mode reads in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
     nothing compares against.
 
