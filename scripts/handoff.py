@@ -96,7 +96,7 @@ TRACK = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 # Matched anywhere in the body and required to occur once, then rewritten onto the last line.
 MARKER = re.compile(
     r"^<!--\s*handoff:\s*v1\s+track=(?P<track>[a-z0-9]+(?:-[a-z0-9]+)*)\s+"
-    r"round=(?P<round>\d+)\s+previous=(?P<previous>\d+|none)\s*-->[ \t]*$",
+    r"round=(?P<round>\d+)\s+previous=(?P<previous>\d+|none)\s*-->[ \t]*\r?$",
     re.MULTILINE,
 )
 
@@ -157,7 +157,10 @@ def run_gh(argv: list[str]) -> str:
     except OSError as exc:
         raise Execution(f"could not run gh: {exc}") from exc
     if r.returncode != 0:
-        sys.stderr.write(r.stderr[:800])
+        detail = r.stderr.strip()
+        sys.stderr.write(detail[:2000])
+        if len(detail) > 2000:
+            sys.stderr.write(f"\n... {len(detail) - 2000} more byte(s) of gh stderr not shown\n")
         raise Execution(f"gh {argv[0]} {argv[1] if len(argv) > 1 else ''} failed rc={r.returncode}")
     return r.stdout
 
@@ -190,7 +193,15 @@ def require_label(repo: str) -> None:
     failure mode `decision` already demonstrated fleet-wide.
     """
     rows = gh_json(["label", "list", "--repo", repo, "--limit", str(WINDOW), "--json", "name"])
-    names = {row["name"] for row in rows} if isinstance(rows, list) else set()
+    if not isinstance(rows, list):
+        raise Execution(f"the label list for {repo} did not read as an array")
+    names = {row["name"] for row in rows}
+    if LABEL not in names and len(rows) >= WINDOW:
+        raise Refusal(
+            f"{repo} has at least {WINDOW} labels, which fills the read window, so `{LABEL}` "
+            "could sit past it. Reporting the label as absent here would send you to re-apply a "
+            "set that may already be applied."
+        )
     if LABEL not in names:
         raise Refusal(
             f"{repo} carries no `{LABEL}` label, so no handoff can be found or filed there. "
@@ -264,7 +275,7 @@ def open_handoffs(repo: str) -> list[dict]:
             "--limit",
             str(WINDOW),
             "--json",
-            "number,title,body,createdAt,updatedAt,url",
+            "number,title,body,state,createdAt,updatedAt,url",
         ]
     )
     if not isinstance(rows, list):
@@ -433,7 +444,7 @@ def body_arg(body: str, dry_run: bool):
         return
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "handoff.md"
-        path.write_text(body, encoding="utf-8")
+        path.write_text(body, encoding="utf-8", newline="\n")
         yield str(path)
 
 
@@ -630,6 +641,11 @@ def cmd_new(a: argparse.Namespace) -> int:
 
     Creating first means a failure at any later step leaves a discoverable new issue rather than a
     closed chain with no successor, and `link` finishes what a failure interrupted.
+
+    The read of the predecessor and the create that follows it are not serialized, so two sessions
+    filing on one track at once both resolve the same predecessor and both create. That leaves the
+    two open handoffs every later command refuses over, which is detectable rather than silent, and
+    naming a track per lane is what keeps two sessions off one chain in the first place.
     """
     body = body_from(Path(a.body_file))
     rows = open_handoffs(a.repo)
@@ -661,6 +677,11 @@ def cmd_new(a: argparse.Namespace) -> int:
 
 def cmd_link(a: argparse.Namespace) -> int:
     """Finish a chain that half-applied, without filing a second issue for it."""
+    if a.new == a.previous:
+        raise Refusal(
+            f"--new and --previous are both #{a.new}, and an issue cannot succeed itself. "
+            "That would close the track's only open link into a cycle."
+        )
     new = issue(a.repo, a.new)
     previous = issue(a.repo, a.previous)
     marker = parse_marker(new.get("body") or "", new["number"])
@@ -668,6 +689,19 @@ def cmd_link(a: argparse.Namespace) -> int:
         raise Refusal(
             f"#{new['number']} carries no handoff metadata block, so it is not a chain link. "
             "Run `adopt` on it first."
+        )
+    # `link` takes no --track, so the two blocks are all that can say they are one lane.
+    # Without this it comments on and closes another lane's open handoff and exits 0.
+    before = parse_marker(previous.get("body") or "", previous["number"])
+    if before is None:
+        raise Refusal(
+            f"#{previous['number']} carries no handoff metadata block, so nothing says it is on "
+            f"track {marker['track']!r}. Run `adopt` on it first."
+        )
+    if before["track"] != marker["track"]:
+        raise Refusal(
+            f"#{new['number']} is on track {marker['track']!r} and #{previous['number']} is on "
+            f"{before['track']!r}. Linking them would close one lane's handoff into another's."
         )
     if marker["previous"] not in ("none", str(previous["number"])):
         raise Refusal(
@@ -709,6 +743,14 @@ def cmd_adopt(a: argparse.Namespace) -> int:
             f"#{target['number']} already carries a handoff metadata block, so there is nothing to "
             "adopt. Edit the block in place where a field is wrong."
         )
+    if target["state"] == "OPEN":
+        standing = on_track(open_handoffs(a.repo), a.track)
+        if standing is not None and standing["number"] != target["number"]:
+            raise Refusal(
+                f"track {a.track!r} already has #{standing['number']} open, so adopting "
+                f"#{target['number']} onto it would make two. Adopt it onto a track of its own, "
+                "or close the standing link first."
+            )
     names = {row["name"] for row in target.get("labels") or []}
     if LABEL in names:
         print(f"1. #{target['number']} already carries the `{LABEL}` label")

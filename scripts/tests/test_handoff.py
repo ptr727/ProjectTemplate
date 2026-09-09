@@ -49,8 +49,26 @@ def subcommands() -> dict[str, argparse.ArgumentParser]:
     raise AssertionError("handoff.build_parser declares no subcommands")
 
 
+def projected(row: dict, argv: list[str]) -> dict:
+    """`row` cut down to the fields `--json` asked for, the way real `gh` answers.
+
+    A fake returning every field regardless is a fake that models a superset of the tool, and a
+    caller reading a field it never asked for then passes here and raises against `gh`. That is
+    exactly what happened: `open_handoffs` did not request `state`, `cmd_new` read it, and 65
+    green cases said nothing because this stub handed the field over anyway.
+    """
+    if "--json" not in argv:
+        return dict(row)
+    wanted = argv[argv.index("--json") + 1].split(",")
+    return {field: row[field] for field in wanted if field in row}
+
+
 class FakeGh:
-    """An in-memory repository `handoff.gh` reads and writes, recording every argv it is given."""
+    """An in-memory repository `handoff.gh` reads and writes, recording every argv it is given.
+
+    It honors `--json`, `--state`, `--label`, and `--limit`, because a stub looser than the tool
+    it stands in for is a stub that green-lights a crash.
+    """
 
     def __init__(self, issues: dict[int, dict] | None = None, *, label: bool = True) -> None:
         self.issues = issues or {}
@@ -64,9 +82,9 @@ class FakeGh:
         if head == ("label", "list"):
             return json.dumps([{"name": handoff.LABEL}] if self.label else [{"name": "bug"}])
         if head == ("issue", "list"):
-            return json.dumps(self._list(argv))
+            return json.dumps([projected(row, argv) for row in self._list(argv)])
         if head == ("issue", "view"):
-            return json.dumps(self.issues[int(argv[2])])
+            return json.dumps(projected(self.issues[int(argv[2])], argv))
         if head == ("issue", "create"):
             return self._create(argv)
         if head == ("issue", "comment"):
@@ -80,7 +98,18 @@ class FakeGh:
 
     def _list(self, argv: list[str]) -> list[dict]:
         state = argv[argv.index("--state") + 1].upper()
-        return [row for row in self.issues.values() if row["state"] == state]
+        rows = [
+            row
+            for row in self.issues.values()
+            if row["state"] == state
+            and ("--label" not in argv or self._labeled(row, argv[argv.index("--label") + 1]))
+        ]
+        limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else len(rows)
+        return rows[:limit]
+
+    @staticmethod
+    def _labeled(row: dict, name: str) -> bool:
+        return any(label["name"] == name for label in row.get("labels") or [])
 
     def _create(self, argv: list[str]) -> str:
         number = self.next_number
@@ -161,6 +190,13 @@ class MarkerCase(unittest.TestCase):
     def test_a_body_with_no_block_reads_as_none(self) -> None:
         self.assertIsNone(handoff.parse_marker("nothing here", 1))
 
+    def test_a_crlf_body_still_chains(self) -> None:
+        """GitHub returns CRLF for anything typed in its web UI, and one Edit must not unchain."""
+        body = "notes\r\n\r\n<!-- handoff: v1 track=default round=2 previous=11 -->\r\n"
+        self.assertEqual(
+            read_marker(body, 12), {"track": "default", "round": "2", "previous": "11"}
+        )
+
     def test_a_track_outside_the_slug_grammar_reads_as_no_block(self) -> None:
         """A lane no command can address must refuse rather than list as current."""
         for track in ("Lane", "lane_two", "lane.two", "-lane"):
@@ -188,6 +224,24 @@ class LabelCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("configure.sh apply", err)
         self.assertIn(handoff.LABEL, err)
+
+    def test_a_full_label_window_refuses_rather_than_reporting_the_label_absent(self) -> None:
+        """Otherwise the caller is sent to re-apply a set that may already be applied."""
+
+        def crowded(argv):
+            if argv[:2] == ["label", "list"]:
+                return json.dumps([{"name": f"l{n}"} for n in range(handoff.WINDOW)])
+            raise AssertionError("should not get past the label read")
+
+        err = io.StringIO()
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", crowded),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(err),
+        ):
+            code = handoff.main(["current", "--repo", "o/r"])
+        self.assertEqual(code, 1)
+        self.assertIn("fills the read window", err.getvalue())
 
     def test_the_label_is_checked_before_every_subcommand(self) -> None:
         for cmd in ("current", "tracks"):
@@ -675,6 +729,38 @@ class LinkCase(unittest.TestCase):
         self.assertIn("nothing to edit", out)
         self.assertEqual(fake.issues[20]["state"], "CLOSED")
 
+    def test_an_issue_cannot_succeed_itself(self) -> None:
+        """Otherwise the track's only open link closes into a cycle and the run exits 0."""
+        fake = FakeGh({21: link(21, "default", 2, None)})
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "21")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot succeed itself", err)
+        self.assertEqual(fake.issues[21]["state"], "OPEN")
+
+    def test_linking_across_tracks_refuses_rather_than_closing_another_lane(self) -> None:
+        """`link` takes no --track, so the two blocks are all that can say they are one lane."""
+        fake = FakeGh(
+            {
+                20: link(20, "other", 1, None),
+                21: link(21, "default", 2, None, body=marked("orphan", "default", 2, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
+        self.assertEqual(code, 1)
+        self.assertIn("'other'", err)
+        self.assertEqual(fake.issues[20]["state"], "OPEN")
+
+    def test_a_predecessor_with_no_block_refuses(self) -> None:
+        fake = FakeGh(
+            {
+                20: link(20, "default", 1, None, body="hand-written"),
+                21: link(21, "default", 2, None, body=marked("orphan", "default", 2, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
+        self.assertEqual(code, 1)
+        self.assertIn("adopt", err)
+
     def test_a_different_predecessor_refuses_rather_than_overwriting(self) -> None:
         fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 19)})
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
@@ -765,6 +851,31 @@ class AdoptCase(unittest.TestCase):
         )
         self.assertEqual(code, 2)
         self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
+
+    def test_adopting_onto_an_occupied_track_refuses(self) -> None:
+        """`adopt` takes its track from a human, so it is the likeliest source of an ambiguity."""
+        fake = FakeGh(
+            {
+                30: link(30, "lane", 1, None),
+                40: link(40, "default", 1, None, body="hand-written"),
+            }
+        )
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("#30", err)
+        self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
+
+    def test_adopting_a_closed_issue_ignores_the_open_invariant(self) -> None:
+        """A closed link joins a lane's history rather than competing to be its current one."""
+        fake = FakeGh(
+            {
+                30: link(30, "lane", 2, None),
+                40: link(40, "default", 1, None, body="hand-written", state="CLOSED"),
+            }
+        )
+        code, _, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        self.assertEqual(read_marker(fake.issues[40]["body"], 40)["track"], "lane")
 
     def test_an_already_adopted_issue_refuses(self) -> None:
         fake = FakeGh({40: link(40, "default", 1, None)})
