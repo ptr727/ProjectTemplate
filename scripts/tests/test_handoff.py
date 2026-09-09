@@ -531,13 +531,64 @@ class ChainCase(unittest.TestCase):
         """A truncated search reading like an exhaustive one is the false "not tried yet"."""
         code, out, _ = run(self.repo(), "chain", "--repo", "o/r", "--limit", "2")
         self.assertEqual(code, 0)
-        self.assertIn("walk stopped at the --limit cap of 2", out)
+        self.assertIn("--limit cap of 2", out)
         self.assertIn("not a search over the chain", out)
 
-    def test_an_exhaustive_walk_says_nothing_about_a_cap(self) -> None:
+    def test_each_subcommand_names_its_own_cap_flag(self) -> None:
+        """`resume` caps with --history and rejects --limit, so naming --limit misdirects."""
+        fake = FakeGh(
+            {
+                11: link(11, "default", 1, None, state="CLOSED"),
+                12: link(12, "default", 2, 11, state="CLOSED"),
+                13: link(13, "default", 3, 12),
+            }
+        )
+        code, out, _ = run(fake, "resume", "--repo", "o/r", "--history", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("--history cap of 1", out)
+        self.assertNotIn("--limit", out)
+
+    def test_an_exhaustive_walk_says_nothing_about_stopping(self) -> None:
         code, out, _ = run(self.repo(), "chain", "--repo", "o/r")
         self.assertEqual(code, 0)
-        self.assertNotIn("stopped at the --limit cap", out)
+        self.assertNotIn("the walk stopped at", out)
+
+    def test_a_link_with_no_block_ends_the_walk_and_says_so(self) -> None:
+        """The cap is not the only early end, and the other one used to return silence."""
+        fake = self.repo()
+        fake.issues[12]["body"] = "a link somebody edited the block out of"
+        code, out, _ = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("carries no metadata block", out)
+        self.assertIn("the walk stopped at", out)
+
+    def test_grep_filters_the_listing_and_never_the_notices(self) -> None:
+        """A stop the filter hid is a stopped search that reads as an exhaustive one."""
+        fake = self.repo()
+        fake.issues[12]["body"] = "a link somebody edited the block out of"
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--grep", "current round")
+        self.assertEqual(code, 0)
+        self.assertNotIn("#12  ", out)
+        self.assertIn("the walk stopped at", out)
+
+    def test_a_walk_that_left_the_track_says_so_even_under_grep(self) -> None:
+        fake = self.repo()
+        fake.issues[11]["body"] = marked("a stray lane", "other", 1, None)
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--grep", "current round")
+        self.assertEqual(code, 0)
+        self.assertIn("left track 'default'", out)
+        self.assertIn("#11 on other", out)
+
+    def test_a_cycle_ends_the_walk_and_says_so(self) -> None:
+        fake = FakeGh(
+            {
+                21: link(21, "default", 1, 22),
+                22: link(22, "default", 2, 21, state="CLOSED"),
+            }
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("a cycle back to", out)
 
     def test_an_invalid_pattern_refuses_rather_than_matching_nothing(self) -> None:
         code, _, err = run(self.repo(), "chain", "--repo", "o/r", "--grep", "(unclosed")

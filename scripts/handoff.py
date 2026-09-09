@@ -320,31 +320,43 @@ def current_or_refuse(repo: str, track: str) -> dict:
     return found
 
 
-def walk(repo: str, start: int, limit: int) -> tuple[list[dict], int | None]:
+def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str | None]:
     """The chain from `start` backwards along `previous=`, at most `limit` links.
 
-    Returns the links and the number the walk stopped short of, or None where it reached the end.
-    A caller that printed only the links could not tell a chain of four from the first four of
-    forty, and a search reporting no match over a silently truncated walk is the false
-    "not tried yet" this whole mechanism exists to prevent.
+    Returns the links and, where the walk ended anywhere but at a `previous=none`, a phrase saying
+    where and why. A caller that printed only the links could not tell a chain of four from the
+    first four of forty, and a search reporting no match over a walk that stopped early is the
+    false "not tried yet" this whole mechanism exists to prevent.
 
-    A link whose body carries no metadata block ends the walk rather than being guessed past, and a
-    number already seen ends it too, since a cycle would otherwise read as an endless chain.
+    `cap` is the flag the caller bounded the walk with, `--limit` for `chain` and `--history` for
+    `resume`, since a message naming the other one sends a reader to a flag that subcommand
+    rejects.
+
+    Three things end a walk short. The cap, a link whose body carries no metadata block, which
+    names nothing before it and is not guessed past, and a number already seen, since a cycle
+    would otherwise read as an endless chain. Each returns its own phrase rather than the clean
+    end's None, because all three leave links unread and only the first is a number the caller
+    chose.
     """
     links: list[dict] = []
     seen: set[int] = set()
     number: int | None = start
     while number is not None:
         if number in seen:
-            return links, None
+            return links, f"a cycle back to #{number}, so the chain does not end where it should"
         if len(links) >= limit:
-            return links, number
+            return links, f"the {cap} cap of {limit}, with #{number} and earlier unread"
         seen.add(number)
         data = issue(repo, number)
         data["marker"] = parse_marker(data.get("body") or "", data["number"])
         links.append(data)
         marker = data["marker"]
-        if marker is None or marker["previous"] == "none":
+        if marker is None:
+            return links, (
+                f"#{number}, whose body carries no metadata block, so nothing names what "
+                "precedes it"
+            )
+        if marker["previous"] == "none":
             return links, None
         number = int(marker["previous"])
     return links, None
@@ -395,7 +407,9 @@ def body_from(path: Path) -> str:
     if size > WARN_BYTES:
         print(
             f"warning: the body is {size} bytes, over the {WARN_BYTES}-byte guidance. The two "
-            "sections most often padded are what the last round did and what not to repeat.",
+            "sections most often padded are what not to repeat and what was learned, which are "
+            "also the two the chain exists for, so trim by the per-section rule rather than by "
+            "cutting them.",
             file=sys.stderr,
         )
     if MARKER.search(text):
@@ -516,11 +530,11 @@ def cmd_resume(a: argparse.Namespace) -> int:
     if previous is None:
         print("(none - this is the first handoff on this track)")
         return 0
-    links, stopped = walk(a.repo, previous, a.history)
+    links, stopped = walk(a.repo, previous, a.history, "--history")
     for link in links:
         print(describe(link))
     if stopped is not None:
-        print(f"(index stopped at the --history cap, #{stopped} and earlier not shown)")
+        print(f"(index stopped at {stopped})")
     return 0
 
 
@@ -537,7 +551,7 @@ def cmd_chain(a: argparse.Namespace) -> int:
             f"{a.repo} has no handoff on track {a.track!r}, open or closed, so there is no chain "
             "to walk."
         )
-    links, stopped = walk(a.repo, head["number"], a.limit)
+    links, stopped = walk(a.repo, head["number"], a.limit, "--limit")
     shown = 0
     for link in links:
         if pattern is not None and not pattern.search(link.get("body") or ""):
@@ -546,10 +560,14 @@ def cmd_chain(a: argparse.Namespace) -> int:
         print(describe(link))
     if pattern is not None:
         print(f"{shown} of {len(links)} links walked match /{a.grep}/")
+    strayed = [link for link in links if link["marker"] and link["marker"]["track"] != a.track]
+    if strayed:
+        listed = ", ".join(f"#{link['number']} on {link['marker']['track']}" for link in strayed)
+        print(f"(the walk left track {a.track!r}: {listed})")
     if stopped is not None:
         print(
-            f"(walk stopped at the --limit cap of {a.limit}, #{stopped} and earlier unread, "
-            "so a search over this walk is not a search over the chain)"
+            f"(the walk stopped at {stopped}, so it read {len(links)} link(s) rather than the "
+            "chain, and a search over it is not a search over the chain)"
         )
     return 0
 

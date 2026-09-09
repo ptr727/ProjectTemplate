@@ -27,11 +27,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Writing a Handoff",
-      "digest": "sha256:2c798c3c915c511d41fc69eec75a9c8b451ffbb3df3fc34ab5a6f4cc379cb435",
+      "digest": "sha256:890fcb936591385020a38830fc2e6651922d963510942924424261ff1d50ad32",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:55:21Z"
+      "stamp": "2026-09-09T16:26:39Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
@@ -131,11 +131,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:4d027a5c4c394a3c4d907586c434610ac95cf261f801deaf1a9445d2cb899dc2",
+      "digest": "sha256:2ce9d636d57a63c499047925f8bf9b8dca29d1d968c3be5e0668b09f427f1479",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:55:21Z"
+      "stamp": "2026-09-09T16:26:39Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -571,11 +571,11 @@
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > Running the Chain",
-      "digest": "sha256:a5a6783127ce6fe6b6b881f4fddefd66a33690afa4638acea395fd98f795dfd5",
+      "digest": "sha256:41a1cf78eaaa71bc837f958cb576314bdd96d2b6b8e6a4fb8f53277df1ee8176",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:55:21Z"
+      "stamp": "2026-09-09T16:36:58Z"
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > The Chain",
@@ -595,11 +595,11 @@
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > What Goes in the Body",
-      "digest": "sha256:c90136eee4bcba3f0a16440544bb3224b714537361abdfdba641068d882bac64",
+      "digest": "sha256:afee9f586975e1347692a151a385f99fd04a50e2edcf4820bb4658caff319021",
       "reviewer": "agent-skill",
-      "findings": 2,
+      "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:55:22Z"
+      "stamp": "2026-09-09T16:31:35Z"
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > What a Handoff Is, and Is Not",
@@ -811,11 +811,11 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:9017325a26b7bf890c3c3a7d82fee6d797f71b4d41f3e718d9dce25832b02820",
+      "digest": "sha256:650f1a3d0284ff969cac0d0db3b36fb8fa967b65d4d0c7e11a209c2eaf4e9203",
       "reviewer": "agent-skill",
-      "findings": 1,
+      "findings": 0,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:55:22Z"
+      "stamp": "2026-09-09T16:36:58Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",

@@ -91,8 +91,7 @@ without trusting the parts of it that have gone stale.
 A fixed section order and fixed section names, the bold name opening each of items 1 through 8
 below being the heading the handoff writes. Item 9 is an HTML comment the tool writes rather than a
 section anyone types. Fixed names are what let a reader find a given fact in the same place every
-time, and what let a `chain --grep` over past rounds match a heading rather than whatever each
-author invented. `AGENTS.md` "Session Scope" sets the size rule, and it is per section: an entry
+time and what let one round's section be compared against another's. `AGENTS.md` "Session Scope" sets the size rule, and it is per section: an entry
 earns its place by being specific enough to change a later session's behavior, and a section ranks
 what it keeps and drops whatever does not meet that bar. `handoff.py` warns above 12 KB and refuses
 above 60 KB, the refusal being a backstop against a body GitHub would reject and the warning a hint
@@ -108,8 +107,9 @@ that the per-section rule broke several sections earlier. Neither is the rule.
    dependency and its reason, so a later session can re-rank when circumstances change rather than
    following an order it cannot audit.
 4. **State.** Branch, worktrees and whose they are, open pull requests, what merged, whether a
-   release was dispatched, and whether the primary checkout is clean. These are facts a resume
-   re-derives, listed so the resume knows what to re-derive.
+   release was dispatched, whether the primary checkout is clean, and any other repository the
+   round touched, named so a resume knows to look there too. These are facts a resume re-derives,
+   listed so the resume knows what to re-derive.
 5. **The parked decision queue.** The count and the ranked list "The Parked Decision Queue" below
    requires, which also requires the questions to be presented in the same act rather than only
    recorded.
@@ -125,8 +125,11 @@ that the per-section rule broke several sections earlier. Neither is the rule.
 
 Sections 7 and 8 are what the chain exists for, and they are also the two most likely to be padded.
 
-A handoff issue is public and permanent, so it quotes no data observed in the maintainer's
-environment, per `GOVERNANCE.md` "Representative Data in Agent-Authored Text". The routine case here
+A handoff issue outlives the session that wrote it and is readable by everyone who can read the
+repository, which on a public one is everyone, so it quotes no data observed in the maintainer's
+environment, per `GOVERNANCE.md` "Representative Data in Agent-Authored Text". That rule binds on a
+private repository exactly as it does on a public one, and the visibility only changes who the
+audience is. The routine case here
 is an absolute home path, since a handoff naturally wants to name a worktree, and the rule for it is
 to name the worktree by its branch and its repository-relative role rather than by its path. A next
 session re-derives the path from `git worktree list` anyway, which section 4 already tells it to
@@ -199,15 +202,17 @@ open.
 
 - **`current` and `resume`** are the read side, `resume` adding the body itself and an index of the
   closed links behind it.
-- **`chain`** walks one track's `previous=` backwards, `--grep` filtering that walk by a regular
-  expression over the bodies.
+- **`chain`** starts at one track's newest link and walks `previous=` backwards from there,
+  following whatever the markers name and saying so where that leaves the track, `--grep`
+  filtering the listing by a regular expression over the bodies while the notices print
+  regardless.
 - **`tracks`** surveys every open handoff, one carrying no metadata block included, and it is the
   one command that reports that state rather than refusing over it.
 - **`new`** performs the chain's three steps, and **`link`** finishes a `new` that stopped between
   them.
 - **`adopt`** puts the label and the metadata block on an issue predating both. It is the one
-  subcommand that writes to an issue this chain did not create, so the issue it names is chosen
-  deliberately rather than swept up.
+  subcommand that writes to an issue this chain did not create, which is why the authorization
+  paragraph below holds it apart from the rest.
 
 ```sh
 python3 scripts/handoff.py current --repo OWNER/NAME --track <slug>
@@ -229,11 +234,16 @@ repository missing the `handoff` label is a refusal naming the command that appl
 set, never a degraded empty answer.
 
 Creating an issue, commenting on one, closing one, editing a body, and adding a label are each
-outward-facing writes, and `new`, `link`, and `adopt` between them do all five. Each is authorized
-the way `GOVERNANCE.md` "Repository Boundaries and Write Safety" authorizes any outward-facing
-write, by the maintainer, for this chain, in this session. **This skill firing is not that
-authorization.** It fires on a trigger an agent reads rather than on anything the maintainer said,
-and reading a trigger as a grant is the self-grant that rule forbids.
+outward-facing writes, and `new`, `link`, and `adopt` between them do all five. Filing a handoff
+link is authorized standing by `AGENTS.md` "Session Scope", which requires one at every session
+close and allows no substitute that records the round, so a session ending unattended can comply
+with it. **That
+authorization reaches `new`'s three writes, and `link` completing an interrupted run of them,
+which is those same three plus the body edit that points the successor at its predecessor, and
+nothing else.** It covers no other issue and no other repository, and reading it wider is the self-grant
+`GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids. `adopt` sits outside it, since
+adding a label to and editing the body of an issue the chain did not create is not the close-time
+link the rule requires, so it needs a go-ahead of its own.
 
 Where the caller names an issue, `link` and `adopt` read it live before writing and write only what
 that read returned, and every other identifier a write consumes is captured from a read in the same
