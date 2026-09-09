@@ -362,6 +362,17 @@ class ExitCodeCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("window", err)
 
+    def test_a_long_unreadable_list_is_cut_the_way_gh_stderr_is(self) -> None:
+        """A refusal nobody can read is a refusal that does not land."""
+        rows = {
+            n: link(n, "lane", 1, None, state="CLOSED", body=f"no block on issue number {n}")
+            for n in range(1, 400)
+        }
+        code, _, err = run(FakeGh(rows), "chain", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("more character(s) not shown", err)
+        self.assertLess(len(err), handoff.STDERR_CAP + 500)
+
     def test_a_full_closed_window_refuses_only_where_no_link_was_found(self) -> None:
         """A closed link past the window reads as a track that never had one, which orphans it."""
         rows = {
@@ -544,6 +555,25 @@ class NewCase(unittest.TestCase):
         )
         self.assertIn("the actual handoff", fake.issues[1001]["body"])
         self.assertIn("## Next steps", fake.issues[1001]["body"])
+
+    def test_a_body_whose_marker_line_the_grammar_rejects_files_one_block(self) -> None:
+        """The line a `resume` prints, pasted back with a stray character on the end."""
+        fake = FakeGh()
+        quoted = "notes\n\n" + handoff.render_marker("lane", 4, 900) + "\u00a0\n"
+        code, _, _ = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "T",
+            "--body-file",
+            self.body_file(quoted),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(handoff.MARKER.findall(fake.issues[1001]["body"])), 1)
 
     def test_the_new_issue_carries_the_label(self) -> None:
         """An unlabeled handoff is invisible to every read this script makes."""
@@ -1106,6 +1136,20 @@ class MalformedCase(unittest.TestCase):
         self.assertIn("#61", out)
         self.assertIn("could not be read", out)
 
+    def test_a_marker_line_the_grammar_rejects_is_not_revived_by_the_strip(self) -> None:
+        """`str.rstrip()` removes 25 whitespace characters where `MARKER` tolerates three.
+
+        Stripping wider turns a line the grammar counts as ordinary text back into a block, which
+        then sits beside the one `with_marker` appends and leaves a body no command can read.
+        """
+        quoted = handoff.render_marker("lane", 4, 900) + "\u00a0"
+        self.assertIsNone(handoff.parse_marker(quoted, 1))
+        written = handoff.with_marker(quoted, "lane", 5, 901)
+        self.assertEqual(len(handoff.MARKER.findall(written)), 1)
+        self.assertEqual(
+            read_marker(written, 1), {"track": "lane", "round": "5", "previous": "901"}
+        )
+
     def test_a_zero_predecessor_is_not_a_block_at_all(self) -> None:
         """Zero is no issue number, and reaching gh with it exits 2 for a fixable block."""
         self.assertIsNone(
@@ -1259,6 +1303,39 @@ class LinkCase(unittest.TestCase):
         self.assertIn("would run: gh issue comment 20", out)
         self.assertIn("would run: gh issue close 20", out)
         self.assertEqual(fake.issues[20]["state"], "OPEN")
+
+    def test_a_predecessor_that_already_has_a_successor_refuses(self) -> None:
+        """`link` is the only adoption path now, so it carries the anti-fork guard.
+
+        Pointing an orphan at a link that already has a successor gives one predecessor two, and
+        the branch it skips is unreachable from every walk while each step exits 0.
+        """
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED"),
+                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("#11 already succeeds #10", err)
+        self.assertIn("unreachable", err)
+        self.assertEqual(fake.issues[10]["state"], "CLOSED")
+        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
+
+    def test_the_track_s_newest_link_is_a_legitimate_predecessor(self) -> None:
+        """The guard must not refuse the adoption `link` exists for, including a round gap."""
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED"),
+                13: link(13, "lane", 7, None, body=marked("an orphan", "lane", 7, None)),
+            }
+        )
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
+        self.assertEqual(code, 0)
+        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "11")
 
     def test_a_successor_with_no_block_refuses(self) -> None:
         fake = FakeGh(

@@ -242,9 +242,17 @@ def render_marker(track: str, round_: int, previous: int | None) -> str:
     return f"<!-- handoff: v1 track={track} round={round_} previous={previous or 'none'} -->"
 
 
+# What may be stripped from the end of a body before the block is appended.
+# `str.rstrip()` removes all twenty-five characters Python calls whitespace.
+# `MARKER` tolerates only these three after the block.
+# Stripping wider revives a marker line the grammar counts as absent.
+# That line then sits beside the one this appends, leaving a body no command can read.
+TRAILING = " \t\r\n"
+
+
 def with_marker(body: str, track: str, round_: int, previous: int | None) -> str:
     """`body` with the metadata block as its last line, replacing any block already in it."""
-    stripped = MARKER.sub("", body or "").rstrip()
+    stripped = MARKER.sub("", body or "").rstrip(TRAILING)
     return f"{stripped}\n\n{render_marker(track, round_, previous)}\n"
 
 
@@ -613,6 +621,13 @@ def cmd_chain(a: argparse.Namespace) -> int:
     return 0
 
 
+def cut(text: str) -> str:
+    """`text` bounded the way `gh`'s own stderr is, since a refusal nobody reads does not land."""
+    if len(text) <= STDERR_CAP:
+        return text
+    return f"{text[:STDERR_CAP]} ... {len(text) - STDERR_CAP} more character(s) not shown."
+
+
 def newest_closed(repo: str, track: str) -> dict | None:
     """The newest closed handoff on a track, or None where the track has never had one.
 
@@ -658,7 +673,7 @@ def newest_closed(repo: str, track: str) -> dict | None:
             if unreadable:
                 raise Refusal(
                     f"#{row['number']} is the newest readable link on track {track!r}, and "
-                    + " ".join(unreadable)
+                    + cut(" ".join(unreadable))
                     + f" Each of those is newer than it, so one could be {track!r}'s real newest "
                     "and chaining onto this one would fork the chain."
                 )
@@ -667,7 +682,7 @@ def newest_closed(repo: str, track: str) -> dict | None:
     if unreadable:
         raise Refusal(
             f"no closed link on track {track!r} was readable, and "
-            + " ".join(unreadable)
+            + cut(" ".join(unreadable))
             + f" A link on {track!r} could be one of those, so this cannot say the track has none."
         )
     # Only a full window leaves "no link on this track" unproven, and only then is it refused.
@@ -737,6 +752,43 @@ def cmd_new(a: argparse.Namespace) -> int:
     return 0
 
 
+def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None:
+    """The link on `track` that already names `number` as its predecessor, or None.
+
+    Read from the open and the closed side together, since a predecessor's successor is closed as
+    soon as the round after it is filed, so the closed side is where it usually sits.
+    """
+    closed = gh_json(
+        [
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--label",
+            LABEL,
+            "--state",
+            "closed",
+            "--limit",
+            str(CLOSED_WINDOW),
+            "--json",
+            "number,body,state",
+        ]
+    )
+    if not isinstance(closed, list):
+        raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    for row in [*open_handoffs(repo), *closed]:
+        if row["number"] == ignore:
+            continue
+        marker = row.get("marker")
+        if marker is None:
+            with contextlib.suppress(Refusal):
+                marker = parse_marker(row.get("body") or "", row["number"])
+        if marker and marker["track"] == track and marker["previous"] == str(number):
+            row["marker"] = marker
+            return row
+    return None
+
+
 def cmd_link(a: argparse.Namespace) -> int:
     """Finish a chain that half-applied, without filing a second issue for it."""
     if a.new == a.previous:
@@ -784,6 +836,14 @@ def cmd_link(a: argparse.Namespace) -> int:
         raise Refusal(
             f"#{previous['number']} already names #{new['number']} as its predecessor, so linking "
             "them this way would close the chain into a cycle."
+        )
+    taken = successor_of(a.repo, marker["track"], previous["number"], new["number"])
+    if taken is not None:
+        raise Refusal(
+            f"#{taken['number']} already succeeds #{previous['number']} on track "
+            f"{marker['track']!r}, so pointing #{new['number']} at it too would fork the chain "
+            f"there and leave #{taken['number']} unreachable. Name the track's newest link as "
+            "--previous instead."
         )
     if marker["previous"] not in ("none", str(previous["number"])):
         raise Refusal(
