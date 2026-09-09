@@ -23,7 +23,8 @@ RELEASE_TRIGGERS = ("two-phase", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
 # The deployment-branch-policy forms a repo's `environments` entry may declare, kept in sync with the $defs in registry/repos.schema.json.
 # This is not a scope selector: it names no audit scope and selects nothing in spec/files.json, so it sits outside the disjointness rule above.
-BRANCH_POLICIES = ("custom", "protected", "none")
+# GitHub's "protected branches only" form is deliberately absent, since it counts classic branch protection and this fleet configures rulesets instead.
+BRANCH_POLICIES = ("custom", "none")
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
 # A query character or a fragment character is excluded from both groups too.
@@ -155,8 +156,8 @@ def environment_errors_for_repo(repo, name):
 
     Absence is not checked, since most of the fleet uses no environment. What is checked is that a declared entry
     carries the two fields repo-config/configure.sh's check mode reads, and that `branches` is present exactly when
-    `branchPolicy` is "custom". The other two forms name no branch set: "protected" defers to branch protection and
-    "none" admits every ref, so a `branches` beside either would be a declaration nothing compares against.
+    `branchPolicy` is "custom". "none" names no branch set, since it admits every ref, so a `branches`
+    beside it would be a declaration nothing compares against.
 
     Presence (`"branches" in env`) is the test rather than truthiness, so a declared empty list under "custom" is
     read as declaring that the environment allows nothing, which configure.sh then asserts, rather than as absent.

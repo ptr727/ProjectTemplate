@@ -294,7 +294,6 @@ class RegistryEnvironmentCase(unittest.TestCase):
         for env in (
             {"name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"]},
             {"name": "production", "branchPolicy": "none"},
-            {"name": "staging", "branchPolicy": "protected"},
         ):
             with self.subTest(policy=env["branchPolicy"]):
                 self.assertEqual(self.errors([env]), [])
@@ -312,17 +311,22 @@ class RegistryEnvironmentCase(unittest.TestCase):
         )
 
     def test_a_policy_naming_no_branch_set_may_not_declare_one(self) -> None:
-        for policy in ("none", "protected"):
-            with self.subTest(policy=policy):
-                self.assertEqual(
-                    self.errors([{"name": "e", "branchPolicy": policy, "branches": ["main"]}]),
-                    [
-                        (
-                            f"Fixture: environments[0] branchPolicy {policy} names no branch set, "
-                            "so it must not declare 'branches'"
-                        )
-                    ],
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "none", "branches": ["main"]}]),
+            [
+                (
+                    "Fixture: environments[0] branchPolicy none names no branch set, "
+                    "so it must not declare 'branches'"
                 )
+            ],
+        )
+
+    def test_githubs_protected_branches_form_is_not_declarable(self) -> None:
+        """It counts classic branch protection, which the fleet removes, so declaring it would assert a gate that does not exist."""
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "protected"}]),
+            [("Fixture: environments[0] branchPolicy 'protected' invalid (expected custom, none)")],
+        )
 
     def test_an_unknown_branch_policy_is_rejected(self) -> None:
         self.assertEqual(
@@ -330,7 +334,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
             [
                 (
                     "Fixture: environments[0] branchPolicy 'everything' invalid "
-                    "(expected custom, protected, none)"
+                    "(expected custom, none)"
                 )
             ],
         )
@@ -339,12 +343,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
         """The one shape that would otherwise reach configure.sh and assert against the literal jq prints for null."""
         self.assertEqual(
             self.errors([{"name": "e"}]),
-            [
-                (
-                    "Fixture: environments[0] branchPolicy 'None' invalid "
-                    "(expected custom, protected, none)"
-                )
-            ],
+            [("Fixture: environments[0] branchPolicy 'None' invalid (expected custom, none)")],
         )
 
     def test_a_missing_or_empty_name_is_rejected(self) -> None:

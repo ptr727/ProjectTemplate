@@ -27,7 +27,7 @@
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
 # What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
-# The check mode also asserts one group apply never writes, the deployment-branch policy of every environment the registry declares for the repo.
+# The check mode also asserts one group apply never writes, the existence and deployment-branch policy of every environment the registry declares for the repo.
 # It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository, so an apply would create an environment that cannot publish and report success.
 # Their names are enumerable through the API, and a variable's value too, so what this script does not check is a choice about what it owns rather than a limit the API imposes.
 # The policy is worth checking on its own because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
@@ -491,7 +491,8 @@ check_environments() {
             continue
         fi
         # Read the live shape as the one token the registry declares, rather than asserting two booleans a reader then has to recombine into a policy.
-        # "unrecognized" is deliberate and never matches a declaration, so a fourth form GitHub adds later fails loudly instead of being folded into one of these three.
+        # "protected" is derived but not declarable, so a live environment set to protected-branches-only always fails here, which is the intent: it counts classic branch protection and the fleet configures rulesets instead.
+        # "unrecognized" is deliberate for the same reason, so a form GitHub adds later fails loudly instead of being folded into one of the three above it.
         got="$(jqr 'if .deployment_branch_policy == null then "none" elif .deployment_branch_policy.custom_branch_policies then "custom" elif .deployment_branch_policy.protected_branches then "protected" else "unrecognized" end' <<<"$env_live")"
         assert "environment '$ename' branch policy = $policy" test "$got" = "$policy"
         # The allowed set exists only under a custom policy, so a mismatch above skips it rather than reporting a second failure for the same cause.
@@ -502,7 +503,11 @@ check_environments() {
         fi
         # A tag policy shares this endpoint with a branch policy, so the type is compared rather than filtered out, and a tag added by hand reads as drift instead of vanishing from the set.
         # Both sides are sorted, since the endpoint's order is not the registry's.
-        want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"
+        # Guarded like every other read here rather than left bare: spec/validate.py requires branches under a custom policy, but this script runs against whatever hub checkout the operator has, and an entry that slipped through would abort the whole run on `Cannot iterate over null` after a pass line had already printed.
+        if ! want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"; then
+            fail "environment '$ename' - declares a custom policy with no branches"
+            continue
+        fi
         got="$(jqr '[.[] | "\(.type // "branch"):\(.name)"] | sort | join(", ")' <<<"$policies")"
         assert "environment '$ename' allows exactly [$want]" test "$got" = "$want"
     done
