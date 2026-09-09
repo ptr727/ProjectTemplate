@@ -58,7 +58,9 @@ Neither `node`, `dotnet`, nor `pwsh` is in the table above, deliberately: they s
 
 **Standing a host up.** [`host-setup/`][host-setup-dir] carries the tooling that makes a host satisfy this contract, and its README is the usage. A host with nothing runs [`host-setup/bootstrap.sh`][bootstrap], which fetches this repository and runs that tooling from the fetched tree. A native Windows host with nothing runs [`host-setup/bootstrap.ps1`][bootstrap-ps1] the same way, which finds or installs PowerShell 7 before it fetches anything, since every script under [`host-setup/windows/`][host-setup-windows] requires it. Neither is called by [`scripts/host_gate.py`][host-gate] and neither calls it: the gate measures a host against the floors above, and the tooling is a remedy a person chooses when the gate reports a gap.
 
-A repository that needs more than the fleet does adds its own `host-tools.json` at its root, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
+**Every repository carries a `host-tools.json` at its root, whether or not it declares anything in it.** [`spec/files.json`][files] lists it as a baseline file of every repository, on the same footing as [`OPERATIONS.md`][operations], so a maintainer who needs to declare a floor finds the file where it already is rather than having to know one may be created. A repository with nothing to add carries an empty `tools` list, and that stub is the conformant state rather than a leftover to remove. [`scripts/host_gate.py`][host-gate] reads the file where it finds one and says nothing where it does not, because the gate measures a host against floors and the audit in [`AUDIT.md`][audit] is what reports a baseline file a repository is missing.
+
+A repository that needs more than the fleet does declares it in that file, which the gate layers over the hub's. It may add a tool nobody else uses, raise a floor, or turn an optional tool required. It may **not** lower a floor or turn a required tool optional, since those edits retire a fleet check from inside the repository it protects, and the gate reports a rejected relaxation rather than dropping it.
 
 A repository-only tool can declare constrained package metadata under `install.linux` or `install.windows`. Linux accepts only an `apt` package name. Windows accepts only a `winget` package ID. The installer reads those values as package identifiers and never evaluates `remedy` text from the repository.
 
@@ -367,6 +369,7 @@ A host that fails any row is not ready for the procedure that row names, and the
 [bootstrap]: ../host-setup/bootstrap.sh
 [bootstrap-ps1]: ../host-setup/bootstrap.ps1
 [devcontainer]: ./devcontainer.md
+[files]: ../spec/files.json
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/

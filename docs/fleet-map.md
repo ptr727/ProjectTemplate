@@ -178,7 +178,7 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 ### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
 
 - **Gap** - [`scripts/host_gate.py`][host-gate] run without `--repo` read only the declaration at its own working directory, so a run started in a subdirectory of a repo carrying a `host-tools.json` overlay skipped that overlay without a word.
-- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/tests/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
+- **Resolution** - A bare run whose working directory sits inside such a repo prints a warning naming the overlay's directory and the `--repo` re-run that counts it, asserted by the `TestBareRunOverlayWarning` cases in `scripts/tests/test_host_gate.py`. An explicit `--repo` and `--no-local` each stay silent, since both are a choice the caller made, and so does an overlay declaring no tool, since every repository carries the file whether or not it adds anything. [`STANDUP.md`][standup] section 0 states the residual case the warning cannot cover, a target repo that does not exist yet, instead of the workaround sentence.
 
 ### G3: A Failed Tool Floor Names No Install Remedy (Closed)
 
