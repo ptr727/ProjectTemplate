@@ -378,7 +378,20 @@ gh() {
         self.assertEqual(1, len(emitted))
         self.assertIn("%0A", emitted[0])
 
-        # A percent is escaped too, and first, or escaping the newline would re-encode its own percent.
+        # A carriage return is the third escape, and without this nothing here would notice its removal.
+        verdict = run(
+            ["bash", "-c", script],
+            env={**os.environ, "PYTHON_VERSIONS": "x\ry"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, verdict.returncode)
+        self.assertIn("got: x%0Dy", verdict.stdout + verdict.stderr)
+
+        # A bare percent must reach the annotation encoded.
+        # Their order is what the %0A assertion above covers instead, not this one.
+        # Substituting the percent last renders a newline %250A, which fails there and passes here.
         verdict = run(
             ["bash", "-c", script],
             env={**os.environ, "PYTHON_VERSIONS": "%"},
