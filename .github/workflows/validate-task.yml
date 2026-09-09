@@ -293,7 +293,13 @@ jobs:
         run: |
           set -Eeuo pipefail
           if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
-            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $PYTHON_VERSIONS"
+            # The annotation carries the rejected value, so it is escaped per the workflow command encoding rules first.
+            # A raw newline would end the annotation and let whatever follows it start a command of its own, and the runner reads a command off stderr as readily as stdout, so redirecting rather than escaping would close nothing.
+            # The percent substitution runs first, since running it after the others would re-encode the percent each of them just introduced.
+            escaped=${PYTHON_VERSIONS//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
             exit 1
           fi
 

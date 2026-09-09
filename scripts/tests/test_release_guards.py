@@ -363,6 +363,32 @@ gh() {
                 )
                 self.assertEqual(expected, verdict.returncode)
 
+        # The annotation carries the rejected value back.
+        # The runner reads a workflow command off any line starting with one, so an unescaped newline starts a second.
+        injected = '["3.13"]\n::error::injected'
+        verdict = run(
+            ["bash", "-c", script],
+            env={**os.environ, "PYTHON_VERSIONS": injected},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, verdict.returncode)
+        emitted = (verdict.stdout + verdict.stderr).splitlines()
+        self.assertEqual(1, len(emitted))
+        self.assertIn("%0A", emitted[0])
+
+        # A percent is escaped too, and first, or escaping the newline would re-encode its own percent.
+        verdict = run(
+            ["bash", "-c", script],
+            env={**os.environ, "PYTHON_VERSIONS": "%"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, verdict.returncode)
+        self.assertIn("got: %25", verdict.stdout + verdict.stderr)
+
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
         audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
         bash_only = ("<(", "<<<", "$'", "[[")
