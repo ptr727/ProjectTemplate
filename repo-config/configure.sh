@@ -456,20 +456,27 @@ check_labels() {
 }
 
 check_environments() {
-    local entries count i row ename policy live_envs env_live got want policies extra
+    local entries entry_count count i row ename policy live_envs env_live got want policies extra
     if [ ! -f "$registry" ]; then
         note "deployment environments: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
         return
     fi
-    # Yields null rather than [] where the repo has no single registry entry, so "declares none" and "is not registered" stay distinguishable below.
+    # Registration is answered by its own read rather than by a sentinel value folded into the next one.
+    # No JSON scalar is free to serve as that sentinel: a declared null prints exactly as one would, so an entry declaring an invalid null would report as an unregistered repo and skip the shape test below that exists to catch it.
     # Fail rather than default on a read error, matching the model lookup: a registry that will not parse is a broken run, not a repo with no environments.
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)] | if length == 1 then (.[0] | if has("environments") then .environments else [] end) else null end' "$registry")"; then
-        fail "could not read the declared deployment environments from $registry"
+    if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry")"; then
+        fail "could not read $registry to resolve the entry for $name"
         return
     fi
-    if [ "$entries" = null ]; then
-        note "deployment environments: no single registry entry named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
+    if [ "$entry_count" != 1 ]; then
+        note "deployment environments: $entry_count registry entries named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
+        return
+    fi
+    # The declared value is emitted verbatim, invalid shapes included, so each one reaches the test that judges it rather than being defaulted away here.
+    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+    if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)][0] | if has("environments") then .environments else [] end' "$registry")"; then
+        fail "could not read the declared deployment environments from $registry"
         return
     fi
     # One list read serves both the per-environment assertions and the undeclared-environment note, and it is the call that surfaces an API or permission failure.
