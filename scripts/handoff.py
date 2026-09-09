@@ -643,6 +643,13 @@ def newest_closed(repo: str, track: str) -> dict | None:
             unreadable.append(str(exc))
             continue
         if marker and marker["track"] == track:
+            if unreadable:
+                raise Refusal(
+                    f"#{row['number']} is the newest readable link on track {track!r}, and "
+                    + " ".join(unreadable)
+                    + f" Each of those is newer than it, so one could be {track!r}'s real newest "
+                    "and chaining onto this one would fork the chain."
+                )
             row["marker"] = marker
             return row
     if unreadable:
@@ -803,7 +810,16 @@ def cmd_adopt(a: argparse.Namespace) -> int:
             "adopt. Edit the block in place where a field is wrong."
         )
     if target["state"] == "OPEN":
-        standing = on_track(open_handoffs(a.repo), a.track)
+        rows = open_handoffs(a.repo)
+        broken = [row for row in rows if row.get("malformed")]
+        if broken:
+            listed = ", ".join(f"#{row['number']}" for row in broken)
+            raise Refusal(
+                f"{listed} is open, carries the `{LABEL}` label, and has an unreadable block, so "
+                f"whether track {a.track!r} already has one open cannot be read. Repair that block "
+                "before adopting onto any track."
+            )
+        standing = on_track(rows, a.track)
         if standing is not None:
             raise Refusal(
                 f"track {a.track!r} already has #{standing['number']} open, so adopting "
@@ -841,24 +857,24 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         print(f"1. read #{previous}, the predecessor this block will name")
     else:
         print("1. no --previous given, so this block names none")
-    names = {row["name"] for row in target.get("labels") or []}
-    if LABEL in names:
-        print(f"2. #{target['number']} already carries the `{LABEL}` label")
-    else:
-        print(f"2. add the `{LABEL}` label to #{target['number']}")
-        out = gh(
-            ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
-            dry_run=a.dry_run,
-        ).strip()
-        if not a.dry_run:
-            print(f"  labeled: {out or '#' + str(target['number'])}")
-    print(f"3. write the metadata block on #{target['number']}")
+    print(f"2. write the metadata block on #{target['number']}")
     edit_body(
         a.repo,
         target["number"],
         with_marker(target.get("body") or "", a.track, a.round, previous),
         a.dry_run,
     )
+    names = {row["name"] for row in target.get("labels") or []}
+    if LABEL in names:
+        print(f"3. #{target['number']} already carries the `{LABEL}` label")
+        return 0
+    print(f"3. add the `{LABEL}` label to #{target['number']}")
+    out = gh(
+        ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
+        dry_run=a.dry_run,
+    ).strip()
+    if not a.dry_run:
+        print(f"  labeled: {out or '#' + str(target['number'])}")
     return 0
 
 

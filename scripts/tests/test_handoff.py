@@ -19,6 +19,7 @@ import contextlib
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -75,6 +76,9 @@ class FakeGh:
         self.label = label
         self.calls: list[list[str]] = []
         self.next_number = 1001
+        # A close that reports success and leaves the issue open.
+        # That is the state the read-back after every close exists to catch.
+        self.refuse_close = False
 
     def __call__(self, argv: list[str]) -> str:
         self.calls.append(list(argv))
@@ -90,7 +94,8 @@ class FakeGh:
         if head == ("issue", "comment"):
             return f"https://github.com/o/r/issues/{argv[2]}#issuecomment-1\n"
         if head == ("issue", "close"):
-            self.issues[int(argv[2])]["state"] = "CLOSED"
+            if not self.refuse_close:
+                self.issues[int(argv[2])]["state"] = "CLOSED"
             return f"Closed issue #{argv[2]}\n"
         if head == ("issue", "edit"):
             return self._edit(argv)
@@ -157,6 +162,15 @@ def link(number: int, track: str, round_: int, previous: int | None, **over) -> 
     }
     row.update(over)
     return row
+
+
+def body_file(case: unittest.TestCase, text: str) -> str:
+    """A handoff body on disk, removed when the case that asked for it finishes."""
+    directory = tempfile.mkdtemp()
+    path = Path(directory) / "handoff.md"
+    path.write_text(text, encoding="utf-8")
+    case.addCleanup(shutil.rmtree, directory)
+    return str(path)
 
 
 def run(fake: FakeGh, *argv: str) -> tuple[int, str, str]:
@@ -383,11 +397,7 @@ class NewCase(unittest.TestCase):
     """Create, comment, close, in that order, so a failure leaves a discoverable successor."""
 
     def body_file(self, text: str) -> str:
-        directory = tempfile.mkdtemp()
-        path = Path(directory) / "handoff.md"
-        path.write_text(text, encoding="utf-8")
-        self.addCleanup(shutil.rmtree, directory)
-        return str(path)
+        return body_file(self, text)
 
     def test_the_three_steps_run_in_order(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, 29)})
@@ -730,6 +740,90 @@ class TracksCase(unittest.TestCase):
         self.assertIn("no open", out)
 
 
+class GhBoundaryCase(unittest.TestCase):
+    """`run_gh` and the write confirmations, which patching `run_gh` wholesale never executes.
+
+    Every other case here replaces `run_gh`, so its own body, and the confirmations the write
+    helpers make on top of it, ran in no test at all. Four guards could be deleted outright with
+    the suite green, one of them the close read-back `GOVERNANCE.md` "Repository Boundaries and
+    Write Safety" requires.
+    """
+
+    def completed(self, code: int, out: str = "", err: str = "") -> object:
+        return subprocess.CompletedProcess(args=["gh"], returncode=code, stdout=out, stderr=err)
+
+    def test_a_nonzero_gh_exit_raises_rather_than_returning_a_blank(self) -> None:
+        err = io.StringIO()
+        with (
+            unittest.mock.patch(
+                "subprocess.run", return_value=self.completed(1, "", "gh: bad credentials")
+            ),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(handoff.Execution),
+        ):
+            handoff.run_gh(["issue", "list"])
+        self.assertIn("gh: bad credentials", err.getvalue())
+
+    def test_a_long_gh_error_says_how_much_it_left(self) -> None:
+        long = "x" * (handoff.STDERR_CAP + 50)
+        err = io.StringIO()
+        with (
+            unittest.mock.patch("subprocess.run", return_value=self.completed(1, "", long)),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(handoff.Execution),
+        ):
+            handoff.run_gh(["issue", "list"])
+        self.assertIn("50 more character(s) not shown", err.getvalue())
+        self.assertTrue(err.getvalue().endswith("\n"))
+
+    def test_gh_missing_from_the_path_is_an_execution_failure(self) -> None:
+        with (
+            unittest.mock.patch("subprocess.run", side_effect=OSError("no gh")),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.run_gh(["issue", "list"])
+        self.assertIn("could not run gh", str(caught.exception))
+
+    def test_output_that_is_not_json_raises_rather_than_reading_as_empty(self) -> None:
+        """A degraded empty answer is the failure the label refusal exists to prevent."""
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: "not json"),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.gh_json(["issue", "list"])
+        self.assertIn("not JSON", str(caught.exception))
+
+    def test_a_comment_returning_no_url_is_not_taken_as_posted(self) -> None:
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: ""),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.comment("o/r", 5, "body", dry_run=False)
+        self.assertIn("nothing confirms it", str(caught.exception))
+
+    def test_a_close_that_did_not_take_is_reported_rather_than_assumed(self) -> None:
+        """A write that appears to have failed is verified, never assumed harmless."""
+        fake = FakeGh({5: link(5, "default", 1, None)})
+        fake.refuse_close = True
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", fake),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.close("o/r", 5, dry_run=False)
+        self.assertIn("not confirmed", str(caught.exception))
+
+    def test_a_create_returning_no_url_is_not_taken_as_filed(self) -> None:
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: "queued\n"),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.create("o/r", "t", "b", dry_run=False)
+        self.assertIn("no issue URL", str(caught.exception))
+
+
 class MalformedCase(unittest.TestCase):
     """One unreadable block must not take down the lanes that have nothing to do with it."""
 
@@ -756,6 +850,28 @@ class MalformedCase(unittest.TestCase):
         code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "bar")
         self.assertEqual(code, 0)
         self.assertIn("#51", out)
+
+    def test_an_unreadable_link_newer_than_the_match_refuses_rather_than_forking(self) -> None:
+        """The scan runs newest first, so anything skipped before a match is newer than it."""
+        fake = FakeGh(
+            {
+                59: link(59, "default", 3, None, state="CLOSED"),
+                60: link(60, "default", 4, None, state="CLOSED", body=doubled("default")),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--title",
+            "Next",
+            "--body-file",
+            body_file(self, "work"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("would fork the chain", err)
+        self.assertNotIn(1001, fake.issues)
 
     def test_a_doubled_closed_link_refuses_only_where_the_track_was_not_found(self) -> None:
         fake = FakeGh({50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo"))})
@@ -976,6 +1092,32 @@ class AdoptCase(unittest.TestCase):
             {
                 30: link(30, "lane", 1, None),
                 40: link(40, "default", 1, None, body="hand-written"),
+            }
+        )
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("#30", err)
+        self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
+
+    def test_adopt_writes_the_block_before_the_label(self) -> None:
+        """A failure between them then leaves an unlabeled issue with a block, blocking nothing.
+
+        The other order leaves a labeled issue with no block, and `require_adopted` refuses every
+        read on every track in the repository until someone re-runs this.
+        """
+        fake = FakeGh({40: link(40, "default", 1, None, body="hand-written", labels=[])})
+        code, _, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        edits = [c for c in fake.calls if c[:2] == ["issue", "edit"]]
+        flags = ["--body-file" if "--body-file" in c else "--add-label" for c in edits]
+        self.assertEqual(flags, ["--body-file", "--add-label"])
+
+    def test_adopt_refuses_while_an_open_link_has_an_unreadable_block(self) -> None:
+        """`on_track` reads only parsed rows, so a malformed one is invisible to the guard."""
+        fake = FakeGh(
+            {
+                30: link(30, "lane", 1, None, body=doubled("lane")),
+                40: link(40, "default", 1, None, body="hand-written", labels=[]),
             }
         )
         code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
