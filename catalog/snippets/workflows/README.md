@@ -9,7 +9,7 @@ A caller stub for a hub-hosted task carries no snippet of its own until the task
 | `merge-bot-pull-request.yml` | Caller stub for the hub-hosted merge-bot task, pinned to a hub release, the shape every repo carries | D8.1, D8.3, D8.4 |
 | `test-pull-request.yml` | Caller stub for the hub-hosted `validate-task.yml`, the no-build operational trigger shape, pinned to a hub release | D1.2, D1.5 |
 | `run-periodic-codegen-pull-request.yml` | Caller stub for the hub-hosted `run-codegen-pull-request-task.yml`, pinned to a hub release, the same per-repo shape a codegen repo carries today | D8.2 |
-| `publish-release.yml` | Caller stub for the hub-hosted release chain, the NuGet-library shape whose merges publish, pinned to a hub release, with the package push in the caller's own job so the OIDC `job_workflow_ref` claim names the publishing repository | D4.1, D5.2, D7.1, D7.2 |
+| `publish-release.yml` | Caller stub for the hub-hosted release chain, the NuGet-library shape, pinned to a hub release, with the package push in the caller's own job so the OIDC `job_workflow_ref` claim names the publishing repository | D4.1, D5.2, D7.1, D7.2 |
 | `.github/workflows/get-version-task.yml` | Hub-hosted and reached by pin from a leaf or publisher rather than carried, with no caller-stub snippet since it is called as a job inside a larger stub, per [`docs/reusable-workflows.md`][reusable-workflows] | D3 |
 | `.github/workflows/publish-plan-task.yml` | Hub-hosted and reached by pin from every publish-release job rather than carried, with no caller-stub snippet since it is called as a job inside a larger stub, per [`docs/reusable-workflows.md`][reusable-workflows] | D4 |
 
