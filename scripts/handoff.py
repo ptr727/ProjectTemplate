@@ -612,8 +612,11 @@ def cmd_chain(a: argparse.Namespace) -> int:
     return 0
 
 
-def newest_closed(repo: str, track: str) -> dict | None:
+def newest_closed(repo: str, track: str, ignore: int | None = None) -> dict | None:
     """The newest closed handoff on a track, or None where the track has never had one.
+
+    `ignore` is an issue to leave out of the scan, which `adopt` passes so a closed issue does not
+    count as an unreadable link blocking its own adoption.
 
     A track with no open handoff is either one that has never had a handoff or one whose lane was
     closed out, and the two are not the same. Reading the second as the first makes the next `new`
@@ -640,6 +643,8 @@ def newest_closed(repo: str, track: str) -> dict | None:
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
     unreadable: list[str] = []
     for row in sorted(rows, key=lambda row: row["number"], reverse=True):
+        if row["number"] == ignore:
+            continue
         try:
             marker = parse_marker(row.get("body") or "", row["number"])
         except Refusal as exc:
@@ -821,13 +826,18 @@ def cmd_link(a: argparse.Namespace) -> int:
     return 0
 
 
-def require_track_free(repo: str, track: str, adopting: int) -> None:
+def require_track_free(repo: str, track: str, adopting: int, superseded: int | None = None) -> None:
     """Refuse where adopting onto `track` would leave two open handoffs on it.
 
     Both of `adopt`'s branches run this, the first-order one and the half-applied recovery, since
     a recovery is not a licence to skip the invariant. A lane can acquire an open link between a
     half-applied run and the re-run that finishes it, and finishing regardless is how a silent
     fork becomes a hard ambiguity.
+
+    `superseded` is the link the issue being adopted names as its own predecessor. That one is
+    the link this issue replaces rather than a second one competing with it, so counting it makes
+    the recovery `link` prints refuse in exactly the state that printed it, which leaves the
+    operator with `new` and a silent fork as the only way forward.
     """
     rows = open_handoffs(repo)
     broken = [row for row in rows if row.get("malformed")]
@@ -839,12 +849,12 @@ def require_track_free(repo: str, track: str, adopting: int) -> None:
             "before adopting onto any track."
         )
     standing = on_track(rows, track)
-    if standing is not None and standing["number"] != adopting:
-        raise Refusal(
-            f"track {track!r} already has #{standing['number']} open, so adopting #{adopting} "
-            "onto it would make two. Adopt it onto a track of its own, or close the standing "
-            "link first."
-        )
+    if standing is None or standing["number"] in {adopting, superseded}:
+        return
+    raise Refusal(
+        f"track {track!r} already has #{standing['number']} open, so adopting #{adopting} onto "
+        "it would make two. Adopt it onto a track of its own, or close the standing link first."
+    )
 
 
 def cmd_adopt(a: argparse.Namespace) -> int:
@@ -853,7 +863,10 @@ def cmd_adopt(a: argparse.Namespace) -> int:
     labeled = LABEL in {row["name"] for row in target.get("labels") or []}
     standing_block = parse_marker(target.get("body") or "", target["number"])
     if target["state"] == "OPEN":
-        require_track_free(a.repo, a.track, target["number"])
+        replacing = None
+        if standing_block is not None and standing_block["previous"] != "none":
+            replacing = int(standing_block["previous"])
+        require_track_free(a.repo, a.track, target["number"], replacing)
     if standing_block is not None:
         wanted = {"track": a.track, "round": str(a.round), "previous": str(a.previous or "none")}
         if labeled:
@@ -911,7 +924,16 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         previous = int(before["number"])
         print(f"1. read #{previous}, the predecessor this block will name")
     else:
-        print("1. no --previous given, so this block names none")
+        standing_closed = newest_closed(a.repo, a.track, ignore=target["number"])
+        if standing_closed is not None:
+            raise Refusal(
+                f"track {a.track!r} already has a chain, whose newest closed link is "
+                f"#{standing_closed['number']} at round {standing_closed['marker']['round']}. "
+                f"Adopting #{target['number']} with no --previous would start a second chain "
+                "beside it. Pass --previous and --round to join the chain, or name a track of "
+                "its own."
+            )
+        print("1. no --previous given, and this track has no chain, so this block names none")
     print(f"2. write the metadata block on #{target['number']}")
     edit_body(
         a.repo,

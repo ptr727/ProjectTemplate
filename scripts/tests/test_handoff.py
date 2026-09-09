@@ -1213,6 +1213,37 @@ class LinkCase(unittest.TestCase):
         self.assertIn("adopt 40 --track lane --round 2 --previous 39", err)
         self.assertEqual(fake.issues[39]["state"], "OPEN")
 
+    def test_the_recovery_link_prints_is_one_adopt_will_actually_run(self) -> None:
+        """A refusal naming a command that always refuses leaves `new` and a silent fork.
+
+        The predecessor the successor's own block names is the link it replaces rather than a
+        second one competing with it.
+        """
+        fake = FakeGh(
+            {
+                39: link(39, "lane", 1, None),
+                40: link(40, "lane", 2, 39, labels=[]),
+            }
+        )
+        refused = run(fake, "link", "--repo", "o/r", "--new", "40", "--previous", "39")
+        self.assertEqual(refused[0], 1)
+        self.assertIn("adopt 40 --track lane --round 2 --previous 39", refused[1] + refused[2])
+        code, _, _ = run(
+            fake,
+            "adopt",
+            "40",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--round",
+            "2",
+            "--previous",
+            "39",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn({"name": handoff.LABEL}, fake.issues[40]["labels"])
+
     def test_a_successor_with_no_block_refuses(self) -> None:
         fake = FakeGh(
             {
@@ -1436,6 +1467,33 @@ class AdoptCase(unittest.TestCase):
         code, _, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
         self.assertEqual(code, 0)
         self.assertEqual(read_marker(fake.issues[40]["body"], 40)["track"], "lane")
+
+    def test_adopt_refuses_to_start_a_second_chain_on_a_closed_out_lane(self) -> None:
+        """`new` consults the closed side for this reason, and `adopt` is the other starter.
+
+        Writing `previous=none` beside an existing chain forks it, and the walk then ends cleanly
+        at that block, so a later `--grep` reports no match over a search that never reached the
+        chain holding the text.
+        """
+        fake = FakeGh(
+            {
+                41: link(41, "lane", 1, None, state="CLOSED"),
+                42: link(42, "lane", 2, 41, state="CLOSED"),
+                44: link(44, "default", 1, None, body="hand-written", labels=[]),
+            }
+        )
+        code, _, err = run(fake, "adopt", "44", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("#42", err)
+        self.assertIn("second chain beside it", err)
+        self.assertEqual(fake.issues[44]["labels"], [])
+
+    def test_adopt_on_a_track_with_no_chain_names_no_predecessor(self) -> None:
+        fake = FakeGh({44: link(44, "default", 1, None, body="hand-written", labels=[])})
+        code, out, _ = run(fake, "adopt", "44", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        self.assertIn("this track has no chain", out)
+        self.assertEqual(read_marker(fake.issues[44]["body"], 44)["previous"], "none")
 
     def test_adopt_refuses_an_issue_named_as_its_own_predecessor(self) -> None:
         fake = FakeGh({40: link(40, "default", 1, None, body="hand-written")})
