@@ -364,11 +364,11 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
     `resume`, since a message naming the other one sends a reader to a flag that subcommand
     rejects.
 
-    Four things end a walk short. The cap, a link whose body carries no metadata block, which
-    names nothing before it and is not guessed past, a link whose block cannot be read at all, and
-    a number already seen, since a cycle would otherwise read as an endless chain. Each returns its
-    own phrase rather than the clean end's None, because all four leave links unread and only the
-    first is a number the caller chose.
+    Five things end a walk short. The cap, a link whose body carries no metadata block, which
+    names nothing before it and is not guessed past, a link whose block cannot be read at all, an
+    ancestor `gh` cannot resolve, and a number already seen, since a cycle would otherwise read as
+    an endless chain. Each returns its own phrase rather than the clean end's None, because all
+    five leave links unread and only the first is a number the caller chose.
     """
     links: list[dict] = []
     seen: set[int] = set()
@@ -379,7 +379,10 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
         if len(links) >= limit:
             return links, f"the {cap} cap of {limit}, with #{number} and earlier unread"
         seen.add(number)
-        data = issue(repo, number)
+        try:
+            data = issue(repo, number)
+        except Execution as exc:
+            return links, f"#{number}, which could not be read: {exc}"
         try:
             data["marker"] = parse_marker(data.get("body") or "", data["number"])
         except Refusal as exc:
@@ -786,9 +789,6 @@ def cmd_link(a: argparse.Namespace) -> int:
         )
     else:
         print(f"1. #{new['number']} already names #{previous['number']}, nothing to edit")
-    if previous["state"] == "CLOSED":
-        print(f"2. #{previous['number']} is already closed, so the chain is finished")
-        return 0
     print(f"2. comment the forward link on #{previous['number']}")
     comment(
         a.repo,
@@ -796,6 +796,9 @@ def cmd_link(a: argparse.Namespace) -> int:
         f"Continued in #{new['number']}, round {marker['round']} on track `{marker['track']}`.",
         a.dry_run,
     )
+    if previous["state"] == "CLOSED":
+        print(f"3. #{previous['number']} is already closed, so the chain is finished")
+        return 0
     print(f"3. close #{previous['number']}")
     close(a.repo, previous["number"], a.dry_run)
     return 0
@@ -804,11 +807,26 @@ def cmd_link(a: argparse.Namespace) -> int:
 def cmd_adopt(a: argparse.Namespace) -> int:
     """Put the label and the metadata block on a handoff that predates both."""
     target = issue(a.repo, a.issue)
-    if parse_marker(target.get("body") or "", target["number"]) is not None:
-        raise Refusal(
-            f"#{target['number']} already carries a handoff metadata block, so there is nothing to "
-            "adopt. Edit the block in place where a field is wrong."
-        )
+    labeled = LABEL in {row["name"] for row in target.get("labels") or []}
+    standing_block = parse_marker(target.get("body") or "", target["number"])
+    if standing_block is not None:
+        wanted = {"track": a.track, "round": str(a.round), "previous": str(a.previous or "none")}
+        if labeled or standing_block != wanted:
+            raise Refusal(
+                f"#{target['number']} already carries a handoff metadata block, so there is "
+                "nothing to adopt. Edit the block in place where a field is wrong."
+            )
+        # The block is this run's own, written before a label write that did not land.
+        # Finishing it is what makes the body-first order recoverable rather than a dead end.
+        print(f"1. #{target['number']} already carries this block, so only the label is left")
+        print(f"2. add the `{LABEL}` label to #{target['number']}")
+        out = gh(
+            ["issue", "edit", str(target["number"]), "--repo", a.repo, "--add-label", LABEL],
+            dry_run=a.dry_run,
+        ).strip()
+        if not a.dry_run:
+            print(f"  labeled: {out or '#' + str(target['number'])}")
+        return 0
     if target["state"] == "OPEN":
         rows = open_handoffs(a.repo)
         broken = [row for row in rows if row.get("malformed")]
@@ -864,8 +882,7 @@ def cmd_adopt(a: argparse.Namespace) -> int:
         with_marker(target.get("body") or "", a.track, a.round, previous),
         a.dry_run,
     )
-    names = {row["name"] for row in target.get("labels") or []}
-    if LABEL in names:
+    if labeled:
         print(f"3. #{target['number']} already carries the `{LABEL}` label")
         return 0
     print(f"3. add the `{LABEL}` label to #{target['number']}")

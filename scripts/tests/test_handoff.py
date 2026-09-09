@@ -69,6 +69,11 @@ class FakeGh:
 
     It honors `--json`, `--state`, `--label`, and `--limit`, because a stub looser than the tool
     it stands in for is a stub that green-lights a crash.
+
+    It also refuses any call carrying no `--repo`, which real `gh` would answer by resolving the
+    repository from the working directory's remote. That is the failure this whole script is built
+    against, and without this the argument could be dropped from any of nine call sites with every
+    case still green.
     """
 
     def __init__(self, issues: dict[int, dict] | None = None, *, label: bool = True) -> None:
@@ -82,12 +87,22 @@ class FakeGh:
 
     def __call__(self, argv: list[str]) -> str:
         self.calls.append(list(argv))
+        if "--repo" not in argv:
+            raise AssertionError(
+                f"{' '.join(argv)} carries no --repo, so real gh would resolve the repository "
+                "from the working directory instead of the one named"
+            )
         head = (argv[0], argv[1])
         if head == ("label", "list"):
             return json.dumps([{"name": handoff.LABEL}] if self.label else [{"name": "bug"}])
         if head == ("issue", "list"):
             return json.dumps([projected(row, argv) for row in self._list(argv)])
         if head == ("issue", "view"):
+            # An issue this repository does not hold is what `gh` exits non-zero on.
+            # `run_gh` turns that into an Execution, so the fake stands in for the same thing.
+            # Raising a KeyError instead would model a failure no caller has a reader for.
+            if int(argv[2]) not in self.issues:
+                raise handoff.Execution(f"gh issue view failed rc=1 for #{argv[2]}")
             return json.dumps(projected(self.issues[int(argv[2])], argv))
         if head == ("issue", "create"):
             return self._create(argv)
@@ -120,6 +135,11 @@ class FakeGh:
         number = self.next_number
         self.next_number += 1
         body = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
+        # The labels come from argv rather than from a constant.
+        # That is `projected`'s reason applied to a write.
+        # A fake labeling an issue the call never asked to label proves nothing.
+        # An unlabeled handoff is invisible to every read the script makes.
+        labels = [{"name": argv[i + 1]} for i, arg in enumerate(argv) if arg == "--label"]
         self.issues[number] = {
             "number": number,
             "title": argv[argv.index("--title") + 1],
@@ -129,7 +149,7 @@ class FakeGh:
             "updatedAt": "2026-09-09T00:00:00Z",
             "closedAt": None,
             "url": f"https://github.com/o/r/issues/{number}",
-            "labels": [{"name": handoff.LABEL}],
+            "labels": labels,
         }
         return f"https://github.com/o/r/issues/{number}\n"
 
@@ -472,6 +492,12 @@ class NewCase(unittest.TestCase):
         self.assertIn("nothing to link or close", out)
         self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "none")
 
+    def test_the_new_issue_carries_the_label(self) -> None:
+        """An unlabeled handoff is invisible to every read this script makes."""
+        fake = FakeGh()
+        run(fake, "new", "--repo", "o/r", "--title", "First", "--body-file", self.body_file("w"))
+        self.assertEqual(fake.issues[1001]["labels"], [{"name": handoff.LABEL}])
+
     def test_the_title_carries_the_track_and_the_subject(self) -> None:
         fake = FakeGh()
         run(
@@ -727,6 +753,19 @@ class TracksCase(unittest.TestCase):
         self.assertIn("lane-b", out)
         self.assertIn("updated", out)
 
+    def test_the_open_read_is_filtered_to_the_label(self) -> None:
+        """Without the filter every open issue in the repository reads as a handoff."""
+        fake = FakeGh(
+            {
+                4: link(4, "lane", 1, None),
+                5: link(5, "lane", 1, None, labels=[], body="an ordinary issue"),
+            }
+        )
+        code, out, _ = run(fake, "tracks", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#4", out)
+        self.assertNotIn("#5", out)
+
     def test_an_unadopted_issue_is_surveyed_rather_than_refused(self) -> None:
         """`tracks` is the survey, so it reports what every other subcommand refuses over."""
         fake = FakeGh({6: link(6, "lane", 1, None, body="hand-written")})
@@ -814,6 +853,45 @@ class GhBoundaryCase(unittest.TestCase):
             handoff.close("o/r", 5, dry_run=False)
         self.assertIn("not confirmed", str(caught.exception))
 
+    def test_a_label_list_that_is_not_an_array_is_an_execution_failure(self) -> None:
+        """Reading a non-array as empty would report the label absent, the degraded answer."""
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: '{"not": "an array"}'),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.require_label("o/r")
+        self.assertIn("did not read as an array", str(caught.exception))
+
+    def test_an_unreadable_body_file_refuses_rather_than_filing_an_empty_handoff(self) -> None:
+        code, _, err = run(
+            FakeGh(), "new", "--repo", "o/r", "--title", "T", "--body-file", "/no/such/path.md"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("could not read the body file", err)
+
+    def test_the_create_url_is_read_from_the_end_of_the_output(self) -> None:
+        """An unanchored match would take an issue number out of any URL gh happened to print."""
+        noise = (
+            "see https://github.com/o/r/issues/99 for context\nhttps://github.com/o/r/issues/7\n"
+        )
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: noise),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(handoff.create("o/r", "t", "b", dry_run=False), 7)
+
+    def test_a_long_gh_error_is_actually_cut(self) -> None:
+        """Asserting only the notice lets an uncut dump carrying that notice pass."""
+        long = "x" * (handoff.STDERR_CAP + 50)
+        err = io.StringIO()
+        with (
+            unittest.mock.patch("subprocess.run", return_value=self.completed(1, "", long)),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(handoff.Execution),
+        ):
+            handoff.run_gh(["issue", "list"])
+        self.assertEqual(err.getvalue().count("x"), handoff.STDERR_CAP)
+
     def test_a_create_returning_no_url_is_not_taken_as_filed(self) -> None:
         with (
             unittest.mock.patch.object(handoff, "run_gh", lambda argv: "queued\n"),
@@ -891,6 +969,14 @@ class MalformedCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("#61", out)
         self.assertIn("cannot be read", out)
+
+    def test_an_ancestor_that_cannot_be_read_ends_the_walk_with_a_phrase(self) -> None:
+        """The fifth early end, which used to discard every link already walked."""
+        fake = FakeGh({61: link(61, "default", 2, 60)})
+        code, out, _ = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#61", out)
+        self.assertIn("could not be read", out)
 
     def test_a_zero_predecessor_is_not_a_block_at_all(self) -> None:
         """Zero is no issue number, and reaching gh with it exits 2 for a fixable block."""
@@ -992,7 +1078,11 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("adopt", err)
 
-    def test_a_closed_predecessor_reports_the_chain_finished(self) -> None:
+    def test_a_closed_predecessor_still_gets_the_forward_comment(self) -> None:
+        """`new` comments before it tests the state, so the recovery path has to as well.
+
+        Testing first made the one write `link` exists to finish the one write it could not make.
+        """
         fake = FakeGh(
             {
                 20: link(20, "default", 1, None, state="CLOSED"),
@@ -1002,6 +1092,9 @@ class LinkCase(unittest.TestCase):
         code, out, _ = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
         self.assertEqual(code, 0)
         self.assertIn("already closed", out)
+        posted = [c for c in fake.calls if c[:2] == ["issue", "comment"]]
+        self.assertEqual(len(posted), 1)
+        self.assertIn("Continued in #21", posted[0][posted[0].index("--body") + 1])
 
 
 class AdoptCase(unittest.TestCase):
@@ -1124,6 +1217,32 @@ class AdoptCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("#30", err)
         self.assertNotIn("--body-file", [arg for call in fake.calls for arg in call])
+
+    def test_a_half_applied_adopt_finishes_on_a_re_run(self) -> None:
+        """Body-first is only safe if the label write can still be made afterwards.
+
+        Refusing the re-run left an issue no label-filtered read can see, which the next `new`
+        then forks the chain around in silence.
+        """
+        fake = FakeGh(
+            {40: link(40, "lane", 1, None, body=marked("hand-written", "lane", 1, None), labels=[])}
+        )
+        code, out, _ = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        self.assertIn("only the label is left", out)
+        self.assertIn({"name": handoff.LABEL}, fake.issues[40]["labels"])
+
+    def test_a_block_that_is_not_this_run_s_still_refuses(self) -> None:
+        fake = FakeGh(
+            {
+                40: link(
+                    40, "lane", 9, None, body=marked("someone else's", "lane", 9, None), labels=[]
+                )
+            }
+        )
+        code, _, err = run(fake, "adopt", "40", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing to adopt", err)
 
     def test_adopt_numbers_its_steps_from_one(self) -> None:
         """A run opening at step 2 reads as one that was interrupted."""
