@@ -415,15 +415,16 @@ def package_source(tool: dict) -> str | None:
 def overlay_above(start: Path) -> Path | None:
     """The nearest ancestor of `start` whose host-tools.json this bare run should name, or None.
 
-    A bare run reads only the declaration at the working directory itself, so an overlay at the
-    root of the repo the run is inside goes unread without a word when the run starts in a
-    subdirectory. Naming that directory lets the run say what it skipped and which re-run reads it.
+    A bare run layers only the declaration at the working directory itself, so an overlay at the
+    root of the repo the run is inside goes unapplied without a word when the run starts in a
+    subdirectory. Naming that directory lets the run say what it skipped and which re-run applies it.
 
     An overlay declaring no tool is passed over in silence, because every repository carries the
     file whether or not it adds anything, so warning on presence alone would tell the operator to
-    re-run a command that reads a declaration adding nothing. An overlay this cannot read is named
-    rather than passed over, since a bare run cannot tell an unreadable declaration from an empty
-    one, and the re-run is what turns the guess into the diagnostic read_declaration already writes.
+    re-run a command that applies a declaration adding nothing. An overlay this cannot parse is
+    named rather than passed over, since whether it declares anything is exactly what the failed
+    parse leaves unknown, and the re-run is what turns that into the diagnostic read_declaration
+    already writes.
 
     The walk stops at the nearest carrier either way, empty or not.
     """
@@ -432,6 +433,8 @@ def overlay_above(start: Path) -> Path | None:
         if not overlay.is_file():
             continue
         tools = read_declaration(overlay, "repository host tool declaration")
+        # Written out rather than folded into the truthiness below, which a diagnostic already satisfies by being a non-empty string.
+        # No test can tell the two apart, so this line is for a reader and for a read_declaration that one day returns an empty diagnostic.
         if isinstance(tools, str):
             return parent
         return parent if tools else None
@@ -572,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     if skipped is not None:
         # Outside --quiet, because a silently skipped overlay is the omission this line exists to name.
         print(
-            f"         warning: {skipped} carries a host-tools.json overlay this bare run did not read - re-run with --repo {quote_argument(str(skipped))} to read it"
+            f"         warning: {skipped} carries a host-tools.json overlay this bare run did not apply - re-run with --repo {quote_argument(str(skipped))}"
         )
     return 1 if issues else 0
 

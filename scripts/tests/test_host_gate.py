@@ -654,8 +654,8 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             out = self.run_from(sub, ["--spec", self.spec_with_one_passing_tool(d)])
             self.assertNotIn("warning:", out)
 
-    def test_an_unreadable_overlay_is_named_rather_than_passed_over(self):
-        """A bare run cannot tell an unreadable declaration from an empty one, so it says so."""
+    def test_an_unreadable_overlay_is_named_like_a_declaring_one(self):
+        """The failed parse leaves open whether it declares anything, so the run names it."""
         import tempfile
 
         for payload in ("{not json", '{"tools": {"gh": {}}}'):
@@ -684,7 +684,7 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             self.assertEqual(host_gate.overlay_above(deep), inner.resolve())
 
     def test_an_empty_overlay_nearer_than_a_declaring_one_stops_the_walk(self):
-        """A further ancestor carrying one is a different repository, and the run is in the nearer."""
+        """The nearest carrier decides, so an empty one is silence rather than a walk past it."""
         import tempfile
 
         with tempfile.TemporaryDirectory() as d:
