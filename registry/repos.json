@@ -60,7 +60,7 @@
             "publish": [{ "target": "pypi", "mechanism": "oidc" }],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "publish-on-merge",
+            "releaseTrigger": "two-phase",
             "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "pyproject.toml" },
             "driftNotes": ["Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."]
         },

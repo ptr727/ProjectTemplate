@@ -19,7 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Scope-selector vocabularies, per spec/scope-model.md, kept in sync with the $defs in registry/repos.schema.json.
 # The four namespaces, meaning project types plus these three, must stay disjoint so a flat appliesTo token set in spec/files.json is unambiguous.
 WORKFLOW_MODELS = ("release", "operational")
-RELEASE_TRIGGERS = ("two-phase", "publish-on-merge", "dispatch-only", "none")
+RELEASE_TRIGGERS = ("two-phase", "dispatch-only", "none")
 CONSUMER_MODELS = ("push", "pull")
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
