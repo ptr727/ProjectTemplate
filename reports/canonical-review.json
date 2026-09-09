@@ -363,11 +363,11 @@
     },
     {
       "unit": ".agents/skills/merge-and-release/SKILL.md > The Procedure",
-      "digest": "sha256:508166bd23ac8f46864da194383676eac7872b52026ab83a6fbdc0b1a6c52b61",
+      "digest": "sha256:89fd928803a3b70e75757d0539b37ce69062e29d68ed4ea0b318c7952b1d9105",
       "reviewer": "agent-skill",
-      "findings": 14,
+      "findings": 10,
       "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T15:19:53Z"
+      "stamp": "2026-09-09T16:22:24Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > (preamble)",
