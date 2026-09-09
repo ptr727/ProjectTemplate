@@ -39,7 +39,7 @@ One pull request pointing a hub `uses:` at a hub-owned action, so that the resol
 
 One pull request measuring the remaining carried surface against the carry-versus-reach test and moving whatever qualifies, now that the model is settled rather than open.
 
-**State** `decision`. **Touches** [`AUDIT.md`][audit-doc] and [`spec/files.json`][files]. **Cost** one hub edit plus a retirement per repo on its next visit. The workflow half of this cluster, replacing copy-pasted workflow content with cross-repo reuse, is measured and answered under "Hub-Hosted Reusable Workflows" below.
+**State** `measure`. **Touches** [`AUDIT.md`][audit-doc] and [`spec/files.json`][files]. **Cost** one hub edit plus a retirement per repo on its next visit. The workflow half of this cluster, replacing copy-pasted workflow content with cross-repo reuse, is measured and answered under "Hub-Hosted Reusable Workflows" below.
 
 - **Measure carried [`AUDIT.md`][audit-doc] against the test.** It is adapted per repo today and the question is how much of it is genuinely per-repo.
   - **Blocked by** - Nothing.
