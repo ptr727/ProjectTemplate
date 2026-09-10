@@ -751,10 +751,12 @@ class RegistryEntryGateCase(unittest.TestCase):
         )
 
     def test_agreement_is_case_sensitive(self) -> None:
-        """configure.sh keys with `select(.name == $n)`, an exact match, so a case-differing name resolves to nothing.
+        """The disagreeing case above differs by more than case, so a casefolded comparison passes it.
 
-        The disagreeing case above differs by more than case, so a casefolded comparison passes it. This is the
-        shape that pins the comparison, and it is the one a future loosening would silently admit.
+        This is the shape that pins the comparison, and it is the one a future loosening would silently admit.
+        A case-only mismatch is refused by spec/resolve_description.py's near-miss guard as well, which aborts
+        configure.sh before any assertion runs, so what this adds is the gate catching it over the whole
+        registry in CI rather than one repo at apply time.
         """
         self.assertIn(
             "name and url disagree, the url naming repo 'Fixture'",
@@ -986,10 +988,12 @@ class RegistryEntryGateCase(unittest.TestCase):
                 )
 
     def test_a_bare_string_drift_notes_is_refused(self) -> None:
-        """A duck-typed container test admits it, and each character then reads as a non-empty note.
+        """A duck-typed container test admits it, and its characters are then judged one at a time as notes.
 
-        Its requiredSecrets twin has this case; without it here, only the null shape was covered, and a None is
-        not iterable either, so it does not tell a type test from a container test.
+        Its requiredSecrets twin has this case. Without it here only the null shape was covered, and a None is
+        not iterable either, so it does not tell a type test from a container test. The mutant is not silent on
+        this input, since the two spaces are refused as empty notes, so the assertion is on the message that
+        names the whole value rather than on the run being clean.
         """
         self.assertIn(
             "Fixture: driftNotes must be an array of notes",

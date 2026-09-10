@@ -66,7 +66,9 @@ GROUND_TRUTH_BRANCH_SHAPE = (
 # That comparison is an exact set difference against the names GitHub's API returns, so a declaration that is not character-for-character one of them is unresolvable rather than merely untidy.
 # Upper case is part of the shape for that reason.
 # Measured across the fleet's repositories, every stored name is upper case, and GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
-# A lower-case declaration therefore matches no stored name and cannot be made to: it is reported missing from the store on every run while the name it meant is simultaneously reported as claimed by no mechanism, so one typo yields two findings on a repository whose store is correct.
+# A lower-case declaration therefore matches no stored name and cannot be made to, so it is reported missing from the store on every run against a repository whose store is correct.
+# Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well, since requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
+# A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
 # The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away: GitHub refuses to store such a name at all, so a repo declaring one collects a missing-from-the-store finding that nothing it can do retires.
 # Refusing lower case outright is what makes that prefix clause exact rather than approximate, since a case-insensitive prefix needs no case-insensitive test once no lower-case name is admitted.
 # A negative lookahead rather than a second check, so the schema's advisory copy stays one pattern and cannot express less than the gate.
@@ -821,9 +823,11 @@ def main():
             errors.append(f"{name}: duplicate registry entry for '{identity}'")
         seen_identities.add(identity)
         # The key and the identity must name the same repository, since repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
-        # An entry whose name differs from its url's repo segment resolves to nothing there, and the run continues: the environment assertions are skipped while it still reports no drift, and the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload.
-        # The environment case prints a note saying no entry of that name was found, which is the one consequence a reader could act on, and it reads as a repo declaring no environment rather than as a registry that disagrees with itself.
+        # An entry whose name differs by more than letter case resolves to nothing there and the run continues: the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload, and the environment and description assertions are skipped while the run still reports no drift.
+        # Each skipped assertion prints a note naming the repo it found no entry for, so a reader is told something, and what they are told reads as a repo declaring no environment and no description rather than as a registry that disagrees with itself.
         # The model case is silent outright, since jq resolves the fallback and exits 0 with a value.
+        # A name differing only by letter case is caught there already, by spec/resolve_description.py's near-miss guard, which raises and exits the script before any assertion runs.
+        # It is refused here as well because that guard runs at apply time on one repo, where this runs over the whole registry in CI, and because the guard is a consumer rather than the rule.
         # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
         # Agreement is also the whole of the name's own grammar, and deliberately so.
         # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows, so a name that equals one carries no invisible character and needs no pattern of its own to say so.
@@ -869,7 +873,7 @@ def main():
             )
         # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
         # A padded element is therefore reported missing from the actions store on every run while the unpadded name it was meant to be goes unrequired, and a non-string element reaches a set membership test that answers False for every name there is.
-        # A positive grammar rather than a padding test, per the grammars at the top of this file, and it is GitHub's own rule for a secret name: letters, digits and underscores, not opening with a digit.
+        # A positive grammar rather than a padding test, per the grammars at the top of this file, and SECRET_NAME_PATTERN there is the one statement of what it admits.
         # Presence is the test rather than `is not None`, since a declared null is a value of the wrong type and not an undeclared field.
         # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
         secrets_decl = repo.get("requiredSecrets")
