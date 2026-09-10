@@ -540,6 +540,35 @@ class NewCase(unittest.TestCase):
         self.assertIn("nothing to link or close", out)
         self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "none")
 
+    def test_new_refuses_a_head_that_already_has_a_successor(self) -> None:
+        """`newest_closed` picks by issue number and `link` orders by round, so the head one
+        command chooses is not always the head the other enforces.
+
+        Two commands, both exiting 0, then forked a lane nothing was wrong with.
+        """
+        fake = FakeGh(
+            {
+                5: link(5, "lane", 4, 11, state="CLOSED"),
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED"),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "T",
+            "--body-file",
+            self.body_file("w"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#5 already succeeds #11", err)
+        self.assertNotIn(1001, fake.issues)
+
     def test_the_new_issue_carries_the_handoff_it_was_given(self) -> None:
         """A write that keeps the marker and drops the prose files an empty handoff."""
         fake = FakeGh()
@@ -1054,6 +1083,14 @@ class MalformedCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("(malformed)", out)
 
+    def test_a_long_malformed_list_is_cut_too(self) -> None:
+        """The sibling refusal one function away was left uncut."""
+        rows = {n: link(n, "lane", 1, None, body=doubled("lane")) for n in range(1, 90)}
+        code, _, err = run(FakeGh(rows), "current", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 1)
+        self.assertIn("more character(s) not shown", err)
+        self.assertLess(len(err), handoff.STDERR_CAP + 500)
+
     def test_a_reader_refuses_over_a_doubled_block_rather_than_guessing(self) -> None:
         fake = FakeGh({50: link(50, "foo", 1, None, body=doubled("foo"))})
         code, _, err = run(fake, "current", "--repo", "o/r", "--track", "foo")
@@ -1136,6 +1173,13 @@ class MalformedCase(unittest.TestCase):
         self.assertIn("#61", out)
         self.assertIn("could not be read", out)
 
+    def test_a_carriage_return_before_a_space_is_not_revived_either(self) -> None:
+        """`MARKER`'s tail is an ordered suffix, so stripping any character it may hold revives."""
+        quoted = handoff.render_marker("lane", 4, 900) + "\r "
+        self.assertIsNone(handoff.parse_marker(quoted, 1))
+        written = handoff.with_marker(quoted, "lane", 5, 901)
+        self.assertEqual(len(handoff.MARKER.findall(written)), 1)
+
     def test_a_marker_line_the_grammar_rejects_is_not_revived_by_the_strip(self) -> None:
         """`str.rstrip()` removes 25 whitespace characters where `MARKER` tolerates three.
 
@@ -1149,6 +1193,20 @@ class MalformedCase(unittest.TestCase):
         self.assertEqual(
             read_marker(written, 1), {"track": "lane", "round": "5", "previous": "901"}
         )
+
+    def test_a_link_with_no_label_ends_the_walk_with_a_phrase(self) -> None:
+        """The chain is label-indexed, so the walk must not reach what the list reads cannot."""
+        fake = FakeGh(
+            {
+                60: link(60, "default", 1, None, state="CLOSED", labels=[]),
+                61: link(61, "default", 2, 60),
+            }
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#61", out)
+        self.assertIn("carries no `handoff` label", out)
+        self.assertIn("the walk stopped at", out)
 
     def test_a_zero_predecessor_is_not_a_block_at_all(self) -> None:
         """Zero is no issue number, and reaching gh with it exits 2 for a fixable block."""
@@ -1336,6 +1394,34 @@ class LinkCase(unittest.TestCase):
         code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
         self.assertEqual(code, 0)
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "11")
+
+    def test_a_full_closed_window_refuses_rather_than_reading_as_no_successor(self) -> None:
+        """A reader that answers None for "could not look" hands the caller a guard that passes."""
+        rows = {
+            n: link(n, f"filler-{n}", 1, None, state="CLOSED")
+            for n in range(1, handoff.CLOSED_WINDOW + 1)
+        }
+        rows[9010] = link(9010, "lane", 1, None, state="CLOSED")
+        rows[9013] = link(9013, "lane", 3, None, body=marked("an orphan", "lane", 3, None))
+        code, _, err = run(
+            FakeGh(rows), "link", "--repo", "o/r", "--new", "9013", "--previous", "9010"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("fills the read window", err)
+        self.assertEqual(read_marker(rows[9013]["body"], 9013)["previous"], "none")
+
+    def test_an_unreadable_link_refuses_rather_than_reading_as_no_successor(self) -> None:
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED", body=doubled("lane")),
+                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("could already succeed #10", err)
+        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
 
     def test_a_successor_with_no_block_refuses(self) -> None:
         fake = FakeGh(

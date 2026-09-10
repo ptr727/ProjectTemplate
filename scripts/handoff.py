@@ -242,17 +242,17 @@ def render_marker(track: str, round_: int, previous: int | None) -> str:
     return f"<!-- handoff: v1 track={track} round={round_} previous={previous or 'none'} -->"
 
 
-# What may be stripped from the end of a body before the block is appended.
-# `str.rstrip()` removes all twenty-five characters Python calls whitespace.
-# `MARKER` tolerates only these three after the block.
-# Stripping wider revives a marker line the grammar counts as absent.
-# That line then sits beside the one this appends, leaving a body no command can read.
-TRAILING = " \t\r\n"
-
-
 def with_marker(body: str, track: str, round_: int, previous: int | None) -> str:
-    """`body` with the metadata block as its last line, replacing any block already in it."""
-    stripped = MARKER.sub("", body or "").rstrip(TRAILING)
+    """`body` with the metadata block as its last line, replacing any block already in it.
+
+    Only newlines are stripped from the end. `MARKER`'s tail is an ordered suffix rather than a
+    set of characters, so removing any character that suffix may itself hold can turn a line the
+    grammar rejects into one it accepts: `-->\\r ` is not a block and `-->\\r` is, so taking off
+    one space revives it, and the revived line then sits beside the one this appends and leaves a
+    body no command can read. A newline is the one thing the tail can never hold, since `$` sits
+    before it, so stripping newlines alone can revive nothing.
+    """
+    stripped = MARKER.sub("", body or "").rstrip("\n")
     return f"{stripped}\n\n{render_marker(track, round_, previous)}\n"
 
 
@@ -325,7 +325,7 @@ def require_marked(rows: list[dict]) -> None:
     """
     broken = [row["malformed"] for row in rows if row.get("malformed")]
     if broken:
-        raise Refusal(" ".join(broken))
+        raise Refusal(cut(" ".join(broken)))
     bare = [row for row in rows if row["marker"] is None]
     if bare:
         listed = ", ".join(f"#{row['number']}" for row in bare)
@@ -393,6 +393,11 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
             data = issue(repo, number)
         except Execution as exc:
             return links, f"#{number}, which could not be read: {exc}"
+        if LABEL not in {row["name"] for row in data.get("labels") or []}:
+            return links, (
+                f"#{number}, which carries no `{LABEL}` label, so the reads that index this "
+                "chain cannot see it"
+            )
         try:
             data["marker"] = parse_marker(data.get("body") or "", data["number"])
         except Refusal as exc:
@@ -730,6 +735,19 @@ def cmd_new(a: argparse.Namespace) -> int:
     previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
+    # The head this resolves by issue number is not the head `link` enforces by round.
+    # So the predecessor it picked can already have a successor, and filing onto it forks the lane.
+    # The check runs before the create rather than after it.
+    # A refusal that leaves an issue behind is a refusal that changed something.
+    if previous is not None:
+        taken = successor_of(a.repo, a.track, int(previous["number"]), 0)
+        if taken is not None:
+            raise Refusal(
+                f"#{taken['number']} already succeeds #{previous['number']} on track "
+                f"{a.track!r}, so filing another link onto it would fork the chain there and "
+                f"leave #{taken['number']} unreachable. That link is the track's head rather "
+                "than this one."
+            )
     title = TITLE.format(track=a.track, subject=a.title)
     print(f"1. create the new handoff on track {a.track!r}, round {round_}")
     number = create(a.repo, title, with_marker(body, a.track, round_, previous_number), a.dry_run)
@@ -776,16 +794,32 @@ def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None
     )
     if not isinstance(closed, list):
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    if len(closed) >= CLOSED_WINDOW:
+        raise Refusal(
+            f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "
+            f"window, so a link already succeeding #{number} could sit past it. Pointing a second "
+            "link at it would fork the chain there unseen."
+        )
+    unreadable: list[str] = []
     for row in [*open_handoffs(repo), *closed]:
         if row["number"] == ignore:
             continue
         marker = row.get("marker")
         if marker is None:
-            with contextlib.suppress(Refusal):
+            try:
                 marker = parse_marker(row.get("body") or "", row["number"])
+            except Refusal as exc:
+                unreadable.append(str(exc))
+                continue
         if marker and marker["track"] == track and marker["previous"] == str(number):
             row["marker"] = marker
             return row
+    if unreadable:
+        raise Refusal(
+            cut(" ".join(unreadable))
+            + f" One of those could already succeed #{number}, so whether pointing a second link "
+            "at it forks the chain cannot be read."
+        )
     return None
 
 
