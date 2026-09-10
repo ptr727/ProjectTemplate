@@ -997,23 +997,28 @@ class AuditRepoSlugCase(unittest.TestCase):
             self.audit.repo_slug({"url": "https://github.com/owner/Fixture.git"}), "owner/Fixture"
         )
 
-    def test_a_url_the_grammar_refuses_answers_with_the_name_rather_than_raising(self) -> None:
+    UNPARSEABLE = (
+        "git@github.com:owner/Fixture.git",
+        "http://github.com/owner/Fixture",
+        "https://gitlab.test/owner/Fixture",
+        "https://github.com/owner/Fixture?tab=readme",
+        "https://github.com/owner/Fixture#readme",
+        "https://github.com/../rate_limit",
+    )
+
+    def test_a_url_the_grammar_refuses_answers_with_a_sentinel_rather_than_raising(self) -> None:
         """spec/fidelity_honesty.py and spec/workflow_reuse.py call this on every entry with no handler.
 
         Raising would abort a whole fleet report over one malformed entry, which instead 404s and lands in the
         unreadable bucket beside its healthy siblings, so the gate refuses such a url and this stays generous.
         """
-        for url in (
-            "git@github.com:owner/Fixture.git",
-            "http://github.com/owner/Fixture",
-            "https://gitlab.test/owner/Fixture",
-            "https://github.com/owner/Fixture?tab=readme",
-            "https://github.com/owner/Fixture#readme",
-            "https://github.com/../rate_limit",
-        ):
+        for url in self.UNPARSEABLE:
             with self.subTest(url=url):
                 self.assertIsNone(validate.github_identity(url))
-                self.assertEqual(self.audit.repo_slug({"url": url, "name": "Fixture"}), "Fixture")
+                self.assertEqual(
+                    self.audit.repo_slug({"url": url, "name": "Fixture"}),
+                    f"{self.audit.UNRESOLVED_OWNER}/Fixture",
+                )
 
     def test_no_fallback_slug_is_built_out_of_the_url_it_could_not_parse(self) -> None:
         """Taking the url's last two path segments produced a plausible slug rather than a failing one.
@@ -1022,29 +1027,37 @@ class AuditRepoSlugCase(unittest.TestCase):
         url survived into the value, where `repos/owner/Repo?tab=readme/branches/main` is a request to
         `repos/owner/Repo` with the rest as a query string. Both address something other than what was declared.
         """
-        for url in (
-            "https://gitlab.test/owner/Repo",
-            "https://github.com/owner/Repo?tab=readme",
-            "https://github.com/owner/Repo#readme",
-            "git@github.com:owner/Repo.git",
-        ):
+        for url in self.UNPARSEABLE:
             with self.subTest(url=url):
                 slug = self.audit.repo_slug({"url": url, "name": "Declared"})
                 self.assertNotIn("owner", slug)
-                self.assertNotIn("Repo", slug)
-                for char in ("?", "#", "/"):
+                self.assertNotIn("Fixture", slug)
+                for char in ("?", "#"):
                     self.assertNotIn(char, slug, slug)
 
-    def test_an_absent_or_non_string_url_answers_with_the_entry_name(self) -> None:
-        """spec/workflow_reuse.py builds `{"name": HUB_NAME}` as its own fallback and calls this with no handler."""
-        for entry, want in (
-            ({"name": "Fixture"}, "Fixture"),
-            ({"url": None, "name": "Fixture"}, "Fixture"),
-            ({"url": 42, "name": "Fixture"}, "Fixture"),
-            ({}, ""),
-        ):
+    def test_every_fallback_slug_is_two_segments_that_cannot_name_a_repository(self) -> None:
+        """A one-segment slug shifts every later path component up one.
+
+        `repos/Fixture/git/trees/<sha>` reads owner `Fixture` and repository `git`, and a name that is nothing but
+        dots normalizes away, so `repos/<owner>/../branches/main` reads `repos/branches/main`. Both address something,
+        which is worse than a 404 for a value that could not be parsed at all.
+        """
+        entries: list[dict[str, object]] = [
+            {"url": u, "name": n}
+            for u in self.UNPARSEABLE
+            for n in ("Fixture", "..", ".", "A/B", "")
+        ]
+        entries += [{"name": "Fixture"}, {"url": None, "name": ".."}, {"url": 42}, {}]
+        for entry in entries:
             with self.subTest(entry=entry):
-                self.assertEqual(self.audit.repo_slug(entry), want)
+                slug = self.audit.repo_slug(entry)
+                owner, _, repo = slug.partition("/")
+                self.assertEqual(owner, self.audit.UNRESOLVED_OWNER)
+                self.assertIn(
+                    "_", owner, "an owner GitHub could hold would collide with a real one"
+                )
+                self.assertNotEqual(repo, "")
+                self.assertNotEqual(repo.strip("."), "", f"{slug} carries a dot segment")
 
     def test_the_branch_override_is_held_to_the_registry_grammar(self) -> None:
         """The override reaches the same path segment and `?ref=` value the declared field does.

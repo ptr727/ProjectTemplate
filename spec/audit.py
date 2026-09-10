@@ -559,6 +559,13 @@ def driftnote_findings(entry, spec, open_count):
     return out
 
 
+# The owner half of the slug repo_slug() answers with when it cannot parse an entry's url, plus the stand-in for a name it cannot use.
+# Both carry an underscore, which GitHub allows in a repository name and not in an owner name.
+# So the pair addresses no repository that can exist, while still naming the entry in every message the finding reaches.
+UNRESOLVED_OWNER = "_unresolved"
+UNNAMED_ENTRY = "_unnamed"
+
+
 def repo_slug(entry):
     """The `<owner>/<repo>` every `repos/{slug}/...` read below addresses.
 
@@ -572,21 +579,28 @@ def repo_slug(entry):
     404s and lands in the unreadable bucket beside its healthy siblings. The finding stays where it belongs, on the
     gate.
 
-    Anything else answers with the entry's percent-encoded name, which is one path segment that resolves to no
-    repository, so the read 404s and the message names the entry that caused it. spec/workflow_reuse.py reaches this
-    by building `{"name": HUB_NAME}` as its own fallback when the hub has no registry entry and calling this on it.
+    Anything else answers with UNRESOLVED_OWNER and the entry's name, so every read 404s and the message names the
+    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": HUB_NAME}` as its own fallback
+    when the hub has no registry entry and calling this on it.
 
-    Taking the url's last two path segments is what this replaced, and it produced a plausible slug rather than a
-    failing one. `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com, and a
-    `?` or a `#` survived into the value, where `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at
-    `repos/<owner>/<repo>` and sends the rest as a query string. Both address something other than what was declared,
-    which is the one shape this grammar exists to remove, so the fallback names the entry instead of guessing at a
-    repository.
+    Each half of that sentinel answers a way a fallback slug has already addressed the wrong thing. It carries two
+    segments because a one-segment value shifts every later path component up one: `repos/Fixture/git/trees/<sha>`
+    reads owner `Fixture` and repository `git` rather than failing. Its owner segment carries an underscore, which
+    GitHub does not allow in an owner name, so it cannot collide with a real owner. And a name that is nothing but
+    dots is dropped rather than encoded, because GitHub decodes `%2e` and then normalizes the dot segment it becomes,
+    so `repos/<owner>/../branches/main` would read `repos/branches/main`.
+
+    Taking the url's last two path segments is what all of this replaced, and it produced a plausible slug rather
+    than a failing one. `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com,
+    and a `?` survived into the value, where `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at
+    `repos/<owner>/<repo>` and sends the rest as a query string.
     """
     slug = validate.github_identity(entry.get("url"))
     if slug is not None:
         return slug
-    return urllib.parse.quote(str(entry.get("name", "")), safe="")
+    name = str(entry.get("name", ""))
+    tail = urllib.parse.quote(name, safe="") if name.strip(".") else UNNAMED_ENTRY
+    return f"{UNRESOLVED_OWNER}/{tail}"
 
 
 def repo_selectors(entry, defaults):
