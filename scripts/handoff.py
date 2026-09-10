@@ -40,8 +40,8 @@ Subcommands
 Exit codes
   0  the command did what it says.
   1  a refusal the caller can act on: the label is missing from the repository, no handoff is
-     open on the track, a track is ambiguous, an open handoff carries no metadata block, a body
-     is over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
+     open on the track, a track is ambiguous, a handoff carries no metadata block, a body is
+     over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
      `Parser` below moves it here off argparse's own 2.
   2  the command did not run to an answer: `gh` failed, a write did not confirm, or an exception
      nobody modeled reached the top. A refusal and a failure to reach one never share a code,
@@ -838,6 +838,7 @@ def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None
             "link at it would fork the chain there unseen."
         )
     unreadable: list[str] = []
+    bare: list[str] = []
     for row in [*open_handoffs(repo), *closed]:
         if row["number"] == ignore:
             continue
@@ -848,12 +849,21 @@ def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None
             except Refusal as exc:
                 unreadable.append(str(exc))
                 continue
-        if marker and marker["track"] == track and marker["previous"] == str(number):
+        if marker is None:
+            # `newest_closed` holds these two to be the same hazard, and so does this.
+            # An absent block leaves what the link succeeds unknown, as an unreadable one does.
+            # Reading either as "not the successor" is a guess.
+            bare.append(
+                f"#{row['number']} carries the `{LABEL}` label and no metadata block, so what it "
+                "succeeds cannot be read. Add one to its body by hand, or take the label off it."
+            )
+            continue
+        if marker["track"] == track and marker["previous"] == str(number):
             row["marker"] = marker
             return row
-    if unreadable:
+    if unreadable or bare:
         raise Refusal(
-            cut(" ".join(unreadable))
+            cut(" ".join([*unreadable, *bare]))
             + f" One of those could already succeed #{number}, so whether pointing a second link "
             "at it forks the chain cannot be read."
         )
