@@ -40,6 +40,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from typing import Any
@@ -376,9 +377,6 @@ def owner_repos(owner):
         page += 1
 
 
-GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s?#]+)/([^/\s?#]+?)(?:\.git)?/?$")
-
-
 def repo_identity(url):
     """owner/repo, lowercased, parsed from a github.com URL, or None if it does not parse.
 
@@ -386,12 +384,19 @@ def repo_identity(url):
     GitHub's own full_name field is already this exact shape (case-preserved).
     A trailing .git is stripped so it still resolves to the same identity full_name would.
     A query string or fragment is rejected outright rather than folded into the repo name.
-    spec/validate.py rejects a url that fails to parse here at all, kept in sync with this regex.
+
+    spec/validate.py's github_identity() is the one parse, called rather than restated, since a byte-identical copy
+    of that regex here is a second definition that only looks like one.
+
+    The padding is trimmed before that call, deliberately and in one direction only. This function decides whether a
+    live repo has an entry, so a padded url resolving to nothing here would report the repo as having no entry at all,
+    a DEFECT naming the wrong problem. The gate refuses the padding itself, which is where that finding belongs, so
+    audit reads the value as generously as it can and validate.py is what says no.
     """
     if not isinstance(url, str):
         return None
-    m = GITHUB_URL_RE.match(url.strip())
-    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+    slug = validate.github_identity(url.strip())
+    return slug.lower() if slug is not None else None
 
 
 def membership_findings(spec):
@@ -554,9 +559,48 @@ def driftnote_findings(entry, spec, open_count):
     return out
 
 
+# The owner half of the slug repo_slug() answers with when it cannot parse an entry's url, plus the stand-in for a name it cannot use.
+# Both carry an underscore, which GitHub allows in a repository name and not in an owner name.
+# So the pair addresses no repository that can exist, while still naming the entry in every message the finding reaches.
+UNRESOLVED_OWNER = "_unresolved"
+UNNAMED_ENTRY = "_unnamed"
+
+
 def repo_slug(entry):
-    # The url field is https://github.com/<owner>/<repo>
-    return "/".join(entry["url"].rstrip("/").split("/")[-2:])
+    """The `<owner>/<repo>` every `repos/{slug}/...` read below addresses.
+
+    Parsed by spec/validate.py's own url grammar rather than by taking the last two path segments, so what this
+    addresses and what that gate accepted are the same value. Taking the segments kept a trailing `.git` that the
+    gate strips for the identity, sending every read to `repos/<owner>/<repo>.git/...`.
+
+    A url this module cannot parse never raises, because this module is not the gate. spec/validate.py refuses such
+    a url, and nothing runs it before an audit: spec/fidelity_honesty.py and spec/workflow_reuse.py both call this on
+    every entry with no handler, so raising would abort a whole fleet report over one malformed entry that instead
+    404s and lands in the unreadable bucket beside its healthy siblings. The finding stays where it belongs, on the
+    gate.
+
+    Anything else answers with UNRESOLVED_OWNER and the entry's name, so every read 404s and the message names the
+    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": HUB_NAME}` as its own fallback
+    when the hub has no registry entry and calling this on it.
+
+    Each half of that sentinel answers a way a fallback slug has already addressed the wrong thing. It carries two
+    segments because a one-segment value shifts every later path component up one: `repos/Fixture/git/trees/<sha>`
+    reads owner `Fixture` and repository `git` rather than failing. Its owner segment carries an underscore, which
+    GitHub does not allow in an owner name, so it cannot collide with a real owner. And a name that is nothing but
+    dots is dropped rather than encoded, because GitHub decodes `%2e` and then normalizes the dot segment it becomes,
+    so `repos/<owner>/../branches/main` would read `repos/branches/main`.
+
+    Taking the url's last two path segments is what all of this replaced, and it produced a plausible slug rather
+    than a failing one. `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com,
+    and a `?` survived into the value, where `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at
+    `repos/<owner>/<repo>` and sends the rest as a query string.
+    """
+    slug = validate.github_identity(entry.get("url"))
+    if slug is not None:
+        return slug
+    name = str(entry.get("name", ""))
+    tail = urllib.parse.quote(name, safe="") if name.strip(".") else UNNAMED_ENTRY
+    return f"{UNRESOLVED_OWNER}/{tail}"
 
 
 def repo_selectors(entry, defaults):
@@ -5326,6 +5370,8 @@ def _selftest():
     id_cases = [
         ("https://github.com/owner/Repo", "owner/repo"),
         ("https://github.com/owner/Repo/", "owner/repo"),
+        # Padding still resolves here, one-directionally: the gate refuses it, and a repo whose entry is padded must
+        # read as an entry that exists rather than as a repo with none, per the membership case below.
         ("  https://github.com/owner/Repo  ", "owner/repo"),
         ("https://github.com/owner/Repo.git", "owner/repo"),
         ("https://github.com/owner/Repo.github", "owner/repo.github"),
@@ -5687,6 +5733,13 @@ def main(argv=None):
     a = parse_args(argv)
     if a.selftest:
         return _selftest()
+    # The override reaches the same path segment and the same `?ref=` value the registry's own groundTruthBranch does,
+    # so it is held to the same grammar. Validating only the declared value would leave `--branch 'main?per_page=1'`
+    # retargeting every read, which is the request-goes-elsewhere shape rather than a request that fails.
+    if a.branch is not None and not validate.GROUND_TRUTH_BRANCH_RE.search(a.branch):
+        shape = validate.GROUND_TRUTH_BRANCH_SHAPE
+        print(f"--branch {a.branch!r} does not address unencoded ({shape})", file=sys.stderr)
+        return 2
     spec = {
         "registry": load("registry/repos.json"),
         "settings": load("repo-config/settings.json"),

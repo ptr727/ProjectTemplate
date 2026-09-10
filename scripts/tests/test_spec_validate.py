@@ -489,22 +489,48 @@ class RegistryEnvironmentCase(unittest.TestCase):
             ["Fixture: environments must be a list"],
         )
 
+    SHAPE = "Fixture: environments[0] name {!r} is not one line of printable ASCII with no leading or trailing space"
+
     def test_a_missing_or_empty_name_is_rejected(self) -> None:
-        for env in ({"branchPolicy": "none"}, {"name": "  ", "branchPolicy": "none"}):
+        for env in ({"branchPolicy": "none"}, {"name": "", "branchPolicy": "none"}):
             with self.subTest(env=env):
                 self.assertEqual(
                     self.errors([env]),
                     ["Fixture: environments[0] missing or empty 'name'"],
                 )
 
+    def test_a_blank_name_is_reported_by_the_grammar_rather_than_as_empty(self) -> None:
+        """It is a non-empty string of the wrong shape, and calling it empty needs the notion of whitespace the grammar drops."""
+        self.assertEqual(
+            self.errors([{"name": "  ", "branchPolicy": "none"}]),
+            [self.SHAPE.format("  ")],
+        )
+
     def test_a_name_with_surrounding_whitespace_is_rejected(self) -> None:
-        """Padding survives the empty check, since a padded name strips to something."""
+        """Padding survives an emptiness check, since a padded name is a non-empty string."""
         for name in ("pypi ", " pypi", "\tpypi"):
             with self.subTest(name=name):
                 self.assertEqual(
                     self.errors([{"name": name, "branchPolicy": "none"}]),
-                    [f"Fixture: environments[0] name {name!r} has leading or trailing whitespace"],
+                    [self.SHAPE.format(name)],
                 )
+
+    def test_a_name_padded_with_something_str_strip_does_not_remove_is_rejected(self) -> None:
+        """The defect a whitespace test cannot reach: each of these is invisible, is left standing by str.strip(),
+        and is exactly as unmatchable by configure.sh's `select(.name == $n)` as a trailing space.
+        """
+        for pad in ("\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u00ad", "\u180e"):
+            name = f"pypi{pad}"
+            with self.subTest(pad=pad):
+                self.assertEqual(name, name.strip())
+                self.assertEqual(
+                    self.errors([{"name": name, "branchPolicy": "none"}]),
+                    [self.SHAPE.format(name)],
+                )
+
+    def test_a_name_carrying_an_interior_space_is_accepted(self) -> None:
+        """GitHub documents no character restriction on the name beyond length and uniqueness, and nothing downstream splits on one."""
+        self.assertEqual(self.errors([{"name": "prod env", "branchPolicy": "none"}]), [])
 
     def test_a_padded_name_beside_its_trimmed_twin_is_reported_for_its_padding(self) -> None:
         """The two are different strings, so they never collided as duplicates, before this check or after it."""
@@ -515,7 +541,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     {"name": "pypi ", "branchPolicy": "none"},
                 ]
             ),
-            ["Fixture: environments[1] name 'pypi ' has leading or trailing whitespace"],
+            [self.SHAPE.format("pypi ").replace("environments[0]", "environments[1]")],
         )
 
     def test_identical_padded_names_report_the_padding_and_defer_the_duplicate(self) -> None:
@@ -532,8 +558,8 @@ class RegistryEnvironmentCase(unittest.TestCase):
                 ]
             ),
             [
-                "Fixture: environments[0] name 'pypi ' has leading or trailing whitespace",
-                "Fixture: environments[1] name 'pypi ' has leading or trailing whitespace",
+                self.SHAPE.format("pypi "),
+                self.SHAPE.format("pypi ").replace("environments[0]", "environments[1]"),
             ],
         )
 
@@ -557,21 +583,54 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     ["Fixture: environments[0] branches must be a list of non-empty strings"],
                 )
 
-    def test_branches_with_surrounding_whitespace_are_rejected(self) -> None:
-        """Every padded entry is named, since reporting only the first would hide the rest behind one fix round."""
+    def test_branches_off_the_grammar_are_rejected(self) -> None:
+        """Every offending entry is named, since reporting only the first would hide the rest behind one fix round."""
         self.assertEqual(
             self.errors(
-                [{"name": "e", "branchPolicy": "custom", "branches": [" main", "dev", "next\t"]}]
+                [
+                    {
+                        "name": "e",
+                        "branchPolicy": "custom",
+                        "branches": [" main", "dev", "next\t", "  ", "rel\u200b"],
+                    }
+                ]
             ),
             [
-                "Fixture: environments[0] branches [' main', 'next\\t'] have leading or trailing whitespace"
+                "Fixture: environments[0] branches [' main', 'next\\t', '  ', 'rel\\u200b']"
+                + " are not printable ASCII with no spaces"
             ],
         )
 
-    def test_an_empty_branch_is_reported_as_empty_rather_than_as_padded(self) -> None:
-        """A whitespace-only branch strips to nothing, so the non-empty check owns it and reports it once."""
+    def test_a_ref_pattern_carrying_a_slash_and_a_star_is_accepted(self) -> None:
+        """A deployment branch policy name is a pattern, so a grammar fitted to the three plain names the registry
+        declares today would pass every test here and refuse the first adopter declaring a release line.
+        """
         self.assertEqual(
-            self.errors([{"name": "e", "branchPolicy": "custom", "branches": ["main", "  "]}]),
+            self.errors(
+                [
+                    {
+                        "name": "e",
+                        "branchPolicy": "custom",
+                        "branches": ["releases/*", "v1.*", "feature/JIRA-123"],
+                    }
+                ]
+            ),
+            [],
+        )
+
+    def test_a_branch_declared_twice_is_rejected(self) -> None:
+        """configure.sh sorts and joins both sides, so the duplicate makes the declaration longer than any live set."""
+        self.assertEqual(
+            self.errors(
+                [{"name": "e", "branchPolicy": "custom", "branches": ["main", "main", "dev"]}]
+            ),
+            ["Fixture: environments[0] branches ['main'] are declared more than once"],
+        )
+
+    def test_an_empty_branch_is_reported_as_empty_rather_than_off_the_grammar(self) -> None:
+        """The empty string carries no shape to report, so the non-empty check owns it and reports it once."""
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "custom", "branches": ["main", ""]}]),
             ["Fixture: environments[0] branches must be a list of non-empty strings"],
         )
 
@@ -583,6 +642,514 @@ class RegistryEnvironmentCase(unittest.TestCase):
         for repo in registry["repos"]:
             with self.subTest(repo=repo.get("name")):
                 self.assertEqual(validate.environment_errors_for_repo(repo, repo["name"]), [])
+
+
+class RegistryEntryGateCase(unittest.TestCase):
+    """The checks that live inside `main()`, run as the real script against a scratch tree.
+
+    Calling the helper functions directly proves the grammar and leaves the wiring unproven: deleting the
+    `errors.extend(...)` line, or putting a `.strip()` back before the url match, leaves every direct-call test green.
+    The registry is a self-contained fixture rather than the live one plus an entry, so an unrelated registry edit
+    cannot move the result.
+    """
+
+    def run_against(self, entry: dict, defaults: dict | None = None) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            # One deliberate defect the loop always reports, which is how each case proves the loop ran at all.
+            marker = {"name": "LoopMarker", "url": "not-a-url", "status": "backlog"}
+            base = {"workflowModel": "release"}
+            base.update(defaults or {})
+            fixture = {"defaults": base, "repos": [entry, marker]}
+            (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertIn(
+                "LoopMarker: url is not a github.com/<owner>/<repo> URL",
+                output,
+                "the registry loop was never reached, so an absence assertion would be vacuous",
+            )
+            return output
+
+    def entry(self, **overrides: object) -> dict:
+        base = {
+            "name": "Fixture",
+            "url": "https://github.com/owner/Fixture",
+            "status": "backlog",
+            "classificationPending": True,
+        }
+        base.update(overrides)
+        return base
+
+    def test_a_declared_ground_truth_branch_is_checked_by_the_loop(self) -> None:
+        self.assertIn(
+            "Fixture: groundTruthBranch 'main?ref=x' does not address unencoded",
+            self.run_against(self.entry(groundTruthBranch="main?ref=x")),
+        )
+
+    def test_a_valid_ground_truth_branch_passes_the_loop(self) -> None:
+        output = self.run_against(self.entry(groundTruthBranch="release/2.0"))
+        self.assertNotIn("groundTruthBranch", output)
+
+    def test_the_defaults_key_is_checked_by_the_same_grammar(self) -> None:
+        """registry/repos.schema.json patterns this key, so a gate that skipped it would be the looser of the two."""
+        self.assertIn(
+            "defaults: groundTruthBranch 'a/../../../../../zen' does not address unencoded",
+            self.run_against(self.entry(), defaults={"groundTruthBranch": "a/../../../../../zen"}),
+        )
+
+    def test_a_valid_defaults_key_passes(self) -> None:
+        output = self.run_against(self.entry(), defaults={"groundTruthBranch": "develop"})
+        self.assertNotIn("groundTruthBranch", output)
+
+    def test_a_padded_url_is_refused_rather_than_trimmed(self) -> None:
+        """The `.strip()` this replaced accepted a value spec/audit.py then addressed with the padding still on."""
+        for url in (
+            "https://github.com/owner/Fixture ",
+            " https://github.com/owner/Fixture",
+            "https://github.com/owner/Fixture\n",
+        ):
+            with self.subTest(url=url):
+                self.assertIn(
+                    "Fixture: url is not a github.com/<owner>/<repo> URL",
+                    self.run_against(self.entry(url=url)),
+                )
+
+    def test_a_git_suffixed_url_passes_the_loop(self) -> None:
+        """The url is legitimate and the gate always accepted it, so the defect was the slug it produced.
+
+        AuditRepoSlugCase below is what pins the slug; this pins that the gate did not start refusing the url.
+        """
+        output = self.run_against(self.entry(url="https://github.com/owner/Fixture.git"))
+        self.assertNotIn("Fixture: url is not", output)
+
+
+class RegistrySchemaMirrorCase(unittest.TestCase):
+    """registry/repos.schema.json is advisory, since no gate runs it, so its patterns answer to spec/validate.py.
+
+    Two obligations, and they are different obligations. A pattern the schema copies from validate.py must stay
+    byte-identical to it, or the editor and the gate drift apart silently. A pattern the schema states on its own
+    must never refuse a value validate.py accepts, since an editor rejecting a valid registry is the direction
+    #1504 reverted an earlier attempt for.
+    """
+
+    PORTABLE_END = r"(?![\s\S])"
+
+    def setUp(self) -> None:
+        self.schema = json.loads(
+            (validate.ROOT / "registry" / "repos.schema.json").read_text(encoding="utf-8")
+        )
+        self.props = self.schema["$defs"]["repo"]["properties"]
+        self.env_props = self.props["environments"]["items"]["properties"]
+
+    def assert_portable(self, pattern: str) -> None:
+        r"""The two constructs measured to mean different things in Python re and ECMA-262, refused by shape.
+
+        `$` matches before a trailing newline in Python and only at the end in ECMA-262, so `"main\n"` satisfies a
+        `$`-anchored pattern in one engine and not the other. `\s` and `\S` name different sets, ECMA-262's
+        whitespace including U+FEFF where Python's does not. Their union is every character in both engines, which
+        is what makes the `(?![\s\S])` terminator itself portable and why it is excluded from the body checked here.
+        """
+        self.assertTrue(pattern.startswith("^"), pattern)
+        self.assertTrue(pattern.endswith(self.PORTABLE_END), pattern)
+        body = pattern[: -len(self.PORTABLE_END)].replace(r"[\s\S]", "")
+        for construct in ("$", "\\s", "\\S"):
+            self.assertNotIn(construct, body, pattern)
+
+    def test_the_copied_patterns_are_byte_identical_to_the_validator(self) -> None:
+        for pattern, constant in (
+            (self.schema["$defs"]["environmentName"]["pattern"], validate.ENVIRONMENT_NAME_PATTERN),
+            (self.env_props["branches"]["items"]["pattern"], validate.DEPLOYMENT_BRANCH_PATTERN),
+            (
+                self.schema["$defs"]["groundTruthBranch"]["pattern"],
+                validate.GROUND_TRUTH_BRANCH_PATTERN,
+            ),
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(pattern, constant)
+
+    def test_both_ground_truth_branch_fields_reach_the_one_definition(self) -> None:
+        """Two literals would let the defaults entry and the per-repo entry drift, and they feed the same readers."""
+        ref = {"$ref": "#/$defs/groundTruthBranch"}
+        self.assertEqual(self.props["groundTruthBranch"], ref)
+        self.assertEqual(
+            self.schema["properties"]["defaults"]["properties"]["groundTruthBranch"], ref
+        )
+
+    def every_pattern(self) -> set[str]:
+        found: set[str] = set()
+
+        def walk(node: object) -> None:
+            if isinstance(node, dict):
+                if isinstance(node.get("pattern"), str):
+                    found.add(node["pattern"])
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(self.schema)
+        self.assertTrue(found)
+        return found
+
+    def test_every_pattern_in_the_schema_is_written_in_what_both_engines_share(self) -> None:
+        for pattern in self.every_pattern():
+            with self.subTest(pattern=pattern):
+                self.assert_portable(pattern)
+
+    def test_both_engines_agree_on_every_pattern_over_a_corpus(self) -> None:
+        """assert_portable checks three constructs by shape, and this executes the patterns in the other engine.
+
+        Node is what an editor's JSON language service uses, so it is the engine the schema actually meets. A host
+        without node skips this rather than failing, since the shape check above still binds everywhere.
+        """
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed, so the ECMA-262 side cannot be executed here")
+        patterns = sorted(self.every_pattern())
+        corpus = [
+            "pypi",
+            "pypi ",
+            " pypi",
+            "pypi\n",
+            "pypi\r\n",
+            "\npypi",
+            "pypi\u200b",
+            "\ufeffpypi",
+            "pypi\u00a0",
+            "pypi\u180e",
+            "pypi\u2060",
+            "pypi\u00ad",
+            "pypi\u2028",
+            "pypi\u2029",
+            "pypi\u1680",
+            "pypi\u3000",
+            "pypi\u0085",
+            "",
+            " ",
+            "prod env",
+            "releases/*",
+            "main",
+            "feature/*",
+            "v1.*",
+            "pypi\tx",
+            "caf\u00e9",
+            "a",
+            "release/2.0",
+            "main?ref=develop",
+            "main?ref",
+            "main#x",
+            "main%2F",
+            "/main",
+            "main/",
+            "main.",
+            ".main",
+            "a..b",
+            "a/../b",
+            "~x",
+            "_wip",
+            "wip-",
+            "A short tagline.",
+            "Runs at 40\u00b0C",
+            "tabbed\t",
+            "two\nlines",
+        ]
+        want = {p: [bool(re.search(p, c)) for c in corpus] for p in patterns}
+        probe = (
+            "const [pats, cases] = JSON.parse(process.argv[1]);"
+            "console.log(JSON.stringify(Object.fromEntries("
+            "pats.map(p => [p, cases.map(c => new RegExp(p).test(c))]))));"
+        )
+        result = subprocess.run(
+            [node, "-e", probe, json.dumps([patterns, corpus])],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), want)
+
+    def test_the_description_pattern_never_refuses_what_the_validator_accepts(self) -> None:
+        """The schema's own statement rather than a copy, so the direction is what has to hold.
+
+        A tier-2 or tier-3 non-ASCII character is legitimate in a description, and no portable positive grammar
+        enumerates one, so this pattern states less than description_errors() does on purpose.
+        """
+        pattern = re.compile(self.props["description"]["pattern"])
+        # Split rather than filtered by the validator's own verdict, so that every entry carries an assertion.
+        # A later tightening of description_errors() then fails the split instead of silently retiring the entry it moved.
+        accepted = [
+            "A short tagline.",
+            "Runs at 40 degrees C +/- 2",
+            "Runs at 40\u00b0C",
+            "A tagline with  two spaces",
+            "zero\u200bwidth",
+            "\ufeffbom",
+        ]
+        refused = [" padded", "padded ", "two\nlines", "trailing newline\n", "\ttabbed", "tabbed\t"]
+        for desc in accepted:
+            with self.subTest(accepted=desc):
+                self.assertEqual(validate.description_errors("Fixture", desc), [])
+                self.assertIsNotNone(pattern.search(desc))
+        for desc in refused:
+            with self.subTest(refused=desc):
+                self.assertNotEqual(validate.description_errors("Fixture", desc), [])
+
+    def test_the_description_pattern_refuses_a_trailing_newline(self) -> None:
+        """The bug the `$` anchor carried: `$` matches just before one in Python, so check-jsonschema accepted a
+        value description_errors() refuses, and an ECMA-262 editor refused the same value. Two engines, two answers.
+        """
+        pattern = self.props["description"]["pattern"]
+        self.assertIsNone(re.compile(pattern).search("A short tagline.\n"))
+        self.assertIsNotNone(re.compile("^\\S(?:[^\\n\\r]*\\S)?$").search("A short tagline.\n"))
+
+
+class RegistryUrlIdentityCase(unittest.TestCase):
+    """The url is what spec/audit.py turns into every request path, so one parse serves both."""
+
+    def test_the_shapes_the_fleet_declares_resolve(self) -> None:
+        self.assertEqual(
+            validate.github_identity("https://github.com/ptr727/ProjectTemplate"),
+            "ptr727/ProjectTemplate",
+        )
+        self.assertEqual(
+            validate.github_identity("https://github.com/ptr727/ProjectTemplate/"),
+            "ptr727/ProjectTemplate",
+        )
+
+    def test_a_url_the_consumer_could_not_address_resolves_to_none(self) -> None:
+        for url in (
+            "http://github.com/ptr727/ProjectTemplate",
+            "https://github.com/ptr727",
+            "https://gitlab.test/ptr727/ProjectTemplate",
+            "https://github.com/ptr727/ProjectTemplate ",
+            " https://github.com/ptr727/ProjectTemplate",
+            "https://github.com/ptr727/ProjectTemplate\n",
+            "https://github.com/ptr727/ProjectTemplate.git\n",
+            "https://github.com/ptr727/Project Template",
+            "https://github.com/ptr727:x/ProjectTemplate",
+            "https://github.com/ptr727/ProjectTemplate?x=1",
+            None,
+            42,
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(validate.github_identity(url))
+
+    def test_a_dot_only_segment_resolves_to_none(self) -> None:
+        """Measured against the live API: `repos/../rate_limit` returns 200 with the rate-limit document.
+
+        GitHub decodes and then normalizes a dot segment, and `repos/%2e%2e/rate_limit` returns 200 the same way, so
+        percent-encoding is no defense and the value has to be refused before it is ever addressed.
+        """
+        for url in (
+            "https://github.com/../rate_limit",
+            "https://github.com/./x",
+            "https://github.com/a/..",
+            "https://github.com/a/.",
+            "https://github.com/../..",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(validate.github_identity(url))
+
+    def test_a_dot_bearing_name_that_is_not_a_dot_segment_still_resolves(self) -> None:
+        """Only `.` and `..` normalize, so refusing every dot would refuse three names GitHub actually holds."""
+        for url, want in (
+            ("https://github.com/owner/.github", "owner/.github"),
+            ("https://github.com/owner/v1.0", "owner/v1.0"),
+            ("https://github.com/owner/a..b", "owner/a..b"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(validate.github_identity(url), want)
+
+    def test_a_git_suffix_resolves_to_the_identity_the_consumer_addresses(self) -> None:
+        """The suffix used to survive into the request. GITHUB_URL_RE makes `.git` optional and strips it for the
+        identity, while spec/audit.py's repo_slug() took the last two raw path segments and addressed
+        `repos/ptr727/ProjectTemplate.git/...`. One parse is what makes those the same string.
+        """
+        self.assertEqual(
+            validate.github_identity("https://github.com/ptr727/ProjectTemplate.git"),
+            "ptr727/ProjectTemplate",
+        )
+
+
+class AuditRepoSlugCase(unittest.TestCase):
+    """spec/audit.py's repo_slug() is the consumer the url grammar exists for."""
+
+    def setUp(self) -> None:
+        # Imported here rather than at module scope, because spec/audit.py runs `git config --get remote.origin.url` while importing.
+        # A module-level import would fail this whole file's cases on a host with no git on PATH, including every case that never touches audit.
+        import audit
+
+        self.audit = audit
+
+    def test_a_git_suffixed_url_addresses_the_clean_slug(self) -> None:
+        """Taking the last two path segments sent every read to `repos/owner/Fixture.git/...`."""
+        self.assertEqual(
+            self.audit.repo_slug({"url": "https://github.com/owner/Fixture.git"}), "owner/Fixture"
+        )
+
+    UNPARSEABLE = (
+        "git@github.com:owner/Fixture.git",
+        "http://github.com/owner/Fixture",
+        "https://gitlab.test/owner/Fixture",
+        "https://github.com/owner/Fixture?tab=readme",
+        "https://github.com/owner/Fixture#readme",
+        "https://github.com/../rate_limit",
+    )
+
+    def test_a_url_the_grammar_refuses_answers_with_a_sentinel_rather_than_raising(self) -> None:
+        """spec/fidelity_honesty.py and spec/workflow_reuse.py call this on every entry with no handler.
+
+        Raising would abort a whole fleet report over one malformed entry, which instead 404s and lands in the
+        unreadable bucket beside its healthy siblings, so the gate refuses such a url and this stays generous.
+        """
+        for url in self.UNPARSEABLE:
+            with self.subTest(url=url):
+                self.assertIsNone(validate.github_identity(url))
+                self.assertEqual(
+                    self.audit.repo_slug({"url": url, "name": "Fixture"}),
+                    f"{self.audit.UNRESOLVED_OWNER}/Fixture",
+                )
+
+    def test_no_fallback_slug_is_built_out_of_the_url_it_could_not_parse(self) -> None:
+        """Taking the url's last two path segments produced a plausible slug rather than a failing one.
+
+        `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com, and a `?` in the
+        url survived into the value, where `repos/owner/Repo?tab=readme/branches/main` is a request to
+        `repos/owner/Repo` with the rest as a query string. Both address something other than what was declared.
+        """
+        for url in self.UNPARSEABLE:
+            with self.subTest(url=url):
+                slug = self.audit.repo_slug({"url": url, "name": "Declared"})
+                self.assertNotIn("owner", slug)
+                self.assertNotIn("Fixture", slug)
+                for char in ("?", "#"):
+                    self.assertNotIn(char, slug, slug)
+
+    def test_every_fallback_slug_is_two_segments_that_cannot_name_a_repository(self) -> None:
+        """A one-segment slug shifts every later path component up one.
+
+        `repos/Fixture/git/trees/<sha>` reads owner `Fixture` and repository `git`, and a name that is nothing but
+        dots normalizes away, so `repos/<owner>/../branches/main` reads `repos/branches/main`. Both address something,
+        which is worse than a 404 for a value that could not be parsed at all.
+        """
+        entries: list[dict[str, object]] = [
+            {"url": u, "name": n}
+            for u in self.UNPARSEABLE
+            for n in ("Fixture", "..", ".", "A/B", "")
+        ]
+        entries += [{"name": "Fixture"}, {"url": None, "name": ".."}, {"url": 42}, {}]
+        for entry in entries:
+            with self.subTest(entry=entry):
+                slug = self.audit.repo_slug(entry)
+                owner, _, repo = slug.partition("/")
+                self.assertEqual(owner, self.audit.UNRESOLVED_OWNER)
+                self.assertIn(
+                    "_", owner, "an owner GitHub could hold would collide with a real one"
+                )
+                self.assertNotEqual(repo, "")
+                self.assertNotEqual(repo.strip("."), "", f"{slug} carries a dot segment")
+
+    def test_the_branch_override_is_held_to_the_registry_grammar(self) -> None:
+        """The override reaches the same path segment and `?ref=` value the declared field does.
+
+        Run as the real script, since the guard lives in `main()` and `--selftest` returns before it. It precedes the
+        first read, so this makes no network call.
+        """
+        for bad in ("a/../../../../../zen", "main?per_page=1", "main#x", "main "):
+            with self.subTest(bad=bad):
+                result = subprocess.run(
+                    [sys.executable, str(validate.ROOT / "spec" / "audit.py"), "--branch", bad],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                    cwd=validate.ROOT,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("does not address unencoded", result.stderr)
+
+    def test_the_override_message_states_the_one_shape(self) -> None:
+        """Two hand-written shape sentences would drift, and the grammar is stated in words exactly once."""
+        result = subprocess.run(
+            [sys.executable, str(validate.ROOT / "spec" / "audit.py"), "--branch", "main?x"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            cwd=validate.ROOT,
+        )
+        self.assertIn(validate.GROUND_TRUTH_BRANCH_SHAPE, result.stderr)
+        self.assertIn(
+            validate.GROUND_TRUTH_BRANCH_SHAPE,
+            validate.ground_truth_branch_errors_for_repo({"groundTruthBranch": "main?x"}, "F")[0],
+        )
+
+
+class RegistryGroundTruthBranchCase(unittest.TestCase):
+    """A declared groundTruthBranch is concatenated raw into a path segment and a `?ref=` query value."""
+
+    def errors(self, value: object) -> list[str]:
+        return validate.ground_truth_branch_errors_for_repo({"groundTruthBranch": value}, "Fixture")
+
+    def test_an_absent_key_produces_no_errors(self) -> None:
+        self.assertEqual(validate.ground_truth_branch_errors_for_repo({}, "Fixture"), [])
+
+    def test_the_branch_names_a_fleet_repo_declares_are_accepted(self) -> None:
+        for value in (
+            "main",
+            "develop",
+            "release/2.0",
+            "v1",
+            "feature/JIRA-123",
+            "_wip",
+            "wip-",
+            "a.b",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.errors(value), [])
+
+    def test_a_value_that_would_re_parse_the_url_is_rejected(self) -> None:
+        """`?` and `#` do not fail the request, they send a different one, which is why the url field's own grammar
+        excludes both and why a value landing in the same URLs has to as well.
+        """
+        for value in (
+            "main?ref=develop",
+            "main?ref",
+            "main?",
+            "main#x",
+            "main#",
+            "main branch",
+            "main%2F",
+            "main+x",
+            "",
+            "/main",
+            "main/",
+            "main.",
+            ".main",
+            "a..b",
+            "..",
+            "a/../b",
+            "x/..",
+            "~x",
+            "main~1",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors(value)), 1)
+
+    def test_a_non_string_is_rejected_rather_than_read_as_absent(self) -> None:
+        for value in (None, 42, ["main"]):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors(value)), 1)
 
 
 if __name__ == "__main__":
