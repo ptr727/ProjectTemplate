@@ -1108,12 +1108,21 @@ class GhBoundaryCase(unittest.TestCase):
                 self.assertNotIn("unmodeled", err.getvalue())
 
     def test_a_row_that_is_not_an_object_is_named_too(self) -> None:
-        with (
-            unittest.mock.patch.object(handoff, "run_gh", lambda argv: json.dumps(["a string"])),
-            self.assertRaises(handoff.Execution) as caught,
-        ):
-            handoff.require_label("o/r")
-        self.assertIn("carrying no name", str(caught.exception))
+        """A row holding the field name without being an object is what pins the type check.
+
+        A plain string fails the `field not in row` half on its own, so it proves nothing about
+        the half this case is named for.
+        """
+        for row in (["name"], "name", 7):
+            with self.subTest(row=row):
+                with (
+                    unittest.mock.patch.object(
+                        handoff, "run_gh", lambda argv, r=row: json.dumps([r])
+                    ),
+                    self.assertRaises(handoff.Execution) as caught,
+                ):
+                    handoff.require_label("o/r")
+                self.assertIn("carrying no name", str(caught.exception))
 
     def test_a_label_list_that_is_not_an_array_is_an_execution_failure(self) -> None:
         """Reading a non-array as empty would report the label absent, the degraded answer."""

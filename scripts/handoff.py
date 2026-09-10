@@ -199,16 +199,19 @@ def gh_json(argv: list[str]) -> object:
 def rows_of(data: object, what: str, field: str) -> list[dict]:
     """`data` as a list of rows each carrying `field`, refusing every other shape.
 
-    Each reader here validates what it is about to subscript. A row that is not an object, or one
-    missing the field the reader asks `gh` for, would otherwise raise out of a comprehension and
-    reach the blind catch as an unmodeled error, which reports exit 2 without saying what `gh`
-    actually returned.
+    A row that is not an object, or one missing the field its reader asks `gh` for, would
+    otherwise raise out of a comprehension and reach the blind catch as an unmodeled error, which
+    reports exit 2 without saying what `gh` actually returned.
+
+    The guarantee stops at that one field. A command consuming these rows reads fields of its own,
+    and an absent one still lands on the blind catch, which is the honest place for a shape nobody
+    named.
     """
     if not isinstance(data, list):
         raise Execution(f"the {what} did not read as an array")
     for row in data:
         if not isinstance(row, dict) or field not in row:
-            raise Execution(f"the {what} holds a row carrying no {field}: {row!r}"[:200])
+            raise Execution(f"the {what} holds a row carrying no {field}: {cut(repr(row))}")
     return data
 
 
