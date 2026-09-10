@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -330,10 +331,27 @@ class RegistryNameUniquenessCase(unittest.TestCase):
             return output
 
     def test_a_name_differing_only_by_case_is_rejected(self) -> None:
-        """audit.py narrows with name.lower(), so both entries would answer one --repo."""
+        """audit.py narrows on the same casefold, so both entries would answer one --repo."""
         self.assertIn(
             "blog: duplicate registry entry for name 'blog', already declared as 'Blog'",
             self.run_against(["Blog", "blog"]),
+        )
+
+    def test_two_names_colliding_only_under_casefold_are_rejected(self) -> None:
+        """Lowercasing keeps these two distinct, so this case is what pins the dedup's normalizer."""
+        sharp_s, doubled = "Stra\u00dfe", "Strasse"
+        self.assertNotEqual(sharp_s.lower(), doubled.lower())
+        self.assertEqual(sharp_s.casefold(), doubled.casefold())
+        self.assertIn(
+            "duplicate registry entry for name 'Strasse', already declared as 'Stra\u00dfe'",
+            self.run_against([sharp_s, doubled]),
+        )
+
+    def test_the_collision_is_found_whichever_order_the_pair_is_declared(self) -> None:
+        """Declared the other way round, the lookup rather than the insert is what has to casefold."""
+        self.assertIn(
+            "duplicate registry entry for name 'Stra\u00dfe', already declared as 'Strasse'",
+            self.run_against(["Strasse", "Stra\u00dfe"]),
         )
 
     def test_a_byte_identical_name_names_the_entry_already_declared(self) -> None:
@@ -345,6 +363,58 @@ class RegistryNameUniquenessCase(unittest.TestCase):
 
     def test_two_distinct_names_are_accepted(self) -> None:
         self.assertNotIn("duplicate registry entry for name", self.run_against(["Blog", "Utils"]))
+
+
+class RegistryNameNormalizerCase(unittest.TestCase):
+    """The narrowing in spec/audit.py, which must normalize a name the way spec/validate.py dedupes it.
+
+    This reads only spec/audit.py. The dedup's own normalizer is pinned by
+    `RegistryNameUniquenessCase` above, whose casefold-only collision fails under lowercasing.
+
+    The narrowing lives inside `main()`, so the three lines that do it are lifted out of the file
+    and executed here. Restating them would leave a test that agrees with itself while the two
+    files disagree, which is the defect this pins.
+    """
+
+    def narrow(self, declared: list[str], typed: list[str]) -> tuple[list[str], set[str]]:
+        source = (validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8")
+        lines = re.findall(
+            r"^(    wanted = \{.*?\n)|^(        repos = \[r for r in repos.*?\n)|^(        missing = wanted -.*?\n)",
+            source,
+            re.MULTILINE,
+        )
+        # The three sit at two indent levels in their own function, so each is dedented on its own.
+        found = [part.strip() for group in lines for part in group if part]
+        self.assertEqual(len(found), 3, f"expected three narrowing lines, got: {found}")
+        block = "\n".join(found)
+        # One dict as both globals and locals, because with two a comprehension's free variable resolves against the empty globals and raises below 3.12 rather than reading the local.
+        scope: dict = {
+            "a": type("Args", (), {"names": typed})(),
+            "repos": [{"name": n} for n in declared],
+        }
+        exec(block, scope)  # noqa: S102
+        selected, missing = scope["repos"], scope["missing"]
+        # 7. The lifted lines are source rather than typed code, so their shapes are asserted.
+        self.assertIsInstance(selected, list)
+        self.assertIsInstance(missing, set)
+        return [r["name"] for r in selected], missing
+
+    def test_a_name_whose_casefold_differs_from_its_lowercase_is_selectable(self) -> None:
+        """`Stra` + sharp s lowercases to itself and casefolds to `strasse`, so the two disagree."""
+        sharp_s = "Stra\u00dfe"
+        self.assertNotEqual(sharp_s.lower(), sharp_s.casefold())
+        # The typed name carries the character too, so the line normalizing `a.names` is pinned alongside the two normalizing the entries.
+        # An ASCII spelling would leave that first line free.
+        typed = "STRA\u00dfE"
+        self.assertNotEqual(typed.lower(), typed.casefold())
+        selected, missing = self.narrow([sharp_s], [typed])
+        self.assertEqual(selected, [sharp_s])
+        self.assertEqual(missing, set())
+
+    def test_an_absent_name_is_reported_missing(self) -> None:
+        selected, missing = self.narrow(["Blog"], ["Utils"])
+        self.assertEqual(selected, [])
+        self.assertEqual(missing, {"utils"})
 
 
 class RegistryEnvironmentCase(unittest.TestCase):

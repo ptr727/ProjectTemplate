@@ -5698,12 +5698,14 @@ def main(argv=None):
         "divergences": load("spec/divergences.json"),
     }
     issue_mode = a.issue
-    wanted = {n.lower() for n in a.names}
+    wanted = {n.casefold() for n in a.names}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
-        # Keyed on the entry name lowercased rather than the owner/repo identity, and a name is unambiguous because spec/validate.py refuses one that duplicates another up to case, when it is run.
-        repos = [r for r in repos if r["name"].lower() in wanted]
-        missing = wanted - {r["name"].lower() for r in repos}
+        # Keyed on the entry name rather than the owner/repo identity, and a name is unambiguous because spec/validate.py refuses one that duplicates another up to case, when it is run.
+        # Casefolded rather than lowercased, and identically on both sides, because the two differ on a name carrying a sharp s: lowercasing keeps the character where casefolding spells it as a double s.
+        # A name declared with one and typed with the other would match under one normalizer and not the other, so both sides use the one spec/validate.py dedupes on.
+        repos = [r for r in repos if r["name"].casefold() in wanted]
+        missing = wanted - {r["name"].casefold() for r in repos}
         if missing:
             print(f"Not cataloged: {', '.join(sorted(missing))}", file=sys.stderr)
             return 2
