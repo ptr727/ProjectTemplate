@@ -50,7 +50,7 @@ python3 scripts/host_gate.py            # from a hub checkout, against the fleet
 
 **No `--repo` here, and that is the one place in these procedures where it is omitted deliberately.** The flag points the gate at a repo's own `host-tools.json` so its floors are layered over the fleet ones, and at this step there is no repo to point it at: the target does not exist yet, since this section runs before the `git init` in section 0B, and the file itself arrives with the baseline in section 2. So this run checks the fleet floors, which is all that is knowable now.
 
-**Re-run it with `--repo` once section 2 has carried the file**, because a bare run reads no declaration but the one at its own working directory, so any floor the target adds goes unapplied. The gate warns when its working directory sits inside a repo whose overlay it did not read, and no warning can name a target that does not exist yet, so this re-run is the only thing that counts the target's floors:
+**Re-run it with `--repo` once section 2 has carried the file**, because a bare run reads no declaration but the one at its own working directory, so any floor the target adds goes unapplied. No warning covers the gap here, because the run above is not inside the target and the target is not an ancestor of the hub checkout it runs from. So this re-run is the only thing that counts the target's floors:
 
 ```shell
 python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 2, so the repo's own floors count
@@ -117,7 +117,7 @@ The rename runs unconditionally rather than behind a test of `init.defaultBranch
 
 A repo lacking any entry is exactly what [`AUDIT.md`][audit] section 0's fleet membership check surfaces on a full sweep, a `DEFECT` naming the repo by its GitHub `full_name`. That finding is what should send an agent here in the first place for a repo nobody has stood up yet, rather than the omission sitting unnoticed (ptr727/ProjectTemplate#550).
 
-Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
+Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules, then write or repair its [`registry/repos.json`][repos] entry: `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, `workflowModel` (omit to take the `release` default), `environments` (only where the repo uses a deployment environment), `configLayout`, and `driftNotes` that describe what the repo **actually is**. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
 
 ## 1A. Carry the Instruction Set, Before Authoring Anything
 

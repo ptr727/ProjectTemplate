@@ -107,6 +107,13 @@ Rank on these, highest first where they conflict:
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
+An issue carrying the `handoff` label is not ranked and is not counted. It is a link in the session
+handoff chain `AGENTS.md` "Session Scope" defines, so it records work to do next rather than work of
+its own, and an open one is present by design for as long as that chain is in use. Counting it
+inflates the number this run reports as the backlog by one for every lane in use, and a backlog
+count this fleet reports wrong is a failure with its own history, so filter the label out of the
+ranking and out of every count of the open backlog rather than out of the ranking alone.
+
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
 except how the question travels. It goes to the maintainer at the end of ranking, per

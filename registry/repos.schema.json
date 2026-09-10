@@ -23,11 +23,12 @@
         }
     },
     "$defs": {
-        "releaseTrigger": { "enum": ["two-phase", "publish-on-merge", "dispatch-only", "none"] },
+        "releaseTrigger": { "enum": ["two-phase", "dispatch-only", "none"] },
         "workflowModel": { "enum": ["release", "operational"] },
         "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release", "self-hosted"] },
+        "branchPolicy": { "enum": ["custom", "none"] },
         "repo": {
             "type": "object",
             "required": ["name", "url", "status"],
@@ -76,6 +77,27 @@
                     }
                 },
                 "requiredSecrets": { "type": "array", "items": { "type": "string" } },
+                "environments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "branchPolicy"],
+                        "additionalProperties": false,
+                        "allOf": [
+                            {
+                                "$comment": "A custom policy names the exact branch set it allows, and none names no set because it admits every ref. GitHub's third form, protected branches only, is not offered: it counts classic branch protection, which this fleet removes in favor of rulesets, so declaring it would assert a gate that does not exist.",
+                                "if": { "properties": { "branchPolicy": { "const": "custom" } }, "required": ["branchPolicy"] },
+                                "then": { "required": ["branches"] },
+                                "else": { "not": { "required": ["branches"] } }
+                            }
+                        ],
+                        "properties": {
+                            "name": { "type": "string", "minLength": 1 },
+                            "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
+                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                        }
+                    }
+                },
                 "consumerModel": { "enum": ["push", "pull"] },
                 "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
                 "configLayout": {

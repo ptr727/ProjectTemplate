@@ -11,11 +11,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
-      "digest": "sha256:90ef963b15a9351c7c5cc39d46de7c936f6250f791c5af2099ed395f7a1e8d6e",
+      "digest": "sha256:f135d0393e4de217ad4f9039fc669f5833f343802592b04070937ed2d8ebca93",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Claiming Done",
@@ -27,11 +27,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Writing a Handoff",
-      "digest": "sha256:b63feb05d2ea84541dd3e6add3895326a8bcc6bec9f1df38d8c2ad3b17df6231",
+      "digest": "sha256:890fcb936591385020a38830fc2e6651922d963510942924424261ff1d50ad32",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T16:26:39Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Delegation, in One Paragraph",
@@ -131,11 +131,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:5ce2044cd7e78e86a24a15d3b8d939cf922c8fce60841bd37f659feaa51726a5",
+      "digest": "sha256:2ce9d636d57a63c499047925f8bf9b8dca29d1d968c3be5e0668b09f427f1479",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "6a590402646712e93c07f4438ed9a6f5e4dc900e",
-      "stamp": "2026-09-05T17:55:41Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T16:26:39Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -200,6 +200,14 @@
       "findings": 4,
       "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
       "stamp": "2026-09-01T05:45:31Z"
+    },
+    {
+      "unit": ".agents/skills/comment-and-doc-style/SKILL.md > Markdown files: linting and spelling",
+      "digest": "sha256:a3a16ca8160209a4f1775bf6f7b90c469f8ed8da8389b390f1d3f07dc2b51bf3",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
     },
     {
       "unit": ".agents/skills/comment-and-doc-style/SKILL.md > PR titles and commit messages",
@@ -362,6 +370,14 @@
       "stamp": "2026-09-05T16:11:49Z"
     },
     {
+      "unit": ".agents/skills/merge-and-release/SKILL.md > The Procedure",
+      "digest": "sha256:89fd928803a3b70e75757d0539b37ce69062e29d68ed4ea0b318c7952b1d9105",
+      "reviewer": "agent-skill",
+      "findings": 10,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T16:22:24Z"
+    },
+    {
       "unit": ".agents/skills/operational-vs-release-workflow/SKILL.md > (preamble)",
       "digest": "sha256:f03486afbab8e5742c3571d7da5544d07a99f7b5a4a90d030baa472a1d6220d6",
       "reviewer": "agent-skill",
@@ -522,6 +538,14 @@
       "stamp": "2026-09-02T03:51:13Z"
     },
     {
+      "unit": ".agents/skills/python-codestyle/references/profiles.md > Adapt before propagating",
+      "digest": "sha256:49fd21f32dcc50815b7de679cd07d618867e85111227ba4f973f6901bef32514",
+      "reviewer": "agent-skill",
+      "findings": 12,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T20:49:22Z"
+    },
+    {
       "unit": ".agents/skills/python-codestyle/references/testing.md",
       "digest": "sha256:94f61df9b261dbbce373b216b2393492ebd547778dee92d2bac61c892e30a00d",
       "reviewer": "agent-skill",
@@ -552,6 +576,70 @@
       "findings": 9,
       "hubCommit": "df5e2493b48aa45d80f586db68af0c21be97ea21",
       "stamp": "2026-09-01T05:45:32Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > (preamble)",
+      "digest": "sha256:59209ea209086098829c360156e8de08c536ae624fd9991df35bf51a1ad329d7",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Resuming",
+      "digest": "sha256:345411acb94fa8db3b406c2b89ab464b165feb856a075af4853fc19baeb1b722",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Running the Chain",
+      "digest": "sha256:27d277294b1768fbf193704fdb95d6ee489859581c64f03ad76a60b595c8d552",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T22:20:55Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > The Chain",
+      "digest": "sha256:a6ffd166799910953794d4d4e7e9be6f0cebc9f2b6c87ef9aeb3a259819dbee3",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:21Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > The Parked Decision Queue",
+      "digest": "sha256:7f26cc53bfa10d8d51cf3fe8dc54a0418c5eed4c12d1a4682e3f7dc36108a1d3",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > What Goes in the Body",
+      "digest": "sha256:afee9f586975e1347692a151a385f99fd04a50e2edcf4820bb4658caff319021",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T16:31:35Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > What a Handoff Is, and Is Not",
+      "digest": "sha256:c2950c7bbc8986d08825a59ac9f526d8fe5cfa08ba84a5805d632ad733390cbd",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
+    },
+    {
+      "unit": ".agents/skills/session-handoff/SKILL.md > Why This Exists",
+      "digest": "sha256:3fa268357934640835b12f9f7def579c890560e5ddb1032cef1a4141370f72ea",
+      "reviewer": "agent-skill",
+      "findings": 1,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": ".agents/skills/shell-codestyle/SKILL.md > Rules",
@@ -746,20 +834,28 @@
       "stamp": "2026-09-05T04:49:01Z"
     },
     {
-      "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:e690f84e1628ddb5fc78e6d2bd2b5bc5995126630ca3a5f9908acb69ab093e63",
+      "unit": ".markdownlint-cli2.jsonc",
+      "digest": "sha256:826753ef2717b77ccc1fef5cd20ee7f2437a8b5c9218cd25f9a66fbfa8390509",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 3,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:02:31Z"
+    },
+    {
+      "unit": "AGENTS.md > Context and Delegation Discipline",
+      "digest": "sha256:650f1a3d0284ff969cac0d0db3b36fb8fa967b65d4d0c7e11a209c2eaf4e9203",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T16:36:58Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
-      "digest": "sha256:ce4edaf6e8818b89bab224a63e6c4b7df0616d7f1f27a5fef17b7eda7e47b7dc",
+      "digest": "sha256:a651e4c18072c8d3526bb44bba12b0cba448bddca7a15068b0bc080b9011b303",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "66d79460335379301db83fe6870303f8f701d92b",
-      "stamp": "2026-09-06T05:06:22Z"
+      "findings": 0,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": "AUDIT.md > (preamble)",
@@ -787,11 +883,11 @@
     },
     {
       "unit": "AUDIT.md > 4. Per-Dimension Checks (Letter and Intent)",
-      "digest": "sha256:083d3ca4108c8b1d047e086924360dba45106e62aad5546636a6cbf468271143",
+      "digest": "sha256:f46131566b2d3c4ff86385251415c54c449093da6c0aed928ed21704c22344e5",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "78898becaa2b1a62cb4c806d86273210c6390ac5",
-      "stamp": "2026-09-01T14:48:23Z"
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
     },
     {
       "unit": "AUDIT.md > 5. Assert the Actions Implement WORKFLOW.md",
@@ -803,11 +899,11 @@
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
-      "digest": "sha256:cadbf5a3b36bdc9ec871eb907565c582bed70c2e4098c6a99fd756cd2b623489",
+      "digest": "sha256:acab766390d45e079b50713cc3a7a19892fb8622f0d5a2f1ad36536aad675d27",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "db9e5695f1501cc894953bdd57db46e4faf74159",
-      "stamp": "2026-09-05T02:20:07Z"
+      "findings": 11,
+      "hubCommit": "c23a4b8acb933e91368709a05811478c59113078",
+      "stamp": "2026-09-09T20:04:13Z"
     },
     {
       "unit": "CODESTYLE.md > .NET",
@@ -819,11 +915,11 @@
     },
     {
       "unit": "CODESTYLE.md > General",
-      "digest": "sha256:54fcc07fc743507089e95ab8f1e7aeb64f0d83e31716514dadb666871a495684",
+      "digest": "sha256:b4ec0b5eb8387f8247d0e8e0cc3f737d82e8d0a7396ab4c756e13b3e417d17e0",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "112ffd874eaec3784a747b341fbdd0b19d75502c",
-      "stamp": "2026-09-02T03:09:17Z"
+      "findings": 0,
+      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
+      "stamp": "2026-09-09T21:41:02Z"
     },
     {
       "unit": "CODESTYLE.md > Python",
@@ -843,11 +939,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Communicating with the User",
-      "digest": "sha256:678e7f48e82be9aca5ff15a93c5ac0fb1cabb0384fd96b1f833be67556769926",
+      "digest": "sha256:e16b3fa4a65bfb7acac452ca91785921957422e9d5299a0d1ab043cf8d1039d1",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T04:23:10Z"
+      "findings": 2,
+      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
+      "stamp": "2026-09-09T15:55:22Z"
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
@@ -856,6 +952,14 @@
       "findings": 5,
       "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
       "stamp": "2026-09-05T14:21:22Z"
+    },
+    {
+      "unit": "GOVERNANCE.md > Hub-Hosted Tooling",
+      "digest": "sha256:12b540ba3e43aa2315985970a66588dd4832856c8f106a6d5386507897dec143",
+      "reviewer": "agent-skill",
+      "findings": 3,
+      "hubCommit": "c23a4b8acb933e91368709a05811478c59113078",
+      "stamp": "2026-09-09T17:32:13Z"
     },
     {
       "unit": "GOVERNANCE.md > PR Review Etiquette",

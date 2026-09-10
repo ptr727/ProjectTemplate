@@ -195,6 +195,34 @@ class DockerLintCase(unittest.TestCase):
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
         self.assertEqual([], docker_lint.tracked_files(self.root, linter))
 
+    def test_node_modules_is_not_a_target_at_any_depth(self) -> None:
+        for name in ("node_modules/pkg/README.md", "web/node_modules/pkg/README.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# Third party\n", encoding="utf-8")
+        self.track("README.md", "# Ours\n")
+        markdownlint = next(
+            linter for linter in docker_lint.LINTERS if linter.name == "markdownlint"
+        )
+        self.assertEqual(["README.md"], docker_lint.tracked_files(self.root, markdownlint))
+
+    def test_pattern_free_linter_still_gets_targets_without_node_modules(self) -> None:
+        self.track("README.md")
+        path = self.root / "node_modules" / "pkg" / "index.js"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("module.exports = 1;\n", encoding="utf-8")
+        editorconfig = next(
+            linter for linter in docker_lint.LINTERS if linter.name == "editorconfig-checker"
+        )
+        self.assertEqual(["README.md"], docker_lint.tracked_files(self.root, editorconfig))
+
+    def test_node_modules_shell_script_is_not_a_shellcheck_target(self) -> None:
+        path = self.root / "node_modules" / "pkg" / "bin" / "run.sh"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        shellcheck = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual([], docker_lint.tracked_files(self.root, shellcheck))
+
     def test_shell_shebang_interpreter_rejects_bash_as_a_plain_argument(self) -> None:
         cases = {
             "#!/bin/bash": "bash",

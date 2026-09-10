@@ -1,9 +1,9 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or pytest, skipped where the caller has no test project), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or pytest, skipped where the caller has no test project, and run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs and repo-gate-exclude-globs are the two optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs and python-versions are the three optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -20,6 +20,12 @@ on:
         required: false
         type: string
         default: ''
+      # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, so the check below reaches only the values that expand at all.
+      python-versions:
+        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. Quote each entry, since an unquoted one is a JSON number rather than a version string.
+        required: false
+        type: string
+        default: '["3.13"]'
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -260,13 +266,43 @@ jobs:
   # A caller with neither a *Tests*.csproj nor a tests/ directory beside a pyproject.toml and a dependency manifest runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # That manifest is a committed uv.lock or a root requirements*.txt, the two dependency mechanisms spec/project-types.json names, so a pip-based Python repo with tests is served here rather than skipped, per D1.6.
   # What excludes the lint-only Python profile here is the root tests/ guard rather than the manifest one, that profile being tooling scripts embedded in a non-Python repo rather than a tested package at the root.
+  # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
+  # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
+  # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
   unit-test:
-    name: Unit test job
+    name: Unit test job (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      # A failing interpreter must not cancel its siblings, since which of them fail is the whole point of running more than one.
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
 
     steps:
+
+      # An entry holding no non-whitespace character is the value that would otherwise run green on an interpreter nobody chose, since setup-uv trims what it reads and then reads an empty input as an absent one.
+      # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well, which is why the entry test is for content rather than for length.
+      # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
+      # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
+      # The rest fail in the dependency sync below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
+      # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
+      - name: Validate python-versions input step
+        env:
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
+            # The annotation carries the rejected value, so it is escaped per the workflow command encoding rules first.
+            # A raw newline would end the annotation and let whatever follows it start a command of its own, and the runner reads a command off stderr as readily as stdout, so redirecting rather than escaping would close nothing.
+            # The percent substitution runs first, since running it after the others would re-encode the percent each of them just introduced.
+            escaped=${PYTHON_VERSIONS//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
+            exit 1
+          fi
 
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -305,7 +341,7 @@ jobs:
           && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
 
       # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
       # The editable install matches what uv sync gives the other branch, and its guard leaves a layout declaring no [project] alone.
@@ -353,6 +389,7 @@ jobs:
           fi
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
+      # The flag names the leg, so a multi-interpreter repo reads its legs apart in Codecov rather than seeing one merged number for all of them.
       - name: Upload coverage to Codecov step (Python)
         if: >-
           hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
@@ -362,6 +399,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          flags: python-${{ matrix.python-version }}
           fail_ci_if_error: false
 
   validate:

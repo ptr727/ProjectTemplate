@@ -44,7 +44,7 @@ The cache directory is unique to this verification run and remains outside the c
 
 The `test_install.py` line behaves differently here than in CI, stated so its failure reads as the verdict it is. Its report cases install from this checkout and assert the machine then reads as current. An install from a checkout carrying uncommitted changes records a dirty stamp that reads as stale. So on a working tree mid-change those cases fail by design where CI's clean checkout passes. The remedy is to run them again once the change is committed, not to read the failure as a regression.
 
-The Docker runner discovers tracked and unignored targets with `git ls-files`. File-argument linters receive each path as one argument, so a path that contains whitespace remains one target. The runner splits long target lists into bounded batches before host command-line limits become relevant.
+The Docker runner discovers tracked and unignored targets with `git ls-files`, excluding any path under `node_modules` at any depth. File-argument linters receive each path as one argument, so a path that contains whitespace remains one target. The runner splits long target lists into bounded batches before host command-line limits become relevant.
 
 Two gaps in that list are CI's rather than this runbook's, reproduced here so a local run matches CI rather than quietly exceeding it. The `jq` glob covers `repo-config/*.json` and does not reach `repo-config/operational/develop.json`, so a malformed operational payload passes. The second is that `sentence-split` and `sentence-length` are implemented and tested but named by no invocation, so nothing runs them.
 
@@ -85,7 +85,7 @@ repo-config/configure.sh apply owner/repo release|operational
 
 **Always pass the command, the repository, and the model.** A bare `repo-config/configure.sh` with no arguments defaults to `apply` against the current repo, so an invocation meant to test whether the script runs performs a live write instead. Never run it without a command. An omitted target resolves to the hub repository, and applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
 
-`check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo.
+`check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo. `check` also asserts one group `apply` never writes, the existence and deployment-branch policy of every environment the registry's `environments` declares for the repo, so the two are not exact inverses. [docs/repo-config.md](./docs/repo-config.md) "Deployment Environments" says why.
 
 `apply` is not a narrow toggle. One run patches every key in `repo-config/settings.json`, sets the default branch, enables both Dependabot features, creates or updates every label in `repo-config/labels.json`, and creates or updates both branch rulesets. On a repository that has deliberately drifted it silently reasserts the fleet configuration.
 

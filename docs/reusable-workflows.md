@@ -68,7 +68,7 @@ The sequencing consequence is that a hub task lands on `develop`, promotes to `m
 
 ### Secrets and Permissions
 
-Every hub task declares the secrets it needs by name under `on.workflow_call.secrets`, and a caller maps each one explicitly. Most are `required: true`. A mechanism's secret is `required: false` where the task treats it as one of several opt-in targets, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-release-task.yml`. A package-registry credential is not among them, since `NUGET_USERNAME` and the PyPI OIDC exchange are read by the caller stub's own `publish-nuget` / `publish-pypi` job rather than passed into the task, per [Adopting the Release Chain][adopting-the-release-chain]. The same names are `required: true` in a task built around that one mechanism instead, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-docker-task.yml`. Whether `secrets: inherit` is used is decided by the call's own boundary, not by the fleet's preference. [GitHub documents the keyword][gh-reusing-workflows] for a caller in the same organization or enterprise as the called workflow, and the fleet is a personal account. So a cross-repository call to a hub task names each secret it passes, and `inherit` is never used on one. A call whose job needs none passes no `secrets:` key, which is what the [Adopting the Gates][adopting-the-gates] `validate` stub does. A call by local path stays inside one repository. There the caller's own secret store is the one the called workflow reads, so `inherit` is available. Availability is not a reason to use it, and this repository's own local-path calls name their secrets or pass none. The [Adopting the Gates][adopting-the-gates] smoke-build stub carries the local-path shape for the same reason. Both shapes run in the fleet today, one repo carrying a local-path `inherit` call beside a cross-repository call that names its secrets, and another proving an inherited value reaches a publishing task that authenticates from it. The declared names are the ones [`spec/secrets.json`][secrets] already declares for the mechanism the task implements, so the secret audit and the workflow agree by construction. An environment-scoped secret is the exception. `DEPLOY_SSH_PRIVATE_KEY` and the `SITE_AUTH_TOKEN_ID`/`SITE_AUTH_TOKEN` pair beside it cross a GitHub Environment boundary `spec/secrets.json` has no vocabulary for, per its `deploy-ssh` mechanism note.
+Every hub task declares the secrets it needs by name under `on.workflow_call.secrets`, and a caller maps each one explicitly. Most are `required: true`. A mechanism's secret is `required: false` where the task treats it as one of several opt-in targets, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-release-task.yml`. A package-registry credential is not among them, since `NUGET_USERNAME` and the PyPI OIDC exchange are read by the caller stub's own `publish-nuget` / `publish-pypi` job rather than passed into the task, per [Adopting the Release Chain][adopting-the-release-chain]. The same names are `required: true` in a task built around that one mechanism instead, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-docker-task.yml`. Whether `secrets: inherit` is used is decided by the call's own boundary, not by the fleet's preference. [GitHub documents the keyword][gh-reusing-workflows] for a caller in the same organization or enterprise as the called workflow, and the fleet is a personal account. So a cross-repository call to a hub task names each secret it passes, and `inherit` is never used on one. A call whose job needs none passes no `secrets:` key, which is what the [Adopting the Gates][adopting-the-gates] `validate` stub does. A call by local path stays inside one repository. There the caller's own secret store is the one the called workflow reads, so `inherit` is available. Availability is not a reason to use it, and this repository's own local-path calls name their secrets or pass none. Both shapes run in the fleet today, one repo carrying a local-path `inherit` call beside a cross-repository call that names its secrets, and another proving an inherited value reaches a publishing task that authenticates from it. The declared names are the ones [`spec/secrets.json`][secrets] already declares for the mechanism the task implements, so the secret audit and the workflow agree by construction. An environment-scoped secret is the exception. `DEPLOY_SSH_PRIVATE_KEY` and the `SITE_AUTH_TOKEN_ID`/`SITE_AUTH_TOKEN` pair beside it cross a GitHub Environment boundary `spec/secrets.json` has no vocabulary for, per its `deploy-ssh` mechanism note.
 
 A hub task declares no job-level `permissions:` where every write goes through the App token, and the caller sets `permissions: {}`. A called workflow can only keep or reduce the caller's grant. A callee job naming a scope the caller did not grant fails at startup even when its `if:` is false. Declaring nothing in the callee is therefore the shape that cannot fail against any caller, and it gives `GITHUB_TOKEN` no scope. A task whose job genuinely writes with `GITHUB_TOKEN`, such as a release upload, declares that scope in the callee job and documents it in the stub's comment so the caller grants it.
 
@@ -152,11 +152,11 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
-- [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates] pinned to that release. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`. The release-with-smoke shape still calls its own repo's `build-release-task.yml` by `./` path rather than the hub's, so it carries no catalog-ready pin yet, and this item stays open until it does.
+- [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates]. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`, re-pinned to `2.0.376` in #826. The release-with-smoke shape reaches the hub's `build-release-task.yml` by pin, so a snippet of its own is now writable, and this item stays open until one lands.
 - [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path observed on PhotoCleaner's adoption pull request, [pilot smoke run][pilot-smoke-run], where the hub's `validate-default` ran because that repo carries no `validate` hook. The follow-up self-reference pilot also runs the bundled prose and repository gates through `$/.github/actions/` without checking out the hub.
 - [x] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), both on 2026-08-16. `test-pull-request.yml` calls the hub validate task and no repo hook was needed.
 - [ ] HomeAutomation-Config (second pilot, operational trigger shape)
-- [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo. A Python adopter owes one precondition before its bump: the `unit-test` job fails when the run wrote no root `coverage.xml`, and that job's Python leg runs where the repository root carries `pyproject.toml`, `tests/`, and a dependency manifest it installs from, a committed `uv.lock` or a root `requirements*.txt`, so an adopter of that shape puts `pytest-cov` among its test dependencies and a `--cov=<package>` selector in its own `pyproject.toml` before it bumps, per D1.6, which binds that selector for every Python repo with tests, lint-only excepted. aiopurpleair and Financial-Modeling carry both. homeassistant-purpleair owes the same precondition, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`, and its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14 where the hub leg pins 3.13 and expresses no matrix at all. PlexCleaner's Python is a stdlib-only tooling subtree with no tests, and ESPHome-Config's Python is lint-only. The hub cannot smoke-test this itself, having no `tests/` of its own.
+- [ ] The remaining repos, one checkbox each added when the pilots close, since the sweep list is every cataloged repo. A Python adopter owes one precondition before its bump: the `unit-test` job fails when the run wrote no root `coverage.xml`, and that job's Python leg runs where the repository root carries `pyproject.toml`, `tests/`, and a dependency manifest it installs from, a committed `uv.lock` or a root `requirements*.txt`, so an adopter of that shape puts `pytest-cov` among its test dependencies and a `--cov=<package>` selector in its own `pyproject.toml` before it bumps, per D1.6, which binds that selector for every Python repo with tests, lint-only excepted. aiopurpleair and Financial-Modeling carry both. homeassistant-purpleair owes the same precondition, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`, and its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14. The `python-versions` input settles the interpreter half, a caller naming `["3.14"]` moving the leg there, and leaves the dependency-version axis open, which is a dimension the hub task does not express. PlexCleaner's Python is a stdlib-only tooling subtree with no tests, and ESPHome-Config's Python is lint-only. The hub cannot smoke-test this itself, having no `tests/` of its own.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
 
 ### Stage 3: The Pure Functions
@@ -196,6 +196,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
 - [x] A real publish through `build-release-task.yml` observed on the PhotoCleaner pilot, [pilot publish run][pilot-publish-run]: release `1.1.11` on `fa91db0` with `Publish GitHub release job` and `Build Docker image job` both succeeding.
 - [x] The first real (non-smoke) NuGet publish through the chain, from ptr727/Utilities at `f3b4cc9` (`2.0.526`), failed the NuGet.org token exchange `HTTP 401` because the OIDC `job_workflow_ref` claim named this hub's `build-release-task.yml` rather than the publishing repository's own workflow. The build itself passed and every later job skipped, so the run published nothing and left no partial release. PhotoCleaner, the pilot, sets `enable_nuget: false`, so the NuGet leg had never run for real. Fixed by moving the push to the caller stub's own `publish-nuget` job, the shape `build-pypi` already used, per [Adopting the Release Chain][adopting-the-release-chain]. A smoke build never reaches either push, so no pull request can catch this class and each adopter's first real release is where it surfaces. Each NuGet adopter owes a stub edit with its next pin bump, dropping `nuget: true`, the `NUGET_USERNAME` secret mapping and `id-token: write` from its `publish` job and adding the `publish-nuget` job, since those two names are no longer declared on the task and a pin bump without the edit startup-fails. Every NuGet and PyPI adopter also owes its publish job the artifact-delete condition `if: ${{ !cancelled() && steps.download.outcome == 'success' }}` with `id: download` on the download step, per D5.2, since a step left without one skips on exactly the failed push it exists for. The same adopter also confirms its nuget.org trusted-publishing policy names its own `publish-release.yml` and repoints it where the pre-fix workaround for this same failure, pointing the policy at the hub task, left it naming `build-release-task.yml`, since the `job_workflow_ref` claim moves back to the publishing repository with the push. ptr727/Utilities proved both halves on one commit, a first release run failing the token exchange on the stale policy and the next succeeding after the policy was repointed.
+- [x] The catalog caller snippet `catalog/snippets/workflows/publish-release.yml`, pinned to `6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587`, settling #1473, once the release chain's renamed .NET publish interface had shipped and the package push had moved to the caller's own job.
 - [ ] Proof: the next PhotoCleaner release names its .NET publish asset `PhotoCleaner.7z`, which the asset-name fix in this repository derives from the project file. Tick with the release.
 - [ ] `reports/workflow-reuse.md` regenerated with `build-release-task.yml` and `build-docker-task.yml` at 0 copies (hub-only files) and `publish-release.yml` showing callers equal to copies.
 
@@ -267,11 +268,11 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. A downstream `publish-release.yml` uses the same released pin for its `validate` job. The hub workflow uses its local task path instead.
+A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
-**Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets an entry listing that target's own paths, which leaves both docs and `.github/workflows/**` matching nothing and satisfies D1.4 without naming a workflow path at all), and a `smoke-build` job. The smoke build calls the repo's own `./.github/workflows/build-release-task.yml` by local path rather than a hub task, since the renamed .NET publish interface the hub-hosted shape needs is not in a hub release yet, per [Adopting the Release Chain][adopting-the-release-chain].
+**Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets an entry listing that target's own paths, which leaves both docs and `.github/workflows/**` matching nothing and satisfies D1.4 without naming a workflow path at all), and a `smoke-build` job. The smoke build reaches the hub's `build-release-task.yml` by pin, the same task the repo's own `publish-release.yml` calls, so the repo deletes its copy of `build-release-task.yml` per the `retire` disposition in `spec/divergences.json` rather than keeping one for the smoke leg, per [Adopting the Release Chain][adopting-the-release-chain].
 
 ```yaml
 name: Test pull request action
@@ -328,12 +329,19 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ./.github/workflows/build-release-task.yml
-    secrets: inherit
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
+    permissions:
+      contents: read
+    # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here, since the task logs in to Docker Hub on every build for the higher rate limit.
     with:
       smoke: true
       github: false
       dockerhub: false
+      # Every enable_* input defaults true on the task, so this one-target caller turns off the three it does not build and leaves its own on that default, the same set its publish-release.yml passes.
+      enable_docker: false
+      enable_pypi: false
+      enable_dotnet_publish: false
+      nuget_project: ./Widget/Widget.csproj
       # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch,
       # so the logical branch reads base_ref first and only falls back to ref_name on a non-PR trigger.
       branch: ${{ github.base_ref || github.ref_name }}
@@ -362,7 +370,20 @@ jobs:
           fi
 ```
 
-A repo that vendors a theme or imports content it does not author narrows the Lint Markdown step's glob instead. Blog carries a WordPress archive and the PaperMod theme, for instance. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so it is not locally editable:
+A repo that vendors a theme or imports content it does not author excludes it from the Markdown lint rather than fixing it. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so the root config is not locally editable, and the exclusion goes in a nested `.markdownlint-cli2.jsonc` inside the excluded directory. `markdownlint-cli2` applies a nested config to the directory it sits in and to every subdirectory below it, so the exclusion holds for a bare local run and for the CI step alike. A nested config's `ignores` patterns resolve against the directory holding it rather than against the repo root. Blog is one of the two repositories owed this, `Financial-Modeling` being the other, and neither has adopted it. Blog excludes `content/**` and `themes/*/**` through the CI input below and nothing else. Its root config also predates the `globs` key, so a bare local run there exits on a usage error rather than linting anything until that re-vendor lands. Migrating it means the re-vendor plus one file per excluded tree. `content/`, its imported WordPress archive, takes the whole subtree:
+
+```jsonc
+{
+    // Imported WordPress content, not authored prose.
+    "ignores": ["**/*.md"]
+}
+```
+
+`themes/` is the case where that pattern would reach too far, since Blog authors `themes/README.md` and vendors only the theme directories under it. A `themes/.markdownlint-cli2.jsonc` carrying `"ignores": ["*/**"]` excludes one level down instead, which leaves that README linted. It also sits outside the vendored directories, where re-vendoring a theme cannot delete it, which the `content/` placement above does not get.
+
+A nested config's settings merge with the root config's rather than replacing them, so the fleet rule block still governs the files it does not exclude. Express the exclusion as `ignores`: `globs` and `gitignore` are read only from the config in the directory the linter is run from, so a nested copy of either is inert.
+
+The Lint Markdown step's `markdown-exclude-globs` input excludes in CI alone, leaving the same files flagged for anyone who runs the linter locally. It is what Blog carries today:
 
 ```yaml
   validate:
@@ -387,6 +408,26 @@ The repo gate's `sha-pin` and `eol-coverage` checks read the same tracked-file l
 ```
 
 `validate-task.yml` passes each line straight through to the `repo-gate` composite action's own `exclude-globs` input. That input turns each line into a `--exclude` argument for `repo_gate.py`. Unlike `markdown-exclude-globs`, a line here is never negated: it is always a pathspec to drop from `git ls-files`. So `themes/PaperMod/**` excludes, rather than `!themes/PaperMod/**`.
+
+A repo whose package claims more than one interpreter names them all in `python-versions`, a JSON array the `unit-test` job reads through `fromJSON` as its matrix, one leg per entry:
+
+```yaml
+  validate:
+    name: Validate sources job
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
+    permissions:
+      contents: read
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    with:
+      python-versions: '["3.13", "3.14"]'
+```
+
+The default is `["3.13"]`, so a caller naming nothing runs the single leg this job has always run. Each leg uploads under a `python-<version>` Codecov flag of its own, which keeps the legs apart in the dashboard rather than merging them into one number, and `fail-fast: false` reports a failing interpreter beside a passing one rather than cancelling the run at the first. Two things move on adoption. The nested check reads `Unit test job (Python 3.13)` rather than `Unit test job`, which binds no ruleset, only the caller's own aggregator being bound, and it reads that way whether or not a Python step ran, so a .NET-only caller reports a version it never used. And a repo that already uploaded Python coverage here uploaded it unflagged, so its series stops there and a `python-3.13` one starts beside it.
+
+Quote each entry, and give each one a version. The `unit-test` job's entry step refuses an array holding an entry with no non-whitespace character, which is the value that would otherwise run green on an interpreter nobody chose: `setup-uv` trims what it reads and then reads an empty input as an absent one, and a caller reaches that by interpolating an unset value of its own, or by leaving a stray space beside it. It refuses an unquoted entry too, since `fromJSON` admits a JSON array of numbers, and what that costs depends on the number. Some of them uv resolves to a real interpreter rather than refusing, `'[3]'` among them, so an unquoted entry is a second silent pass the check prevents. The rest fail in the `Sync dependencies step` rather than in `setup-uv`, which exports the version rather than resolving it, and there the check names a cause instead. An empty array, and anything that is not a JSON array at all, never reach the step: they fail while the matrix is expanded, loudly and with an unnamed cause.
+
+Two things are deliberately outside the input. A caller carrying a .NET test project as well repeats that half of the job once per leg, the matrix being on the job rather than on its Python steps, so naming a second version there buys runner minutes rather than a second measurement. And the `lint` job stays on the one interpreter the task pins, which costs a repo two different things. Its type check is performed at that interpreter, `mypy` and `pyright` each defaulting their target to the one they run under where the repo's own `[tool.mypy]` or `[tool.pyright]` section does not name a version, while `ruff` takes its target from `requires-python` where the `pyproject.toml` declares a `[project]` table and from its own default where it does not. That much a repo settles in its own configuration. What it cannot settle there is a lockfile: a repo carrying a `uv.lock` whose `requires-python` floor is above the pinned interpreter fails the `Sync Python dependencies step` outright, and no value of `python-versions` moves that job.
 
 ## Adopting the Pure Functions
 
@@ -418,16 +459,19 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 ## Adopting the Release Chain
 
-A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The renamed .NET publish interface is not yet in a hub release, so the full shape below keeps a pin placeholder and the catalog snippet is withheld until that release exists ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
+A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The full shape below is the catalog snippet [`publish-release.yml`][release-caller-snippet] byte for byte, pinned to a release carrying the current task interface, and Dependabot bumps it from there ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload and the artifact cleanup), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
 
 Neither package push runs inside the hub task, and that is a constraint rather than a preference. NuGet.org and PyPI trusted publishing both validate the OIDC token's `job_workflow_ref` claim against the repository that owns the package, and that claim names the workflow file the job actually ran from. A job running from a hub task therefore carries `ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha>`, and the token exchange is rejected, NuGet.org answering `HTTP 401` with `does not start with <owner>/<repo>/.github/workflows/` and PyPI rejecting the same shape under its own code. A caller hook does not avoid it, since a composite action runs inside the hub's job and leaves the claim unchanged. The hub task instead builds the package and uploads it as `nuget-build-<branch>` or `pypi-build-<branch>`, and the caller stub's own `publish-nuget` or `publish-pypi` job downloads that artifact and pushes, so the claim names the publishing repository. A smoke build never reaches either push, which is why a pull request cannot catch this and the first real release is where it surfaces.
 
 The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
-The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo whose merges should auto-publish. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, a NuGet-library repo whose merges publish:
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, for a NuGet-library repo:
 
 ```yaml
 name: Publish project release action
+
+# Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
+# This is the NuGet-library shape, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 
 on:
   push:
@@ -452,7 +496,7 @@ jobs:
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -463,7 +507,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     permissions:
       contents: read
     secrets:
@@ -475,7 +519,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     permissions:
       contents: write
       actions: write
@@ -703,6 +747,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [pilot-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31974932749
 [self-reference-smoke-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/32047594855
 [pr-760]: https://github.com/ptr727/ProjectTemplate/pull/760
+[release-caller-snippet]: ../catalog/snippets/workflows/publish-release.yml
 [run-cross-repo-secret-probe]: https://github.com/ptr727/Blog/actions/runs/32618245296
 [run-770]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972611554
 [run-771]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972622149
