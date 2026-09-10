@@ -33,7 +33,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[!-~](?:[ -~]*[!-~])?(?![\\s\\S])",
-            "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII rather than any non-blank string because a zero-width space is already trimmed and fails that comparison exactly as a trailing space does."
+            "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII, per CODESTYLE.md 'Character set', rather than any non-blank string, and a grammar rather than a padding test because str.strip() does not remove a zero-width space, so a name ending in one survives a padding test and then matches no live environment."
         },
         "groundTruthBranch": {
             "type": "string",
@@ -106,7 +106,7 @@
                                 "else": { "not": { "required": ["branches"] } }
                             }
                         ],
-                        "$comment": "The two patterns below are the exact strings spec/validate.py declares as ENVIRONMENT_NAME_PATTERN and DEPLOYMENT_BRANCH_PATTERN, and scripts/tests/test_spec_validate.py fails if they ever stop being identical. Both are written in what Python re and ECMA-262 share, so the gate and an editor resolving this schema refuse the same values: `(?![\\s\\S])` rather than `$`, which is end-of-string in only one of the two, and literal ASCII ranges rather than `\\s` or `\\S`, which name a different set in each. That agreement is what makes an editor-side copy safe, and an earlier attempt was reverted in #1504 for leaving an editor refusing what the gate allowed.",
+                        "$comment": "The name and branches patterns this object reaches are the exact strings spec/validate.py declares as ENVIRONMENT_NAME_PATTERN and DEPLOYMENT_BRANCH_PATTERN, and scripts/tests/test_spec_validate.py fails if they ever stop being identical. Both are written in what Python re and ECMA-262 share, so the gate and an editor resolving this schema refuse the same values: `(?![\\s\\S])` rather than `$`, which is end-of-string in only one of the two, and literal ASCII ranges rather than `\\s` or `\\S`, which name a different set in each. That agreement is what makes an editor-side copy safe, and an earlier attempt was reverted in #1504 for leaving an editor refusing what the gate allowed.",
                         "properties": {
                             "name": { "$ref": "#/$defs/environmentName" },
                             "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
