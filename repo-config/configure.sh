@@ -56,6 +56,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- Resolve the workflow model (selects the develop ruleset), shared by apply and check -----
 registry="$script_dir/../registry/repos.json"
+# The registry key is the entry name rather than the owner/repo identity parsed from its url.
+# Reviewers keep proposing the switch, and the answer is that a name resolves to at most one entry: spec/resolve_description.py raises on a duplicate or a case-only near-miss and exits this script below, and spec/validate.py refuses both when it is run.
 name="${repo##*/}"
 if [ -z "$model" ]; then
     if [ -f "$registry" ]; then
@@ -456,7 +458,7 @@ check_labels() {
 }
 
 check_environments() {
-    local entries entry_count count i row ename policy live_envs env_live got want policies extra
+    local entries entry_count count i row ename ename_uri policy live_envs env_live got want policies extra
     if [ ! -f "$registry" ]; then
         note "deployment environments: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
         return
@@ -469,13 +471,10 @@ check_environments() {
         fail "could not read $registry to resolve the entry for $name"
         return
     fi
-    # The two non-one counts are different states with different remedies, so they render separately rather than sharing one sentence that can only be true of one of them.
-    if [ "$entry_count" = 0 ]; then
-        note "deployment environments: no registry entry named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
-        return
-    fi
+    # Only the zero case is reachable here.
+    # A count above one raises in spec/resolve_description.py and exits the script above, before any check runs, so a branch for it here could never fire.
     if [ "$entry_count" != 1 ]; then
-        note "deployment environments: $entry_count registry entries named '$name', so which entry declares them cannot be resolved. Resolve the duplicate (spec/validate.py refuses it once run)."
+        note "deployment environments: no registry entry named '$name', so nothing is declared to check. Verify by hand whether this repo uses one."
         return
     fi
     # The declared value is emitted verbatim, invalid shapes included, so each one reaches the test that judges it rather than being defaulted away here.
@@ -527,7 +526,10 @@ check_environments() {
         assert "environment '$ename' branch policy = $policy" test "$got" = "$policy"
         # The allowed set exists only under a custom policy, so a mismatch above skips it rather than reporting a second failure for the same cause.
         if [ "$policy" != custom ] || [ "$got" != custom ]; then continue; fi
-        if ! policies="$(gh api --paginate "repos/$repo/environments/$ename/deployment-branch-policies" --jq '.branch_policies[]' | jq -s '.')"; then
+        # GitHub documents no character restriction on an environment name beyond 255 characters and uniqueness, so a name legitimately holds a space, a '#', a '?' or a '/'.
+        # Raw interpolation would turn each of those into something other than one path segment, and a '/' into two.
+        ename_uri="$(jq -rn --arg s "$ename" '$s|@uri')"
+        if ! policies="$(gh api --paginate "repos/$repo/environments/$ename_uri/deployment-branch-policies" --jq '.branch_policies[]' | jq -s '.')"; then
             fail "environment '$ename' - could not read its deployment branch policies"
             continue
         fi

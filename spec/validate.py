@@ -636,7 +636,7 @@ def main():
         )
 
     seen_identities = set()
-    seen_names = set()
+    seen_names = {}
     for i, repo in enumerate(repos["repos"]):
         if not isinstance(repo, dict):
             errors.append(f"repo #{i} is not an object")
@@ -653,9 +653,15 @@ def main():
             # A padded value would therefore make the entry unresolvable there, not merely cosmetic here.
             errors.append(f"repo #{i}: name '{name}' carries leading/trailing whitespace")
             continue
-        if name in seen_names:
-            errors.append(f"{name}: duplicate registry entry for name '{name}'")
-        seen_names.add(name)
+        # Casefolded rather than exact, because spec/audit.py narrows to a named repo on the same casefold.
+        # Two entries differing only in case would otherwise pass here and then both answer one --repo, with nothing reporting the collision.
+        # The entry already declared is named rather than qualified as case-differing, since the two shapes read the same way and only one of them is.
+        if name.casefold() in seen_names:
+            first = seen_names[name.casefold()]
+            errors.append(
+                f"{name}: duplicate registry entry for name '{name}', already declared as '{first}'"
+            )
+        seen_names.setdefault(name.casefold(), name)
         if not isinstance(repo.get("url"), str) or not repo["url"].strip():
             errors.append(f"{name}: missing or empty 'url'")
             continue
