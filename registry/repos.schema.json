@@ -12,7 +12,7 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "groundTruthBranch": { "type": "string" },
+                "groundTruthBranch": { "$ref": "#/$defs/groundTruthBranch" },
                 "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" }
             }
@@ -29,6 +29,17 @@
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },
         "target": { "enum": ["nuget", "pypi", "docker", "github-release", "self-hosted"] },
         "branchPolicy": { "enum": ["custom", "none"] },
+        "environmentName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[!-~](?:[ -~]*[!-~])?(?![\\s\\S])",
+            "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII rather than any non-blank string because a zero-width space is already trimmed and fails that comparison exactly as a trailing space does."
+        },
+        "groundTruthBranch": {
+            "type": "string",
+            "pattern": "^(?![\\s\\S]*\\.\\.)[A-Za-z0-9_-](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?(?![\\s\\S])",
+            "$comment": "The exact string spec/validate.py declares as GROUND_TRUTH_BRANCH_PATTERN, which scripts/tests/test_spec_validate.py asserts. The value is concatenated raw into a request path and a `?ref=` query value, so it admits only the characters that are both unreserved in RFC 3986 and legal in a git ref name, plus `/`, and it refuses `..`, which the live API resolves as a traversal. One $def rather than two literals so that neither key can drift from the other, and spec/validate.py checks both keys against it, since a pattern here on a key the gate did not check would make this schema the stricter of the two."
+        },
         "repo": {
             "type": "object",
             "required": ["name", "url", "status"],
@@ -52,15 +63,19 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100,
-                    "pattern": "^\\S(?:[^\\n\\r]*\\S)?$",
-                    "$comment": "Single line, no leading/trailing whitespace - kept in sync with spec/validate.py's description_errors(). That function also rejects Markdown links, which this pattern does not attempt to express."
+                    "pattern": "^[^ \\n\\r](?:[^\\n\\r]*[^ \\n\\r])?(?![\\s\\S])",
+                    "$comment": "Deliberately looser than spec/validate.py's description_errors(), which is the gate: this refuses only a line break and a leading or trailing ASCII space, both of which that function also refuses. It does not express the link-free rule, the full leading/trailing whitespace rule, or a character set, because a description may legitimately carry a tier-2 or tier-3 non-ASCII character (a degree sign, a unit symbol) that no portable positive grammar enumerates. A pattern here that refused something the gate accepts would leave an editor rejecting a valid registry, so where the two differ this one is the permissive side by design. `(?![\\s\\S])` rather than `$`, since `$` also matches before a trailing newline in Python's engine and would admit a value description_errors() refuses."
                 },
                 "status": { "enum": ["cataloged", "backlog", "archived", "excluded"] },
-                "exclusionReason": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                "exclusionReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "$comment": "Length alone, with no pattern: the blank-value rule is spec/validate.py's, which is the gate, and stating it here needed `\\S`, whose set differs between Python and ECMA-262. That divergence had an editor refusing a value the gate accepts, the direction an advisory schema must never be wrong in."
+                },
                 "types": { "type": "array", "items": { "type": "string" } },
                 "profiles": { "type": "object", "additionalProperties": { "enum": ["lint-only", "build"] } },
                 "classificationPending": { "type": "boolean" },
-                "groundTruthBranch": { "type": "string" },
+                "groundTruthBranch": { "$ref": "#/$defs/groundTruthBranch" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },
                 "lineEndings": { "$ref": "#/$defs/lineEndings" },
                 "hasDevelop": { "type": "boolean" },
@@ -91,10 +106,11 @@
                                 "else": { "not": { "required": ["branches"] } }
                             }
                         ],
+                        "$comment": "The two patterns below are the exact strings spec/validate.py declares as ENVIRONMENT_NAME_PATTERN and DEPLOYMENT_BRANCH_PATTERN, and scripts/tests/test_spec_validate.py fails if they ever stop being identical. Both are written in what Python re and ECMA-262 share, so the gate and an editor resolving this schema refuse the same values: `(?![\\s\\S])` rather than `$`, which is end-of-string in only one of the two, and literal ASCII ranges rather than `\\s` or `\\S`, which name a different set in each. That agreement is what makes an editor-side copy safe, and an earlier attempt was reverted in #1504 for leaving an editor refusing what the gate allowed.",
                         "properties": {
-                            "name": { "type": "string", "minLength": 1 },
+                            "name": { "$ref": "#/$defs/environmentName" },
                             "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
-                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])" } }
                         }
                     }
                 },
