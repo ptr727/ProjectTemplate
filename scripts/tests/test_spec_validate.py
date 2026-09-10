@@ -976,13 +976,32 @@ class AuditRepoSlugCase(unittest.TestCase):
         unreadable bucket beside its healthy siblings, so the gate refuses such a url and this stays generous.
         """
         for url, want in (
-            ("git@github.com:owner/Fixture.git", "git@github.com:owner/Fixture.git"),
+            ("git@github.com:owner/Fixture.git", "git%40github.com%3Aowner/Fixture.git"),
             ("http://github.com/owner/Fixture", "owner/Fixture"),
-            ("https://github.com/owner/Fixture?tab=readme", "owner/Fixture?tab=readme"),
+            ("https://gitlab.test/owner/Fixture", "owner/Fixture"),
         ):
             with self.subTest(url=url):
                 self.assertIsNone(validate.github_identity(url))
                 self.assertEqual(self.audit.repo_slug({"url": url}), want)
+
+    def test_no_fallback_slug_can_end_the_request_path_early(self) -> None:
+        """A `?` or a `#` in a raw fallback slug reads a different resource rather than failing.
+
+        `repos/owner/Fixture?tab=readme/branches/main` is a request to `repos/owner/Fixture` with the rest as a query
+        string, which is the shape the grammar this change adds exists to remove, so the fallback encodes instead.
+        """
+        for url in (
+            "https://github.com/owner/Fixture?tab=readme",
+            "https://github.com/owner/Fixture#readme",
+            "git@github.com:owner/Fixture.git",
+            "https://github.com/owner/Fix ture",
+        ):
+            with self.subTest(url=url):
+                slug = self.audit.repo_slug({"url": url})
+                self.assertIsNone(validate.github_identity(url))
+                # The path-ending characters, plus the space that would end an argument, are what must be gone.
+                for char in ("?", "#", " "):
+                    self.assertNotIn(char, slug, slug)
 
     def test_an_absent_or_non_string_url_answers_with_the_entry_name(self) -> None:
         """spec/workflow_reuse.py builds `{"name": HUB_NAME}` as its own fallback and calls this with no handler."""

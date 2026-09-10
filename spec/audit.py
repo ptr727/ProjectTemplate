@@ -40,6 +40,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from typing import Any
@@ -574,12 +575,19 @@ def repo_slug(entry):
     An absent or non-string url answers with the entry's name for the same reason, since spec/workflow_reuse.py
     builds `{"name": HUB_NAME}` as its own fallback when the hub has no registry entry and calls this on it. That
     404s like any other unparseable slug, and it names the entry in the message where an empty string would not.
+
+    Every fallback value is percent-encoded per segment, because it is built from a value the grammar refused and can
+    carry a `?` or a `#`. Raw, `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at `repos/<owner>/<repo>`
+    and sends the rest as a query string, which reads a different resource rather than failing, the one shape this
+    grammar exists to remove. Encoded, the same value is a 404 that names itself.
     """
     url = entry.get("url")
     if not isinstance(url, str):
-        return str(entry.get("name", ""))
+        return urllib.parse.quote(str(entry.get("name", "")), safe="")
     slug = validate.github_identity(url)
-    return slug if slug is not None else "/".join(url.rstrip("/").split("/")[-2:])
+    if slug is not None:
+        return slug
+    return "/".join(urllib.parse.quote(part, safe="") for part in url.rstrip("/").split("/")[-2:])
 
 
 def repo_selectors(entry, defaults):
