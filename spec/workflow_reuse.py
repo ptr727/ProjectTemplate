@@ -127,7 +127,7 @@ def measure(registry, canon, hub_slug, reader=fetch, lister=fetch_dir):
             continue
         name = entry["name"]
         slug = audit.repo_slug(entry)
-        ref = entry.get("groundTruthBranch", "main")
+        ref = audit.ground_branch_of(entry, defaults=registry.get("defaults", {}))
         files = [f for f in lister(slug, WORKFLOW_DIR, ref) if f.endswith((".yml", ".yaml"))]
         if not files and name != audit.HUB_NAME:
             empty.append(name)

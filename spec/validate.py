@@ -61,9 +61,15 @@ GROUND_TRUTH_BRANCH_PATTERN = (
 GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
+# A `requiredSecrets` name is resolved against the repository actions store by an exact comparison, so it is the same class of value as the three above and takes the same treatment.
+# This is GitHub's own rule for a secret name rather than a shape fitted to the four names the registry declares today: alphanumerics and underscores, and not opening with a digit.
+# Naming GitHub's set refuses no name that can be stored, where a grammar fitted to the current values would pass every test and refuse the first repo declaring a secret those four happen not to use.
+SECRET_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*(?![\s\S])"
+SECRET_NAME_SHAPE = "ASCII letters, digits and _, not opening with a digit"
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
+SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
 # A query character or a fragment character is excluded from both groups too.
@@ -738,6 +744,29 @@ def main():
     # An advisory schema stricter than the gate is the direction #1504 was reverted for.
     errors.extend(ground_truth_branch_errors_for_repo(reg_defaults, "defaults"))
 
+    # Both the defaults object and a repo entry are marked `additionalProperties: false` in registry/repos.schema.json, and no gate runs that schema, so a misspelled key passes CI today.
+    # It fails silently rather than loudly: a repo declaring `groundTruthBanch` validates clean and the audit reads main without ever saying that the declaration it was given went unread.
+    # The key set is read out of the schema rather than restated here, so the rule has one statement.
+    # A second list in this file would drift from the first in the direction nobody checks, since a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
+    # The two objects the registry's own consumers index are the ones checked.
+    # A nested object is left to the schema, and to the per-field checks that already read it.
+    schema = load("registry/repos.schema.json")
+    try:
+        repo_keys = set(schema["$defs"]["repo"]["properties"])
+        defaults_keys = set(schema["properties"]["defaults"]["properties"])
+    except (KeyError, TypeError):
+        # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
+        errors.append(
+            "repos.schema.json: cannot read the declared property names for 'defaults' and a repo entry, so no unknown key could be checked"
+        )
+        repo_keys, defaults_keys = None, None
+    if defaults_keys is not None:
+        stray = sorted(set(reg_defaults) - defaults_keys)
+        if stray:
+            errors.append(
+                f"defaults: unknown key(s) {', '.join(stray)} - registry/repos.schema.json declares none of them, so nothing reads the value"
+            )
+
     seen_identities = set()
     seen_names = {}
     for i, repo in enumerate(repos["repos"]):
@@ -781,6 +810,25 @@ def main():
         if identity in seen_identities:
             errors.append(f"{name}: duplicate registry entry for '{identity}'")
         seen_identities.add(identity)
+        # The key and the identity must name the same repository, since repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
+        # An entry whose name differs from its url's repo segment resolves to nothing there, and every consequence is a silent one: the environment assertions are skipped while the run still reports no drift, the description lookup degrades the same way, and the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload.
+        # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
+        # Agreement is also the whole of the name's own grammar, and deliberately so.
+        # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows, so a name that equals one carries no invisible character and needs no pattern of its own to say so.
+        # A separate grammar was the other candidate and was rejected for being a second statement of the same shape, free to drift from the first, where this one cannot disagree with the url it is read from.
+        url_name = slug.split("/", 1)[1]
+        if name != url_name:
+            errors.append(
+                f"{name}: name and url disagree, the url naming repo '{url_name}' - repo-config/configure.sh keys the registry on the url's segment, so this entry resolves to nothing there"
+            )
+
+        # Checked per entry for the reason given at the defaults check above, and on every status, since a backlog or archived entry is read by the fleet membership check and by whatever promotes it later.
+        if repo_keys is not None:
+            stray = sorted(set(repo) - repo_keys)
+            if stray:
+                errors.append(
+                    f"{name}: unknown key(s) {', '.join(stray)} - registry/repos.schema.json declares none of them, so nothing reads the value"
+                )
 
         # These fields are facts about the repo itself, not about its audit scope.
         # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.
@@ -800,6 +848,38 @@ def main():
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
+        # Read by spec/audit.py as `bool(entry.get("hasDevelop"))` and compared against the live branch, so the coercion decides the answer wherever the declared value is not already a boolean.
+        # The string "no" reads as True and an empty list reads as False, and the DRIFT line prints the raw value either way, so the report would name a value that is not what was compared.
+        # Presence is the test rather than truthiness, since a declared `false` is the answer for a repo that has no develop branch and must not be read as an undeclared field.
+        if "hasDevelop" in repo and not isinstance(repo["hasDevelop"], bool):
+            errors.append(
+                f"{name}: hasDevelop {repo['hasDevelop']!r} must be true or false, and spec/audit.py coerces whatever is declared"
+            )
+        # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
+        # A padded element is therefore reported missing from the actions store on every run while the unpadded name it was meant to be goes unrequired, and a non-string element reaches a set membership test that answers False for every name there is.
+        # A positive grammar rather than a padding test, per the grammars at the top of this file, and it is GitHub's own rule for a secret name: letters, digits and underscores, not opening with a digit.
+        secrets_decl = repo.get("requiredSecrets")
+        if secrets_decl is not None:
+            if not isinstance(secrets_decl, list):
+                errors.append(f"{name}: requiredSecrets must be an array of secret names")
+            else:
+                for s in secrets_decl:
+                    if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
+                        errors.append(
+                            f"{name}: requiredSecrets entry {s!r} is not a GitHub secret name ({SECRET_NAME_SHAPE})"
+                        )
+        # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names, so a non-string element raises there mid-run rather than reporting.
+        # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.
+        notes_decl = repo.get("driftNotes")
+        if notes_decl is not None:
+            if not isinstance(notes_decl, list):
+                errors.append(f"{name}: driftNotes must be an array of notes")
+            else:
+                for note in notes_decl:
+                    if not isinstance(note, str) or not note.strip():
+                        errors.append(
+                            f"{name}: driftNotes entry {note!r} must be a non-empty string"
+                        )
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
@@ -864,6 +944,14 @@ def main():
         if cm not in CONSUMER_MODELS:
             errors.append(
                 f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})"
+            )
+
+        # Required on a cataloged repo, which is the set spec/audit.py audits, because there an absent field is not read as undeclared.
+        # It is coerced to False and compared against the live branch, so omitting it asserts that the repo has no develop branch rather than declining to say.
+        # The type check above holds wherever the field is declared, and this is the one status that must declare it.
+        if "hasDevelop" not in repo:
+            errors.append(
+                f"{name}: cataloged repo must declare hasDevelop, since spec/audit.py reads an absent field as false and audits the branch against it"
             )
 
         required = set(repo.get("requiredSecrets", []))

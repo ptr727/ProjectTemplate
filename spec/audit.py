@@ -2187,9 +2187,26 @@ def classify_branch_drift(base, main, develop):
     return behind, diverged
 
 
-def ground_branch_of(entry, branch=None):
-    """The branch this audit reads, the registry's `groundTruthBranch` unless overridden."""
-    return branch or entry.get("groundTruthBranch", "main")
+def ground_branch_of(entry, branch=None, defaults=None):
+    """The branch this audit reads, the registry's `groundTruthBranch` unless overridden.
+
+    Resolved in three steps, the entry, then the registry defaults, then the fleet value, which is the shape
+    audit_repo() already uses for workflowModel. Every reader used to fall back to a literal "main" and consult no
+    defaults at all, so a registry setting `defaults.groundTruthBranch` to develop validated clean and every repo
+    relying on it was still audited against main, with nothing reporting that the declaration went unread.
+
+    Presence is the test at both levels rather than truthiness, matching spec/validate.py, which holds the defaults
+    key to the same grammar as the per-repo one: a declared empty string is a value that gate refuses by name, not
+    a field to default away here.
+    """
+    if branch:
+        return branch
+    if "groundTruthBranch" in entry:
+        return entry["groundTruthBranch"]
+    defaults = defaults or {}
+    if "groundTruthBranch" in defaults:
+        return defaults["groundTruthBranch"]
+    return "main"
 
 
 def audit_repo(entry, spec, branch=None):
@@ -2201,7 +2218,7 @@ def audit_repo(entry, spec, branch=None):
         or spec["registry"].get("defaults", {}).get("workflowModel")
         or "release"
     )
-    ground = ground_branch_of(entry, branch)
+    ground = ground_branch_of(entry, branch, spec["registry"].get("defaults", {}))
 
     try:
         live = gh(f"repos/{slug}")
@@ -4155,21 +4172,24 @@ def _selftest():
         else:
             print(f"  ok   cli: {argv or ['(no args)']} -> names={names} branch={branch}")
 
-    # The override wins over the registry field, and the registry default is main.
+    # The override wins over the registry field, the field wins over the registry defaults, and the fleet value is main.
+    # The two defaults cases are what pin the middle step: before it existed every reader fell back to a literal "main", so a declared defaults.groundTruthBranch validated clean and was never read.
     ground_cases = [
-        ({}, None, "main"),
-        ({"groundTruthBranch": "develop"}, None, "develop"),
-        ({"groundTruthBranch": "main"}, "develop", "develop"),
-        ({}, "feature/x", "feature/x"),
+        ({}, None, None, "main"),
+        ({"groundTruthBranch": "develop"}, None, None, "develop"),
+        ({"groundTruthBranch": "main"}, "develop", None, "develop"),
+        ({}, "feature/x", None, "feature/x"),
+        ({}, None, {"groundTruthBranch": "develop"}, "develop"),
+        ({"groundTruthBranch": "main"}, None, {"groundTruthBranch": "develop"}, "main"),
     ]
-    for entry, branch, want in ground_cases:
-        got = ground_branch_of(entry, branch)
+    for entry, branch, defaults, want in ground_cases:
+        got = ground_branch_of(entry, branch, defaults)
         if got != want:
             ok = False
-            print(f"  FAIL ground branch {entry} + {branch} -> {got}, want {want}")
+            print(f"  FAIL ground branch {entry} + {branch} + {defaults} -> {got}, want {want}")
         else:
             print(
-                f"  ok   ground branch: registry={entry.get('groundTruthBranch')} override={branch} -> {want}"
+                f"  ok   ground branch: registry={entry.get('groundTruthBranch')} defaults={(defaults or {}).get('groundTruthBranch')} override={branch} -> {want}"
             )
 
     # The driftNote freshness rules, driven directly rather than through audit_repo.
@@ -5751,6 +5771,8 @@ def main(argv=None):
         "divergences": load("spec/divergences.json"),
     }
     issue_mode = a.issue
+    # Read once here, since both the issue path and the sweep resolve a ground-truth branch through it.
+    reg_defaults = spec["registry"].get("defaults", {})
     wanted = {n.casefold() for n in a.names}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
@@ -5787,7 +5809,12 @@ def main(argv=None):
         except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
         title, body = render_issue(
-            entry, findings, ground_branch_of(entry, a.branch), audited_sha, run_utc, hub_sha
+            entry,
+            findings,
+            ground_branch_of(entry, a.branch, reg_defaults),
+            audited_sha,
+            run_utc,
+            hub_sha,
         )
         print(title)
         print(
@@ -5832,7 +5859,7 @@ def main(argv=None):
             or spec["registry"].get("defaults", {}).get("workflowModel")
             or "release"
         )
-        ground = ground_branch_of(entry, a.branch)
+        ground = ground_branch_of(entry, a.branch, reg_defaults)
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
         # A gh/JSON failure mid-audit must not abort the sweep.
