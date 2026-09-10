@@ -870,6 +870,51 @@ class RegistryEntryGateCase(unittest.TestCase):
         self.assertNotIn("Traceback", output)
         self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
 
+    def test_an_unhashable_required_secret_reports_rather_than_raises(self) -> None:
+        """A container-type guard passes a nested list, which then raises on the way into the cross-check's set().
+
+        The non-list case above is a different shape and does not reach this line at all, so it proves nothing
+        about it. `set(["a", ["b"]])` raises TypeError: unhashable type: 'list'.
+        """
+        unhashable: list[list[object]] = [[["CODECOV_TOKEN"]], [{}], [[]]]
+        for declared in unhashable:
+            with self.subTest(declared=declared):
+                output = self.run_against(
+                    self.entry(
+                        status="cataloged",
+                        types=["source-only"],
+                        consumerModel="pull",
+                        hasDevelop=True,
+                        requiredSecrets=declared,
+                        classificationPending=None,
+                    )
+                )
+                self.assertNotIn("Traceback", output)
+                self.assertIn("Fixture: requiredSecrets entry", output)
+
+    def test_a_schema_that_is_not_valid_utf8_is_reported_rather_than_raised(self) -> None:
+        """read_text raises UnicodeDecodeError, a ValueError that is not a JSONDecodeError, so naming that
+        subclass alone let it escape the guard and exit on a traceback.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            (root / "registry" / "repos.json").write_text(
+                json.dumps({"defaults": {}, "repos": [self.entry()]}), encoding="utf-8"
+            )
+            (root / "registry" / "repos.schema.json").write_bytes(b'{"a": "\x80"}')
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertNotIn("Traceback", output)
+            self.assertIn("repos.schema.json: cannot read the declared property names", output)
+
     def test_an_unreadable_schema_is_reported_rather_than_raised(self) -> None:
         """The unknown-key check reads the schema, and skipping it silently reads exactly like a clean registry."""
         with tempfile.TemporaryDirectory() as d:
@@ -931,9 +976,50 @@ class RegistryEntryGateCase(unittest.TestCase):
             self.run_against(self.entry(configLayout={"rulesetsDir": "repo-config"})),
         )
 
-    def test_every_key_the_live_registry_declares_is_known(self) -> None:
-        """The check reads the schema, so a key the schema dropped and the registry kept would fail every entry."""
+    def test_a_well_formed_entry_reports_no_unknown_key(self) -> None:
+        """The absence half of the check, over the fixture. The live registry's own keys are read by
+        RegistrySchemaMirrorCase.test_the_gate_reads_its_key_sets_from_this_schema, which reads repos.json itself.
+        """
         self.assertNotIn("unknown key(s)", self.run_against(self.entry()))
+
+
+class GroundBranchReaderCase(unittest.TestCase):
+    """Every reader of a repo's ground-truth branch must go through spec/audit.py's ground_branch_of().
+
+    The defect this pins is that the resolve was correct and unreached. Each reader carried its own
+    `entry.get("groundTruthBranch", "main")`, which consults no registry defaults, so a declared
+    `defaults.groundTruthBranch` validated clean and was read by nothing. Reverting any one call site to that
+    literal reintroduces it at that site alone, and every behavioral test stays green, because the pure function
+    is still correct and simply is not called.
+
+    Read as source rather than exercised, deliberately. Three of the six sites need a live GitHub API to reach,
+    so a behavioral test for them would be a network test; the two that are reachable are pinned behaviorally as
+    well, by spec/audit.py's own ground_cases and by spec/workflow_reuse.py's --selftest.
+    """
+
+    READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
+
+    def test_no_reader_carries_its_own_default(self) -> None:
+        for rel in self.READERS:
+            with self.subTest(module=rel):
+                source = (validate.ROOT / rel).read_text(encoding="utf-8")
+                # The one definition is ground_branch_of()'s own body, which is in audit.py and returns the literal on its last line.
+                # Its own `return "main"` carries no `.get`, so matching the call shape rather than the word leaves it untouched.
+                self.assertNotIn(
+                    'get("groundTruthBranch", "main")',
+                    source,
+                    f"{rel} resolves the ground-truth branch itself instead of through "
+                    "audit.ground_branch_of(), so it consults no registry defaults",
+                )
+
+    def test_the_one_definition_resolves_all_three_steps(self) -> None:
+        """A guard against the check above being satisfied by deleting the readers rather than routing them."""
+        source = (validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8")
+        self.assertIn("def ground_branch_of(entry, branch=None, defaults=None):", source)
+        for rel in self.READERS:
+            with self.subTest(module=rel):
+                text = (validate.ROOT / rel).read_text(encoding="utf-8")
+                self.assertIn("ground_branch_of(", text)
 
 
 class RegistrySchemaMirrorCase(unittest.TestCase):

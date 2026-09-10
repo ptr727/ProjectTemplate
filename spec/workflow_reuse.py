@@ -331,6 +331,8 @@ def _selftest():
     assert cluster({"r1": big, "r2": near, "r3": far}) == [["r1", "r2"], ["r3"]]
 
     registry = {
+        # A defaults branch that is neither the fleet "main" nor the one "Two" declares, so the three-step resolve is told apart from either shortcut it could collapse to.
+        "defaults": {"groundTruthBranch": "release/9.9"},
         "repos": [
             {
                 "name": audit.HUB_NAME,
@@ -346,7 +348,7 @@ def _selftest():
             },
             {"name": "Skip", "status": "planned", "url": "https://x/acme/Skip"},
             {"name": "Gone", "status": "cataloged", "url": "https://x/acme/Gone"},
-        ]
+        ],
     }
     canon_map = {"a.yml": canon}
     trees = {
@@ -373,7 +375,9 @@ def _selftest():
     rows, unreadable, empty = measure(registry, canon_map, hub, reader=reader, lister=lister)
     assert unreadable == ["Two:big.yml"], unreadable
     assert empty == ["Gone"], empty
-    assert seen_refs["Two"] == "develop" and seen_refs["One"] == "main"
+    # "Two" declares its own branch and "One" declares none, so this pins the entry step and the defaults step together.
+    # A reader resolving the field itself, with the fleet value as its own fallback, reads that fallback for "One" and fails here, which is what makes the wiring proven rather than merely present.
+    assert seen_refs["Two"] == "develop" and seen_refs["One"] == "release/9.9"
     total = summarize(rows)
     assert total["files"] == 3 and total["canonical_named"] == 2 and total["callers"] == 1, total
     assert total["repos"] == 2 and total["lines"] == 7 + 1 + 3, total

@@ -751,12 +751,13 @@ def main():
     # The two objects the registry's own consumers index are the ones checked.
     # A nested object is left to the schema, and to the per-field checks that already read it.
     # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
-    # The load is inside the guard because that is where the file is actually unreadable: an absent file raises OSError and a malformed one raises JSONDecodeError, and neither is the wrong-shape case.
+    # The load is inside the guard because that is where the file is actually unreadable, and the ways it can be are not one shape: an absent or unopenable file raises OSError, and bytes that are not valid UTF-8 or not valid JSON each raise a ValueError, JSONDecodeError and UnicodeDecodeError both being one.
+    # ValueError is named rather than its two subclasses, so a third way of being undecodable does not escape by not having been enumerated.
     try:
         schema = load("registry/repos.schema.json")
         repo_keys = set(schema["$defs"]["repo"]["properties"])
         defaults_keys = set(schema["properties"]["defaults"]["properties"])
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         errors.append(
             f"repos.schema.json: cannot read the declared property names for 'defaults' and a repo entry, so no unknown key could be checked ({exc})"
         )
@@ -812,7 +813,9 @@ def main():
             errors.append(f"{name}: duplicate registry entry for '{identity}'")
         seen_identities.add(identity)
         # The key and the identity must name the same repository, since repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
-        # An entry whose name differs from its url's repo segment resolves to nothing there, and every consequence is a silent one: the environment assertions are skipped while the run still reports no drift, the description lookup degrades the same way, and the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload.
+        # An entry whose name differs from its url's repo segment resolves to nothing there, and the run continues: the environment assertions are skipped while it still reports no drift, and the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload.
+        # The environment case prints a note saying no entry of that name was found, which is the one consequence a reader could act on, and it reads as a repo declaring no environment rather than as a registry that disagrees with itself.
+        # The model case is silent outright, since jq resolves the fallback and exits 0 with a value.
         # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
         # Agreement is also the whole of the name's own grammar, and deliberately so.
         # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows, so a name that equals one carries no invisible character and needs no pattern of its own to say so.
@@ -958,9 +961,15 @@ def main():
                 f"{name}: cataloged repo must declare hasDevelop, since spec/audit.py reads an absent field as false and audits the branch against it"
             )
 
-        # Re-read defensively rather than trusting the check above, which appends an error and does not stop the loop.
-        # Every error is printed after the loop, so an unguarded set() here raises on a malformed value and the operator gets a traceback instead of the message naming it.
-        required = set(secrets_decl) if isinstance(secrets_decl, list) else set()
+        # Built from the well-formed elements alone rather than from the declared value, since the check above appends an error and does not stop the loop.
+        # Every error is printed after the loop, so anything that raises here costs the operator the message naming the defect and hands over a traceback instead.
+        # The elements are filtered rather than the container type tested, because a list is not the only shape that reaches this: an unhashable element, a nested list being one, satisfies a container test and raises on the way into the set.
+        # A non-string element has already been reported by name above, so dropping it here loses no finding and lets the cross-check below run on the part of the declaration that is readable.
+        required = (
+            {s for s in secrets_decl if isinstance(s, str)}
+            if isinstance(secrets_decl, list)
+            else set()
+        )
         for pub in repo.get("publish", []):
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
                 errors.append(f"{name}: publish entry missing 'target'/'mechanism'")
