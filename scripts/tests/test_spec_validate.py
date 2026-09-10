@@ -894,10 +894,11 @@ class RegistryEntryGateCase(unittest.TestCase):
     def test_a_malformed_required_secrets_on_a_cataloged_repo_reports_rather_than_raises(
         self,
     ) -> None:
-        """The cross-check below the loop builds a set from the same value, and every error prints after the loop.
+        """The publish cross-check builds a set from the same value, further down the same per-entry iteration.
 
-        An unguarded set() there raises on the malformed value, so the operator gets a traceback in place of the
-        message this check appended, which is the one finding that would have named the defect.
+        Every error prints after the loop has finished, so an unguarded set() there raises on the malformed value
+        before anything is printed, and the operator gets a traceback in place of the message this check appended,
+        which is the one finding that would have named the defect.
         """
         output = self.run_against(
             self.entry(
@@ -1041,11 +1042,13 @@ class RegistryEntryGateCase(unittest.TestCase):
 class GroundBranchReaderCase(unittest.TestCase):
     """No reader of a repo's ground-truth branch resolves the field itself.
 
-    The defect this pins is a resolve that was correct and unreached. Each reader carried its own
-    `entry.get("groundTruthBranch", "main")`, which consults no registry defaults, so a declared
-    `defaults.groundTruthBranch` validated clean and was read by nothing. A reader that resolves the key itself
-    is that defect, whatever shape the resolve takes, and refusing the read is one rule where naming the shapes
-    was an enumeration that kept leaving a gap.
+    The defect this pins is a resolve that was correct and unreached. A reader resolving the key itself consults
+    no registry defaults, so a declared `defaults.groundTruthBranch` validated clean and was read by nothing.
+    That is the defect whatever shape the resolve takes, and refusing the read is one rule where naming the
+    shapes was an enumeration that kept leaving a gap. Stated as a property of any reader rather than as a history
+    of the three files READERS names, because the history differs per file and pinning it here bought nothing:
+    three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
+    itself never depended on which file carried what.
 
     What this cannot establish is that a call which does reach the function passes it anything useful.
     `ground_branch_of(entry, branch, None)` reads the same in source as the wired call and consults no defaults,
