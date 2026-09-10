@@ -540,17 +540,16 @@ class NewCase(unittest.TestCase):
         self.assertIn("nothing to link or close", out)
         self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "none")
 
-    def test_new_refuses_a_head_that_already_has_a_successor(self) -> None:
-        """`newest_closed` picks by issue number and `link` orders by round, so the head one
-        command chooses is not always the head the other enforces.
+    def test_new_refuses_an_open_head_that_already_has_a_successor(self) -> None:
+        """The open head takes precedence over the closed side, and it can still be succeeded.
 
-        Two commands, both exiting 0, then forked a lane nothing was wrong with.
+        A closed link naming the open head as its predecessor is the reachable shape: filing onto
+        that head again would put two links at one round and leave the closed one unreachable.
         """
         fake = FakeGh(
             {
-                5: link(5, "lane", 4, 11, state="CLOSED"),
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, state="CLOSED"),
+                20: link(20, "lane", 2, None),
+                21: link(21, "lane", 3, 20, state="CLOSED"),
             }
         )
         code, _, err = run(
@@ -566,8 +565,35 @@ class NewCase(unittest.TestCase):
             self.body_file("w"),
         )
         self.assertEqual(code, 1)
-        self.assertIn("#5 already succeeds #11", err)
+        self.assertIn("#21 already succeeds #20", err)
         self.assertNotIn(1001, fake.issues)
+
+    def test_new_files_onto_a_head_nothing_succeeds(self) -> None:
+        """The guard must not refuse the ordinary case it sits in front of."""
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED"),
+                12: link(12, "lane", 3, 11, state="CLOSED"),
+                13: link(13, "lane", 4, 11, state="CLOSED"),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "T",
+            "--body-file",
+            self.body_file("w"),
+        )
+        self.assertEqual(code, 0)
+        # The head is round 4, and nothing succeeds it, so this files onto it.
+        self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "13")
+        self.assertEqual(err, "")
 
     def test_the_new_issue_carries_the_handoff_it_was_given(self) -> None:
         """A write that keeps the marker and drops the prose files an empty handoff."""
@@ -762,6 +788,78 @@ class ChainCase(unittest.TestCase):
         self.assertIn("#11", out)
         self.assertNotIn("#12", out)
         self.assertIn("1 of 3 links walked match", out)
+
+    def test_a_link_then_new_sequence_cannot_fork_a_lane(self) -> None:
+        """The reproduction that condemned issue-number head resolution, end to end.
+
+        `link` recovers an interrupted `new`, then `new` resumes the lane. Both exited 0 and the
+        lane came out with two links at one round, the real chain unreachable, and `chain --grep`
+        answering no match over text that was in it.
+        """
+        fake = FakeGh(
+            {
+                3: link(3, "alpha", 6, 15, state="CLOSED", body=marked("token15", "alpha", 6, 15)),
+                15: link(15, "alpha", 5, None),
+                56: link(56, "alpha", 5, None, state="CLOSED"),
+            }
+        )
+        first = run(fake, "link", "--repo", "o/r", "--new", "3", "--previous", "15")
+        self.assertEqual(first[0], 0)
+        second = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "alpha",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        # The second command either refuses or chains onto the round-6 head.
+        # What it must never do is file a second round-6 link and exit 0.
+        if second[0] == 0:
+            marker = read_marker(fake.issues[1001]["body"], 1001)
+            self.assertEqual(marker["previous"], "3")
+            self.assertEqual(marker["round"], "7")
+        else:
+            self.assertNotIn(1001, fake.issues)
+        # The seed already holds two round-5 links, the irregular input `link` exists for.
+        # What the two commands must not do is add another collision.
+        rounds = [
+            read_marker(row["body"], n)["round"]
+            for n, row in fake.issues.items()
+            if handoff.MARKER.search(row["body"] or "")
+        ]
+        collisions = len(rounds) - len(set(rounds))
+        self.assertEqual(collisions, 1, f"the commands added a round collision: {rounds}")
+
+    def test_a_link_then_new_sequence_keeps_the_lane_searchable(self) -> None:
+        """The user-visible half: a search must not answer no match over text in the lane."""
+        fake = FakeGh(
+            {
+                3: link(3, "alpha", 6, 15, state="CLOSED", body=marked("token15", "alpha", 6, 15)),
+                15: link(15, "alpha", 5, None),
+                56: link(56, "alpha", 5, None, state="CLOSED"),
+            }
+        )
+        run(fake, "link", "--repo", "o/r", "--new", "3", "--previous", "15")
+        run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "alpha",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "alpha", "--grep", "token15")
+        self.assertEqual(code, 0)
+        self.assertIn("#3", out)
 
     def test_a_capped_walk_says_it_stopped_short(self) -> None:
         """A truncated search reading like an exhaustive one is the false "not tried yet"."""
@@ -1097,61 +1195,6 @@ class MalformedCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("2 handoff metadata blocks", err)
 
-    def test_a_doubled_closed_link_does_not_refuse_a_track_that_was_found(self) -> None:
-        """`newest_closed` scans every lane, so one bad link must not block the others."""
-        fake = FakeGh(
-            {
-                50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo")),
-                51: link(51, "bar", 4, None, state="CLOSED"),
-            }
-        )
-        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "bar")
-        self.assertEqual(code, 0)
-        self.assertIn("#51", out)
-
-    def test_an_unreadable_link_newer_than_the_match_refuses_rather_than_forking(self) -> None:
-        """The scan runs newest first, so anything skipped before a match is newer than it."""
-        fake = FakeGh(
-            {
-                59: link(59, "default", 3, None, state="CLOSED"),
-                60: link(60, "default", 4, None, state="CLOSED", body=doubled("default")),
-            }
-        )
-        code, _, err = run(
-            fake,
-            "new",
-            "--repo",
-            "o/r",
-            "--title",
-            "Next",
-            "--body-file",
-            body_file(self, "work"),
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("would fork the chain", err)
-        self.assertNotIn(1001, fake.issues)
-
-    def test_a_bare_closed_link_newer_than_the_match_refuses_too(self) -> None:
-        """A block absent and a block unreadable are the same hazard, so both must refuse."""
-        fake = FakeGh(
-            {
-                59: link(59, "default", 3, None, state="CLOSED"),
-                60: link(60, "default", 4, None, state="CLOSED", body="block edited out"),
-            }
-        )
-        code, _, err = run(
-            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", body_file(self, "w")
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("would fork the chain", err)
-        self.assertNotIn(1001, fake.issues)
-
-    def test_a_doubled_closed_link_refuses_only_where_the_track_was_not_found(self) -> None:
-        fake = FakeGh({50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo"))})
-        code, _, err = run(fake, "chain", "--repo", "o/r", "--track", "bar")
-        self.assertEqual(code, 1)
-        self.assertIn("could be one of those", err)
-
     def test_a_doubled_block_mid_chain_ends_the_walk_with_a_phrase(self) -> None:
         """`walk` promises a stop phrase for every early end, so this is not an exception."""
         fake = FakeGh(
@@ -1207,6 +1250,56 @@ class MalformedCase(unittest.TestCase):
         self.assertIn("#61", out)
         self.assertIn("carries no `handoff` label", out)
         self.assertIn("the walk stopped at", out)
+
+    def test_an_unreadable_closed_link_refuses_the_head_read_outright(self) -> None:
+        """A head is the highest round, and an unreadable link's round compares with nothing.
+
+        The old test ordered by issue number and let a higher-numbered readable match through.
+        That proxy was the defect: a lower-numbered issue can hold a higher round, so an
+        unreadable link can outrank the match whatever their numbers are.
+        """
+        for body in (doubled("foo"), "the block edited out"):
+            with self.subTest(body=body[:20]):
+                fake = FakeGh(
+                    {
+                        50: link(50, "foo", 1, None, state="CLOSED", body=body),
+                        51: link(51, "bar", 4, None, state="CLOSED"),
+                    }
+                )
+                code, _, err = run(fake, "chain", "--repo", "o/r", "--track", "bar")
+                self.assertEqual(code, 1)
+                self.assertIn("#50", err)
+                self.assertIn("cannot be read", err)
+
+    def test_a_readable_closed_side_names_the_highest_round_as_the_head(self) -> None:
+        """Everything else orders by round, and issue number only agrees where filing was in
+        order.
+
+        They disagree wherever a lower-numbered issue joined the lane later, and picking by number
+        there hands `new` a predecessor that is not the head.
+        """
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                56: link(56, "lane", 2, 10, state="CLOSED"),
+                3: link(3, "lane", 6, 56, state="CLOSED"),
+            }
+        )
+        code, _, _ = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        self.assertEqual(code, 0)
+        marker = read_marker(fake.issues[1001]["body"], 1001)
+        self.assertEqual(marker, {"track": "lane", "round": "7", "previous": "3"})
 
     def test_a_zero_predecessor_is_not_a_block_at_all(self) -> None:
         """Zero is no issue number, and reaching gh with it exits 2 for a fixable block."""

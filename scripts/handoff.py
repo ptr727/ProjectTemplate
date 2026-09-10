@@ -640,6 +640,14 @@ def newest_closed(repo: str, track: str) -> dict | None:
     closed out, and the two are not the same. Reading the second as the first makes the next `new`
     start a second chain at round 1 with `previous=none`, orphaning every link already written,
     which is the failure the chain exists to prevent.
+
+    The head is the highest round rather than the highest issue number, because a chain is ordered
+    by round everywhere else and an issue number only agrees with that where the links were filed
+    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
+    number there hands `new` a predecessor that is not the head, so it files a second link at a
+    round already taken and the real chain goes unreachable while every step exits 0. The number
+    breaks a tie between two links claiming one round, which is itself a defect the reader should
+    not have to resolve.
     """
     rows = gh_json(
         [
@@ -660,7 +668,8 @@ def newest_closed(repo: str, track: str) -> dict | None:
     if not isinstance(rows, list):
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
     unreadable: list[str] = []
-    for row in sorted(rows, key=lambda row: row["number"], reverse=True):
+    found: list[dict] = []
+    for row in rows:
         try:
             marker = parse_marker(row.get("body") or "", row["number"])
         except Refusal as exc:
@@ -668,28 +677,26 @@ def newest_closed(repo: str, track: str) -> dict | None:
             continue
         if marker is None:
             # A block that is absent and one that cannot be read are the same hazard here.
-            # Either way the link's track is unknown, so either could be this track's real newest.
+            # Either way the link's track and round are unknown.
+            # So either could be this track's real head.
             unreadable.append(
                 f"#{row['number']} carries the `{LABEL}` label and no metadata block, so its "
                 "track cannot be read."
             )
             continue
         if marker["track"] == track:
-            if unreadable:
-                raise Refusal(
-                    f"#{row['number']} is the newest readable link on track {track!r}, and "
-                    + cut(" ".join(unreadable))
-                    + f" Each of those is newer than it, so one could be {track!r}'s real newest "
-                    "and chaining onto this one would fork the chain."
-                )
             row["marker"] = marker
-            return row
+            found.append(row)
+    # An unreadable link's round compares with nothing, so it could outrank every readable one.
+    # That makes "this is the head" unprovable rather than merely uncertain.
     if unreadable:
         raise Refusal(
-            f"no closed link on track {track!r} was readable, and "
-            + cut(" ".join(unreadable))
-            + f" A link on {track!r} could be one of those, so this cannot say the track has none."
+            cut(" ".join(unreadable))
+            + f" Any of those could be track {track!r}'s newest closed link, so which link is its "
+            "head cannot be read, and chaining onto the wrong one forks the chain."
         )
+    if found:
+        return max(found, key=lambda row: (int(row["marker"]["round"]), row["number"]))
     # Only a full window leaves "no link on this track" unproven, and only then is it refused.
     # Refusing on a full window regardless would wall off a brand-new track for good.
     # A repository reaches that many closed handoffs by working rather than by going wrong.
