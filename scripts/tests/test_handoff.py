@@ -1108,10 +1108,12 @@ class GhBoundaryCase(unittest.TestCase):
                 self.assertNotIn("unmodeled", err.getvalue())
 
     def test_a_row_that_is_not_an_object_is_named_too(self) -> None:
-        """A row holding the field name without being an object is what pins the type check.
+        """Three rows, each reaching the type check by a different route, so none is redundant.
 
-        A plain string fails the `field not in row` half on its own, so it proves nothing about
-        the half this case is named for.
+        `["name"]` holds the field name without being an object. `"name"` is a plain string that
+        happens to equal it. `7` is not a container at all, so the membership test itself raises.
+        Every one of them passes or bypasses the `field not in row` half, which is why removing
+        the type check fails all three rather than none.
         """
         for row in (["name"], "name", 7):
             with self.subTest(row=row):
