@@ -34,6 +34,10 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`decision`**: a question waiting on the maintainer, alone or beside whatever else the issue carries.
 
+`handoff` is a surface marker like `agents` and `skills` rather than a triage label, and a handoff issue carries no triage label at all, because it records work to do next rather than work of its own. Without that stated here, the next reader of this taxonomy reads a handoff issue carrying no triage label as drift. The chain it indexes is found by this label rather than by a title search, which is what lets a handoff title carry a human subject with nothing parsing it, and every enumeration that ranks or counts the open backlog excludes the label for the same reason one is always open by design.
+
+- **`handoff`**: a link in the session handoff chain, one open issue per track.
+
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
