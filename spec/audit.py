@@ -5701,6 +5701,7 @@ def main(argv=None):
     wanted = {n.lower() for n in a.names}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
+        # Keyed on the entry name lowercased rather than the owner/repo identity, and a name is unambiguous because spec/validate.py refuses one that duplicates another up to case, when it is run.
         repos = [r for r in repos if r["name"].lower() in wanted]
         missing = wanted - {r["name"].lower() for r in repos}
         if missing:

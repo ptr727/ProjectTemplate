@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -279,6 +281,70 @@ class TreeSourceRootCase(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertFalse(validate.reduces_to_repo_root(value))
+
+
+class RegistryNameUniquenessCase(unittest.TestCase):
+    """A registry name is the key both configure.sh and audit.py resolve an entry by.
+
+    The check lives inside `main()`, so this runs the real script against a scratch tree rather
+    than calling a function that does not exist to be called. The registry is a self-contained
+    fixture rather than the live one plus an entry, so an unrelated registry edit cannot move
+    the result and the two cases differ only in the thing under test.
+    """
+
+    def run_against(self, names: list[str]) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            # The marker entry carries one deliberate defect the loop always reports, which is how each case proves the loop ran.
+            # Keying that proof on the names under test would leave the absence assertion below passing on a run that never reached them.
+            marker = {"name": "LoopMarker", "url": "not-a-url", "status": "backlog"}
+            fixture = {
+                "defaults": {"workflowModel": "release"},
+                "repos": [
+                    {
+                        "name": n,
+                        "url": f"https://github.com/owner{i}/repo{i}",
+                        "status": "backlog",
+                        "classificationPending": True,
+                    }
+                    for i, n in enumerate(names)
+                ]
+                + [marker],
+            }
+            (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertIn(
+                "LoopMarker: url is not a github.com/<owner>/<repo> URL",
+                output,
+                "the registry loop was never reached, so an absence assertion would be vacuous",
+            )
+            return output
+
+    def test_a_name_differing_only_by_case_is_rejected(self) -> None:
+        """audit.py narrows with name.lower(), so both entries would answer one --repo."""
+        self.assertIn(
+            "blog: duplicate registry entry for name 'blog', already declared as 'Blog'",
+            self.run_against(["Blog", "blog"]),
+        )
+
+    def test_a_byte_identical_name_names_the_entry_already_declared(self) -> None:
+        """The commonest shape, and the one a case-differing qualifier would misdescribe."""
+        self.assertIn(
+            "Blog: duplicate registry entry for name 'Blog', already declared as 'Blog'",
+            self.run_against(["Blog", "Blog"]),
+        )
+
+    def test_two_distinct_names_are_accepted(self) -> None:
+        self.assertNotIn("duplicate registry entry for name", self.run_against(["Blog", "Utils"]))
 
 
 class RegistryEnvironmentCase(unittest.TestCase):
