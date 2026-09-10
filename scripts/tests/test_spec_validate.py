@@ -781,6 +781,23 @@ class RegistryEntryGateCase(unittest.TestCase):
         """Presence is the test, so the answer for a repo with no develop branch is not read as an undeclared field."""
         self.assertNotIn("hasDevelop", self.run_against(self.entry(hasDevelop=False)))
 
+    def test_a_cataloged_repo_declaring_false_satisfies_the_requirement(self) -> None:
+        """The requirement is presence, and a truthiness test would report this legitimate declaration as absent.
+
+        The case above runs on a backlog fixture, where the cataloged-only requirement cannot fire at all, so it
+        proves the type check and nothing about the requirement. This one is what the truthiness mutant fails.
+        """
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                types=["source-only"],
+                consumerModel="pull",
+                hasDevelop=False,
+                classificationPending=None,
+            )
+        )
+        self.assertNotIn("must declare hasDevelop", output)
+
     def test_a_cataloged_repo_must_declare_has_develop(self) -> None:
         """Absent, it is coerced to false and audited against the live branch, so omitting it asserts rather than declines."""
         self.assertIn(
@@ -816,6 +833,63 @@ class RegistryEntryGateCase(unittest.TestCase):
             "Fixture: requiredSecrets must be an array of secret names",
             self.run_against(self.entry(requiredSecrets="CODECOV_TOKEN")),
         )
+
+    def test_a_declared_null_list_is_a_wrong_type_rather_than_an_absent_field(self) -> None:
+        """`entry.get(key, [])` returns the null rather than the default, so spec/audit.py iterates it and raises.
+
+        The entry helper drops a None value, which is how a case declares a field absent, so both nulls are placed
+        directly here. A guard written as `is not None` skips its own check on exactly this shape.
+        """
+        for key, message in (
+            ("requiredSecrets", "requiredSecrets must be an array of secret names"),
+            ("driftNotes", "driftNotes must be an array of notes"),
+        ):
+            with self.subTest(key=key):
+                entry = self.entry()
+                entry[key] = None
+                self.assertIn(f"Fixture: {message}", self.run_against(entry))
+
+    def test_a_malformed_required_secrets_on_a_cataloged_repo_reports_rather_than_raises(
+        self,
+    ) -> None:
+        """The cross-check below the loop builds a set from the same value, and every error prints after the loop.
+
+        An unguarded set() there raises on the malformed value, so the operator gets a traceback in place of the
+        message this check appended, which is the one finding that would have named the defect.
+        """
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                types=["source-only"],
+                consumerModel="pull",
+                hasDevelop=True,
+                requiredSecrets=7,
+                classificationPending=None,
+            )
+        )
+        self.assertNotIn("Traceback", output)
+        self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
+
+    def test_an_unreadable_schema_is_reported_rather_than_raised(self) -> None:
+        """The unknown-key check reads the schema, and skipping it silently reads exactly like a clean registry."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            (root / "registry" / "repos.json").write_text(
+                json.dumps({"defaults": {}, "repos": [self.entry()]}), encoding="utf-8"
+            )
+            # No repos.schema.json at all, which raises OSError rather than reaching the wrong-shape case.
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertNotIn("Traceback", output)
+            self.assertIn("repos.schema.json: cannot read the declared property names", output)
 
     def test_a_drift_note_that_is_not_a_note_is_refused(self) -> None:
         """spec/audit.py slices each note and runs a regex over it, so a non-string raises mid-run rather than reporting."""

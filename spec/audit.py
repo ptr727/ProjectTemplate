@@ -4181,6 +4181,10 @@ def _selftest():
         ({}, "feature/x", None, "feature/x"),
         ({}, None, {"groundTruthBranch": "develop"}, "develop"),
         ({"groundTruthBranch": "main"}, None, {"groundTruthBranch": "develop"}, "main"),
+        # The two empty-string cases are what pin presence over truthiness at each level.
+        # spec/validate.py refuses a declared "" by name at both, so returning it is what lets that refusal be the thing the operator reads, where defaulting it away would address main and report nothing.
+        ({"groundTruthBranch": ""}, None, {"groundTruthBranch": "develop"}, ""),
+        ({}, None, {"groundTruthBranch": ""}, ""),
     ]
     for entry, branch, defaults, want in ground_cases:
         got = ground_branch_of(entry, branch, defaults)

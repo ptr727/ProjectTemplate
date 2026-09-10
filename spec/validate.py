@@ -283,8 +283,8 @@ def ground_truth_branch_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `groundTruthBranch` (a repo reading "main" declares none).
 
     Presence is the test rather than truthiness, matching description_errors_for_repo, because spec/audit.py's
-    ground_branch_of() also defaults only on absence: `entry.get("groundTruthBranch", "main")` returns the empty
-    string for a declared `""`, which is then addressed rather than replaced by "main".
+    ground_branch_of() also defaults only on absence, at both the entry level and the registry defaults level it
+    resolves through: a declared `""` is returned and then addressed, rather than being replaced by "main".
 
     spec/audit.py, spec/fidelity_honesty.py and spec/workflow_reuse.py each concatenate the value straight into a
     request path and a `?ref=` query value, so the grammar is what makes the declared value and the addressed one
@@ -750,14 +750,15 @@ def main():
     # A second list in this file would drift from the first in the direction nobody checks, since a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
     # The two objects the registry's own consumers index are the ones checked.
     # A nested object is left to the schema, and to the per-field checks that already read it.
-    schema = load("registry/repos.schema.json")
+    # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
+    # The load is inside the guard because that is where the file is actually unreadable: an absent file raises OSError and a malformed one raises JSONDecodeError, and neither is the wrong-shape case.
     try:
+        schema = load("registry/repos.schema.json")
         repo_keys = set(schema["$defs"]["repo"]["properties"])
         defaults_keys = set(schema["properties"]["defaults"]["properties"])
-    except (KeyError, TypeError):
-        # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         errors.append(
-            "repos.schema.json: cannot read the declared property names for 'defaults' and a repo entry, so no unknown key could be checked"
+            f"repos.schema.json: cannot read the declared property names for 'defaults' and a repo entry, so no unknown key could be checked ({exc})"
         )
         repo_keys, defaults_keys = None, None
     if defaults_keys is not None:
@@ -858,8 +859,10 @@ def main():
         # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
         # A padded element is therefore reported missing from the actions store on every run while the unpadded name it was meant to be goes unrequired, and a non-string element reaches a set membership test that answers False for every name there is.
         # A positive grammar rather than a padding test, per the grammars at the top of this file, and it is GitHub's own rule for a secret name: letters, digits and underscores, not opening with a digit.
+        # Presence is the test rather than `is not None`, since a declared null is a value of the wrong type and not an undeclared field.
+        # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
         secrets_decl = repo.get("requiredSecrets")
-        if secrets_decl is not None:
+        if "requiredSecrets" in repo:
             if not isinstance(secrets_decl, list):
                 errors.append(f"{name}: requiredSecrets must be an array of secret names")
             else:
@@ -870,8 +873,9 @@ def main():
                         )
         # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names, so a non-string element raises there mid-run rather than reporting.
         # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.
+        # Presence rather than `is not None`, for the reason requiredSecrets gives above: `entry.get("driftNotes", [])` returns a declared null, which is then iterated.
         notes_decl = repo.get("driftNotes")
-        if notes_decl is not None:
+        if "driftNotes" in repo:
             if not isinstance(notes_decl, list):
                 errors.append(f"{name}: driftNotes must be an array of notes")
             else:
@@ -954,7 +958,9 @@ def main():
                 f"{name}: cataloged repo must declare hasDevelop, since spec/audit.py reads an absent field as false and audits the branch against it"
             )
 
-        required = set(repo.get("requiredSecrets", []))
+        # Re-read defensively rather than trusting the check above, which appends an error and does not stop the loop.
+        # Every error is printed after the loop, so an unguarded set() here raises on a malformed value and the operator gets a traceback instead of the message naming it.
+        required = set(secrets_decl) if isinstance(secrets_decl, list) else set()
         for pub in repo.get("publish", []):
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
                 errors.append(f"{name}: publish entry missing 'target'/'mechanism'")
