@@ -1258,7 +1258,12 @@ class MalformedCase(unittest.TestCase):
         That proxy was the defect: a lower-numbered issue can hold a higher round, so an
         unreadable link can outrank the match whatever their numbers are.
         """
-        for body in (doubled("foo"), "the block edited out"):
+        # The two classes need different remedies, so each carries its own.
+        # Telling the owner of a body with two blocks to add a block gives it three.
+        for body, remedy in (
+            (doubled("foo"), "Leave exactly one"),
+            ("the block edited out", "by hand"),
+        ):
             with self.subTest(body=body[:20]):
                 fake = FakeGh(
                     {
@@ -1270,8 +1275,15 @@ class MalformedCase(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("#50", err)
                 self.assertIn("cannot be read", err)
-                # Its open-side twin names the edit that settles it, and so must this one.
-                self.assertIn("by hand", err)
+                self.assertIn(remedy, err)
+        # A body with two blocks must not be told to add one.
+        fake = FakeGh(
+            {
+                50: link(50, "foo", 1, None, state="CLOSED", body=doubled("foo")),
+                51: link(51, "bar", 4, None, state="CLOSED"),
+            }
+        )
+        self.assertNotIn("by hand", run(fake, "chain", "--repo", "o/r", "--track", "bar")[2])
 
     def test_a_readable_closed_side_names_the_highest_round_as_the_head(self) -> None:
         """Everything else orders by round, and issue number only agrees where filing was in

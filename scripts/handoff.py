@@ -667,19 +667,21 @@ def newest_closed(repo: str, track: str) -> dict | None:
     )
     if not isinstance(rows, list):
         raise Execution(f"the closed handoff list for {repo} did not read as an array")
-    unreadable: list[str] = []
+    malformed: list[str] = []
+    bare: list[str] = []
     found: list[dict] = []
     for row in rows:
         try:
             marker = parse_marker(row.get("body") or "", row["number"])
         except Refusal as exc:
-            unreadable.append(str(exc))
+            # Its own message already says what settles it, so no remedy is appended for these.
+            malformed.append(str(exc))
             continue
         if marker is None:
             # A block that is absent and one that cannot be read are the same hazard here.
             # Either way the link's track and round are unknown.
             # So either could be this track's real head.
-            unreadable.append(
+            bare.append(
                 f"#{row['number']} carries the `{LABEL}` label and no metadata block, so its "
                 "track cannot be read."
             )
@@ -689,12 +691,16 @@ def newest_closed(repo: str, track: str) -> dict | None:
             found.append(row)
     # An unreadable link's round compares with nothing, so it could outrank every readable one.
     # That makes "this is the head" unprovable rather than merely uncertain.
-    if unreadable:
+    if malformed or bare:
         raise Refusal(
-            cut(" ".join(unreadable))
+            cut(" ".join([*malformed, *bare]))
             + f" Any of those could be the newest closed link on track {track!r}, so which link "
-            "is its head cannot be read, and chaining onto the wrong one forks the chain. Add "
-            "the block to each of those bodies by hand, or take the label off them."
+            "is its head cannot be read, and chaining onto the wrong one forks the chain."
+            + (
+                " Add the block to each body that carries none by hand, or take the label off it."
+                if bare
+                else ""
+            )
         )
     if found:
         return max(found, key=lambda row: (int(row["marker"]["round"]), row["number"]))
@@ -744,8 +750,9 @@ def cmd_new(a: argparse.Namespace) -> int:
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
     # A head can already have a successor, whatever key resolved it.
-    # An interrupted run leaves one, and so does a lane somebody edited by hand.
-    # Filing onto such a head puts two links at one round and loses the one it skipped.
+    # An interrupted run does not reach here, since two open links refuse earlier as ambiguous.
+    # A lane somebody edited by hand does reach it, on either side.
+    # Filing onto such a head forks the lane there and loses the branch it skipped.
     # The check runs before the create rather than after it.
     # A refusal that leaves an issue behind is a refusal that changed something.
     if previous is not None:
