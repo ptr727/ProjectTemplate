@@ -33,7 +33,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[!-~](?:[ -~]*[!-~])?(?![\\s\\S])",
-            "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII, per CODESTYLE.md 'Character set', rather than any non-blank string, and a grammar rather than a padding test because str.strip() does not remove a zero-width space, so a name ending in one survives a padding test and then matches no live environment."
+            "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII, per GOVERNANCE.md 'Documentation Style Conventions' and its 'Character Set' rule, rather than any non-blank string, and a grammar rather than a padding test because str.strip() does not remove a zero-width space, so a name ending in one survives a padding test and then matches no live environment."
         },
         "groundTruthBranch": {
             "type": "string",

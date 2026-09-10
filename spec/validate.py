@@ -38,7 +38,7 @@ BRANCH_POLICIES = ("custom", "none")
 # One line of printable ASCII with no leading or trailing space, for a deployment environment `name`.
 # The check mode in repo-config/configure.sh resolves that name with `select(.name == $n)` and then percent-encodes it into one URL path segment.
 # An interior space is admitted, since GitHub documents no character restriction on the name beyond length and uniqueness and nothing downstream splits the value on one.
-# The ASCII floor is this fleet's rule rather than GitHub's, per CODESTYLE.md "Character set": a non-ASCII environment name is legal on GitHub and repo-config/configure.sh percent-encodes one correctly, and it is refused here because the registry is agent-authored text and an environment name is an identifier compared exactly rather than prose read by a person.
+# The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule: a non-ASCII environment name is legal on GitHub and repo-config/configure.sh percent-encodes one correctly, and it is refused here because the registry is agent-authored text and an environment name is an identifier compared exactly rather than prose read by a person.
 # That is why the `description` field's own pattern stays looser: its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
 # A repo that genuinely needs one is a decision for the maintainer, and a refusal naming the shape is a better place to raise it than a silent mismatch against the live environment.
 ENVIRONMENT_NAME_PATTERN = r"^[!-~](?:[ -~]*[!-~])?(?![\s\S])"
