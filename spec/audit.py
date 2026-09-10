@@ -572,22 +572,21 @@ def repo_slug(entry):
     404s and lands in the unreadable bucket beside its healthy siblings. The finding stays where it belongs, on the
     gate.
 
-    An absent or non-string url answers with the entry's name for the same reason, since spec/workflow_reuse.py
-    builds `{"name": HUB_NAME}` as its own fallback when the hub has no registry entry and calls this on it. That
-    404s like any other unparseable slug, and it names the entry in the message where an empty string would not.
+    Anything else answers with the entry's percent-encoded name, which is one path segment that resolves to no
+    repository, so the read 404s and the message names the entry that caused it. spec/workflow_reuse.py reaches this
+    by building `{"name": HUB_NAME}` as its own fallback when the hub has no registry entry and calling this on it.
 
-    Every fallback value is percent-encoded per segment, because it is built from a value the grammar refused and can
-    carry a `?` or a `#`. Raw, `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at `repos/<owner>/<repo>`
-    and sends the rest as a query string, which reads a different resource rather than failing, the one shape this
-    grammar exists to remove. Encoded, the same value is a 404 that names itself.
+    Taking the url's last two path segments is what this replaced, and it produced a plausible slug rather than a
+    failing one. `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com, and a
+    `?` or a `#` survived into the value, where `repos/<owner>/<repo>?tab=readme/branches/main` ends its path at
+    `repos/<owner>/<repo>` and sends the rest as a query string. Both address something other than what was declared,
+    which is the one shape this grammar exists to remove, so the fallback names the entry instead of guessing at a
+    repository.
     """
-    url = entry.get("url")
-    if not isinstance(url, str):
-        return urllib.parse.quote(str(entry.get("name", "")), safe="")
-    slug = validate.github_identity(url)
+    slug = validate.github_identity(entry.get("url"))
     if slug is not None:
         return slug
-    return "/".join(urllib.parse.quote(part, safe="") for part in url.rstrip("/").split("/")[-2:])
+    return urllib.parse.quote(str(entry.get("name", "")), safe="")
 
 
 def repo_selectors(entry, defaults):

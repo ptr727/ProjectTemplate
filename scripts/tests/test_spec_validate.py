@@ -935,12 +935,40 @@ class RegistryUrlIdentityCase(unittest.TestCase):
             " https://github.com/ptr727/ProjectTemplate",
             "https://github.com/ptr727/ProjectTemplate\n",
             "https://github.com/ptr727/ProjectTemplate.git\n",
+            "https://github.com/ptr727/Project Template",
+            "https://github.com/ptr727:x/ProjectTemplate",
             "https://github.com/ptr727/ProjectTemplate?x=1",
             None,
             42,
         ):
             with self.subTest(url=url):
                 self.assertIsNone(validate.github_identity(url))
+
+    def test_a_dot_only_segment_resolves_to_none(self) -> None:
+        """Measured against the live API: `repos/../rate_limit` returns 200 with the rate-limit document.
+
+        GitHub decodes and then normalizes a dot segment, and `repos/%2e%2e/rate_limit` returns 200 the same way, so
+        percent-encoding is no defense and the value has to be refused before it is ever addressed.
+        """
+        for url in (
+            "https://github.com/../rate_limit",
+            "https://github.com/./x",
+            "https://github.com/a/..",
+            "https://github.com/a/.",
+            "https://github.com/../..",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(validate.github_identity(url))
+
+    def test_a_dot_bearing_name_that_is_not_a_dot_segment_still_resolves(self) -> None:
+        """Only `.` and `..` normalize, so refusing every dot would refuse three names GitHub actually holds."""
+        for url, want in (
+            ("https://github.com/owner/.github", "owner/.github"),
+            ("https://github.com/owner/v1.0", "owner/v1.0"),
+            ("https://github.com/owner/a..b", "owner/a..b"),
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(validate.github_identity(url), want)
 
     def test_a_git_suffix_resolves_to_the_identity_the_consumer_addresses(self) -> None:
         """The suffix used to survive into the request. GITHUB_URL_RE makes `.git` optional and strips it for the
@@ -969,38 +997,42 @@ class AuditRepoSlugCase(unittest.TestCase):
             self.audit.repo_slug({"url": "https://github.com/owner/Fixture.git"}), "owner/Fixture"
         )
 
-    def test_a_url_the_grammar_refuses_falls_back_rather_than_raising(self) -> None:
+    def test_a_url_the_grammar_refuses_answers_with_the_name_rather_than_raising(self) -> None:
         """spec/fidelity_honesty.py and spec/workflow_reuse.py call this on every entry with no handler.
 
-        Raising would abort a whole fleet report over one malformed entry that previously 404'd and landed in the
+        Raising would abort a whole fleet report over one malformed entry, which instead 404s and lands in the
         unreadable bucket beside its healthy siblings, so the gate refuses such a url and this stays generous.
         """
-        for url, want in (
-            ("git@github.com:owner/Fixture.git", "git%40github.com%3Aowner/Fixture.git"),
-            ("http://github.com/owner/Fixture", "owner/Fixture"),
-            ("https://gitlab.test/owner/Fixture", "owner/Fixture"),
-        ):
-            with self.subTest(url=url):
-                self.assertIsNone(validate.github_identity(url))
-                self.assertEqual(self.audit.repo_slug({"url": url}), want)
-
-    def test_no_fallback_slug_can_end_the_request_path_early(self) -> None:
-        """A `?` or a `#` in a raw fallback slug reads a different resource rather than failing.
-
-        `repos/owner/Fixture?tab=readme/branches/main` is a request to `repos/owner/Fixture` with the rest as a query
-        string, which is the shape the grammar this change adds exists to remove, so the fallback encodes instead.
-        """
         for url in (
+            "git@github.com:owner/Fixture.git",
+            "http://github.com/owner/Fixture",
+            "https://gitlab.test/owner/Fixture",
             "https://github.com/owner/Fixture?tab=readme",
             "https://github.com/owner/Fixture#readme",
-            "git@github.com:owner/Fixture.git",
-            "https://github.com/owner/Fix ture",
+            "https://github.com/../rate_limit",
         ):
             with self.subTest(url=url):
-                slug = self.audit.repo_slug({"url": url})
                 self.assertIsNone(validate.github_identity(url))
-                # The path-ending characters, plus the space that would end an argument, are what must be gone.
-                for char in ("?", "#", " "):
+                self.assertEqual(self.audit.repo_slug({"url": url, "name": "Fixture"}), "Fixture")
+
+    def test_no_fallback_slug_is_built_out_of_the_url_it_could_not_parse(self) -> None:
+        """Taking the url's last two path segments produced a plausible slug rather than a failing one.
+
+        `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com, and a `?` in the
+        url survived into the value, where `repos/owner/Repo?tab=readme/branches/main` is a request to
+        `repos/owner/Repo` with the rest as a query string. Both address something other than what was declared.
+        """
+        for url in (
+            "https://gitlab.test/owner/Repo",
+            "https://github.com/owner/Repo?tab=readme",
+            "https://github.com/owner/Repo#readme",
+            "git@github.com:owner/Repo.git",
+        ):
+            with self.subTest(url=url):
+                slug = self.audit.repo_slug({"url": url, "name": "Declared"})
+                self.assertNotIn("owner", slug)
+                self.assertNotIn("Repo", slug)
+                for char in ("?", "#", "/"):
                     self.assertNotIn(char, slug, slug)
 
     def test_an_absent_or_non_string_url_answers_with_the_entry_name(self) -> None:

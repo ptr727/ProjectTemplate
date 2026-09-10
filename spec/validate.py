@@ -71,7 +71,11 @@ GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
 # A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
 # `(?![\s\S])` rather than `$`, for the reason given below at the grammars.
 # `$` also matches just before a trailing newline in Python, so a newline-padded url parsed here while a space-padded one did not, and the padding reached spec/audit.py's request path either way.
-GITHUB_URL_RE = re.compile(r"^https://github\.com/([^/\s?#]+)/([^/\s?#]+?)(?:\.git)?/?(?![\s\S])")
+# The two segments name GitHub's own character sets rather than "anything that is not a delimiter".
+# GitHub restricts an owner to letters, digits and hyphens and a repository name to letters, digits, `.`, `_` and `-`, replacing anything else at creation time, so naming those sets refuses no url that can exist.
+GITHUB_URL_RE = re.compile(
+    r"^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?(?![\s\S])"
+)
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
@@ -340,7 +344,18 @@ def github_identity(url):
     the registry lowercases this result itself, at the one place that needs a case-insensitive answer.
     """
     match = GITHUB_URL_RE.match(url) if isinstance(url, str) else None
-    return None if match is None else f"{match.group(1)}/{match.group(2)}"
+    if match is None:
+        return None
+    owner, repo = match.group(1), match.group(2)
+    # A dot-only segment is refused here rather than in the pattern above, since a character class cannot say "not only dots" and stating it twice reads worse than stating it once.
+    # It has to be refused somewhere, because GitHub decodes and then normalizes a dot segment.
+    # Measured against the live API, `https://github.com/../rate_limit` parsed structurally, passed the gate, and `gh api repos/../rate_limit` returned 200 with the rate-limit document rather than failing.
+    # Percent-encoding is no defense, since `repos/%2e%2e/rate_limit` returned 200 the same way.
+    # Only `.` and `..` normalize, so refusing a segment that is nothing but dots is the whole of it, and `..a`,
+    # `.github` and `v1.0` are untouched.
+    if owner.strip(".") == "" or repo.strip(".") == "":
+        return None
+    return f"{owner}/{repo}"
 
 
 def markdown_targets(text):
