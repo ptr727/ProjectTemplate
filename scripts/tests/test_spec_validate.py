@@ -948,14 +948,17 @@ class RegistryUrlIdentityCase(unittest.TestCase):
         """Measured against the live API: `repos/../rate_limit` returns 200 with the rate-limit document.
 
         GitHub decodes and then normalizes a dot segment, and `repos/%2e%2e/rate_limit` returns 200 the same way, so
-        percent-encoding is no defense and the value has to be refused before it is ever addressed.
+        percent-encoding is no defense and the value has to be refused before it is ever addressed. The two positions
+        are refused by different halves of the grammar, the owner by its character class and the repo by the guard
+        after it, so both are listed here rather than left to whichever half happens to hold.
         """
         for url in (
             "https://github.com/../rate_limit",
             "https://github.com/./x",
+            "https://github.com/../..",
             "https://github.com/a/..",
             "https://github.com/a/.",
-            "https://github.com/../..",
+            "https://github.com/a/...",
         ):
             with self.subTest(url=url):
                 self.assertIsNone(validate.github_identity(url))

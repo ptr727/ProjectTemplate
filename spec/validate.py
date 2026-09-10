@@ -347,13 +347,12 @@ def github_identity(url):
     if match is None:
         return None
     owner, repo = match.group(1), match.group(2)
-    # A dot-only segment is refused here rather than in the pattern above, since a character class cannot say "not only dots" and stating it twice reads worse than stating it once.
-    # It has to be refused somewhere, because GitHub decodes and then normalizes a dot segment.
-    # Measured against the live API, `https://github.com/../rate_limit` parsed structurally, passed the gate, and `gh api repos/../rate_limit` returned 200 with the rate-limit document rather than failing.
-    # Percent-encoding is no defense, since `repos/%2e%2e/rate_limit` returned 200 the same way.
-    # Only `.` and `..` normalize, so refusing a segment that is nothing but dots is the whole of it, and `..a`,
-    # `.github` and `v1.0` are untouched.
-    if owner.strip(".") == "" or repo.strip(".") == "":
+    # GitHub decodes and then normalizes a dot segment, so a segment that is nothing but dots is refused rather than addressed.
+    # The owner class above already refuses one, which is the position it mattered in: measured against the live API, `repos/../rate_limit` returned 200 with the rate-limit document and `repos/../..` returned the API root, and percent-encoding is no defense since `repos/%2e%2e/rate_limit` returned 200 the same way.
+    # The repo class admits `.`, so only that position reaches this check, and it is refused for a narrower reason: `repos/ptr727/../rate_limit` returned 404 rather than a different document, but the normalization eats a segment either way, so what a read addresses stops being decided by the declaration and starts being decided by the shape of that read.
+    # The check is here rather than in the pattern because a character class cannot say "not only dots".
+    # Only `.` and `..` normalize, so refusing a segment that is nothing but dots is the whole of it, and `..a`, `.github` and `v1.0` are untouched.
+    if repo.strip(".") == "":
         return None
     return f"{owner}/{repo}"
 
