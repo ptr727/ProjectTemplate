@@ -19,7 +19,6 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Governance hub; audits its own rules against itself."]
         },
         {
@@ -33,7 +32,6 @@
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["No get-version-task; relies on validate-task."]
         },
         {
@@ -47,7 +45,6 @@
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["No get-version-task; relies on validate-task."]
         },
         {
@@ -62,7 +59,6 @@
             "environments": [{ "name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"] }],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "pyproject.toml" },
             "driftNotes": ["Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."]
         },
         {
@@ -76,7 +72,6 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "push",
             "releaseTrigger": "dispatch-only",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": "standalone" },
             "driftNotes": [
                 "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize).",
                 "Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."
@@ -93,7 +88,6 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "configLayout": { "pythonConfig": "pyproject.toml" },
             "driftNotes": [
                 "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs); private.",
                 "Source-release repo: source-only, no PyPI - a tag plus a source zip on manual dispatch (releaseTrigger dispatch-only).",
@@ -115,7 +109,6 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned and python.coverage.codecov are N/A for that subtree (no uv project, no tests); codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
@@ -129,7 +122,6 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Upstream-version tracker drives the image tag."]
         },
         {
@@ -143,7 +135,6 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Separate publish-docker-readme-task for the Hub overview."]
         },
         {
@@ -321,7 +312,6 @@
             "environments": [{ "name": "production", "branchPolicy": "none" }, { "name": "staging", "branchPolicy": "none" }],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "configLayout": { "rulesetsDir": "repo-config", "pythonConfig": null },
             "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which spec/secrets.json has no vocabulary for, so requiredSecrets stays empty and the names are declared in this repo's own secrets.json environments block; listing them here would make the audit demand them in the repository actions store.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving."]
         },
         {

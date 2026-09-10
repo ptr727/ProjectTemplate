@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
@@ -298,6 +299,11 @@ class RegistryNameUniquenessCase(unittest.TestCase):
             root = Path(d)
             shutil.copytree(validate.ROOT / "spec", root / "spec")
             (root / "registry").mkdir()
+            # The gate reads the schema's own property names to check for an unknown key, so the scratch tree carries it.
+            shutil.copy(
+                validate.ROOT / "registry" / "repos.schema.json",
+                root / "registry" / "repos.schema.json",
+            )
             # The marker entry carries one deliberate defect the loop always reports, which is how each case proves the loop ran.
             # Keying that proof on the names under test would leave the absence assertion below passing on a run that never reached them.
             marker = {"name": "LoopMarker", "url": "not-a-url", "status": "backlog"}
@@ -658,6 +664,11 @@ class RegistryEntryGateCase(unittest.TestCase):
             root = Path(d)
             shutil.copytree(validate.ROOT / "spec", root / "spec")
             (root / "registry").mkdir()
+            # The gate reads the schema's own property names to check for an unknown key, so the scratch tree carries it.
+            shutil.copy(
+                validate.ROOT / "registry" / "repos.schema.json",
+                root / "registry" / "repos.schema.json",
+            )
             # One deliberate defect the loop always reports, which is how each case proves the loop ran at all.
             marker = {"name": "LoopMarker", "url": "not-a-url", "status": "backlog"}
             base = {"workflowModel": "release"}
@@ -687,7 +698,8 @@ class RegistryEntryGateCase(unittest.TestCase):
             "classificationPending": True,
         }
         base.update(overrides)
-        return base
+        # An override of None drops the key, which is how a case declares a field absent rather than declared null.
+        return {k: v for k, v in base.items() if v is not None}
 
     def test_a_declared_ground_truth_branch_is_checked_by_the_loop(self) -> None:
         self.assertIn(
@@ -731,6 +743,370 @@ class RegistryEntryGateCase(unittest.TestCase):
         output = self.run_against(self.entry(url="https://github.com/owner/Fixture.git"))
         self.assertNotIn("Fixture: url is not", output)
 
+    def test_a_name_disagreeing_with_its_url_is_refused(self) -> None:
+        """repo-config/configure.sh keys the registry on the url's segment, so the entry resolves to nothing there."""
+        self.assertIn(
+            "Other: name and url disagree, the url naming repo 'Fixture'",
+            self.run_against(self.entry(name="Other")),
+        )
+
+    def test_agreement_is_case_sensitive(self) -> None:
+        """The disagreeing case above differs by more than case, so a casefolded comparison passes it.
+
+        This is the shape that pins the comparison, and it is the one a future loosening would silently admit.
+        A case-only mismatch is refused by spec/resolve_description.py's near-miss guard as well, which aborts
+        configure.sh before any assertion runs, so what this adds is the gate catching it over the whole
+        registry in CI rather than one repo at apply time.
+        """
+        self.assertIn(
+            "name and url disagree, the url naming repo 'Fixture'",
+            self.run_against(self.entry(name="fixture")),
+        )
+
+    def test_agreement_is_measured_after_the_git_suffix_is_stripped(self) -> None:
+        """The identity drops a trailing `.git`, so a name must equal what the audit addresses rather than the raw tail."""
+        output = self.run_against(self.entry(url="https://github.com/owner/Fixture.git"))
+        self.assertNotIn("name and url disagree", output)
+
+    def test_agreement_is_the_names_own_grammar(self) -> None:
+        """A name carrying an invisible character is refused with no pattern of its own, since no url segment holds one.
+
+        This is the case a `.strip()` truthiness test admitted: the value is already trimmed, so it passed both name
+        checks and then matched no entry in configure.sh or spec/audit.py.
+        """
+        zero_width = "Fixture\u200b"
+        self.assertEqual(zero_width.strip(), zero_width)
+        self.assertIn(
+            "name and url disagree, the url naming repo 'Fixture'",
+            self.run_against(self.entry(name=zero_width)),
+        )
+
+    def test_a_non_boolean_has_develop_is_refused(self) -> None:
+        """spec/audit.py coerces it, so "no" reads as true and [] reads as false while the DRIFT line prints the raw value."""
+        coerced: list[object] = ["no", [], 1]
+        for declared in coerced:
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: hasDevelop",
+                    self.run_against(self.entry(hasDevelop=declared)),
+                )
+
+    def test_a_declared_false_has_develop_passes(self) -> None:
+        """Presence is the test, so the answer for a repo with no develop branch is not read as an undeclared field."""
+        self.assertNotIn("hasDevelop", self.run_against(self.entry(hasDevelop=False)))
+
+    def test_a_cataloged_repo_declaring_false_satisfies_the_requirement(self) -> None:
+        """The requirement is presence, and a truthiness test would report this legitimate declaration as absent.
+
+        The case above runs on a backlog fixture, where the cataloged-only requirement cannot fire at all, so it
+        proves the type check and nothing about the requirement. This one is what the truthiness mutant fails.
+        """
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                types=["source-only"],
+                consumerModel="pull",
+                hasDevelop=False,
+                classificationPending=None,
+            )
+        )
+        self.assertNotIn("must declare hasDevelop", output)
+
+    def test_a_cataloged_repo_must_declare_has_develop(self) -> None:
+        """Absent, it is coerced to false and audited against the live branch, so omitting it asserts rather than declines."""
+        self.assertIn(
+            "Fixture: cataloged repo must declare hasDevelop",
+            self.run_against(
+                self.entry(
+                    status="cataloged",
+                    types=["source-only"],
+                    consumerModel="pull",
+                    classificationPending=None,
+                )
+            ),
+        )
+
+    def test_a_required_secret_that_is_not_a_github_secret_name_is_refused(self) -> None:
+        """A padded name is reported missing from the actions store on every run, and the unpadded one goes unrequired."""
+        # The lower-case pair is the same never-satisfiable shape as the padded one, since the store holds upper case and neither declaration can ever match a name in it.
+        for declared in (
+            " CODECOV_TOKEN",
+            "CODECOV_TOKEN ",
+            "CODECOV TOKEN",
+            "codecov_token",
+            "Codecov_Token",
+            "1TOKEN",
+            "",
+            7,
+        ):
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: requiredSecrets entry",
+                    self.run_against(self.entry(requiredSecrets=[declared])),
+                )
+
+    def test_a_github_prefixed_secret_name_is_refused(self) -> None:
+        """GitHub refuses to store one, so declaring it collects a finding on every run that nothing retires.
+
+        The name is well formed under the character rule, so this is the clause that refuses it rather than the
+        character class. Only the exact `GITHUB_` prefix is reserved, so a name merely starting with those
+        letters is still a name a repo can store.
+        """
+        for declared in ("GITHUB_TOKEN", "GITHUB_"):
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: requiredSecrets entry",
+                    self.run_against(self.entry(requiredSecrets=[declared])),
+                )
+        self.assertNotIn(
+            "requiredSecrets entry",
+            self.run_against(self.entry(requiredSecrets=["GITHUBBER"])),
+        )
+
+    def test_the_secret_names_the_registry_declares_pass(self) -> None:
+        output = self.run_against(
+            self.entry(requiredSecrets=["CODECOV_TOKEN", "NUGET_USERNAME", "_LEADING"])
+        )
+        self.assertNotIn("requiredSecrets entry", output)
+
+    def test_a_non_list_required_secrets_is_refused(self) -> None:
+        """A bare string would otherwise become a set of its characters, matching no secret name there is."""
+        self.assertIn(
+            "Fixture: requiredSecrets must be an array of secret names",
+            self.run_against(self.entry(requiredSecrets="CODECOV_TOKEN")),
+        )
+
+    def test_a_declared_null_list_is_a_wrong_type_rather_than_an_absent_field(self) -> None:
+        """`entry.get(key, [])` returns the null rather than the default, so spec/audit.py iterates it and raises.
+
+        The entry helper drops a None value, which is how a case declares a field absent, so both nulls are placed
+        directly here. A guard written as `is not None` skips its own check on exactly this shape.
+        """
+        for key, message in (
+            ("requiredSecrets", "requiredSecrets must be an array of secret names"),
+            ("driftNotes", "driftNotes must be an array of notes"),
+        ):
+            with self.subTest(key=key):
+                entry = self.entry()
+                entry[key] = None
+                self.assertIn(f"Fixture: {message}", self.run_against(entry))
+
+    def test_a_malformed_required_secrets_on_a_cataloged_repo_reports_rather_than_raises(
+        self,
+    ) -> None:
+        """The publish cross-check builds a set from the same value, further down the same per-entry iteration.
+
+        Every error prints after the loop has finished, so an unguarded set() there raises on the malformed value
+        before anything is printed, and the operator gets a traceback in place of the message this check appended,
+        which is the one finding that would have named the defect.
+        """
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                types=["source-only"],
+                consumerModel="pull",
+                hasDevelop=True,
+                requiredSecrets=7,
+                classificationPending=None,
+            )
+        )
+        self.assertNotIn("Traceback", output)
+        self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
+
+    def test_an_unhashable_required_secret_reports_rather_than_raises(self) -> None:
+        """A container-type guard passes a nested list, which then raises on the way into the cross-check's set().
+
+        The non-list case above is a different shape and does not reach this line at all, so it proves nothing
+        about it. `set(["a", ["b"]])` raises TypeError: unhashable type: 'list'.
+        """
+        unhashable: list[list[object]] = [[["CODECOV_TOKEN"]], [{}], [[]]]
+        for declared in unhashable:
+            with self.subTest(declared=declared):
+                output = self.run_against(
+                    self.entry(
+                        status="cataloged",
+                        types=["source-only"],
+                        consumerModel="pull",
+                        hasDevelop=True,
+                        requiredSecrets=declared,
+                        classificationPending=None,
+                    )
+                )
+                self.assertNotIn("Traceback", output)
+                self.assertIn("Fixture: requiredSecrets entry", output)
+
+    def test_a_schema_that_is_not_valid_utf8_is_reported_rather_than_raised(self) -> None:
+        """read_text raises UnicodeDecodeError, a ValueError that is not a JSONDecodeError, so naming that
+        subclass alone let it escape the guard and exit on a traceback.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            (root / "registry" / "repos.json").write_text(
+                json.dumps({"defaults": {}, "repos": [self.entry()]}), encoding="utf-8"
+            )
+            (root / "registry" / "repos.schema.json").write_bytes(b'{"a": "\x80"}')
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertNotIn("Traceback", output)
+            self.assertIn("repos.schema.json: cannot read the declared property names", output)
+
+    def test_an_unreadable_schema_is_reported_rather_than_raised(self) -> None:
+        """The unknown-key check reads the schema, and skipping it silently reads exactly like a clean registry."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            (root / "registry" / "repos.json").write_text(
+                json.dumps({"defaults": {}, "repos": [self.entry()]}), encoding="utf-8"
+            )
+            # No repos.schema.json at all, which raises OSError rather than reaching the wrong-shape case.
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertNotIn("Traceback", output)
+            self.assertIn("repos.schema.json: cannot read the declared property names", output)
+
+    def test_a_drift_note_that_is_not_a_note_is_refused(self) -> None:
+        """spec/audit.py slices each note and runs a regex over it, so a non-string raises mid-run rather than reporting."""
+        for declared in (None, 7, "", "   "):
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: driftNotes entry",
+                    self.run_against(self.entry(driftNotes=[declared])),
+                )
+
+    def test_a_bare_string_drift_notes_is_refused(self) -> None:
+        """A duck-typed container test admits it, and its characters are then judged one at a time as notes.
+
+        Its requiredSecrets twin has this case. Without it here only the null shape was covered, and a None is
+        not iterable either, so it does not tell a type test from a container test. The mutant is not silent on
+        this input, since the two spaces are refused as empty notes, so the assertion is on the message that
+        names the whole value rather than on the run being clean.
+        """
+        self.assertIn(
+            "Fixture: driftNotes must be an array of notes",
+            self.run_against(self.entry(driftNotes="a single note")),
+        )
+
+    def test_a_real_drift_note_passes(self) -> None:
+        output = self.run_against(self.entry(driftNotes=["Governance hub; audits its own rules."]))
+        self.assertNotIn("driftNotes entry", output)
+
+    def test_an_unknown_key_on_a_repo_entry_is_refused(self) -> None:
+        """The schema marks the entry additionalProperties: false and no gate runs the schema, so this is the only reader.
+
+        A misspelled key validates clean otherwise, and the audit reads its own default without ever saying that the
+        declaration it was handed went unread.
+        """
+        self.assertIn(
+            "Fixture: unknown key(s) groundTruthBanch",
+            self.run_against(self.entry(groundTruthBanch="develop")),
+        )
+
+    def test_an_unknown_key_on_the_defaults_object_is_refused(self) -> None:
+        self.assertIn(
+            "defaults: unknown key(s) groundTruthBanch",
+            self.run_against(self.entry(), defaults={"groundTruthBanch": "develop"}),
+        )
+
+    def test_the_retired_config_layout_key_is_reported_as_unknown(self) -> None:
+        """rulesetsDir and pythonConfig were read by nothing, so the pair was retired rather than wired (#1508).
+
+        The unknown-key check is what makes the retirement stick: a re-added entry is reported rather than ignored.
+        """
+        self.assertIn(
+            "Fixture: unknown key(s) configLayout",
+            self.run_against(self.entry(configLayout={"rulesetsDir": "repo-config"})),
+        )
+
+    def test_a_well_formed_entry_reports_no_unknown_key(self) -> None:
+        """The absence half of the check, over the fixture. The live registry's own keys are read by
+        RegistrySchemaMirrorCase.test_the_gate_reads_its_key_sets_from_this_schema, which reads repos.json itself.
+        """
+        self.assertNotIn("unknown key(s)", self.run_against(self.entry()))
+
+
+class GroundBranchReaderCase(unittest.TestCase):
+    """No reader of a repo's ground-truth branch resolves the field itself.
+
+    The defect this pins is a resolve that was correct and unreached. A reader resolving the key itself consults
+    no registry defaults, so a declared `defaults.groundTruthBranch` validated clean and was read by nothing.
+    That is the defect whatever shape the resolve takes, and refusing the read is one rule where naming the
+    shapes was an enumeration that kept leaving a gap. Stated as a property of any reader rather than as a history
+    of the three files READERS names, because the history differs per file and pinning it here bought nothing:
+    three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
+    itself never depended on which file carried what.
+
+    What this cannot establish is that a call which does reach the function passes it anything useful.
+    `ground_branch_of(entry, branch, None)` reads the same in source as the wired call and consults no defaults,
+    and source text cannot tell the two apart. That gap is covered behaviorally where it can be:
+    spec/workflow_reuse.py's --selftest resolves through its injected reader and fails if its site stops
+    consulting the defaults, and spec/audit.py's own ground_cases pin the function's three steps. The remaining
+    sites need a live GitHub API, so that gap is open at each of them and this rule does not close it: the rule
+    refuses a reader resolving the key, which a call passing nothing useful is not.
+    """
+
+    READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
+    FUNCTION = "ground_branch_of"
+    KEY = "groundTruthBranch"
+
+    def test_no_reader_resolves_the_key_itself(self) -> None:
+        """`.get(key, "main")`, `.get(key) or "main"` and a bare subscript each resolve it without the defaults."""
+        for rel in self.READERS:
+            tree = ast.parse((validate.ROOT / rel).read_text(encoding="utf-8"))
+            exempt: set[int] = set()
+            for node in ast.walk(tree):
+                # The function's own body is where the key is resolved rather than read through it.
+                # A self-test is exempt beside it because it reads the key to print what it resolved, which is not a production resolve.
+                # In this tree that rescues four nodes, all in spec/audit.py: the two subscripts inside the function's own body, and two reads in the self-test that print what it resolved.
+                # A fixture declaring the key as a dict-literal entry matches neither branch below, so no exemption is needed for one.
+                if isinstance(node, ast.FunctionDef) and (
+                    node.name == self.FUNCTION or node.name.startswith("_selftest")
+                ):
+                    exempt |= {id(n) for n in ast.walk(node)}
+            for node in ast.walk(tree):
+                if id(node) in exempt:
+                    continue
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    reads_key = node.func.attr == "get" and any(
+                        isinstance(a, ast.Constant) and a.value == self.KEY for a in node.args
+                    )
+                elif isinstance(node, ast.Subscript):
+                    reads_key = (
+                        isinstance(node.slice, ast.Constant) and node.slice.value == self.KEY
+                    )
+                else:
+                    continue
+                self.assertFalse(
+                    reads_key,
+                    f"{rel}:{node.lineno} resolves '{self.KEY}' itself instead of through "
+                    f"audit.{self.FUNCTION}(), so it consults no registry defaults",
+                )
+
+    def test_the_one_definition_still_takes_the_defaults(self) -> None:
+        """A guard against the rule above being satisfied by deleting the resolve rather than routing it."""
+        tree = ast.parse((validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8"))
+        found = [
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == self.FUNCTION
+        ]
+        self.assertEqual(
+            len(found), 1, "spec/audit.py no longer defines exactly one ground_branch_of()"
+        )
+        self.assertEqual([a.arg for a in found[0].args.args], ["entry", "branch", "defaults"])
+
 
 class RegistrySchemaMirrorCase(unittest.TestCase):
     """registry/repos.schema.json is advisory, since no gate runs it, so its patterns answer to spec/validate.py.
@@ -772,9 +1148,30 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
                 self.schema["$defs"]["groundTruthBranch"]["pattern"],
                 validate.GROUND_TRUTH_BRANCH_PATTERN,
             ),
+            (
+                self.props["requiredSecrets"]["items"]["pattern"],
+                validate.SECRET_NAME_PATTERN,
+            ),
         ):
             with self.subTest(pattern=pattern):
                 self.assertEqual(pattern, constant)
+
+    def test_the_schema_declares_no_retired_key(self) -> None:
+        """configLayout was retired rather than wired (#1508), and the gate's unknown-key check reads this list.
+
+        A key left here would keep an entry declaring it validating clean, which is the state the retirement ended.
+        """
+        self.assertNotIn("configLayout", self.props)
+
+    def test_the_gate_reads_its_key_sets_from_this_schema(self) -> None:
+        """Every key the live registry declares resolves here, so the two objects the gate checks are in step."""
+        registry = json.loads(
+            (validate.ROOT / "registry" / "repos.json").read_text(encoding="utf-8")
+        )
+        declared: set[str] = {k for entry in registry["repos"] for k in entry}
+        self.assertEqual(declared - set(self.props), set())
+        defaults_props = set(self.schema["properties"]["defaults"]["properties"])
+        self.assertEqual(set(registry.get("defaults", {})) - defaults_props, set())
 
     def test_both_ground_truth_branch_fields_reach_the_one_definition(self) -> None:
         """Two literals would let the defaults entry and the per-repo entry drift, and they feed the same readers."""
