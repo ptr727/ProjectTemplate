@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
@@ -984,42 +985,108 @@ class RegistryEntryGateCase(unittest.TestCase):
 
 
 class GroundBranchReaderCase(unittest.TestCase):
-    """Every reader of a repo's ground-truth branch must go through spec/audit.py's ground_branch_of().
+    """Every reader of a repo's ground-truth branch resolves it through spec/audit.py's ground_branch_of().
 
-    The defect this pins is that the resolve was correct and unreached. Each reader carried its own
+    The defect this pins is a resolve that was correct and unreached. Each reader carried its own
     `entry.get("groundTruthBranch", "main")`, which consults no registry defaults, so a declared
-    `defaults.groundTruthBranch` validated clean and was read by nothing. Reverting any one call site to that
-    literal reintroduces it at that site alone, and every behavioral test stays green, because the pure function
-    is still correct and simply is not called.
+    `defaults.groundTruthBranch` validated clean and was read by nothing. Reverting one call site reintroduces
+    that at the site alone, and every behavioral test stays green, because the function is still correct and
+    simply is not called with what it needs.
 
-    Read as source rather than exercised, deliberately. Three of the six sites need a live GitHub API to reach,
-    so a behavioral test for them would be a network test; the two that are reachable are pinned behaviorally as
-    well, by spec/audit.py's own ground_cases and by spec/workflow_reuse.py's --selftest.
+    Read as source rather than exercised, because five of the six call sites need a live GitHub API to reach.
+    Only spec/workflow_reuse.py's is reachable offline, through the reader and lister its --selftest injects,
+    and that selftest pins it behaviorally. spec/audit.py's ground_cases pin the function itself rather than
+    any call site, which is the gap this case fills.
+
+    A tripwire for the two shapes a revert actually takes, rather than a proof that no bypass exists. Source
+    text cannot give the latter. What it does give is that dropping the defaults argument and resolving the key
+    outside the function are both caught, and those are what a careless edit does.
     """
 
     READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
+    FUNCTION = "ground_branch_of"
+    KEY = "groundTruthBranch"
 
-    def test_no_reader_carries_its_own_default(self) -> None:
+    def parsed(self, rel: str) -> ast.Module:
+        return ast.parse((validate.ROOT / rel).read_text(encoding="utf-8"))
+
+    def own_definition(self, tree: ast.Module) -> ast.FunctionDef | None:
+        """ground_branch_of's own body, the one place the key is resolved rather than read through it."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == self.FUNCTION:
+                return node
+        return None
+
+    def test_every_call_site_passes_the_registry_defaults(self) -> None:
+        """Dropping the third argument is the natural revert, and it leaves the defaults step unreachable.
+
+        `ground_branch_of(entry, branch)` still resolves entry-then-"main" and still passes every behavioral
+        test, so nothing but this case tells it from the wired call.
+        """
+        calls = 0
         for rel in self.READERS:
-            with self.subTest(module=rel):
-                source = (validate.ROOT / rel).read_text(encoding="utf-8")
-                # The one definition is ground_branch_of()'s own body, which is in audit.py and returns the literal on its last line.
-                # Its own `return "main"` carries no `.get`, so matching the call shape rather than the word leaves it untouched.
-                self.assertNotIn(
-                    'get("groundTruthBranch", "main")',
-                    source,
-                    f"{rel} resolves the ground-truth branch itself instead of through "
-                    "audit.ground_branch_of(), so it consults no registry defaults",
+            tree = self.parsed(rel)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+                if name != self.FUNCTION:
+                    continue
+                calls += 1
+                wired = len(node.args) >= 3 or any(k.arg == "defaults" for k in node.keywords)
+                self.assertTrue(
+                    wired,
+                    f"{rel}:{node.lineno} calls {self.FUNCTION}() without the registry defaults, "
+                    "so a declared defaults.groundTruthBranch is unread at that site",
+                )
+        # A floor rather than an exact count, so adding a reader does not fail this while removing them all does.
+        # Without it, deleting every call site satisfies the loop above vacuously.
+        self.assertGreaterEqual(calls, 6, "a reader stopped calling ground_branch_of() altogether")
+
+    def test_no_reader_resolves_the_key_itself(self) -> None:
+        """The other revert shape, and it is not one literal: `.get(key, "main")` and `.get(key) or "main"` and
+        a bare subscript all resolve the field without the defaults step.
+
+        Any read of the key outside the function's own body is refused rather than each shape enumerated, since
+        an enumeration is exactly what the first two rounds of this pattern kept leaving a gap in.
+        """
+        for rel in self.READERS:
+            tree = self.parsed(rel)
+            definition = self.own_definition(tree)
+            exempt = set()
+            if definition is not None:
+                exempt = {id(n) for n in ast.walk(definition)}
+            # The self-tests read the key to build their own fixtures and to print what they resolved.
+            # Neither is a production resolve, so they are exempt alongside the definition.
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name.startswith("_selftest"):
+                    exempt |= {id(n) for n in ast.walk(node)}
+            for node in ast.walk(tree):
+                if id(node) in exempt:
+                    continue
+                reads_key = False
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    reads_key = node.func.attr == "get" and any(
+                        isinstance(a, ast.Constant) and a.value == self.KEY for a in node.args
+                    )
+                elif isinstance(node, ast.Subscript):
+                    reads_key = (
+                        isinstance(node.slice, ast.Constant) and node.slice.value == self.KEY
+                    )
+                self.assertFalse(
+                    reads_key,
+                    f"{rel}:{getattr(node, 'lineno', '?')} resolves '{self.KEY}' itself instead of "
+                    f"through audit.{self.FUNCTION}(), so it consults no registry defaults",
                 )
 
     def test_the_one_definition_resolves_all_three_steps(self) -> None:
-        """A guard against the check above being satisfied by deleting the readers rather than routing them."""
-        source = (validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8")
-        self.assertIn("def ground_branch_of(entry, branch=None, defaults=None):", source)
-        for rel in self.READERS:
-            with self.subTest(module=rel):
-                text = (validate.ROOT / rel).read_text(encoding="utf-8")
-                self.assertIn("ground_branch_of(", text)
+        """A guard against the two cases above being satisfied by deleting the resolve rather than routing it."""
+        definition = self.own_definition(self.parsed("spec/audit.py"))
+        self.assertIsNotNone(definition, "spec/audit.py no longer defines ground_branch_of()")
+        assert definition is not None  # narrows the type after the assertion above
+        args = [a.arg for a in definition.args.args]
+        self.assertEqual(args, ["entry", "branch", "defaults"])
 
 
 class RegistrySchemaMirrorCase(unittest.TestCase):
