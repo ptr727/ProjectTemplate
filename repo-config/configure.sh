@@ -493,7 +493,7 @@ check_environments() {
     fi
     # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has, so every read below is preceded by one test rather than left bare.
     # A bare read of a malformed entry aborts the whole run under set -e, mid-check, after the four groups above have printed their pass lines and before cmd_check reaches its drift summary.
-    # This test is narrower than spec/validate.py's: a duplicate environment name and a whitespace-only branch pass here and are refused there, so a registry that never ran the validator can still report drift rather than the malformation causing it.
+    # This test is narrower than spec/validate.py's, which refuses shapes this one admits, so a registry that never ran the validator can still report drift rather than the malformation causing it.
     if ! jq_has 'type == "array"' <<<"$entries"; then
         fail "registry environments for $name is not a list"
         return
