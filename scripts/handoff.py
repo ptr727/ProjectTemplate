@@ -196,15 +196,33 @@ def gh_json(argv: list[str]) -> object:
         raise Execution(f"gh returned output that is not JSON: {exc}") from exc
 
 
+def rows_of(data: object, what: str, field: str) -> list[dict]:
+    """`data` as a list of rows each carrying `field`, refusing every other shape.
+
+    Each reader here validates what it is about to subscript. A row that is not an object, or one
+    missing the field the reader asks `gh` for, would otherwise raise out of a comprehension and
+    reach the blind catch as an unmodeled error, which reports exit 2 without saying what `gh`
+    actually returned.
+    """
+    if not isinstance(data, list):
+        raise Execution(f"the {what} did not read as an array")
+    for row in data:
+        if not isinstance(row, dict) or field not in row:
+            raise Execution(f"the {what} holds a row carrying no {field}: {row!r}"[:200])
+    return data
+
+
 def require_label(repo: str) -> None:
     """Refuse where the target repository does not carry the label the chain is indexed by.
 
     Degrading instead would report an empty chain on a repository that has one, which is the
     failure mode `decision` already demonstrated fleet-wide.
     """
-    rows = gh_json(["label", "list", "--repo", repo, "--limit", str(WINDOW), "--json", "name"])
-    if not isinstance(rows, list):
-        raise Execution(f"the label list for {repo} did not read as an array")
+    rows = rows_of(
+        gh_json(["label", "list", "--repo", repo, "--limit", str(WINDOW), "--json", "name"]),
+        f"label list for {repo}",
+        "name",
+    )
     names = {row["name"] for row in rows}
     if LABEL not in names and len(rows) >= WINDOW:
         raise Refusal(
@@ -280,24 +298,26 @@ def open_handoffs(repo: str) -> list[dict]:
     A page that fills is reported as truncated rather than treated as whole, since an open handoff
     past the window is exactly as invisible as one that does not exist.
     """
-    rows = gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--label",
-            LABEL,
-            "--state",
-            "open",
-            "--limit",
-            str(WINDOW),
-            "--json",
-            "number,title,body,state,createdAt,updatedAt,url",
-        ]
+    rows = rows_of(
+        gh_json(
+            [
+                "issue",
+                "list",
+                "--repo",
+                repo,
+                "--label",
+                LABEL,
+                "--state",
+                "open",
+                "--limit",
+                str(WINDOW),
+                "--json",
+                "number,title,body,state,createdAt,updatedAt,url",
+            ]
+        ),
+        f"handoff list for {repo}",
+        "number",
     )
-    if not isinstance(rows, list):
-        raise Execution(f"the handoff list for {repo} did not read as an array")
     if len(rows) >= WINDOW:
         raise Refusal(
             f"{repo} has at least {WINDOW} open `{LABEL}` issues, which fills the read window, so "
@@ -665,8 +685,7 @@ def newest_closed(repo: str, track: str) -> dict | None:
             "number,body,state",
         ]
     )
-    if not isinstance(rows, list):
-        raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    rows = rows_of(rows, f"closed handoff list for {repo}", "number")
     malformed: list[str] = []
     bare: list[str] = []
     found: list[dict] = []
@@ -808,8 +827,7 @@ def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None
             "number,body,state",
         ]
     )
-    if not isinstance(closed, list):
-        raise Execution(f"the closed handoff list for {repo} did not read as an array")
+    closed = rows_of(closed, f"closed handoff list for {repo}", "number")
     if len(closed) >= CLOSED_WINDOW:
         raise Refusal(
             f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "

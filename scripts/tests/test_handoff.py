@@ -439,7 +439,9 @@ class ExitCodeCase(unittest.TestCase):
         def wrong_shape(argv):
             if argv[:2] == ["label", "list"]:
                 return json.dumps([{"name": handoff.LABEL}])
-            return json.dumps([{"no": "number key here"}])
+            # A row of the right shape carrying a timestamp `gh` would never emit.
+            # No reader validates that, because none could name every field's own grammar.
+            return json.dumps([{"number": 1, "updatedAt": None, "title": "t", "body": ""}])
 
         out, err = io.StringIO(), io.StringIO()
         with (
@@ -1079,6 +1081,39 @@ class GhBoundaryCase(unittest.TestCase):
         ):
             handoff.close("o/r", 5, dry_run=False)
         self.assertIn("not confirmed", str(caught.exception))
+
+    def test_a_row_missing_the_field_its_reader_asked_for_is_named(self) -> None:
+        """Reaching the blind catch reports exit 2 without saying what `gh` returned."""
+        for argv_head, payload, phrase in (
+            (["label", "list"], [{"no": "name"}], "label list"),
+            (["issue", "list"], [{"no": "number"}], "handoff list"),
+        ):
+            with self.subTest(phrase=phrase):
+
+                def shaped(argv, head=argv_head, rows=payload):
+                    if argv[:2] == ["label", "list"] and head != ["label", "list"]:
+                        return json.dumps([{"name": handoff.LABEL}])
+                    return json.dumps(rows)
+
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(handoff, "run_gh", shaped),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(err),
+                ):
+                    code = handoff.main(["tracks", "--repo", "o/r"])
+                self.assertEqual(code, 2)
+                self.assertIn(phrase, err.getvalue())
+                self.assertIn("carrying no", err.getvalue())
+                self.assertNotIn("unmodeled", err.getvalue())
+
+    def test_a_row_that_is_not_an_object_is_named_too(self) -> None:
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", lambda argv: json.dumps(["a string"])),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.require_label("o/r")
+        self.assertIn("carrying no name", str(caught.exception))
 
     def test_a_label_list_that_is_not_an_array_is_an_execution_failure(self) -> None:
         """Reading a non-array as empty would report the label absent, the degraded answer."""
