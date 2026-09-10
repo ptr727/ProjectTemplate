@@ -692,8 +692,9 @@ def newest_closed(repo: str, track: str) -> dict | None:
     if unreadable:
         raise Refusal(
             cut(" ".join(unreadable))
-            + f" Any of those could be track {track!r}'s newest closed link, so which link is its "
-            "head cannot be read, and chaining onto the wrong one forks the chain."
+            + f" Any of those could be the newest closed link on track {track!r}, so which link "
+            "is its head cannot be read, and chaining onto the wrong one forks the chain. Add "
+            "the block to each of those bodies by hand, or take the label off them."
         )
     if found:
         return max(found, key=lambda row: (int(row["marker"]["round"]), row["number"]))
@@ -742,8 +743,9 @@ def cmd_new(a: argparse.Namespace) -> int:
     previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
-    # The head this resolves by issue number is not the head `link` enforces by round.
-    # So the predecessor it picked can already have a successor, and filing onto it forks the lane.
+    # A head can already have a successor, whatever key resolved it.
+    # An interrupted run leaves one, and so does a lane somebody edited by hand.
+    # Filing onto such a head puts two links at one round and loses the one it skipped.
     # The check runs before the create rather than after it.
     # A refusal that leaves an issue behind is a refusal that changed something.
     if previous is not None:

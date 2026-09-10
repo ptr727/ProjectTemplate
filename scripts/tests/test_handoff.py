@@ -1270,6 +1270,8 @@ class MalformedCase(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("#50", err)
                 self.assertIn("cannot be read", err)
+                # Its open-side twin names the edit that settles it, and so must this one.
+                self.assertIn("by hand", err)
 
     def test_a_readable_closed_side_names_the_highest_round_as_the_head(self) -> None:
         """Everything else orders by round, and issue number only agrees where filing was in
