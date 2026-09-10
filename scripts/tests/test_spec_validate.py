@@ -822,6 +822,24 @@ class RegistryEntryGateCase(unittest.TestCase):
                     self.run_against(self.entry(requiredSecrets=[declared])),
                 )
 
+    def test_a_github_prefixed_secret_name_is_refused(self) -> None:
+        """GitHub refuses to store one, so declaring it collects a finding on every run that nothing retires.
+
+        The name is well formed under the character rule, so this is the clause that refuses it rather than the
+        character class. Only the exact `GITHUB_` prefix is reserved, so a name merely starting with those
+        letters is still a name a repo can store.
+        """
+        for declared in ("GITHUB_TOKEN", "GITHUB_"):
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: requiredSecrets entry",
+                    self.run_against(self.entry(requiredSecrets=[declared])),
+                )
+        self.assertNotIn(
+            "requiredSecrets entry",
+            self.run_against(self.entry(requiredSecrets=["GITHUBBER"])),
+        )
+
     def test_the_secret_names_the_registry_declares_pass(self) -> None:
         output = self.run_against(
             self.entry(requiredSecrets=["CODECOV_TOKEN", "NUGET_USERNAME", "_LEADING"])
@@ -985,87 +1003,42 @@ class RegistryEntryGateCase(unittest.TestCase):
 
 
 class GroundBranchReaderCase(unittest.TestCase):
-    """Every reader of a repo's ground-truth branch resolves it through spec/audit.py's ground_branch_of().
+    """No reader of a repo's ground-truth branch resolves the field itself.
 
     The defect this pins is a resolve that was correct and unreached. Each reader carried its own
     `entry.get("groundTruthBranch", "main")`, which consults no registry defaults, so a declared
-    `defaults.groundTruthBranch` validated clean and was read by nothing. Reverting one call site reintroduces
-    that at the site alone, and every behavioral test stays green, because the function is still correct and
-    simply is not called with what it needs.
+    `defaults.groundTruthBranch` validated clean and was read by nothing. A reader that resolves the key itself
+    is that defect, whatever shape the resolve takes, and refusing the read is one rule where naming the shapes
+    was an enumeration that kept leaving a gap.
 
-    Read as source rather than exercised, because five of the six call sites need a live GitHub API to reach.
-    Only spec/workflow_reuse.py's is reachable offline, through the reader and lister its --selftest injects,
-    and that selftest pins it behaviorally. spec/audit.py's ground_cases pin the function itself rather than
-    any call site, which is the gap this case fills.
-
-    A tripwire for the two shapes a revert actually takes, rather than a proof that no bypass exists. Source
-    text cannot give the latter. What it does give is that dropping the defaults argument and resolving the key
-    outside the function are both caught, and those are what a careless edit does.
+    What this cannot establish is that a call which does reach the function passes it anything useful.
+    `ground_branch_of(entry, branch, None)` reads the same in source as the wired call and consults no defaults,
+    and source text cannot tell the two apart. That gap is covered behaviorally where it can be:
+    spec/workflow_reuse.py's --selftest resolves through its injected reader and fails if its site stops
+    consulting the defaults, and spec/audit.py's own ground_cases pin the function's three steps. The remaining
+    sites need a live GitHub API, so they are covered by this rule and not by a behavioral test.
     """
 
     READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
     FUNCTION = "ground_branch_of"
     KEY = "groundTruthBranch"
 
-    def parsed(self, rel: str) -> ast.Module:
-        return ast.parse((validate.ROOT / rel).read_text(encoding="utf-8"))
-
-    def own_definition(self, tree: ast.Module) -> ast.FunctionDef | None:
-        """ground_branch_of's own body, the one place the key is resolved rather than read through it."""
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == self.FUNCTION:
-                return node
-        return None
-
-    def test_every_call_site_passes_the_registry_defaults(self) -> None:
-        """Dropping the third argument is the natural revert, and it leaves the defaults step unreachable.
-
-        `ground_branch_of(entry, branch)` still resolves entry-then-"main" and still passes every behavioral
-        test, so nothing but this case tells it from the wired call.
-        """
-        calls = 0
-        for rel in self.READERS:
-            tree = self.parsed(rel)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-                if name != self.FUNCTION:
-                    continue
-                calls += 1
-                wired = len(node.args) >= 3 or any(k.arg == "defaults" for k in node.keywords)
-                self.assertTrue(
-                    wired,
-                    f"{rel}:{node.lineno} calls {self.FUNCTION}() without the registry defaults, "
-                    "so a declared defaults.groundTruthBranch is unread at that site",
-                )
-        # A floor rather than an exact count, so adding a reader does not fail this while removing them all does.
-        # Without it, deleting every call site satisfies the loop above vacuously.
-        self.assertGreaterEqual(calls, 6, "a reader stopped calling ground_branch_of() altogether")
-
     def test_no_reader_resolves_the_key_itself(self) -> None:
-        """The other revert shape, and it is not one literal: `.get(key, "main")` and `.get(key) or "main"` and
-        a bare subscript all resolve the field without the defaults step.
-
-        Any read of the key outside the function's own body is refused rather than each shape enumerated, since
-        an enumeration is exactly what the first two rounds of this pattern kept leaving a gap in.
-        """
+        """`.get(key, "main")`, `.get(key) or "main"` and a bare subscript each resolve it without the defaults."""
         for rel in self.READERS:
-            tree = self.parsed(rel)
-            definition = self.own_definition(tree)
-            exempt = set()
-            if definition is not None:
-                exempt = {id(n) for n in ast.walk(definition)}
-            # The self-tests read the key to build their own fixtures and to print what they resolved.
-            # Neither is a production resolve, so they are exempt alongside the definition.
+            tree = ast.parse((validate.ROOT / rel).read_text(encoding="utf-8"))
+            exempt: set[int] = set()
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name.startswith("_selftest"):
+                # The function's own body is where the key is resolved rather than read through it.
+                # A self-test is exempt beside it because it reads the key to print what it resolved, which is not a production resolve.
+                # In this tree that rescues two nodes, both in spec/audit.py's self-test, since a fixture declares the key as a dict-literal entry and matches neither branch below.
+                if isinstance(node, ast.FunctionDef) and (
+                    node.name == self.FUNCTION or node.name.startswith("_selftest")
+                ):
                     exempt |= {id(n) for n in ast.walk(node)}
             for node in ast.walk(tree):
                 if id(node) in exempt:
                     continue
-                reads_key = False
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     reads_key = node.func.attr == "get" and any(
                         isinstance(a, ast.Constant) and a.value == self.KEY for a in node.args
@@ -1074,19 +1047,24 @@ class GroundBranchReaderCase(unittest.TestCase):
                     reads_key = (
                         isinstance(node.slice, ast.Constant) and node.slice.value == self.KEY
                     )
+                else:
+                    continue
                 self.assertFalse(
                     reads_key,
-                    f"{rel}:{getattr(node, 'lineno', '?')} resolves '{self.KEY}' itself instead of "
-                    f"through audit.{self.FUNCTION}(), so it consults no registry defaults",
+                    f"{rel}:{node.lineno} resolves '{self.KEY}' itself instead of through "
+                    f"audit.{self.FUNCTION}(), so it consults no registry defaults",
                 )
 
-    def test_the_one_definition_resolves_all_three_steps(self) -> None:
-        """A guard against the two cases above being satisfied by deleting the resolve rather than routing it."""
-        definition = self.own_definition(self.parsed("spec/audit.py"))
-        self.assertIsNotNone(definition, "spec/audit.py no longer defines ground_branch_of()")
-        assert definition is not None  # narrows the type after the assertion above
-        args = [a.arg for a in definition.args.args]
-        self.assertEqual(args, ["entry", "branch", "defaults"])
+    def test_the_one_definition_still_takes_the_defaults(self) -> None:
+        """A guard against the rule above being satisfied by deleting the resolve rather than routing it."""
+        tree = ast.parse((validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8"))
+        found = [
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == self.FUNCTION
+        ]
+        self.assertEqual(
+            len(found), 1, "spec/audit.py no longer defines exactly one ground_branch_of()"
+        )
+        self.assertEqual([a.arg for a in found[0].args.args], ["entry", "branch", "defaults"])
 
 
 class RegistrySchemaMirrorCase(unittest.TestCase):

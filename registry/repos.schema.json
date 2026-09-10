@@ -104,8 +104,8 @@
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])",
-                        "$comment": "The exact string spec/validate.py declares as SECRET_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. A name here is resolved against the repository actions store by an exact comparison, so a padded element reports as missing on every run while the name it was meant to be goes unrequired. GitHub's own rule for a secret name, so it refuses no name that can be stored, and it is portable between Python re and ECMA-262 for the reason the grammars above give."
+                        "pattern": "^(?!GITHUB_)[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])",
+                        "$comment": "The exact string spec/validate.py declares as SECRET_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. A name here is resolved against the repository actions store by an exact comparison, so a padded element reports as missing on every run while the name it was meant to be goes unrequired. GitHub's own rule for a secret name, so it refuses no name that can be stored, and it is portable between Python re and ECMA-262 for the reason the grammars above give. The reserved GITHUB_ prefix is part of that rule: GitHub refuses to store such a name, so a repo declaring one collects an actions-store finding on every run that nothing it can do retires."
                     }
                 },
                 "environments": {

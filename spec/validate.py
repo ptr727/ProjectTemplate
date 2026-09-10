@@ -62,10 +62,15 @@ GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
 # A `requiredSecrets` name is resolved against the repository actions store by an exact comparison, so it is the same class of value as the three above and takes the same treatment.
-# This is GitHub's own rule for a secret name rather than a shape fitted to the four names the registry declares today: alphanumerics and underscores, and not opening with a digit.
+# This is GitHub's own rule for a secret name rather than a shape fitted to the four names the registry declares today: alphanumerics and underscores, not opening with a digit, and not opening with `GITHUB_`.
 # Naming GitHub's set refuses no name that can be stored, where a grammar fitted to the current values would pass every test and refuse the first repo declaring a secret those four happen not to use.
-SECRET_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*(?![\s\S])"
-SECRET_NAME_SHAPE = "ASCII letters, digits and _, not opening with a digit"
+# The reserved prefix is part of that rule rather than an addition to it, and leaving it out admitted a name with no clearing action: GitHub refuses to store one, so spec/audit.py reports it missing from the actions store on every run and nothing a repo can do retires the finding.
+# That is the same never-satisfiable shape the character grammar already refuses a padded name for, one clause away, which is why the two are stated together.
+# A negative lookahead rather than a second check, so the schema's advisory copy stays one pattern and cannot express less than the gate.
+SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Za-z_][A-Za-z0-9_]*(?![\s\S])"
+SECRET_NAME_SHAPE = (
+    "ASCII letters, digits and _, not opening with a digit, and not opening with GITHUB_"
+)
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
