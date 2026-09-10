@@ -570,6 +570,37 @@ class NewCase(unittest.TestCase):
         self.assertIn("#21 already succeeds #20", err)
         self.assertNotIn(1001, fake.issues)
 
+    def test_new_refuses_over_a_bare_closed_row(self) -> None:
+        """An open head keeps `newest_closed` from ever running, so nothing else reads #50.
+
+        `on_track` takes precedence unconditionally, and the closed side is scanned only when it
+        returns nothing. So `successor_of` is the one read that meets a bare closed row on this
+        path, and reading it as "nothing succeeds #11" is the guess that forks the lane.
+        """
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10),
+                50: link(50, "lane", 3, 11, state="CLOSED", body="the block was edited out"),
+            }
+        )
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "T",
+            "--body-file",
+            self.body_file("w"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#50", err)
+        self.assertIn("no metadata block", err)
+        self.assertNotIn(1001, fake.issues)
+
     def test_new_files_onto_a_head_nothing_succeeds(self) -> None:
         """The guard must not refuse the ordinary case it sits in front of."""
         fake = FakeGh(
@@ -1573,6 +1604,26 @@ class LinkCase(unittest.TestCase):
         )
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
         self.assertEqual(code, 1)
+        self.assertIn("could already succeed #10", err)
+        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
+
+    def test_a_bare_link_refuses_rather_than_reading_as_no_successor(self) -> None:
+        """The successor is real and its block was stripped, so nothing says it succeeds #10.
+
+        Reading that as "#10 has no successor" lets a second link name #10 as well, which forks
+        the lane and strands #11 while the run exits 0.
+        """
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, body="the block was edited out"),
+                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("#11", err)
+        self.assertIn("no metadata block", err)
         self.assertIn("could already succeed #10", err)
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
 
