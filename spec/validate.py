@@ -181,6 +181,10 @@ def environment_errors_for_repo(repo, name):
         env_name = env.get("name")
         if not isinstance(env_name, str) or not env_name.strip():
             errors.append(f"{where} missing or empty 'name'")
+        # Padding is refused rather than trimmed because what reaches the consumer depends on which padding it is: a trailing space survives into a name that matches no live environment, while a trailing newline is eaten by command substitution on the way.
+        # Refusing all of it is what leaves the declaration meaning one thing.
+        elif env_name != env_name.strip():
+            errors.append(f"{where} name {env_name!r} has leading or trailing whitespace")
         elif env_name in seen:
             # Two entries for one environment would have configure.sh assert the same live state twice, against declarations that may disagree.
             errors.append(f"{where} duplicate environment '{env_name}'")
@@ -204,6 +208,11 @@ def environment_errors_for_repo(repo, name):
                 isinstance(b, str) and b.strip() for b in branches
             ):
                 errors.append(f"{where} branches must be a list of non-empty strings")
+            # A declared branch name reaches its comparison the same way, so padding is refused here for the reason given above rather than for one of its own.
+            elif any(b != b.strip() for b in branches):
+                errors.append(
+                    f"{where} branches {[b for b in branches if b != b.strip()]!r} have leading or trailing whitespace"
+                )
         elif "branches" in env:
             errors.append(
                 f"{where} branchPolicy {policy} names no branch set, so it must not declare 'branches'"

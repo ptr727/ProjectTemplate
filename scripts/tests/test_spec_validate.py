@@ -361,6 +361,46 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     ["Fixture: environments[0] missing or empty 'name'"],
                 )
 
+    def test_a_name_with_surrounding_whitespace_is_rejected(self) -> None:
+        """Padding survives the empty check, since a padded name strips to something."""
+        for name in ("pypi ", " pypi", "\tpypi"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    self.errors([{"name": name, "branchPolicy": "none"}]),
+                    [f"Fixture: environments[0] name {name!r} has leading or trailing whitespace"],
+                )
+
+    def test_a_padded_name_beside_its_trimmed_twin_is_reported_for_its_padding(self) -> None:
+        """The two are different strings, so they never collided as duplicates, before this check or after it."""
+        self.assertEqual(
+            self.errors(
+                [
+                    {"name": "pypi", "branchPolicy": "none"},
+                    {"name": "pypi ", "branchPolicy": "none"},
+                ]
+            ),
+            ["Fixture: environments[1] name 'pypi ' has leading or trailing whitespace"],
+        )
+
+    def test_identical_padded_names_report_the_padding_and_defer_the_duplicate(self) -> None:
+        """A padded name never reaches the seen set, so the duplicate it also is surfaces on the run after the padding is fixed.
+
+        Reporting the padding alone is the deliberate half: the duplicate is a consequence of it
+        rather than a second defect, and naming both would report a symptom beside its cause.
+        """
+        self.assertEqual(
+            self.errors(
+                [
+                    {"name": "pypi ", "branchPolicy": "none"},
+                    {"name": "pypi ", "branchPolicy": "none"},
+                ]
+            ),
+            [
+                "Fixture: environments[0] name 'pypi ' has leading or trailing whitespace",
+                "Fixture: environments[1] name 'pypi ' has leading or trailing whitespace",
+            ],
+        )
+
     def test_two_entries_for_one_environment_are_rejected(self) -> None:
         self.assertEqual(
             self.errors(
@@ -380,6 +420,24 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     self.errors([{"name": "e", "branchPolicy": "custom", "branches": branches}]),
                     ["Fixture: environments[0] branches must be a list of non-empty strings"],
                 )
+
+    def test_branches_with_surrounding_whitespace_are_rejected(self) -> None:
+        """Every padded entry is named, since reporting only the first would hide the rest behind one fix round."""
+        self.assertEqual(
+            self.errors(
+                [{"name": "e", "branchPolicy": "custom", "branches": [" main", "dev", "next\t"]}]
+            ),
+            [
+                "Fixture: environments[0] branches [' main', 'next\\t'] have leading or trailing whitespace"
+            ],
+        )
+
+    def test_an_empty_branch_is_reported_as_empty_rather_than_as_padded(self) -> None:
+        """A whitespace-only branch strips to nothing, so the non-empty check owns it and reports it once."""
+        self.assertEqual(
+            self.errors([{"name": "e", "branchPolicy": "custom", "branches": ["main", "  "]}]),
+            ["Fixture: environments[0] branches must be a list of non-empty strings"],
+        )
 
     def test_the_live_registry_declares_only_shapes_this_check_accepts(self) -> None:
         """The fixtures above prove the rule, and this proves the registry the rule is applied to."""
