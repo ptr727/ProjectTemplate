@@ -750,6 +750,17 @@ class RegistryEntryGateCase(unittest.TestCase):
             self.run_against(self.entry(name="Other")),
         )
 
+    def test_agreement_is_case_sensitive(self) -> None:
+        """configure.sh keys with `select(.name == $n)`, an exact match, so a case-differing name resolves to nothing.
+
+        The disagreeing case above differs by more than case, so a casefolded comparison passes it. This is the
+        shape that pins the comparison, and it is the one a future loosening would silently admit.
+        """
+        self.assertIn(
+            "name and url disagree, the url naming repo 'Fixture'",
+            self.run_against(self.entry(name="fixture")),
+        )
+
     def test_agreement_is_measured_after_the_git_suffix_is_stripped(self) -> None:
         """The identity drops a trailing `.git`, so a name must equal what the audit addresses rather than the raw tail."""
         output = self.run_against(self.entry(url="https://github.com/owner/Fixture.git"))
@@ -815,7 +826,17 @@ class RegistryEntryGateCase(unittest.TestCase):
 
     def test_a_required_secret_that_is_not_a_github_secret_name_is_refused(self) -> None:
         """A padded name is reported missing from the actions store on every run, and the unpadded one goes unrequired."""
-        for declared in (" CODECOV_TOKEN", "CODECOV_TOKEN ", "CODECOV TOKEN", "1TOKEN", "", 7):
+        # The lower-case pair is the same never-satisfiable shape as the padded one, since the store holds upper case and neither declaration can ever match a name in it.
+        for declared in (
+            " CODECOV_TOKEN",
+            "CODECOV_TOKEN ",
+            "CODECOV TOKEN",
+            "codecov_token",
+            "Codecov_Token",
+            "1TOKEN",
+            "",
+            7,
+        ):
             with self.subTest(declared=declared):
                 self.assertIn(
                     "Fixture: requiredSecrets entry",
@@ -964,6 +985,17 @@ class RegistryEntryGateCase(unittest.TestCase):
                     self.run_against(self.entry(driftNotes=[declared])),
                 )
 
+    def test_a_bare_string_drift_notes_is_refused(self) -> None:
+        """A duck-typed container test admits it, and each character then reads as a non-empty note.
+
+        Its requiredSecrets twin has this case; without it here, only the null shape was covered, and a None is
+        not iterable either, so it does not tell a type test from a container test.
+        """
+        self.assertIn(
+            "Fixture: driftNotes must be an array of notes",
+            self.run_against(self.entry(driftNotes="a single note")),
+        )
+
     def test_a_real_drift_note_passes(self) -> None:
         output = self.run_against(self.entry(driftNotes=["Governance hub; audits its own rules."]))
         self.assertNotIn("driftNotes entry", output)
@@ -1016,7 +1048,8 @@ class GroundBranchReaderCase(unittest.TestCase):
     and source text cannot tell the two apart. That gap is covered behaviorally where it can be:
     spec/workflow_reuse.py's --selftest resolves through its injected reader and fails if its site stops
     consulting the defaults, and spec/audit.py's own ground_cases pin the function's three steps. The remaining
-    sites need a live GitHub API, so they are covered by this rule and not by a behavioral test.
+    sites need a live GitHub API, so that gap is open at each of them and this rule does not close it: the rule
+    refuses a reader resolving the key, which a call passing nothing useful is not.
     """
 
     READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
@@ -1031,7 +1064,8 @@ class GroundBranchReaderCase(unittest.TestCase):
             for node in ast.walk(tree):
                 # The function's own body is where the key is resolved rather than read through it.
                 # A self-test is exempt beside it because it reads the key to print what it resolved, which is not a production resolve.
-                # In this tree that rescues two nodes, both in spec/audit.py's self-test, since a fixture declares the key as a dict-literal entry and matches neither branch below.
+                # In this tree that rescues four nodes, all in spec/audit.py: the two subscripts inside the function's own body, and two reads in the self-test that print what it resolved.
+                # A fixture declaring the key as a dict-literal entry matches neither branch below, so no exemption is needed for one.
                 if isinstance(node, ast.FunctionDef) and (
                     node.name == self.FUNCTION or node.name.startswith("_selftest")
                 ):

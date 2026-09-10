@@ -62,14 +62,17 @@ GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
 # A `requiredSecrets` name is resolved against the repository actions store by an exact comparison, so it is the same class of value as the three above and takes the same treatment.
-# This is GitHub's own rule for a secret name rather than a shape fitted to the four names the registry declares today: alphanumerics and underscores, not opening with a digit, and not opening with `GITHUB_`.
-# Naming GitHub's set refuses no name that can be stored, where a grammar fitted to the current values would pass every test and refuse the first repo declaring a secret those four happen not to use.
-# The reserved prefix is part of that rule rather than an addition to it, and leaving it out admitted a name with no clearing action: GitHub refuses to store one, so spec/audit.py reports it missing from the actions store on every run and nothing a repo can do retires the finding.
-# That is the same never-satisfiable shape the character grammar already refuses a padded name for, one clause away, which is why the two are stated together.
+# The shape a name must have to be resolvable against the actions store spec/audit.py compares it to, rather than a shape fitted to the four names the registry declares today.
+# That comparison is an exact set difference against the names GitHub's API returns, so a declaration that is not character-for-character one of them is unresolvable rather than merely untidy.
+# Upper case is part of the shape for that reason.
+# Measured across the fleet's repositories, every stored name is upper case, and GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
+# A lower-case declaration therefore matches no stored name and cannot be made to: it is reported missing from the store on every run while the name it meant is simultaneously reported as claimed by no mechanism, so one typo yields two findings on a repository whose store is correct.
+# The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away: GitHub refuses to store such a name at all, so a repo declaring one collects a missing-from-the-store finding that nothing it can do retires.
+# Refusing lower case outright is what makes that prefix clause exact rather than approximate, since a case-insensitive prefix needs no case-insensitive test once no lower-case name is admitted.
 # A negative lookahead rather than a second check, so the schema's advisory copy stays one pattern and cannot express less than the gate.
-SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Za-z_][A-Za-z0-9_]*(?![\s\S])"
+SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\s\S])"
 SECRET_NAME_SHAPE = (
-    "ASCII letters, digits and _, not opening with a digit, and not opening with GITHUB_"
+    "upper-case ASCII letters, digits and _, not opening with a digit, and not opening with GITHUB_"
 )
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
