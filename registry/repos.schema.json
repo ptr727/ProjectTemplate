@@ -53,11 +53,20 @@
                     "$comment": "An excluded repo records the deliberate decision that put it out of audit scope, not just the fact.",
                     "if": { "properties": { "status": { "const": "excluded" } }, "required": ["status"] },
                     "then": { "required": ["exclusionReason"] }
+                },
+                {
+                    "$comment": "A cataloged repo is the set spec/audit.py audits, and there an absent hasDevelop is coerced to false and compared against the live branch rather than read as undeclared, so omitting it asserts that the repo has no develop branch. spec/validate.py requires it on the same status.",
+                    "if": { "properties": { "status": { "const": "cataloged" } }, "required": ["status"] },
+                    "then": { "required": ["hasDevelop"] }
                 }
             ],
             "additionalProperties": false,
             "properties": {
-                "name": { "type": "string", "minLength": 1 },
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "$comment": "Length alone here, and the field's real shape is stated by spec/validate.py, which requires the name to equal its own url's repo segment. JSON Schema cannot compare two sibling properties, so the rule can only live in the gate. Agreement is what gives the name a grammar: the url is held to GitHub's own repository-name characters, so a name equal to that segment carries nothing invisible without a pattern of its own."
+                },
                 "url": { "type": "string", "format": "uri", "minLength": 1 },
                 "description": {
                     "type": "string",
@@ -91,7 +100,14 @@
                         }
                     }
                 },
-                "requiredSecrets": { "type": "array", "items": { "type": "string" } },
+                "requiredSecrets": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "pattern": "^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\\s\\S])",
+                        "$comment": "The exact string spec/validate.py declares as SECRET_NAME_PATTERN, which scripts/tests/test_spec_validate.py asserts. A name here is resolved against the repository actions store by an exact comparison, so a padded element reports as missing on every run while the name it was meant to be goes unrequired. The shape a name must have to resolve against the actions store spec/audit.py compares it to by exact set difference, and it is portable between Python re and ECMA-262 for the reason the grammars above give. Upper case because a stored name is upper case, so a lower-case declaration matches none and reports missing from the store on every run, and where no mechanism maps the name the stored one it meant is reported as claimed by nothing too. The reserved GITHUB_ prefix because GitHub refuses to store such a name at all, so a repo declaring one collects a finding nothing it can do retires."
+                    }
+                },
                 "environments": {
                     "type": "array",
                     "items": {
@@ -116,15 +132,14 @@
                 },
                 "consumerModel": { "enum": ["push", "pull"] },
                 "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
-                "configLayout": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "rulesetsDir": { "type": "string" },
-                        "pythonConfig": { "type": ["string", "null"] }
+                "driftNotes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "$comment": "Length alone, no pattern: a note is prose. spec/validate.py, which is the gate, also refuses a note that is only whitespace, and stating that here needed a character set this schema keeps out for the reason exclusionReason gives. The type is what matters, since spec/audit.py slices each note and runs a regex over it, so a non-string element raises mid-run rather than reporting."
                     }
-                },
-                "driftNotes": { "type": "array", "items": { "type": "string" } }
+                }
             }
         }
     }

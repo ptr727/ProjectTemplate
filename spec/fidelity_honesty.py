@@ -114,7 +114,9 @@ def fidelity_pass(spec):
             sel = audit.repo_selectors(r, defaults)
             if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
                 continue
-            text = fetch(audit.repo_slug(r), down_path, r.get("groundTruthBranch", "main"))
+            text = fetch(
+                audit.repo_slug(r), down_path, audit.ground_branch_of(r, defaults=defaults)
+            )
             if (
                 text is None
             ):  # missing (404) or present-but-non-inline (too large / encoding "none")
@@ -167,7 +169,7 @@ def manifest_gap_pass(spec):
         if entry.get("status") != "cataloged" or entry.get("name") == audit.HUB_NAME:
             continue
         slug = audit.repo_slug(entry)
-        ground = entry.get("groundTruthBranch", "main")
+        ground = audit.ground_branch_of(entry, defaults=spec["registry"].get("defaults", {}))
         br = audit.gh(f"repos/{slug}/branches/{ground}", ok404=True)
         carried = audit.repo_tree(slug, br) if br else None
         if carried is None:

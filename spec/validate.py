@@ -61,9 +61,25 @@ GROUND_TRUTH_BRANCH_PATTERN = (
 GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
+# A `requiredSecrets` name is resolved against the repository actions store by an exact comparison, so it is the same class of value as the three above and takes the same treatment.
+# The shape a name must have to be resolvable against the actions store spec/audit.py compares it to, rather than a shape fitted to the four names the registry declares today.
+# That comparison is an exact set difference against the names GitHub's API returns, so a declaration that is not character-for-character one of them is unresolvable rather than merely untidy.
+# Upper case is part of the shape for that reason.
+# Measured across the fleet's repositories, every stored name is upper case, and GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
+# A lower-case declaration therefore matches no stored name and cannot be made to, so it is reported missing from the store on every run against a repository whose store is correct.
+# Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well, since requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
+# A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
+# The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away: GitHub refuses to store such a name at all, so a repo declaring one collects a missing-from-the-store finding that nothing it can do retires.
+# Refusing lower case outright is what makes that prefix clause exact rather than approximate, since a case-insensitive prefix needs no case-insensitive test once no lower-case name is admitted.
+# A negative lookahead rather than a second check, so the schema's advisory copy stays one pattern and cannot express less than the gate.
+SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\s\S])"
+SECRET_NAME_SHAPE = (
+    "upper-case ASCII letters, digits and _, not opening with a digit, and not opening with GITHUB_"
+)
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
+SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
 # A query character or a fragment character is excluded from both groups too.
@@ -277,8 +293,8 @@ def ground_truth_branch_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `groundTruthBranch` (a repo reading "main" declares none).
 
     Presence is the test rather than truthiness, matching description_errors_for_repo, because spec/audit.py's
-    ground_branch_of() also defaults only on absence: `entry.get("groundTruthBranch", "main")` returns the empty
-    string for a declared `""`, which is then addressed rather than replaced by "main".
+    ground_branch_of() also defaults only on absence, at both the entry level and the registry defaults level it
+    resolves through: a declared `""` is returned and then addressed, rather than being replaced by "main".
 
     spec/audit.py, spec/fidelity_honesty.py and spec/workflow_reuse.py each concatenate the value straight into a
     request path and a `?ref=` query value, so the grammar is what makes the declared value and the addressed one
@@ -738,6 +754,31 @@ def main():
     # An advisory schema stricter than the gate is the direction #1504 was reverted for.
     errors.extend(ground_truth_branch_errors_for_repo(reg_defaults, "defaults"))
 
+    # Both the defaults object and a repo entry are marked `additionalProperties: false` in registry/repos.schema.json, and no gate runs that schema, so a misspelled key passes CI today.
+    # It fails silently rather than loudly: a repo declaring `groundTruthBanch` validates clean and the audit reads main without ever saying that the declaration it was given went unread.
+    # The key set is read out of the schema rather than restated here, so the rule has one statement.
+    # A second list in this file would drift from the first in the direction nobody checks, since a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
+    # The two objects the registry's own consumers index are the ones checked.
+    # A nested object is left to the schema, and to the per-field checks that already read it.
+    # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
+    # The load is inside the guard because that is where the file is actually unreadable, and the ways it can be are not one shape: an absent or unopenable file raises OSError, and bytes that are not valid UTF-8 or not valid JSON each raise a ValueError, JSONDecodeError and UnicodeDecodeError both being one.
+    # ValueError is named rather than its two subclasses, so a third way of being undecodable does not escape by not having been enumerated.
+    try:
+        schema = load("registry/repos.schema.json")
+        repo_keys = set(schema["$defs"]["repo"]["properties"])
+        defaults_keys = set(schema["properties"]["defaults"]["properties"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(
+            f"repos.schema.json: cannot read the declared property names for 'defaults' and a repo entry, so no unknown key could be checked ({exc})"
+        )
+        repo_keys, defaults_keys = None, None
+    if defaults_keys is not None:
+        stray = sorted(set(reg_defaults) - defaults_keys)
+        if stray:
+            errors.append(
+                f"defaults: unknown key(s) {', '.join(stray)} - registry/repos.schema.json declares none of them, so nothing reads the value"
+            )
+
     seen_identities = set()
     seen_names = {}
     for i, repo in enumerate(repos["repos"]):
@@ -781,6 +822,29 @@ def main():
         if identity in seen_identities:
             errors.append(f"{name}: duplicate registry entry for '{identity}'")
         seen_identities.add(identity)
+        # The key and the identity must name the same repository, since repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
+        # An entry whose name differs by more than letter case resolves to nothing there and the run continues: the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload, and the environment and description assertions are skipped while the run still reports no drift.
+        # Each skipped assertion prints a note naming the repo it found no entry for, so a reader is told something, and what they are told reads as a repo declaring no environment and no description rather than as a registry that disagrees with itself.
+        # The model case is silent outright, since jq resolves the fallback and exits 0 with a value.
+        # A name differing only by letter case is caught there already, by spec/resolve_description.py's near-miss guard, which raises and exits the script before any assertion runs.
+        # It is refused here as well because that guard runs at apply time on one repo, where this runs over the whole registry in CI, and because the guard is a consumer rather than the rule.
+        # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
+        # Agreement is also the whole of the name's own grammar, and deliberately so.
+        # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows, so a name that equals one carries no invisible character and needs no pattern of its own to say so.
+        # A separate grammar was the other candidate and was rejected for being a second statement of the same shape, free to drift from the first, where this one cannot disagree with the url it is read from.
+        url_name = slug.split("/", 1)[1]
+        if name != url_name:
+            errors.append(
+                f"{name}: name and url disagree, the url naming repo '{url_name}' - repo-config/configure.sh keys the registry on the url's segment, so this entry resolves to nothing there"
+            )
+
+        # Checked per entry for the reason given at the defaults check above, and on every status, since a backlog or archived entry is read by the fleet membership check and by whatever promotes it later.
+        if repo_keys is not None:
+            stray = sorted(set(repo) - repo_keys)
+            if stray:
+                errors.append(
+                    f"{name}: unknown key(s) {', '.join(stray)} - registry/repos.schema.json declares none of them, so nothing reads the value"
+                )
 
         # These fields are facts about the repo itself, not about its audit scope.
         # The schema's operational-needs-lineEndings rule (registry/repos.schema.json) binds regardless of status.
@@ -800,6 +864,41 @@ def main():
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
+        # Read by spec/audit.py as `bool(entry.get("hasDevelop"))` and compared against the live branch, so the coercion decides the answer wherever the declared value is not already a boolean.
+        # The string "no" reads as True and an empty list reads as False, and the DRIFT line prints the raw value either way, so the report would name a value that is not what was compared.
+        # Presence is the test rather than truthiness, since a declared `false` is the answer for a repo that has no develop branch and must not be read as an undeclared field.
+        if "hasDevelop" in repo and not isinstance(repo["hasDevelop"], bool):
+            errors.append(
+                f"{name}: hasDevelop {repo['hasDevelop']!r} must be true or false, and spec/audit.py coerces whatever is declared"
+            )
+        # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
+        # A padded element is therefore reported missing from the actions store on every run while the unpadded name it was meant to be goes unrequired, and a non-string element reaches a set membership test that answers False for every name there is.
+        # A positive grammar rather than a padding test, per the grammars at the top of this file, and SECRET_NAME_PATTERN there is the one statement of what it admits.
+        # Presence is the test rather than `is not None`, since a declared null is a value of the wrong type and not an undeclared field.
+        # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
+        secrets_decl = repo.get("requiredSecrets")
+        if "requiredSecrets" in repo:
+            if not isinstance(secrets_decl, list):
+                errors.append(f"{name}: requiredSecrets must be an array of secret names")
+            else:
+                for s in secrets_decl:
+                    if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
+                        errors.append(
+                            f"{name}: requiredSecrets entry {s!r} is not a GitHub secret name ({SECRET_NAME_SHAPE})"
+                        )
+        # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names, so a non-string element raises there mid-run rather than reporting.
+        # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.
+        # Presence rather than `is not None`, for the reason requiredSecrets gives above: `entry.get("driftNotes", [])` returns a declared null, which is then iterated.
+        notes_decl = repo.get("driftNotes")
+        if "driftNotes" in repo:
+            if not isinstance(notes_decl, list):
+                errors.append(f"{name}: driftNotes must be an array of notes")
+            else:
+                for note in notes_decl:
+                    if not isinstance(note, str) or not note.strip():
+                        errors.append(
+                            f"{name}: driftNotes entry {note!r} must be a non-empty string"
+                        )
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
@@ -866,7 +965,23 @@ def main():
                 f"{name}: consumerModel '{cm}' invalid or missing (expected {' or '.join(CONSUMER_MODELS)})"
             )
 
-        required = set(repo.get("requiredSecrets", []))
+        # Required on a cataloged repo, which is the set spec/audit.py audits, because there an absent field is not read as undeclared.
+        # It is coerced to False and compared against the live branch, so omitting it asserts that the repo has no develop branch rather than declining to say.
+        # The type check above holds wherever the field is declared, and this is the one status that must declare it.
+        if "hasDevelop" not in repo:
+            errors.append(
+                f"{name}: cataloged repo must declare hasDevelop, since spec/audit.py reads an absent field as false and audits the branch against it"
+            )
+
+        # Built from the well-formed elements alone rather than from the declared value, since the check above appends an error and does not stop the loop.
+        # Every error is printed after the loop, so anything that raises here costs the operator the message naming the defect and hands over a traceback instead.
+        # The elements are filtered rather than the container type tested, because a list is not the only shape that reaches this: an unhashable element, a nested list being one, satisfies a container test and raises on the way into the set.
+        # A non-string element has already been reported by name above, so dropping it here loses no finding and lets the cross-check below run on the part of the declaration that is readable.
+        required = (
+            {s for s in secrets_decl if isinstance(s, str)}
+            if isinstance(secrets_decl, list)
+            else set()
+        )
         for pub in repo.get("publish", []):
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
                 errors.append(f"{name}: publish entry missing 'target'/'mechanism'")
