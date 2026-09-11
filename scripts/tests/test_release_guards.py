@@ -100,7 +100,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertRegex(
             consumer, r"(?m)^[ \t]*name: pypi-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
         )
-        self.assertIn('select(.name == \\"pypi-build-${{ github.ref_name }}\\")', consumer)
+        self.assertIn('select(.name == "pypi-build-" + env.GITHUB_REF_NAME)', consumer)
 
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],
@@ -246,6 +246,67 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn("'1.2.34'", output)
 
+    def test_no_run_script_interpolates_a_ref_name(self) -> None:
+        """No run: script interpolates an expression that `names_a_ref` flags.
+
+        An expression is pasted into the script before bash parses it, and git accepts a branch
+        named like x$(id), so an interpolated name would run as code in a job holding the token.
+        """
+        paths = [
+            *sorted((REPO / ".github/workflows").glob("*.y*ml")),
+            *sorted((REPO / ".github/actions").glob("*/action.y*ml")),
+            *sorted((REPO / "catalog/snippets/workflows").glob("*.y*ml")),
+            REPO / "docs/reusable-workflows.md",
+        ]
+        expression = re.compile(r"\$\{\{((?:(?!\}\}).)*)(?:\}\}|$)")
+        bracket = re.compile(r"\[\s*(?:'([\w-]+)'|\d+|\*)\s*\]")
+        ref_name = re.compile(
+            r"\b(?:inputs\.branch|github\.(?:ref_name|head_ref|base_ref|ref)"
+            r"|github\.event\.[\w.*]*(?:ref|branch))\b"
+        )
+
+        def names_a_ref(line: str) -> bool:
+            return any(
+                ref_name.search(bracket.sub(r".\1", body)) for body in expression.findall(line)
+            )
+
+        opener = re.compile(r"^( *)(- )?run:")
+        blocks = 0
+        offenders: list[str] = []
+        for path in paths:
+            block_indent: int | None = None
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                indent = len(line) - len(line.lstrip(" "))
+                if block_indent is not None and line.strip() and indent <= block_indent:
+                    block_indent = None
+                match = opener.match(line)
+                if match:
+                    blocks += 1
+                    block_indent = len(match.group(1)) + len(match.group(2) or "")
+                if block_indent is not None and names_a_ref(line):
+                    offenders.append(f"{path.relative_to(REPO)}:{number}")
+        # A scanner that recognized no run: block would pass on any tree.
+        self.assertGreater(blocks, 50)
+        self.assertEqual([], offenders)
+        for form in (
+            "${{ github.event.pull_request.head.ref }}",
+            "${{ github.event.workflow_run.head_branch }}",
+            "${{ format('{0}', github.ref_name) }}",
+            "${{ inputs['branch'] }}",
+            "${{ github[ 'ref_name' ] }}",
+            "${{ github.event['pull_request'].head['ref'] }}",
+            "${{ github.event.workflow_run.pull_requests[0].head.ref }}",
+            "${{ github.event.workflow_run.pull_requests.*.head.ref }}",
+        ):
+            with self.subTest(form=form):
+                self.assertTrue(names_a_ref(form))
+        for form in (
+            "${{ github.event_name }} ${{ github.run_id }}",
+            "${{ github['event_name'] }}",
+        ):
+            with self.subTest(form=form):
+                self.assertFalse(names_a_ref(form))
+
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
         canonical_name = "nuget-build-"
         legacy_name = "nuget-push" + "-default"
@@ -273,7 +334,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertRegex(
             consumer, r"(?m)^[ \t]*name: nuget-build-\$\{\{ github\.ref_name \}\}[ \t]*$"
         )
-        self.assertIn('select(.name == \\"nuget-build-${{ github.ref_name }}\\")', consumer)
+        self.assertIn('select(.name == "nuget-build-" + env.GITHUB_REF_NAME)', consumer)
 
         tracked_text = run(
             ["git", "grep", "-n", legacy_name],
