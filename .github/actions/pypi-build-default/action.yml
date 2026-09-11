@@ -89,7 +89,7 @@ runs:
         else
           version="$core"
         fi
-        echo "PyPI version for branch $BRANCH: $version"
+        echo "PyPI version: $version"
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
     # This rewrites the hardcoded __version__ after tests run, so a test asserting it is non-empty is unaffected.

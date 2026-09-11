@@ -134,6 +134,12 @@ jobs:
           SMOKE: ${{ inputs.smoke }}
         run: |
           set -Eeuo pipefail
+          # Refuse a branch git would not accept as a name, whose ':', '[' or control characters could form a workflow command where later steps print it.
+          # Both of git's streams are discarded, since it echoes the name it checks.
+          if ! git check-ref-format --branch "$BRANCH" > /dev/null 2>&1; then
+            echo "::error::The branch input is not a valid git branch name, so the build is refused."
+            exit 1
+          fi
           # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
           if [[ "$SMOKE" == "true" ]]; then
             echo "Smoke build; skipping release version validation."
@@ -146,7 +152,7 @@ jobs:
               exit 1
             fi
           elif [[ "$CORE_AND_PRE" != *-* ]]; then
-            echo "::error::Prerelease ($BRANCH) version '$SEMVER2' has no prerelease suffix (NBGV classified it public); refusing to publish."
+            echo "::error::Prerelease version '$SEMVER2' has no prerelease suffix (NBGV classified it public); refusing to publish."
             exit 1
           fi
 
