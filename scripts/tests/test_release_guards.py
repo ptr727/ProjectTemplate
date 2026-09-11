@@ -247,7 +247,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertIn("'1.2.34'", output)
 
     def test_no_run_script_interpolates_a_ref_name(self) -> None:
-        """No run: script interpolates a branch or ref expression that `ref_expression` matches.
+        """No run: script interpolates an expression that `names_a_ref` flags.
 
         An expression is pasted into the script before bash parses it, and git accepts a branch
         named like x$(id), so an interpolated name would run as code in a job holding the token.
@@ -258,10 +258,18 @@ class ReleaseGuardCase(unittest.TestCase):
             *sorted((REPO / "catalog/snippets/workflows").glob("*.y*ml")),
             REPO / "docs/reusable-workflows.md",
         ]
-        ref_expression = re.compile(
-            r"\$\{\{(?:(?!\}\}).)*?\b(?:inputs\.branch|github\.(?:ref_name|head_ref|base_ref|ref)"
-            r"|github\.event\.[\w.]*(?:ref|branch))\b"
+        expression = re.compile(r"\$\{\{((?:(?!\}\}).)*)(?:\}\}|$)")
+        bracket = re.compile(r"\[\s*(?:'([\w-]+)'|\d+|\*)\s*\]")
+        ref_name = re.compile(
+            r"\b(?:inputs\.branch|github\.(?:ref_name|head_ref|base_ref|ref)"
+            r"|github\.event\.[\w.*]*(?:ref|branch))\b"
         )
+
+        def names_a_ref(line: str) -> bool:
+            return any(
+                ref_name.search(bracket.sub(r".\1", body)) for body in expression.findall(line)
+            )
+
         opener = re.compile(r"^( *)(- )?run:")
         blocks = 0
         offenders: list[str] = []
@@ -275,7 +283,7 @@ class ReleaseGuardCase(unittest.TestCase):
                 if match:
                     blocks += 1
                     block_indent = len(match.group(1)) + len(match.group(2) or "")
-                if block_indent is not None and ref_expression.search(line):
+                if block_indent is not None and names_a_ref(line):
                     offenders.append(f"{path.relative_to(REPO)}:{number}")
         # A scanner that recognized no run: block would pass on any tree.
         self.assertGreater(blocks, 50)
@@ -284,10 +292,20 @@ class ReleaseGuardCase(unittest.TestCase):
             "${{ github.event.pull_request.head.ref }}",
             "${{ github.event.workflow_run.head_branch }}",
             "${{ format('{0}', github.ref_name) }}",
+            "${{ inputs['branch'] }}",
+            "${{ github[ 'ref_name' ] }}",
+            "${{ github.event['pull_request'].head['ref'] }}",
+            "${{ github.event.workflow_run.pull_requests[0].head.ref }}",
+            "${{ github.event.workflow_run.pull_requests.*.head.ref }}",
         ):
             with self.subTest(form=form):
-                self.assertRegex(form, ref_expression)
-        self.assertNotRegex("${{ github.event_name }} ${{ github.run_id }}", ref_expression)
+                self.assertTrue(names_a_ref(form))
+        for form in (
+            "${{ github.event_name }} ${{ github.run_id }}",
+            "${{ github['event_name'] }}",
+        ):
+            with self.subTest(form=form):
+                self.assertFalse(names_a_ref(form))
 
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
         canonical_name = "nuget-build-"
