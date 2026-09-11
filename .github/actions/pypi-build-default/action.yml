@@ -69,8 +69,6 @@ runs:
 
     # PEP 440 version: develop gives M.N.P.dev0 as a prerelease, and anything else gives M.N.P.
     # M.N.P is SemVer2 with its prerelease and build segments stripped.
-    # The NBGV git height sits in the release segment, so develop's normally exceeds main's.
-    # A pip install --pre therefore picks the dev build over the main release.
     - name: Compute PyPI version step
       id: pypiver
       shell: bash
