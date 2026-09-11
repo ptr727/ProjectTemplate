@@ -771,11 +771,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
-      "digest": "sha256:f0f7bc15472c9919ed46b8e4883a7a41391651465d2bb424f6c736f3883807ea",
+      "digest": "sha256:35f577cdf921fde5ba9d3edf69e253f4a4d0aac62ace7f3d9a55b73a52326d15",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "a76d389d50bcf4bd17f6bc0ca173c9d0df62d0af",
-      "stamp": "2026-09-11T13:55:19Z"
+      "hubCommit": "3bb13ce5bb1f5661bb3357db053b66413b123fd2",
+      "stamp": "2026-09-11T15:37:48Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
@@ -1035,11 +1035,11 @@
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:8aff932fcb163a3445f3a530832f53f0fc1195dc37d91d173c6f44534038a0bd",
+      "digest": "sha256:7e3972a87b4dfad680b33c0294fa043d88193c68153df376986a14ef025f7db9",
       "reviewer": "agent-skill",
-      "findings": 2,
-      "hubCommit": "a76d389d50bcf4bd17f6bc0ca173c9d0df62d0af",
-      "stamp": "2026-09-11T13:54:00Z"
+      "findings": 0,
+      "hubCommit": "3bb13ce5bb1f5661bb3357db053b66413b123fd2",
+      "stamp": "2026-09-11T15:37:48Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
