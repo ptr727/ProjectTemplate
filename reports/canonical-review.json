@@ -443,11 +443,11 @@
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Orchestration vs. build: the override seam",
-      "digest": "sha256:a7de5ead05a2d1746a0e9d737fc1e12af881bbf23a2972401f0eff969f4a7d4c",
+      "digest": "sha256:28d4ca8d7276d6bdb309b516847e5e67284c686bcf735eb56399c91442c215a2",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
-      "stamp": "2026-09-02T16:21:12Z"
+      "findings": 4,
+      "hubCommit": "c4ecc46e0615d25e64da7f3b681d3ab0bb1ecb85",
+      "stamp": "2026-09-11T18:17:33Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Per-target subsetting",

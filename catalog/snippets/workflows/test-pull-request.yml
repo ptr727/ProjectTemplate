@@ -18,13 +18,12 @@ permissions: {}
 
 jobs:
 
+  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage reaches Codecov with no token (D1.6).
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@537b1837fe90e2288f71034ef96cc4e949937712 # 2.0.376
     permissions:
       contents: read
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
   # Its name is the ruleset-bound required status-check context: rename it and the ruleset context together.

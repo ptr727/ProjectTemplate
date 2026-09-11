@@ -38,8 +38,9 @@ aggregator shape of `test-pull-request.yml`. Within
 wiring and the ruleset-bound job name are verbatim orchestration, while the `dorny/paths-filter`
 entries are owned/per-target. The validation job is a call to the reusable validator, whose own
 jobs a caller cannot address. The **build** layer is a hook: a composite
-action at `.github/actions/build-<target>` the hub-hosted `build-release-task.yml` reaches. The
-hub defaults require explicit project paths. A project needing more than a path override carries
+action at `.github/actions/<job>/action.yml`, named for the build job (`dotnet-publish`,
+`build-nuget`, `build-pypi`), that the hub-hosted `build-release-task.yml` runs in place of its
+hub default. The hub defaults require explicit project paths. A project needing more than a path override carries
 its own hook.
 
 The contract that keeps the seam clean: **a target contributes files to the GitHub release by
@@ -51,7 +52,7 @@ plus create-the-release plus attach-the-assets logic reusable **as-is** across r
 name-pattern handoff is canonical for every repo, single-target included**: name your one asset
 `release-asset-<branch>-<target>` and the verbatim `github-release` globs it. Do not switch a
 single-target repo to an `artifact-id` output plus `download-artifact` `artifact-ids:`, which
-looks tidier for 1:1 but forks the `github-release` download and breaks its verbatim carry.
+looks tidier for 1:1 but forks the `github-release` download.
 
 **What a repo still curates** (by design, not a leak): which `enable_<target>` inputs its caller
 stub sets, per the per-target subsetting rule above. `build-release-task.yml` is hub-hosted
