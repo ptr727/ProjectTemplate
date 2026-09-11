@@ -137,7 +137,7 @@ jobs:
           # Refuse a branch git would not accept as a name, whose ':', '[' or control characters could form a workflow command where later steps print it.
           # Both of git's streams are discarded, since it echoes the name it checks.
           if ! git check-ref-format --branch "$BRANCH" > /dev/null 2>&1; then
-            echo "::error::The branch input is not a valid git branch name; refusing to build."
+            echo "::error::The branch input is not a valid git branch name, so the build is refused."
             exit 1
           fi
           # Smoke builds never publish and always version as prerelease (detached PR HEAD), which would trip the main arm.
