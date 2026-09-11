@@ -247,7 +247,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertIn("'1.2.34'", output)
 
     def test_no_run_script_interpolates_a_ref_name(self) -> None:
-        """No run: script interpolates one of the branch or ref expressions ref_expression names.
+        """No run: script interpolates a branch or ref expression that `ref_expression` matches.
 
         An expression is pasted into the script before bash parses it, and git accepts a branch
         named like x$(id), so an interpolated name would run as code in a job holding the token.
