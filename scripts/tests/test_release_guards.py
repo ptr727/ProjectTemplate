@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from subprocess import run
@@ -110,6 +111,140 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
+
+    def test_pypi_default_versions_from_the_semver2_core(self) -> None:
+        """The hub PyPI default stamps SemVer2's M.N.P core rather than AssemblyFileVersion.
+
+        For a two-part version.json base NBGV fills AssemblyFileVersion's fourth segment from the
+        commit id, so a version built from it never equals the release tag. The four-part refusal
+        case below is that shape.
+        """
+        action = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("assembly-file-version", action)
+
+        marker = "    - name: Compute PyPI version step\n"
+        self.assertIn(marker, action)
+        body = action.split(marker, 1)[1]
+        opener = re.search(r"(?m)^      run: \|-?\n", body)
+        self.assertIsNotNone(opener, "the version step's script must be a literal block scalar")
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 8):
+                break
+            lines.append(line[8:])
+        script = "\n".join(lines)
+
+        with tempfile.TemporaryDirectory() as scratch:
+            output = Path(scratch) / "output"
+
+            def compute(branch: str, semver2: str) -> int:
+                output.write_text("", encoding="utf-8")
+                env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2}
+                env["GITHUB_OUTPUT"] = str(output)
+                verdict = run(
+                    ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                )
+                return verdict.returncode
+
+            stamped = {
+                ("main", "1.2.34"): "1.2.34",
+                ("develop", "1.2.34-g1a2b3c4d5e"): "1.2.34.dev0",
+                ("main", "1.2.34+build.7"): "1.2.34",
+            }
+            for (branch, semver2), expected in stamped.items():
+                with self.subTest(branch=branch, semver2=semver2):
+                    self.assertEqual(0, compute(branch, semver2))
+                    self.assertEqual(f"version={expected}\n", output.read_text(encoding="utf-8"))
+
+            # An unset input would otherwise stamp an empty version, and four parts is the shape the defect stamped.
+            for semver2 in ("", "1.2", "1.2.34.51234"):
+                with self.subTest(semver2=semver2):
+                    self.assertEqual(1, compute("main", semver2))
+                    self.assertEqual("", output.read_text(encoding="utf-8"))
+
+            # The rejected value is printed for diagnosis, and neither command syntax may survive in it.
+            # The runner reads a :: command only at a line start, but a ##[ command anywhere in a line.
+            for injected in ("1.2\n::error::injected", "1.2\n##[error]injected"):
+                with self.subTest(injected=injected):
+                    output.write_text("", encoding="utf-8")
+                    env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
+                    env["GITHUB_OUTPUT"] = str(output)
+                    verdict = run(
+                        ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                    )
+                    self.assertEqual(1, verdict.returncode)
+                    self.assertIn("injected", verdict.stdout)
+                    lines = verdict.stdout.splitlines()
+                    self.assertEqual(1, len([line for line in lines if line.startswith("::")]))
+                    self.assertNotIn("##[", verdict.stdout)
+
+            # The version step compares the branch but never prints it.
+            output.write_text("", encoding="utf-8")
+            injected = "x\n##[error]injected\n::error::injected"
+            env = {**os.environ, "BRANCH": injected, "SEMVER2": "1.2.34"}
+            env["GITHUB_OUTPUT"] = str(output)
+            verdict = run(
+                ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+            )
+            self.assertEqual(0, verdict.returncode)
+            self.assertEqual("version=1.2.34\n", output.read_text(encoding="utf-8"))
+            self.assertNotIn("injected", verdict.stdout + verdict.stderr)
+
+        # Both hook steps receive SemVer2, the caller hook as the dotnet-publish and build-nuget hooks already do.
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  build-pypi:\n", 1)[1].split("\n  build-docker:\n", 1)[0]
+        self.assertEqual(
+            2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
+        )
+
+    def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
+        """validate-release refuses a branch git would not accept as a name, on a smoke run too.
+
+        Such a value can carry a newline and a :: command, or a ##[ token the runner reads anywhere
+        in a line, into any later step that prints the branch. The refusal never echoes it.
+        """
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        marker = "      - name: Validate branch and version consistency step\n"
+        self.assertIn(marker, workflow)
+        body = workflow.split(marker, 1)[1]
+        opener = re.search(r"(?m)^        run: \|-?\n", body)
+        self.assertIsNotNone(opener, "the gate's script must be a literal block scalar")
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+
+        def gate(branch: str, semver2: str, smoke: str = "false") -> tuple[int, str]:
+            env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2, "SMOKE": smoke}
+            verdict = run(
+                ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+            )
+            return verdict.returncode, verdict.stdout + verdict.stderr
+
+        self.assertEqual(0, gate("develop", "1.2.34-g1a2b3c4d5e")[0])
+        self.assertEqual(0, gate("feature/x-1", "1.2.34", smoke="true")[0])
+
+        # A prerelease version, so only the branch check can refuse it.
+        injected = "x\n##[error]injected\n::error::injected"
+        for smoke in ("false", "true"):
+            with self.subTest(smoke=smoke):
+                code, output = gate(injected, "1.2.34-g1a2b3c4d5e", smoke=smoke)
+                self.assertEqual(1, code)
+                commands = [line for line in output.splitlines() if line.startswith("::")]
+                self.assertEqual(1, len(commands))
+                self.assertNotIn("##[", output)
+                self.assertNotIn("injected", output)
+
+        # A valid branch reaches the version check, whose refusal names the version it rejected.
+        code, output = gate("feature/x-1", "1.2.34")
+        self.assertEqual(1, code)
+        self.assertIn("'1.2.34'", output)
 
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
         canonical_name = "nuget-build-"
