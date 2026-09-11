@@ -579,7 +579,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
-            --jq ".artifacts[] | select(.name == \"nuget-build-${{ github.ref_name }}\") | .id"); then
+            --jq '.artifacts[] | select(.name == "nuget-build-" + env.GITHUB_REF_NAME) | .id'); then
             echo "::warning::Could not list NuGet build artifacts. The retention-days backstop will reap them."
             ids=""
           fi
@@ -625,7 +625,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
         run: |
           set -Eeuo pipefail
           if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
-            --jq ".artifacts[] | select(.name == \"pypi-build-${{ github.ref_name }}\") | .id"); then
+            --jq '.artifacts[] | select(.name == "pypi-build-" + env.GITHUB_REF_NAME) | .id'); then
             echo "::warning::Could not list PyPI build artifacts. The retention-days backstop will reap them."
             ids=""
           fi

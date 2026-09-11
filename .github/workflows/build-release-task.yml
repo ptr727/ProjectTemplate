@@ -378,12 +378,14 @@ jobs:
         # The retention-days: 1 backstop reaps anything missed.
         # It deletes every matching id, because a rerun can upload duplicates.
         continue-on-error: true
+        # The branch reaches jq through env rather than an expression, since an expression is pasted into the script before bash parses it.
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
         run: |
           set -Eeuo pipefail
           if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
-            --jq ".artifacts[] | select(.name | startswith(\"release-asset-${{ inputs.branch }}-\")) | .id"); then
+            --jq '.artifacts[] | select(.name | startswith("release-asset-" + env.BRANCH + "-")) | .id'); then
             echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
             ids=""
           fi
