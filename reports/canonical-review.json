@@ -443,11 +443,11 @@
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Orchestration vs. build: the override seam",
-      "digest": "sha256:a7de5ead05a2d1746a0e9d737fc1e12af881bbf23a2972401f0eff969f4a7d4c",
+      "digest": "sha256:ea7c3bc931c6ae5f793b53be0eeeafb9df82f641b94451f18c59509893122a43",
       "reviewer": "agent-skill",
-      "findings": 9,
-      "hubCommit": "50d97cd013e013af1fee010dfe8828200792f560",
-      "stamp": "2026-09-02T16:21:12Z"
+      "findings": 2,
+      "hubCommit": "09971b8051dd11d3748999cc5182116dd42ffa4c",
+      "stamp": "2026-09-11T19:31:00Z"
     },
     {
       "unit": ".agents/skills/operational-vs-release-workflow/references/release-publish-mechanics.md > Per-target subsetting",
@@ -755,11 +755,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/architecture.md > The Architecture",
-      "digest": "sha256:3cb06ef7f2302ab4dfd1bfb9bcc425ba5c680fadd4ade34971fef469b9187b7c",
+      "digest": "sha256:a608d2209fc760c080d320769a113405c9266c199b82733e0207285d64092baf",
       "reviewer": "agent-skill",
       "findings": 1,
-      "hubCommit": "b21059f2deea1f80e8e522d5452de1ec92b33091",
-      "stamp": "2026-09-11T03:05:25Z"
+      "hubCommit": "09971b8051dd11d3748999cc5182116dd42ffa4c",
+      "stamp": "2026-09-11T19:16:48Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > (preamble)",
@@ -771,11 +771,11 @@
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/d-guarantees.md > The Behavioral Contract",
-      "digest": "sha256:35f577cdf921fde5ba9d3edf69e253f4a4d0aac62ace7f3d9a55b73a52326d15",
+      "digest": "sha256:cb59602471dff258ead049a85eb5d517df893eb6f1c81899ecd243ea0e2e8262",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "3bb13ce5bb1f5661bb3357db053b66413b123fd2",
-      "stamp": "2026-09-11T15:37:48Z"
+      "findings": 0,
+      "hubCommit": "09971b8051dd11d3748999cc5182116dd42ffa4c",
+      "stamp": "2026-09-11T19:32:07Z"
     },
     {
       "unit": ".agents/skills/workflow-ci-contract/references/test-methodology.md > (preamble)",
@@ -1027,19 +1027,19 @@
     },
     {
       "unit": "WORKFLOW.md > 3. Architecture",
-      "digest": "sha256:25e595d9ef91d673358a511e57f249e120bae24fed6d1dbaa9f0e4a649b56938",
+      "digest": "sha256:af4ab36bacbe25e229d941323b7d43ae6ff115c56038c10df296d00d339dda77",
       "reviewer": "agent-skill",
-      "findings": 3,
-      "hubCommit": "b21059f2deea1f80e8e522d5452de1ec92b33091",
-      "stamp": "2026-09-11T03:04:59Z"
+      "findings": 1,
+      "hubCommit": "09971b8051dd11d3748999cc5182116dd42ffa4c",
+      "stamp": "2026-09-11T19:16:46Z"
     },
     {
       "unit": "WORKFLOW.md > 4. Behavioral Contract: Expected Outcomes",
-      "digest": "sha256:7e3972a87b4dfad680b33c0294fa043d88193c68153df376986a14ef025f7db9",
+      "digest": "sha256:88009557df8f3467addd53d216e67f2ef2d7e928f05e4b23932ece5dee1c713a",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "3bb13ce5bb1f5661bb3357db053b66413b123fd2",
-      "stamp": "2026-09-11T15:37:48Z"
+      "hubCommit": "09971b8051dd11d3748999cc5182116dd42ffa4c",
+      "stamp": "2026-09-11T19:32:07Z"
     },
     {
       "unit": "WORKFLOW.md > 5. Test Methodology",
@@ -1051,11 +1051,11 @@
     },
     {
       "unit": "WORKFLOW.md > 6. Per-Project-Type Test Walkthroughs",
-      "digest": "sha256:d9c7fc6f68a3d53922a3467da305755b8f57ce3927afa8b9a0980fc5feee506f",
+      "digest": "sha256:6e067a1fba7cdebdc35e234439bd16a2b565e76cbb875fb62b670d1eb1804e86",
       "reviewer": "agent-skill",
       "findings": 2,
-      "hubCommit": "a76d389d50bcf4bd17f6bc0ca173c9d0df62d0af",
-      "stamp": "2026-09-11T13:38:56Z"
+      "hubCommit": "c4ecc46e0615d25e64da7f3b681d3ab0bb1ecb85",
+      "stamp": "2026-09-11T17:44:40Z"
     }
   ]
 }
