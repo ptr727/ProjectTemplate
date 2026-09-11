@@ -34,7 +34,9 @@ The split between the generic **orchestration** layer and the repo-owned **build
 `release-asset-<branch>-<target>` pattern handoff that keeps the seam between them clean, and
 what a repo curates when it adds or drops a target are `WORKFLOW.md` section 3's, under "Two
 Layers: Orchestration vs Build" and "The Seam Contract", which the `workflow-ci-contract` skill
-carries whole as its `references/architecture.md`.
+carries whole as its `references/architecture.md`. A caller of the hub-hosted
+`build-release-task.yml` also sets the inputs its enabled targets need, `docker_image` and the
+project-path inputs among them.
 
 ## Map your outputs to the right seam
 
