@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from subprocess import run
@@ -110,6 +111,66 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
+
+    def test_pypi_default_versions_from_the_semver2_core(self) -> None:
+        """The hub PyPI default stamps SemVer2's M.N.P core rather than AssemblyFileVersion.
+
+        For a two-part version.json base NBGV fills AssemblyFileVersion's fourth segment from the
+        commit id, so a version built from it never equals the release tag. The four-part refusal
+        case below is that shape.
+        """
+        action = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("assembly-file-version", action)
+
+        marker = "    - name: Compute PyPI version step\n"
+        self.assertIn(marker, action)
+        body = action.split(marker, 1)[1]
+        opener = re.search(r"(?m)^      run: \|-?\n", body)
+        self.assertIsNotNone(opener, "the version step's script must be a literal block scalar")
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 8):
+                break
+            lines.append(line[8:])
+        script = "\n".join(lines)
+
+        with tempfile.TemporaryDirectory() as scratch:
+            output = Path(scratch) / "output"
+
+            def compute(branch: str, semver2: str) -> int:
+                output.write_text("", encoding="utf-8")
+                env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2}
+                env["GITHUB_OUTPUT"] = str(output)
+                verdict = run(
+                    ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                )
+                return verdict.returncode
+
+            stamped = {
+                ("main", "1.2.34"): "1.2.34",
+                ("develop", "1.2.34-g1a2b3c4d5e"): "1.2.34.dev0",
+                ("main", "1.2.34+build.7"): "1.2.34",
+            }
+            for (branch, semver2), expected in stamped.items():
+                with self.subTest(branch=branch, semver2=semver2):
+                    self.assertEqual(0, compute(branch, semver2))
+                    self.assertEqual(f"version={expected}\n", output.read_text(encoding="utf-8"))
+
+            # An unset input would otherwise stamp an empty version, and four parts is the shape the defect stamped.
+            for semver2 in ("", "1.2", "1.2.34.51234"):
+                with self.subTest(semver2=semver2):
+                    self.assertEqual(1, compute("main", semver2))
+                    self.assertEqual("", output.read_text(encoding="utf-8"))
+
+        # Both hook steps receive SemVer2, the caller hook as the dotnet-publish and build-nuget hooks already do.
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  build-pypi:\n", 1)[1].split("\n  build-docker:\n", 1)[0]
+        self.assertEqual(
+            2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
+        )
 
     def test_nuget_artifact_name_matches_contracts_and_consumers(self) -> None:
         canonical_name = "nuget-build-"

@@ -247,6 +247,7 @@ jobs:
         with:
           branch: ${{ inputs.branch }}
           smoke: ${{ inputs.smoke }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           project-dir: ${{ inputs.pypi_project_dir }}
 
@@ -256,7 +257,7 @@ jobs:
         with:
           branch: ${{ inputs.branch }}
           smoke: ${{ inputs.smoke }}
-          assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
+          semver2: ${{ needs.get-version.outputs.SemVer2 }}
           project-dir: ${{ inputs.pypi_project_dir }}
           version-file: ${{ inputs.pypi_version_file }}
 

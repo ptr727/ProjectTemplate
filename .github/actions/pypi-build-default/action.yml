@@ -9,8 +9,8 @@ inputs:
     description: Smoke mode skips the build-artifact upload, since nothing would consume it.
     required: false
     default: 'false'
-  assembly-file-version:
-    description: NBGV AssemblyFileVersion (M.N.P.B), the PEP 440 version source.
+  semver2:
+    description: NBGV SemVer2, whose M.N.P core is the PEP 440 version source.
     required: true
   project-dir:
     description: Working directory of the PyPI project.
@@ -67,21 +67,27 @@ runs:
       working-directory: ${{ inputs.project-dir }}
       run: uv run pytest
 
-    # PEP 440 version: develop gives M.N.P.B.dev0 as a prerelease, and anything else gives M.N.P.B.
+    # PEP 440 version: develop gives M.N.P.dev0 as a prerelease, and anything else gives M.N.P.
+    # M.N.P is SemVer2 with its prerelease and build segments stripped.
     # The NBGV git height sits in the release segment, so develop's normally exceeds main's.
     # A pip install --pre therefore picks the dev build over the main release.
     - name: Compute PyPI version step
       id: pypiver
       shell: bash
       env:
-        AFV: ${{ inputs.assembly-file-version }}
+        SEMVER2: ${{ inputs.semver2 }}
         BRANCH: ${{ inputs.branch }}
       run: |
         set -Eeuo pipefail
+        core="${SEMVER2%%[-+]*}"
+        if [[ ! "$core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::semver2 carries no M.N.P core to build a PEP 440 version from."
+          exit 1
+        fi
         if [[ "$BRANCH" == "develop" ]]; then
-          version="${AFV}.dev0"
+          version="${core}.dev0"
         else
-          version="$AFV"
+          version="$core"
         fi
         echo "PyPI version for branch $BRANCH: $version"
         echo "version=$version" >> "$GITHUB_OUTPUT"
