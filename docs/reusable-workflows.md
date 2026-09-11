@@ -317,7 +317,7 @@ jobs:
               - 'version.json'
               - '.github/actions/**'
 
-  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage reaches Codecov with no token (D1.6).
+  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage upload runs without the token and can skip silently (D1.6).
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
