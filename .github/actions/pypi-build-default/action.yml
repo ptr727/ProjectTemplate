@@ -81,6 +81,8 @@ runs:
         set -Eeuo pipefail
         core="${SEMVER2%%[-+]*}"
         if [[ ! "$core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          # Characters outside SemVer's own set print as ?, so the value can form no workflow command.
+          printf 'Received semver2: %s\n' "${SEMVER2//[^0-9A-Za-z.+-]/?}"
           echo "::error::semver2 carries no M.N.P core to build a PEP 440 version from."
           exit 1
         fi

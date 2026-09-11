@@ -241,6 +241,7 @@ jobs:
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
 
+      # A caller hook should declare semver2, though one that does not only draws the runner's unexpected-input warning.
       - name: Run caller build-pypi hook step
         if: ${{ hashFiles('.github/actions/build-pypi/action.yml') != '' }}
         uses: ./.github/actions/build-pypi

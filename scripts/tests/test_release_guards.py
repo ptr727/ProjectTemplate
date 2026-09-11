@@ -165,6 +165,22 @@ class ReleaseGuardCase(unittest.TestCase):
                     self.assertEqual(1, compute("main", semver2))
                     self.assertEqual("", output.read_text(encoding="utf-8"))
 
+            # The rejected value is printed for diagnosis, and neither command syntax may survive in it.
+            # The runner reads a :: command only at a line start, but a ##[ command anywhere in a line.
+            for injected in ("1.2\n::error::injected", "1.2\n##[error]injected"):
+                with self.subTest(injected=injected):
+                    output.write_text("", encoding="utf-8")
+                    env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
+                    env["GITHUB_OUTPUT"] = str(output)
+                    verdict = run(
+                        ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                    )
+                    self.assertEqual(1, verdict.returncode)
+                    self.assertIn("injected", verdict.stdout)
+                    lines = verdict.stdout.splitlines()
+                    self.assertEqual(1, len([line for line in lines if line.startswith("::")]))
+                    self.assertNotIn("##[", verdict.stdout)
+
         # Both hook steps receive SemVer2, the caller hook as the dotnet-publish and build-nuget hooks already do.
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  build-pypi:\n", 1)[1].split("\n  build-docker:\n", 1)[0]
