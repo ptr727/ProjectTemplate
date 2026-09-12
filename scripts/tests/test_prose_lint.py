@@ -1899,6 +1899,24 @@ class TestCli(unittest.TestCase):
         ):
             self.assertEqual(2, prose_lint.main(["--check", "dupword", "--diff", "HEAD"]))
 
+    def test_an_empty_diff_value_takes_the_refusal_rather_than_widening(self) -> None:
+        """An empty value is a base that failed to compute, never a request for a whole tree.
+
+        A caller substituting a command's output, `--diff "$(git merge-base origin/develop HEAD)"`,
+        passes an empty string whenever that command fails. Read as truthiness the option
+        vanishes, the refusal `main` holds for a base it cannot resolve is never reached, and the
+        run reports the whole tree's backlog as though the change introduced it.
+        """
+        bait = self.tmp / "bait.md"
+        bait.write_text(f"{DUP} thing\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[bait]),
+            mock.patch.object(prose_lint, "changed_lines", return_value=None) as changed,
+        ):
+            self.assertEqual(2, prose_lint.main(["--check", "dupword", "--diff", ""]))
+        # Pins that the resolver received the empty value itself, rather than a coerced stand-in.
+        self.assertEqual("", changed.call_args.args[0])
+
     def test_list_files_prints_the_scope_and_reports_nothing(self) -> None:
         """The audit path for the sweep scope exits 0 even on a tree full of findings."""
         bait = self.tmp / "bait.md"
@@ -2671,6 +2689,21 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         (there / "DOC.md").write_text(self.BAIT, encoding="utf-8")
         self.git(there, "commit", "-qam", "change")
         self.assertEqual(1, self.run_in(here, str(there), "--diff", "HEAD~1"))
+
+    def test_an_empty_base_is_refused_by_a_real_git_rather_than_by_a_mock(self) -> None:
+        """The precondition the empty-value refusal rests on, asserted against git itself.
+
+        `main` routes an empty `--diff` into the resolver rather than treating it as no diff at
+        all, which is only a refusal because git rejects an empty revision.
+        `TestCli.test_an_empty_diff_value_takes_the_refusal_rather_than_widening` mocks the
+        resolver, so it would stay green if git ever resolved one. Resolving one to an empty scope
+        reads as a clean tree, which is the false pass the routing exists to close.
+        """
+        root = self.repo()
+        (root / "DOC.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "commit", "-qam", "change")
+        self.assertEqual(1, self.run_in(root, ".", "--diff", "HEAD~1"))
+        self.assertEqual(2, self.run_in(root, ".", "--diff", ""))
 
     def test_a_subtree_argument_reads_the_untracked_files_inside_it(self) -> None:
         """`git ls-files` prints names relative to its `-C` directory, for `--others` as well.
