@@ -1552,5 +1552,187 @@ class RegistryGroundTruthBranchCase(unittest.TestCase):
                 self.assertEqual(len(self.errors(value)), 1)
 
 
+class InvestigateTrackingCase(unittest.TestCase):
+    """`investigate` is the one disposition naming no outcome, so it names where its decision is being made."""
+
+    def errors(self, entry: dict) -> list[str]:
+        return validate.investigate_tracking_errors("gap 'pyproject.toml'", entry)
+
+    def test_a_null_tracking_value_is_rejected(self) -> None:
+        self.assertEqual(
+            self.errors({"disposition": "investigate", "tracking": None}),
+            [
+                "divergences.json: gap 'pyproject.toml' disposition 'investigate' requires a non-empty tracking value naming where the pending decision is being made, such as 'owner/repo#123'. Where no decision is pending, record the disposition that names the outcome rather than a tracking value written to satisfy this check"
+            ],
+        )
+
+    def test_an_absent_tracking_key_is_rejected_rather_than_read_as_tracked(self) -> None:
+        self.assertEqual(len(self.errors({"disposition": "investigate"})), 1)
+
+    def test_a_whitespace_only_tracking_value_is_rejected(self) -> None:
+        """A blank string satisfies the string type the schema declares while naming nothing."""
+        self.assertEqual(len(self.errors({"disposition": "investigate", "tracking": "   "})), 1)
+
+    def test_a_tracked_entry_is_accepted(self) -> None:
+        self.assertEqual(
+            self.errors({"disposition": "investigate", "tracking": "owner/repo#123"}),
+            [],
+        )
+
+    def test_every_other_disposition_may_leave_tracking_null(self) -> None:
+        """The requirement is scoped to the disposition that defers, not applied to the whole vocabulary."""
+        for disposition in ("re-vendor", "track", "accepted", "upstream-candidate", "retire"):
+            with self.subTest(disposition=disposition):
+                self.assertEqual(self.errors({"disposition": disposition, "tracking": None}), [])
+
+
+class InvestigateTrackingWiringCase(unittest.TestCase):
+    """The helper is wired into both ledger loops, which no test of the helper alone can show.
+
+    Deleting either call site, or handing the `dispositions` loop the `gap` label, leaves every helper
+    test green and `spec/validate.py` green too, since the live ledger's one `investigate` row is
+    compliant. So this runs the real script against a scratch tree whose ledger defers in both arrays.
+    """
+
+    MESSAGE = "disposition 'investigate' requires a non-empty tracking value"
+
+    def run_against(self, tracking: object) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            # The gate reads the schema's own property names to check for an unknown key, so the scratch tree carries it.
+            shutil.copy(
+                validate.ROOT / "registry" / "repos.schema.json",
+                root / "registry" / "repos.schema.json",
+            )
+            (root / "registry" / "repos.json").write_text(
+                json.dumps(
+                    {
+                        "defaults": {"workflowModel": "release"},
+                        "repos": [
+                            {
+                                "name": "Fixture",
+                                "url": "https://github.com/owner/fixture",
+                                "status": "backlog",
+                                "classificationPending": True,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            # One marker per array, each carrying a defect its loop always reports whatever the tracking value is.
+            # Keying the proof on the entries under test would leave the absence assertion below passing on a run that never reached them.
+            (root / "spec" / "divergences.json").write_text(
+                json.dumps(
+                    {
+                        "dispositions": [
+                            {
+                                "path": "AGENTS.md",
+                                "repos": ["Fixture"],
+                                "disposition": "investigate",
+                                "reason": "Deferred in the dispositions array.",
+                                "tracking": tracking,
+                            },
+                            {
+                                "path": "WORKFLOW.md",
+                                "repos": ["Fixture"],
+                                "disposition": "retire",
+                                "reason": "",
+                                "tracking": None,
+                            },
+                        ],
+                        "gaps": [
+                            {
+                                "path": "fixture/deferred-here.txt",
+                                "disposition": "investigate",
+                                "reason": "Deferred in the gaps array.",
+                                "tracking": tracking,
+                            },
+                            {
+                                "path": "fixture/marker.txt",
+                                "disposition": "retire",
+                                "reason": "",
+                                "tracking": None,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertNotIn("Traceback", output)
+            for marker in (
+                "divergences.json: 'WORKFLOW.md' reason must be a non-empty string",
+                "divergences.json: gap 'fixture/marker.txt' reason must be a non-empty string",
+            ):
+                self.assertIn(
+                    marker,
+                    output,
+                    "a ledger loop was never reached, so an absence assertion would be vacuous",
+                )
+            return output
+
+    def test_both_arrays_refuse_an_untracked_investigate_entry(self) -> None:
+        output = self.run_against(None)
+        self.assertIn(f"divergences.json: 'AGENTS.md' {self.MESSAGE}", output)
+        self.assertIn(f"divergences.json: gap 'fixture/deferred-here.txt' {self.MESSAGE}", output)
+
+    def test_a_tracked_investigate_entry_passes_both_arrays(self) -> None:
+        self.assertNotIn(self.MESSAGE, self.run_against("owner/repo#123"))
+
+
+class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
+    """spec/divergences.schema.json is advisory, since CI runs no JSON-schema validation, so it answers to spec/validate.py.
+
+    The conditional has to stay present for both arrays, since a schema that stops asserting the rule leaves
+    an editor green on exactly the entry the gate refuses. The two are deliberately unequal, and in one
+    direction only: the schema refuses an absent, null, empty, or non-string value, and the gate refuses every
+    one of those plus a value that is only whitespace. A schema pattern closing that last gap would refuse a
+    value the gate accepts, which is the direction #1504 reverted for the registry schema, for this same
+    reason: U+FEFF is an ECMA-262 `\\s` character and `str.strip` does not remove it, so a `\\S` pattern would
+    refuse a value this gate keeps.
+    """
+
+    def setUp(self) -> None:
+        self.schema = json.loads(
+            (validate.ROOT / "spec" / "divergences.schema.json").read_text(encoding="utf-8")
+        )
+
+    def test_both_arrays_carry_the_conditional(self) -> None:
+        for array in ("dispositions", "gaps"):
+            with self.subTest(array=array):
+                self.assertEqual(
+                    self.schema["properties"][array]["items"]["allOf"],
+                    [{"$ref": "#/$defs/investigateNeedsTracking"}],
+                )
+
+    def test_the_conditional_requires_a_non_empty_tracking_value(self) -> None:
+        rule = self.schema["$defs"]["investigateNeedsTracking"]
+        self.assertEqual(rule["if"]["properties"]["disposition"]["const"], "investigate")
+        self.assertEqual(rule["then"]["required"], ["tracking"])
+        self.assertEqual(rule["then"]["properties"]["tracking"]["type"], "string")
+        self.assertEqual(rule["then"]["properties"]["tracking"]["minLength"], 1)
+
+    def test_the_gate_is_the_stricter_of_the_two(self) -> None:
+        """A whitespace-only value satisfies minLength and is refused by the gate, which is the safe direction."""
+        self.assertEqual(
+            len(
+                validate.investigate_tracking_errors(
+                    "gap 'x'", {"disposition": "investigate", "tracking": " "}
+                )
+            ),
+            1,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

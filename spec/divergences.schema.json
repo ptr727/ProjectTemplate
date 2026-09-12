@@ -18,8 +18,12 @@
                     "repos": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
                     "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
-                    "tracking": { "type": ["string", "null"] }
-                }
+                    "tracking": {
+                        "type": ["string", "null"],
+                        "description": "Where the decision or the remediation this entry records is tracked, such as owner/repo#123. Required on an investigate entry, per $defs/investigateNeedsTracking."
+                    }
+                },
+                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }]
             }
         },
         "gaps": {
@@ -32,7 +36,30 @@
                     "path": { "type": "string" },
                     "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
-                    "tracking": { "type": ["string", "null"] }
+                    "tracking": {
+                        "type": ["string", "null"],
+                        "description": "Where the decision or the remediation this entry records is tracked, such as owner/repo#123. Required on an investigate entry, per $defs/investigateNeedsTracking."
+                    }
+                },
+                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }]
+            }
+        }
+    },
+    "$defs": {
+        "investigateNeedsTracking": {
+            "title": "An investigate disposition names where its pending decision is being made",
+            "if": {
+                "required": ["disposition"],
+                "properties": { "disposition": { "const": "investigate" } }
+            },
+            "then": {
+                "required": ["tracking"],
+                "properties": {
+                    "tracking": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Where the pending decision is being made, such as owner/repo#123. spec/validate.py additionally refuses a value that is only whitespace, so this schema is the more permissive of the two by design."
+                    }
                 }
             }
         }

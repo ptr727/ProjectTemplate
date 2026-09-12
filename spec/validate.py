@@ -178,6 +178,21 @@ def is_str_list(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
+def investigate_tracking_errors(label, entry):
+    """Require a tracking value on an `investigate` disposition, the one disposition that names no outcome.
+
+    Every other value in the vocabulary states what happens to the divergence, where this one states that nobody has decided yet. With `tracking` null beside it the ledger records a decision as owed while naming nowhere it is being made, so the deferral reads as an omission instead. The field stays optional under every other disposition, which already names its own outcome.
+    """
+    if entry.get("disposition") != "investigate":
+        return []
+    tracking = entry.get("tracking")
+    if isinstance(tracking, str) and tracking.strip():
+        return []
+    return [
+        f"divergences.json: {label} disposition 'investigate' requires a non-empty tracking value naming where the pending decision is being made, such as 'owner/repo#123'. Where no decision is pending, record the disposition that names the outcome rather than a tracking value written to satisfy this check"
+    ]
+
+
 def escapes_repo_root(value):
     """Whether `ROOT / value` could resolve outside ROOT on some host.
 
@@ -1335,6 +1350,7 @@ def main():
                 errors.append(f"divergences.json: '{p}' reason must be a non-empty string")
             if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):
                 errors.append(f"divergences.json: '{p}' tracking must be a string or null")
+            errors.extend(investigate_tracking_errors(f"'{p}'", d))
         for g in div_gaps:
             if not isinstance(g, dict):
                 errors.append(f"divergences.json: gap {g!r} is not an object")
@@ -1355,6 +1371,7 @@ def main():
                 errors.append(f"divergences.json: gap '{gp}' reason must be a non-empty string")
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
+            errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
 
     if errors:
         print("Spec validation FAILED:")
