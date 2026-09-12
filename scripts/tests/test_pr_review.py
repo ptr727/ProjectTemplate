@@ -4149,6 +4149,42 @@ class TestContract(unittest.TestCase):
         self.assertEqual(delays, sorted(delays))
 
 
+class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
+    """These refusals name the directory probed, the reader's own being a different one."""
+
+    ANCHOR = Path("/anchor-this-script-sits-in")
+
+    def test_the_probe_reads_the_directory_the_refusal_names(self) -> None:
+        """A message naming a directory the probe never read sends the reader at the wrong tree."""
+        self.enterContext(mock.patch.object(pr_review, "HERE", self.ANCHOR))
+        with mock.patch.object(pr_review.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout="https://github.com/o/r.git\n")
+            self.assertEqual("o", pr_review.origin_owner())
+        argv = run.call_args.args[0]
+        self.assertEqual(str(self.ANCHOR), argv[argv.index("-C") + 1])
+
+    def test_an_unreadable_origin_names_that_directory_and_a_remedy(self) -> None:
+        """A claim naming no directory is one the operator disproves in the wrong tree."""
+        self.enterContext(mock.patch.object(pr_review, "HERE", self.ANCHOR))
+        with mock.patch.object(pr_review, "origin_owner", return_value=None):
+            ok, why = pr_review.in_scope("o")
+        self.assertFalse(ok)
+        self.assertIn(str(self.ANCHOR), why)
+        self.assertIn("hub checkout", why)
+        self.assertIn("instead of this one", why)
+        self.assertIn("git remote get-url origin", why)
+        self.assertNotIn("this checkout", why)
+
+    def test_a_cross_owner_refusal_names_that_directory_too(self) -> None:
+        """The same ambiguity, on the branch that reports both owners."""
+        self.enterContext(mock.patch.object(pr_review, "HERE", self.ANCHOR))
+        with mock.patch.object(pr_review, "origin_owner", return_value="o"):
+            ok, why = pr_review.in_scope("someone-else")
+        self.assertFalse(ok)
+        self.assertIn(str(self.ANCHOR), why)
+        self.assertNotIn("this checkout", why)
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""

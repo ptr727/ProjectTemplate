@@ -88,7 +88,7 @@ Subcommands
            finding, queries the id itself, and offers no argument an id fits in. Exit 0 =
            done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
            no comment url so nothing was resolved, 63 = the resolve did not report the
-           thread resolved, 64 = the target is under another owner.
+           thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands
            on the current head, then print the digest. The auto-request is skipped once a
            review already covers the head, once Copilot has already answered outside a formal
@@ -155,6 +155,10 @@ import tarfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+
+# The directory this script sits in, and the anchor every scope answer is read from.
+# One value serves the owner probe and the refusal naming it, so the two cannot disagree.
+HERE = Path(__file__).resolve().parent
 
 REVIEWER = "copilot-pull-request-reviewer"
 # Other review bots this repository has trialed alongside Copilot.
@@ -1985,7 +1989,7 @@ def digest(
 
 
 def origin_owner() -> str | None:
-    """The owner of the checkout this script sits in, or None where that cannot be read.
+    """The owner `git remote get-url origin` yields against this script's own directory, or None.
 
     Anchored on the script's own directory rather than the working directory, because this is
     reached from a hub checkout while the repository being answered is named on the command line,
@@ -1993,7 +1997,7 @@ def origin_owner() -> str | None:
     """
     try:
         url = subprocess.run(
-            ["git", "-C", str(Path(__file__).resolve().parent), "remote", "get-url", "origin"],
+            ["git", "-C", str(HERE), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -2021,14 +2025,20 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
     origin = origin_owner()
     if origin is None:
         return False, (
-            "this checkout has no readable `origin`, so the owner a write would stay "
-            "within cannot be established, and an unverified scope is not a scope"
+            "this script got no owner from `git remote get-url origin` against the directory "
+            f"it sits in, {HERE}, so the owner a write would stay within cannot be "
+            "established, and an unverified scope is not a scope. That directory is this "
+            "script's own rather than the working directory, so a readable `origin` in the "
+            "working directory says nothing about this, and the remedy for a copy of this "
+            "script sitting outside a checkout is to run the copy that lives inside a hub "
+            "checkout instead of this one"
         )
     if target_owner.lower() != origin:
         return False, (
-            f"the target is under {target_owner}, and this checkout is under {origin}. "
-            "A different owner is the shape this refuses outright: take it through the "
-            "runbook mutations, where the write-guard hook reads the maintainer grant"
+            f"the target is under {target_owner}, and `git remote get-url origin`, run against "
+            f"the directory this script sits in, {HERE}, named {origin}. A different owner is "
+            "the shape this refuses outright: take it through the runbook mutations, where the "
+            "write-guard hook reads the maintainer grant"
         )
     return True, ""
 
