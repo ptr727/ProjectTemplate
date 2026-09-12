@@ -277,6 +277,7 @@ def canonical_blob_sha(path):
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if result.returncode != 0:
@@ -310,6 +311,7 @@ def hub_name():
         ["git", "config", "--get", "remote.origin.url"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=ROOT,
         check=False,
     )
@@ -327,7 +329,9 @@ def gh(path, ok404=False) -> Any:
     No --paginate: on object endpoints it concatenates page documents into unparseable JSON. Every
     list read here fits one page; callers pass per_page=100 where a default page could truncate.
     """
-    r = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
+    )
     if r.returncode != 0:
         if ok404 and ("HTTP 404" in r.stderr or "Not Found" in r.stderr):
             return None
@@ -1893,6 +1897,7 @@ def _hub_main_rev():
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if fetch.returncode != 0:
@@ -1902,6 +1907,7 @@ def _hub_main_rev():
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if resolved.returncode != 0 or not resolved.stdout.strip():
@@ -1935,6 +1941,7 @@ def _git_revisions(rel_path, rev=None):
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if r.returncode != 0:
@@ -1952,6 +1959,7 @@ def _git_revisions(rel_path, rev=None):
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         if t.returncode != 0:
@@ -2045,6 +2053,7 @@ def git_blob_in_file_history(rel_path, blob_sha, rev=None):
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     return result.returncode == 0 and bool(result.stdout.strip())
@@ -5796,6 +5805,7 @@ def main(argv=None):
         ["git", "rev-parse", "--short", "HEAD"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=ROOT,
         check=False,
     )

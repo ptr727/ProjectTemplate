@@ -192,7 +192,9 @@ def apply_tree(
 
 
 def git(root: pathlib.Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+    )
     if result.returncode != 0:
         raise CarryError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
@@ -204,6 +206,7 @@ def git_is_ancestor(root: pathlib.Path, ancestor: str, descendant: str) -> bool:
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if result.returncode not in (0, 1):

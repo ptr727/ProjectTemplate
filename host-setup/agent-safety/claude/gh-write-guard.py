@@ -216,6 +216,7 @@ def _origin_owner_repo(cwd):
             ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         ).stdout.strip()
@@ -276,6 +277,7 @@ def _live_branch_rules(owner, repo, branch):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )
@@ -302,6 +304,7 @@ def _current_push_branch(cwd):
                 ["git", "-C", cwd or ".", *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=5,
                 check=False,
             )
@@ -777,6 +780,7 @@ def _is_primary_checkout(target_dir, git_dir=None):
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         )
@@ -894,6 +898,7 @@ def _resolves_as_ref(target_dir, ref, verify=None):
             ["git", "-C", target_dir or ".", "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         )
@@ -919,6 +924,7 @@ def _config_alias(target_dir, name, config_lookup=None):
             ["git", "-C", target_dir or ".", "config", "--get", f"alias.{name}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         )

@@ -254,6 +254,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -276,6 +277,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
@@ -295,6 +297,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
@@ -311,6 +314,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
@@ -332,6 +336,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
@@ -359,6 +364,7 @@ class TestSpecCoverage(unittest.TestCase):
                 [str(LINUX / "install-tools.sh"), "--list", "--repo", directory],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
@@ -490,6 +496,7 @@ class TestScriptPresence(unittest.TestCase):
                 ["git", "ls-files", "-s", "--", "host-setup"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=True,
                 cwd=ROOT,
             ).stdout

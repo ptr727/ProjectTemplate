@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import locale
 import os
 import re
 import subprocess
@@ -1300,6 +1301,7 @@ class TestDiscovery(unittest.TestCase):
             input="\n".join(str(p) for p in found),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual("", r.stdout.strip())
@@ -2520,6 +2522,7 @@ class TestReusableGateExclusions(unittest.TestCase):
             cwd=self.root,
             env=env,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
@@ -3030,6 +3033,7 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
 
@@ -3113,6 +3117,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         ).stdout.strip()
         return root, script, head
@@ -3126,6 +3131,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3217,6 +3223,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3285,6 +3292,7 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3322,6 +3330,62 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         """A repository with no ref names no commit, so it is worse than naming nothing."""
         self.assertNotIn("--provenance", self.run_block({"ACTION_REPOSITORY": "owner/repo"}))
         self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
+
+
+class TestGitOutputDecodesAsUtf8(unittest.TestCase):
+    """A git call must decode its output as UTF-8, never as whatever the locale prefers.
+
+    On Windows the locale encoding is commonly cp1252, and a diff or filename carrying a
+    character cp1252 cannot map then raises UnicodeDecodeError with no encoding pinned.
+    """
+
+    def patch_locale_as_cp1252(self) -> None:
+        """Patch every locale accessor this interpreter defines so each reports cp1252."""
+        stack = self.enterContext(contextlib.ExitStack())
+        for name in ("getencoding", "getpreferredencoding"):
+            if hasattr(locale, name):
+                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
+
+    def test_the_locale_patch_reaches_the_decoder(self) -> None:
+        """Proves the patch is effective, so the two cases below cannot pass vacuously."""
+        self.patch_locale_as_cp1252()
+        snippet = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
+        with self.assertRaises(UnicodeDecodeError):
+            # Naming no encoding is the whole of the control, so a sweep must never fix this call.
+            subprocess.run(
+                [sys.executable, "-c", snippet], capture_output=True, text=True, check=False
+            )
+
+    def test_a_diff_carrying_a_non_mappable_character_still_maps_its_lines(self) -> None:
+        """A diff hunk holding the character still maps its added line under the fix."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "commit.gpgsign", "false"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True
+        )
+        target = root / "bait.md"
+        target.write_text("Existing prose.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+
+        target.write_text("Existing prose.\nAdds a name spelled Sh\u014dko.\n", encoding="utf-8")
+
+        self.patch_locale_as_cp1252()
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "a decode failure returns None, which is the defect itself"
+        self.assertIn(2, got["bait.md"])
+
+    def test_an_untracked_path_named_with_a_non_mappable_character_is_listed(self) -> None:
+        """An untracked filename holding the character is still listed under the fix."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        name = "Sh\u014dko.md"
+        (root / name).write_text("New prose.\n", encoding="utf-8")
+
+        self.patch_locale_as_cp1252()
+        self.assertIn(name, prose_lint.untracked_paths(root))
 
 
 class TestHarness(unittest.TestCase):

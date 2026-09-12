@@ -52,6 +52,7 @@ class PublishPlanCase(unittest.TestCase):
             capture_output=True,
             env=env,
             text=True,
+            encoding="utf-8",
         )
         written_output = output.read_text(encoding="utf-8") if output.exists() else ""
         return result, written_output

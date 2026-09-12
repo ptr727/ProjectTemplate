@@ -28,7 +28,12 @@ def run(home, *args):
     """Invoke the installer as a subprocess, the way a host actually runs it."""
     env = dict(os.environ, CLAUDE_HOME=str(home))
     return subprocess.run(
-        [sys.executable, str(INSTALL), *args], capture_output=True, text=True, env=env, check=False
+        [sys.executable, str(INSTALL), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        check=False,
     )
 
 
@@ -224,7 +229,12 @@ class TestDegradedEnvironments(StampCase):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
         env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
         r = subprocess.run(
-            [sys.executable, str(INSTALL)], capture_output=True, text=True, env=env, check=False
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
         )
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stamp = json.loads(self.stamp.read_text(encoding="utf-8"))

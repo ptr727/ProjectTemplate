@@ -165,6 +165,7 @@ def untracked_paths(root: Path) -> list[str]:
             ["git", "-C", str(root), "ls-files", "-z", "--others", "--exclude-standard"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, ValueError):
@@ -199,6 +200,7 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -343,6 +345,7 @@ def checkout_provenance(script: Path) -> str:
                 ["git", "-C", str(script.parent), *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
                 env=env,
             )
@@ -502,6 +505,7 @@ def once_tracked(root: str, rel_path: str) -> bool:
             ["git", "-C", root, "log", "-1", "--format=%H", "--", rel_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, ValueError):
@@ -568,6 +572,7 @@ def shallow_checkout(root: Path) -> bool:
             ["git", "-C", str(root), "rev-parse", "--is-shallow-repository"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, ValueError):
@@ -597,6 +602,7 @@ def repo_root(path: Path) -> str:
             ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, ValueError):
@@ -612,7 +618,11 @@ def tracked_paths(root: Path) -> list[Path] | None:
     """
     try:
         r = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True, check=False
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
     except (OSError, ValueError):
         return None
