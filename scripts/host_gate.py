@@ -71,7 +71,15 @@ def probe(argv: list[str]) -> str | None:
     """
     try:
         p = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8", timeout=20, check=False
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            # A decode failure here is a ValueError that neither handler below catches.
+            # A probe answering in some other encoding is unreadable rather than fatal.
+            errors="replace",
+            timeout=20,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

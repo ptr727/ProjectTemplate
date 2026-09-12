@@ -17,6 +17,11 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dead-path      No mention of a path git once tracked and the tree no longer holds.
 
 Exit 1 if any violation is found. Read-only, never edits.
+
+Every git read below names its encoding rather than taking the locale's. On Windows the
+locale encoding is the ANSI code page, which cannot map every byte git emits, and the
+handlers around these calls catch no decode failure. Surrogateescape rather than strict, so
+a path holding a byte that is not UTF-8 round-trips to the same name on disk.
 """
 
 from __future__ import annotations
@@ -166,6 +171,7 @@ def untracked_paths(root: Path) -> list[str]:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -201,6 +207,7 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -346,6 +353,7 @@ def checkout_provenance(script: Path) -> str:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                errors="surrogateescape",
                 check=False,
                 env=env,
             )
@@ -506,6 +514,7 @@ def once_tracked(root: str, rel_path: str) -> bool:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -573,6 +582,7 @@ def shallow_checkout(root: Path) -> bool:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -603,6 +613,7 @@ def repo_root(path: Path) -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -622,6 +633,7 @@ def tracked_paths(root: Path) -> list[Path] | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -1756,7 +1768,22 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     return out
 
 
+def report_paths_that_are_not_utf8() -> None:
+    """Let a path holding a byte that is not UTF-8 print rather than ending the run.
+
+    The git reads above decode with surrogateescape so such a path opens on disk, which leaves
+    the lone surrogate in the name to reach this program's own output. Encoding it strictly
+    raises where the name is printed, which is after the scan and so after every finding it
+    was about to report. Escaping it instead names the file the way git itself names one.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    report_paths_that_are_not_utf8()
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*", default=["."])
     ap.add_argument("--check", action="append", dest="checks", choices=sorted(RULES))

@@ -11,6 +11,7 @@ Run as `python3 scripts/tests/test_prose_lint.py`, or under `python3 -m unittest
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
 import locale
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -3332,29 +3334,67 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
 
 
+# Writes U+014D, whose UTF-8 encoding cp1252 has no mapping for, which is the whole of the bait.
+UNMAPPABLE_SNIPPET = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
+
+
+@contextlib.contextmanager
+def locale_patched_as_cp1252() -> Iterator[None]:
+    """Report cp1252 from every locale accessor this interpreter defines, for the block's duration.
+
+    Which accessor a text-mode pipe consults has moved between releases, so both are patched
+    rather than the test guessing which one this interpreter reads.
+    """
+    with contextlib.ExitStack() as stack:
+        for name in ("getencoding", "getpreferredencoding"):
+            if hasattr(locale, name):
+                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
+        yield
+
+
+@functools.cache
+def locale_patch_bites() -> bool:
+    """Whether patching the locale actually changes how a text-mode pipe decodes, on this host.
+
+    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder
+    there. That is the documented workaround for the very defect these cases cover, and a
+    container started with no LANG enables it on its own, so it is an ordinary host rather than
+    an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
+    the several ways an interpreter arrives at a UTF-8 default.
+
+    Measured once, since answering it spawns an interpreter.
+    """
+    with locale_patched_as_cp1252():
+        try:
+            # Naming no encoding is the whole of the probe, so a sweep must never fix this call.
+            subprocess.run(
+                [sys.executable, "-c", UNMAPPABLE_SNIPPET],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except UnicodeDecodeError:
+            return True
+    return False
+
+
 class TestGitOutputDecodesAsUtf8(unittest.TestCase):
     """A git call must decode its output as UTF-8, never as whatever the locale prefers.
 
     On Windows the locale encoding is commonly cp1252, and a diff or filename carrying a
     character cp1252 cannot map then raises UnicodeDecodeError with no encoding pinned.
+
+    Each case below skips where the locale patch cannot reach the decoder, rather than passing.
+    A pass there would say the fix held when nothing exercised it.
     """
 
-    def patch_locale_as_cp1252(self) -> None:
-        """Patch every locale accessor this interpreter defines so each reports cp1252."""
-        stack = self.enterContext(contextlib.ExitStack())
-        for name in ("getencoding", "getpreferredencoding"):
-            if hasattr(locale, name):
-                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
+    def setUp(self) -> None:
+        if not locale_patch_bites():
+            self.skipTest("this interpreter decodes as UTF-8 whatever the locale reports")
 
-    def test_the_locale_patch_reaches_the_decoder(self) -> None:
-        """Proves the patch is effective, so the two cases below cannot pass vacuously."""
-        self.patch_locale_as_cp1252()
-        snippet = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
-        with self.assertRaises(UnicodeDecodeError):
-            # Naming no encoding is the whole of the control, so a sweep must never fix this call.
-            subprocess.run(
-                [sys.executable, "-c", snippet], capture_output=True, text=True, check=False
-            )
+    def patch_locale_as_cp1252(self) -> None:
+        """Hold the patch for the rest of the running case."""
+        self.enterContext(locale_patched_as_cp1252())
 
     def test_a_diff_carrying_a_non_mappable_character_still_maps_its_lines(self) -> None:
         """A diff hunk holding the character still maps its added line under the fix."""
@@ -3374,7 +3414,9 @@ class TestGitOutputDecodesAsUtf8(unittest.TestCase):
 
         self.patch_locale_as_cp1252()
         got = prose_lint.changed_lines("HEAD", root)
-        assert got is not None, "a decode failure returns None, which is the defect itself"
+        # A decode failure raises out of `changed_lines` rather than returning None.
+        # None means git itself failed, which is a broken fixture rather than the defect here.
+        assert got is not None, "git failed, so this case proved nothing about decoding"
         self.assertIn(2, got["bait.md"])
 
     def test_an_untracked_path_named_with_a_non_mappable_character_is_listed(self) -> None:
@@ -3386,6 +3428,61 @@ class TestGitOutputDecodesAsUtf8(unittest.TestCase):
 
         self.patch_locale_as_cp1252()
         self.assertIn(name, prose_lint.untracked_paths(root))
+
+
+class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
+    """A byte git emits that is not UTF-8 must not end the run, on any host.
+
+    Pinning the encoding fixes the locale half of this and leaves the strict half, where a
+    tracked latin-1 file or a filename holding such a byte raises on a decode the handlers
+    around these reads cannot catch. Neither case needs a patched locale to reach, so neither
+    skips the way the cases above do.
+    """
+
+    def git_repo(self) -> Path:
+        """A committed-into temp repository, configured so no host identity or signing applies."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for key, value in (
+            ("commit.gpgsign", "false"),
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+        ):
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+        return root
+
+    def test_a_latin_1_file_modified_in_the_tree_still_maps_its_diff(self) -> None:
+        """git emits the raw byte in the diff, and a strict decode would raise past the handler."""
+        root = self.git_repo()
+        target = root / "bait.md"
+        target.write_bytes(b"base line\n")
+        subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+
+        # Latin-1 for an e with an acute accent, which is not a valid UTF-8 sequence.
+        target.write_bytes(b"base line\ncaf\xe9 added\n")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about decoding"
+        self.assertIn(2, got["bait.md"])
+
+    def test_a_filename_that_is_not_utf8_is_scanned_and_reported(self) -> None:
+        """The name reaches this program's own output, where encoding it strictly would raise."""
+        root = self.git_repo()
+        try:
+            (root / Path(os.fsdecode(b"bad\xe9name.md"))).write_bytes(
+                b"It has a dupword dupword in it.\n"
+            )
+        except (OSError, UnicodeError) as error:
+            self.skipTest(f"this filesystem rejects a name that is not UTF-8: {error}")
+
+        out = io.StringIO()
+        # The scope banner goes to stderr, so it is captured too rather than left on the console.
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = prose_lint.main([str(root), "--check", "dupword"])
+
+        self.assertEqual(1, code)
+        self.assertIn("dupword", out.getvalue())
 
 
 class TestHarness(unittest.TestCase):
