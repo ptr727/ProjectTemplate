@@ -4,10 +4,12 @@
 Python decodes a `text=True` pipe with the locale encoding when the call names none. On Linux
 that is UTF-8 and the default is invisible. On Windows it is the ANSI code page, commonly
 cp1252, so output carrying a byte sequence that code page cannot map raises UnicodeDecodeError.
-Git, which most of these calls spawn, emits UTF-8 on every host, so naming the encoding is what
-makes a Windows run read what a Linux run reads. A call spawning something else names UTF-8 for
-the same reason and says what it does about a byte that is not, `host_gate.py` being the case
-that matters, since the tool it runs comes from a declaration a downstream repository can extend.
+The tools these calls spawn do not transcode to the console's code page, so a Windows run taking
+the ANSI default reads something the tool never wrote. Naming UTF-8 is what makes that run read
+what a Linux run reads. What a byte outside UTF-8 is worth is a separate question this rule does
+not answer, and a call that can meet one answers it with its own `errors`, as `prose_lint.py` and
+`host_gate.py` do. The second matters most, since the tool it runs comes from a declaration a
+downstream repository can extend.
 
 A test rather than a lint rule because nothing in this repository's toolchain checks it.
 `ruff` has no rule reaching a subprocess call at all. Its rule for the same omission on `open`

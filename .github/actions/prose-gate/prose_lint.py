@@ -21,7 +21,8 @@ Exit 1 if any violation is found. Read-only, never edits.
 Every git read below names its encoding rather than taking the locale's. On Windows the
 locale encoding is the ANSI code page, which cannot map every byte git emits, and the
 handlers around these calls catch no decode failure. Surrogateescape rather than strict, so
-a path holding a byte that is not UTF-8 round-trips to the same name on disk.
+such a byte does not end the read either. A name round-trips to the same name on disk, and a
+diff's content reaches no further than the hunk headers this file reads out of it.
 """
 
 from __future__ import annotations
@@ -181,6 +182,27 @@ def untracked_paths(root: Path) -> list[str]:
     return [name for name in r.stdout.split("\0") if name]
 
 
+def diff_header_path(field: str) -> str | None:
+    """The repository-relative path a `+++` header names, or None where it names no file.
+
+    Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
+    or a control character, escaping it the way C does. Reading the quoted form as a literal path
+    dropped the file from scope, and an empty scope is falsy, so `main`'s no-match refusal did
+    not fire either and the run reported a clean gate on a file it never read. Decoding the
+    escape covers every quoted name, which setting `core.quotePath=false` would not: that only
+    stops git quoting the first of those three, leaving the other two to miss the same way.
+
+    `/dev/null` is the header of a deletion, which adds no line to scope.
+    """
+    if field == "/dev/null":
+        return None
+    if field.startswith('"') and field.endswith('"') and len(field) > 1:
+        # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
+        unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
+        field = unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
+    return field[2:] if field.startswith("b/") else None
+
+
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     """Map repository-relative path -> line numbers this working tree adds vs `base`.
 
@@ -190,6 +212,9 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
 
     An untracked file counts as added in full, since a change whose whole point is adding a file
     otherwise scopes to nothing and reports a clean run on exactly the file it added.
+
+    A name git quotes even with `core.quotePath=false`, one holding a quote, a backslash, or a
+    control character, is unquoted here rather than left to miss the same way.
     """
     try:
         d = subprocess.run(
@@ -215,8 +240,10 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     out: dict[str, set[int]] = {}
     cur = None
     for line in d.split("\n"):
-        if line.startswith("+++ b/"):
-            cur = line[6:]
+        if line.startswith("+++ "):
+            cur = diff_header_path(line[4:])
+            if cur is None:
+                continue
             out.setdefault(cur, set())
         elif line.startswith("@@") and cur:
             m = re.search(r"\+(\d+)(?:,(\d+))?", line)
@@ -1773,9 +1800,9 @@ def report_paths_that_are_not_utf8() -> None:
 
     The git reads above decode with surrogateescape so such a path opens on disk, which leaves
     the lone surrogate in the name to reach this program's own output. Encoding it strictly
-    raises where the name is printed, which is after the scan and so after every finding it
-    was about to report. Escaping it costs the reader an unreadable byte in one name, where
-    raising costs them the whole run's findings.
+    raises at the line printing that name, part way through the scan, so every finding after
+    that point is lost along with the run's own verdict, and the exit code becomes a traceback's
+    rather than the gate's. Escaping it costs the reader one unreadable byte in one name.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
