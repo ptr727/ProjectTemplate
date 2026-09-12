@@ -25,7 +25,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/actions/prose-gate"))
+PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[2] / ".github/actions/prose-gate/prose_lint.py"
+sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
 import prose_lint
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -3467,7 +3468,12 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
         self.assertIn(2, got["bait.md"])
 
     def test_a_filename_that_is_not_utf8_is_scanned_and_reported(self) -> None:
-        """The name reaches this program's own output, where encoding it strictly would raise."""
+        """The name reaches this program's own output, where encoding it strictly would raise.
+
+        Run as a child process rather than in this one. `redirect_stdout` hands `main` a
+        `StringIO`, which has no `reconfigure` and so never reaches the call under test, leaving
+        a case that passes with the fix deleted. A real pipe is the whole of what this covers.
+        """
         root = self.git_repo()
         try:
             (root / Path(os.fsdecode(b"bad\xe9name.md"))).write_bytes(
@@ -3476,13 +3482,21 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
         except (OSError, UnicodeError) as error:
             self.skipTest(f"this filesystem rejects a name that is not UTF-8: {error}")
 
-        out = io.StringIO()
-        # The scope banner goes to stderr, so it is captured too rather than left on the console.
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            code = prose_lint.main([str(root), "--check", "dupword"])
+        # A strict encoder is what raises, so the child is told to use one.
+        # Left alone it would inherit whatever this host's console happens to be.
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        done = subprocess.run(
+            [sys.executable, str(PROSE_LINT_SCRIPT), str(root), "--check", "dupword"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            env=env,
+            check=False,
+        )
 
-        self.assertEqual(1, code)
-        self.assertIn("dupword", out.getvalue())
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("dupword", done.stdout)
+        self.assertNotIn("UnicodeEncodeError", done.stderr)
 
 
 class TestHarness(unittest.TestCase):

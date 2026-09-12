@@ -4,8 +4,10 @@
 Python decodes a `text=True` pipe with the locale encoding when the call names none. On Linux
 that is UTF-8 and the default is invisible. On Windows it is the ANSI code page, commonly
 cp1252, so output carrying a byte sequence that code page cannot map raises UnicodeDecodeError.
-The tools here read `git`, `gh`, and `jq`, all of which emit UTF-8 on every host, so naming the
-encoding is what makes a Windows run read what a Linux run reads.
+Git, which most of these calls spawn, emits UTF-8 on every host, so naming the encoding is what
+makes a Windows run read what a Linux run reads. A call spawning something else names UTF-8 for
+the same reason and says what it does about a byte that is not, `host_gate.py` being the case
+that matters, since the tool it runs comes from a declaration a downstream repository can extend.
 
 A test rather than a lint rule because nothing in this repository's toolchain checks it.
 `ruff` has no rule reaching a subprocess call at all. Its rule for the same omission on `open`
@@ -63,8 +65,11 @@ def scanned_python_files() -> list[Path]:
     """
     names: set[str] = set()
     for extra in ([], ["--others", "--exclude-standard"]):
+        # The excludes apply to the untracked pass alone.
+        # A tracked file under one of those names is still read rather than silently dropped.
+        excludes = UNTRACKED_EXCLUDES if extra else ()
         listed = subprocess.run(
-            ["git", "-C", str(REPO), "ls-files", "-z", *extra, "--", "*.py", *UNTRACKED_EXCLUDES],
+            ["git", "-C", str(REPO), "ls-files", "-z", *extra, "--", "*.py", *excludes],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -125,13 +130,13 @@ def spawning_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
 def in_text_mode(call: ast.Call) -> bool:
     """Whether this call decodes its child's output, which is what makes an encoding load bearing.
 
-    Per the subprocess docs, naming `errors` alone puts a call into text mode, not only
-    `text=True`, so `errors="replace"` with no encoding hits the exact locale-dependent bug this
-    test exists to catch. A call naming `encoding=` already states its own encoding and is judged
-    by `names_utf8` directly, so this function does not also need to look for that keyword.
+    Per the subprocess docs, naming `encoding` or `errors` puts a call into text mode on its own,
+    not only `text=True`. Both spellings have to arrive here, since a call this returns False for
+    is never judged at all: `errors="replace"` alone takes the locale and hits the exact bug this
+    file exists to catch, and `encoding="cp1252"` is text mode in an encoding git does not emit.
     """
     for keyword in call.keywords:
-        if keyword.arg == "errors":
+        if keyword.arg in ("encoding", "errors"):
             return True
         if keyword.arg in TEXT_KEYWORDS:
             value = keyword.value
@@ -213,10 +218,10 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                 self.function_name_counts.get(name, 0),
                 f"{name} is not defined exactly once across the scanned tree",
             )
-            self.assertGreaterEqual(
-                self.exemptions_hit.get((rel, name), 0),
+            self.assertEqual(
                 1,
-                f"the exemption for {rel}:{name} suppressed no call",
+                self.exemptions_hit.get((rel, name), 0),
+                f"the exemption for {rel}:{name} covers exactly one call, and did not",
             )
 
 

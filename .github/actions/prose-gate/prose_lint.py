@@ -1774,7 +1774,8 @@ def report_paths_that_are_not_utf8() -> None:
     The git reads above decode with surrogateescape so such a path opens on disk, which leaves
     the lone surrogate in the name to reach this program's own output. Encoding it strictly
     raises where the name is printed, which is after the scan and so after every finding it
-    was about to report. Escaping it instead names the file the way git itself names one.
+    was about to report. Escaping it costs the reader an unreadable byte in one name, where
+    raising costs them the whole run's findings.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
