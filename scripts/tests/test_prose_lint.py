@@ -11,18 +11,23 @@ Run as `python3 scripts/tests/test_prose_lint.py`, or under `python3 -m unittest
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
+import locale
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/actions/prose-gate"))
+PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[2] / ".github/actions/prose-gate/prose_lint.py"
+sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
 import prose_lint
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -1300,6 +1305,7 @@ class TestDiscovery(unittest.TestCase):
             input="\n".join(str(p) for p in found),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual("", r.stdout.strip())
@@ -2520,6 +2526,7 @@ class TestReusableGateExclusions(unittest.TestCase):
             cwd=self.root,
             env=env,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
@@ -3030,6 +3037,7 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
 
@@ -3113,6 +3121,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         ).stdout.strip()
         return root, script, head
@@ -3126,6 +3135,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3217,6 +3227,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3285,6 +3296,7 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
         )
@@ -3322,6 +3334,240 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         """A repository with no ref names no commit, so it is worse than naming nothing."""
         self.assertNotIn("--provenance", self.run_block({"ACTION_REPOSITORY": "owner/repo"}))
         self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
+
+
+# Writes U+014D, whose UTF-8 encoding cp1252 has no mapping for, which is the whole of the bait.
+UNMAPPABLE_SNIPPET = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
+
+
+@contextlib.contextmanager
+def locale_patched_as_cp1252() -> Iterator[None]:
+    """Report cp1252 from every locale accessor this interpreter defines, for the block's duration.
+
+    Which accessor a text-mode pipe consults has moved between releases, so both are patched
+    rather than the test guessing which one this interpreter reads.
+    """
+    with contextlib.ExitStack() as stack:
+        for name in ("getencoding", "getpreferredencoding"):
+            if hasattr(locale, name):
+                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
+        yield
+
+
+@functools.cache
+def locale_patch_bites() -> bool:
+    """Whether patching the locale actually changes how a text-mode pipe decodes, on this host.
+
+    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder
+    there. That is the documented workaround for the very defect these cases cover, and a
+    container started with no LANG enables it on its own, so it is an ordinary host rather than
+    an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
+    the several ways an interpreter arrives at a UTF-8 default.
+
+    Measured once, since answering it spawns an interpreter.
+    """
+    with locale_patched_as_cp1252():
+        try:
+            # Naming no encoding is the whole of the probe, so a sweep must never fix this call.
+            subprocess.run(
+                [sys.executable, "-c", UNMAPPABLE_SNIPPET],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except UnicodeDecodeError:
+            return True
+    return False
+
+
+class TestGitOutputDecodesAsUtf8(unittest.TestCase):
+    """A git call must decode its output as UTF-8, never as whatever the locale prefers.
+
+    On Windows the locale encoding is commonly cp1252, and a diff or filename carrying a
+    character cp1252 cannot map then raises UnicodeDecodeError with no encoding pinned.
+
+    Each case below skips where the locale patch cannot reach the decoder, rather than passing.
+    A pass there would say the fix held when nothing exercised it.
+    """
+
+    def setUp(self) -> None:
+        if not locale_patch_bites():
+            self.skipTest("this interpreter decodes as UTF-8 whatever the locale reports")
+
+    def patch_locale_as_cp1252(self) -> None:
+        """Hold the patch for the rest of the running case."""
+        self.enterContext(locale_patched_as_cp1252())
+
+    def test_a_diff_carrying_a_non_mappable_character_still_maps_its_lines(self) -> None:
+        """A diff hunk holding the character still maps its added line under the fix."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "commit.gpgsign", "false"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True
+        )
+        target = root / "bait.md"
+        target.write_text("Existing prose.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+
+        target.write_text("Existing prose.\nAdds a name spelled Sh\u014dko.\n", encoding="utf-8")
+
+        self.patch_locale_as_cp1252()
+        got = prose_lint.changed_lines("HEAD", root)
+        # A decode failure raises out of `changed_lines` rather than returning None.
+        # None means git itself failed, which is a broken fixture rather than the defect here.
+        assert got is not None, "git failed, so this case proved nothing about decoding"
+        self.assertIn(2, got["bait.md"])
+
+    def test_an_untracked_path_named_with_a_non_mappable_character_is_listed(self) -> None:
+        """An untracked filename holding the character is still listed under the fix."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        name = "Sh\u014dko.md"
+        (root / name).write_text("New prose.\n", encoding="utf-8")
+
+        self.patch_locale_as_cp1252()
+        self.assertIn(name, prose_lint.untracked_paths(root))
+
+
+class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
+    """A byte git emits that is not UTF-8 must not end the run, on any host.
+
+    Pinning the encoding fixes the locale half of this and leaves the strict half, where a
+    tracked latin-1 file or a filename holding such a byte raises on a decode the handlers
+    around these reads cannot catch. Neither case needs a patched locale to reach, so neither
+    skips the way the cases above do.
+    """
+
+    def git_repo(self) -> Path:
+        """A committed-into temp repository, configured so no host identity or signing applies."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for key, value in (
+            ("commit.gpgsign", "false"),
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+        ):
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+        return root
+
+    def test_a_latin_1_file_modified_in_the_tree_still_maps_its_diff(self) -> None:
+        """git emits the raw byte in the diff, and a strict decode would raise past the handler."""
+        root = self.git_repo()
+        target = root / "bait.md"
+        target.write_bytes(b"base line\n")
+        subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+
+        # Latin-1 for an e with an acute accent, which is not a valid UTF-8 sequence.
+        target.write_bytes(b"base line\ncaf\xe9 added\n")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about decoding"
+        self.assertIn(2, got["bait.md"])
+
+    def test_a_filename_that_is_not_utf8_is_scanned_and_reported(self) -> None:
+        """The name reaches this program's own output, where encoding it strictly would raise.
+
+        Run as a child process rather than in this one. `redirect_stdout` hands `main` a
+        `StringIO`, which has no `reconfigure` and so never reaches the call under test, leaving
+        a case that passes with the fix deleted. A real pipe is the whole of what this covers.
+        """
+        root = self.git_repo()
+        try:
+            (root / Path(os.fsdecode(b"bad\xe9name.md"))).write_bytes(
+                b"It has a dupword dupword in it.\n"
+            )
+        except (OSError, UnicodeError) as error:
+            self.skipTest(f"this filesystem rejects a name that is not UTF-8: {error}")
+
+        # A strict encoder is what raises, so the child is told to use one.
+        # Left alone it would inherit whatever this host's console happens to be.
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        done = subprocess.run(
+            [sys.executable, str(PROSE_LINT_SCRIPT), str(root), "--check", "dupword"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            env=env,
+            check=False,
+        )
+
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("dupword", done.stdout)
+        self.assertNotIn("UnicodeEncodeError", done.stderr)
+
+
+class TestDiffScopeReachesAQuotedName(unittest.TestCase):
+    """A name git quotes in a diff header must still land in scope.
+
+    `core.quotePath` defaults on and quotes every byte at or above 0x80, so the header of an
+    ordinary non-ASCII filename never matched the `+++ b/` parse and the file left scope. An
+    empty scope is falsy, so `main`'s no-match refusal did not fire either, and the run reported
+    a clean gate on a file it never read. That is the production path, since the action always
+    passes `--diff`.
+    """
+
+    BAIT = "It has a dupword dupword here.\n"
+
+    # Every route by which git quotes a header, plus two names taking two of them at once.
+    # A mixed name is what an inherited `core.quotePath=false` corrupts.
+    # Git then leaves its high bytes raw inside the quotes it still adds for the quote character.
+    NAMES: ClassVar[dict[str, str]] = {
+        "utf8": "Sh\u014dko.md",
+        "backslash": "back\\slash.md",
+        "quote": 'quo"te.md',
+        "utf8 and quote": 'Sh\u014dko"x.md',
+        "latin1 and quote": 'na\u00efve"y.md',
+        "ascii": "plain.md",
+    }
+
+    def repo(self, quote_path: str) -> Path:
+        """A committed-into temp repository, with the settings this case depends on pinned.
+
+        `core.quotePath` is set rather than left inherited, since it decides which names reach
+        the decoder at all and a host turning it off would silently retire the headline case.
+        """
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for key, value in (
+            ("commit.gpgsign", "false"),
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+            ("core.quotePath", quote_path),
+        ):
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+        return root
+
+    def test_each_name_git_quotes_still_maps_its_added_line(self) -> None:
+        """Both host settings, since the gate pins its own and must not read the inherited one."""
+        for quote_path in ("true", "false"):
+            root = self.repo(quote_path)
+            for name in [*self.NAMES.values(), "gone.md"]:
+                (root / name).write_text("Title.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            for name in self.NAMES.values():
+                (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
+            (root / "gone.md").unlink()
+
+            got = prose_lint.changed_lines("HEAD", root)
+            assert got is not None, "git failed, so this case proved nothing about scoping"
+            for label, name in self.NAMES.items():
+                with self.subTest(f"core.quotePath={quote_path}", name=label):
+                    self.assertIn(2, got.get(name, set()))
+            self.assertNotIn("gone.md", got)
+
+    def test_a_deletion_header_names_no_file(self) -> None:
+        """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
+
+        Reading `/dev/null` as a path would leave `cur` naming a file that is not there, which
+        the surrounding loop would then credit with the next hunk it reads.
+        """
+        self.assertIsNone(prose_lint.diff_header_path("/dev/null"))
+        self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
 class TestHarness(unittest.TestCase):

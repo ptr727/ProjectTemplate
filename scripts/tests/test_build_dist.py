@@ -923,7 +923,11 @@ class IncludeCase(TreeCase):
         )
 
         result = subprocess.run(
-            [sys.executable, "-c", source], capture_output=True, text=True, check=True
+            [sys.executable, "-c", source],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
         )
 
         before, after = result.stdout.split()

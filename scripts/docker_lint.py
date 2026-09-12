@@ -83,7 +83,12 @@ def run_command(
     """Run one command and preserve its output for the caller."""
     try:
         return subprocess.run(
-            command, check=False, text=True, timeout=timeout, capture_output=capture_output
+            command,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            capture_output=capture_output,
         )
     except subprocess.TimeoutExpired as error:
         if command[:2] == ["docker", "run"] and "--name" in command:

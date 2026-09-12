@@ -60,7 +60,11 @@ def source_ref():
     def git(*args):
         try:
             r = subprocess.run(
-                ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
+                ["git", "-C", str(ROOT), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
             )
         except OSError:
             return None
@@ -169,6 +173,7 @@ def register_claude_marketplace():
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     # Re-adding an already-registered marketplace is expected on a re-run.
@@ -185,6 +190,7 @@ def register_claude_marketplace():
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if (

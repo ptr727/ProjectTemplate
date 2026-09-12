@@ -33,7 +33,9 @@ import canonical_review as cr
 
 def run(cwd: Path, *args: str) -> str:
     """A checked git call for test setup, loud on failure so a broken fixture is never silent."""
-    proc = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", check=False
+    )
     if proc.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout

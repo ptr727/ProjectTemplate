@@ -17,6 +17,12 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dead-path      No mention of a path git once tracked and the tree no longer holds.
 
 Exit 1 if any violation is found. Read-only, never edits.
+
+Every git read below names its encoding rather than taking the locale's. On Windows the
+locale encoding is the ANSI code page, which cannot map every byte git emits, and the
+handlers around these calls catch no decode failure. Surrogateescape rather than strict, so
+such a byte does not end the read either. A name round-trips to the same name on disk, and a
+diff's content reaches no further than the hunk headers this file reads out of it.
 """
 
 from __future__ import annotations
@@ -165,6 +171,8 @@ def untracked_paths(root: Path) -> list[str]:
             ["git", "-C", str(root), "ls-files", "-z", "--others", "--exclude-standard"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -172,6 +180,29 @@ def untracked_paths(root: Path) -> list[str]:
     if r.returncode != 0:
         return []
     return [name for name in r.stdout.split("\0") if name]
+
+
+def diff_header_path(field: str) -> str | None:
+    """The repository-relative path a `+++` header names, or None where it names no file.
+
+    Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
+    or a control character, escaping it the way C does. Reading the quoted form as a literal path
+    dropped the file from scope, and an empty scope is falsy, so `main`'s no-match refusal did
+    not fire either and the run reported a clean gate on a file it never read.
+
+    The caller pins `core.quotePath=true`, which is what makes a quoted field ASCII and so what
+    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
+    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
+    raw inside the quotes, which this decode cannot carry.
+
+    A header naming no `b/` path adds nothing to scope, which is how a deletion's `/dev/null`
+    leaves the caller with no file to credit the hunk that follows it.
+    """
+    if field.startswith('"') and field.endswith('"') and len(field) > 1:
+        # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
+        unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
+        field = unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
+    return field[2:] if field.startswith("b/") else None
 
 
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
@@ -183,6 +214,9 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
 
     An untracked file counts as added in full, since a change whose whole point is adding a file
     otherwise scopes to nothing and reports a clean run on exactly the file it added.
+
+    A name git quotes even with `core.quotePath=false`, one holding a quote, a backslash, or a
+    control character, is unquoted here rather than left to miss the same way.
     """
     try:
         d = subprocess.run(
@@ -190,6 +224,11 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "git",
                 "-C",
                 str(root),
+                # `diff_header_path` decodes a quoted name as ASCII, and this is what makes it so.
+                # An inherited `false` leaves a high byte raw inside the quotes git still adds.
+                # That field is then not ASCII, and the decode either corrupts it or raises.
+                "-c",
+                "core.quotePath=true",
                 "diff",
                 "--unified=0",
                 "--no-color",
@@ -199,6 +238,8 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -206,8 +247,10 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     out: dict[str, set[int]] = {}
     cur = None
     for line in d.split("\n"):
-        if line.startswith("+++ b/"):
-            cur = line[6:]
+        if line.startswith("+++ "):
+            cur = diff_header_path(line[4:])
+            if cur is None:
+                continue
             out.setdefault(cur, set())
         elif line.startswith("@@") and cur:
             m = re.search(r"\+(\d+)(?:,(\d+))?", line)
@@ -343,6 +386,8 @@ def checkout_provenance(script: Path) -> str:
                 ["git", "-C", str(script.parent), *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="surrogateescape",
                 check=False,
                 env=env,
             )
@@ -502,6 +547,8 @@ def once_tracked(root: str, rel_path: str) -> bool:
             ["git", "-C", root, "log", "-1", "--format=%H", "--", rel_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -568,6 +615,8 @@ def shallow_checkout(root: Path) -> bool:
             ["git", "-C", str(root), "rev-parse", "--is-shallow-repository"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -597,6 +646,8 @@ def repo_root(path: Path) -> str:
             ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, ValueError):
@@ -612,7 +663,12 @@ def tracked_paths(root: Path) -> list[Path] | None:
     """
     try:
         r = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True, check=False
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            check=False,
         )
     except (OSError, ValueError):
         return None
@@ -1746,7 +1802,23 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     return out
 
 
+def report_paths_that_are_not_utf8() -> None:
+    """Let a path holding a byte that is not UTF-8 print rather than ending the run.
+
+    The git reads above decode with surrogateescape so such a path opens on disk, which leaves
+    the lone surrogate in the name to reach this program's own output. Encoding it strictly
+    raises at the line printing that name, part way through the scan, so every finding after
+    that point is lost along with the run's own verdict, and the exit code becomes a traceback's
+    rather than the gate's. Escaping it costs the reader one unreadable byte in one name.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    report_paths_that_are_not_utf8()
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*", default=["."])
     ap.add_argument("--check", action="append", dest="checks", choices=sorted(RULES))

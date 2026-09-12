@@ -61,7 +61,9 @@ NOTES: list[str] = []
 
 
 def sh(*args: str) -> str:
-    return subprocess.run(args, capture_output=True, text=True, check=False).stdout
+    return subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", check=False
+    ).stdout
 
 
 def origin_owner(root: Path) -> str | None:
@@ -87,6 +89,7 @@ def gh_exists(path: str) -> bool | None:
             ["gh", "api", path, "--jq", ".sha"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=GH_TIMEOUT,
             check=False,
         )
@@ -126,7 +129,7 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     args = ["git", "-C", str(root), "ls-files"]
     if exclude:
         args += ["--", *(f":!{pattern}" for pattern in exclude)]
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", check=False)
     if result.returncode != 0:
         # A failed command's stdout is never trusted, even where it is non-empty.
         # A partial listing read as complete is a scan that missed files and said nothing.
@@ -159,6 +162,7 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
             input="\0".join(paths) + "\0",
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, subprocess.SubprocessError):

@@ -433,6 +433,7 @@ def unprivileged_root_is_available() -> bool:
                 ["unshare", "-r", "id", "-u"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=20,
                 check=False,
             ).stdout.strip()
@@ -461,6 +462,7 @@ class LinuxWrapperSudoGuardCase(unittest.TestCase):
             [*argv, str(LINUX_WRAPPER), "--dry-run"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
             env=env,
@@ -499,6 +501,7 @@ class LinuxWrapperSudoGuardCase(unittest.TestCase):
             ["unshare", "-r", str(LINUX_WRAPPER), "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
             env={"PATH": os.environ.get("PATH", ""), "SUDO_USER": "someone"},
