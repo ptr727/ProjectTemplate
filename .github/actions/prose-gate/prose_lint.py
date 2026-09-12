@@ -1846,8 +1846,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     discovered = len(files)
-    scope = changed_lines(a.diff, scan_root) if a.diff else None
-    if a.diff and scope is None:
+    # Presence rather than truthiness, since an empty value is a base that failed to compute.
+    # Reading it as no diff at all is the silent widening the refusal below exists to prevent.
+    scope = changed_lines(a.diff, scan_root) if a.diff is not None else None
+    if a.diff is not None and scope is None:
         # Widening to the whole tree answers a different question, and answers it silently.
         # A caller scoping to a change gets the backlog reported as though the change made it.
         # A CI adoption hits this first, where an unresolvable base walls off the first run.
