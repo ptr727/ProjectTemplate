@@ -192,8 +192,16 @@ def apply_tree(
 
 
 def git(root: pathlib.Path, *args: str) -> str:
+    # `rev-parse --show-toplevel` and `worktree list --porcelain` emit a path raw, without the quoting that keeps other git output ASCII.
+    # A strict decode of one that is not UTF-8 raises here uncaught, ending the run in a traceback.
     result = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=False,
     )
     if result.returncode != 0:
         raise CarryError(result.stderr.strip() or f"git {' '.join(args)} failed")

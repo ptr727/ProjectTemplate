@@ -305,6 +305,8 @@ def _current_push_branch(cwd):
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                # A ref name is bytes like a path, and a strict decode of one that is not UTF-8 raises into the handler below, which answers None, and None leaves `_check_push_bypass` with no target to test against the protected branches.
+                errors="surrogateescape",
                 timeout=5,
                 check=False,
             )
@@ -3366,8 +3368,9 @@ def _selftest():
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
-    mark = "ok  " if got is True else "FAIL"
-    if got is not True:
+    # None is the skip, which is neither a pass nor a failure: it says the case could not run here.
+    mark = "ok  " if got is True else ("skip" if got is None else "FAIL")
+    if got is False:
         ok = False
     print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
@@ -3377,8 +3380,10 @@ def _selftest():
 def _is_primary_checkout_selftest():
     """Resolve a real primary checkout whose directory name is not valid UTF-8.
 
-    None where the platform will not take such a name, which is not a failure: Windows rejects
-    it outright, so the case reports as skipped rather than pretending to have run.
+    None where the case could not run at all, which is neither a pass nor a failure and is
+    printed as a skip. Windows refuses such a name outright, a sandbox can refuse the directory,
+    and a host can have no git, and reporting any of those as a pass would say the decode was
+    exercised when it never ran.
     """
     import tempfile
 
@@ -3387,10 +3392,13 @@ def _is_primary_checkout_selftest():
         try:
             os.mkdir(target)
         except (OSError, UnicodeError):
-            return True
-        r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+            return None
+        try:
+            r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+        except OSError:
+            return None
         if r.returncode != 0:
-            return True
+            return None
         return _is_primary_checkout(target)
 
 

@@ -163,6 +163,9 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # `-z` turns off the quoting that keeps other git output ASCII, so this echoes a path back raw.
+            # A strict decode raises a ValueError, which the handler below does not catch.
+            errors="surrogateescape",
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
