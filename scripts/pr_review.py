@@ -134,6 +134,8 @@ Subcommands
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
+           64 = the write scope could not be established or excludes the target, checked before
+           the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
 mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
@@ -2506,6 +2508,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
+
+    # `wait` mutates too, via the auto-request below, and had no scope check of its own until
+    # #1562: the other two write paths refused a cross-owner target outright and this one did not.
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
+        return 64
 
     # In-process backoff, so the whole wait costs one agent turn.
     delays = [15, 20, 30, 45, 60, 120]

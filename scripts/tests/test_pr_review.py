@@ -323,6 +323,10 @@ class GqlCase(unittest.TestCase):
         never reaches the real `gh_graphql` since the mock above replaces it wholesale, so the
         two patches govern disjoint call sites and neither can shadow the other. A case
         exercising the auto-request itself re-patches `gh_graphql` after calling this.
+
+        `origin_owner` is patched to this suite's own "o" too, since `wait` now runs the same
+        in-scope check `comment` and `reply` already did, and this suite's cases run against a
+        real checkout whose actual origin has nothing to do with the "o/r" they exercise.
         """
         queue = list(responses)
 
@@ -330,6 +334,7 @@ class GqlCase(unittest.TestCase):
             return queue.pop(0) if len(queue) > 1 else queue[0]
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -4237,6 +4242,26 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
             }
             with mock.patch.dict(os.environ, env):
                 self.assertEqual("acme", pr_review.origin_owner())
+
+
+class TestWaitStaysInScope(unittest.TestCase):
+    """#1562: `wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
+
+    def test_a_cross_owner_target_is_refused_before_the_wait_reads_or_writes_anything(self) -> None:
+        """Both transports raise on any call, so a reverted check fails fast rather than
+        falling into the real, minutes-long backoff loop with a mocked GraphQL response."""
+        out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="acme"))
+        boom = AssertionError("no network call should be reached for an out-of-scope target")
+        with (
+            mock.patch.object(pr_review, "gql", side_effect=boom) as gql,
+            mock.patch.object(pr_review, "gh_graphql", side_effect=boom) as gh_graphql,
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "someone-else/r"])
+        self.assertEqual(64, code)
+        self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
+        gql.assert_not_called()
+        gh_graphql.assert_not_called()
 
 
 class TestHarness(unittest.TestCase):
