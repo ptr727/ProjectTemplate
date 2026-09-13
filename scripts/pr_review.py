@@ -1998,8 +1998,10 @@ def origin_owner() -> str | None:
     reached from a hub checkout while the repository being answered is named on the command line,
     so the working directory says nothing about who owns either.
     """
-    # An inherited GIT_DIR overrides the `-C` argument for repository discovery, so the probe must not inherit one.
+    # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument for repository discovery, so the probe must not inherit either one.
     # Stripped rather than the environment being cleared wholesale, since git still needs PATH to be found at all and HOME to read the config this very call reads.
+    # `git remote get-url` applies `insteadOf` rewriting, so an injected rewrite can make it name an owner this checkout does not have.
+    # `--local` reads this repository's own config file directly, which is the question actually being asked: which owner does the checkout this script sits in belong to.
     env = {
         k: v
         for k, v in os.environ.items()
@@ -2007,7 +2009,7 @@ def origin_owner() -> str | None:
     }
     try:
         url = subprocess.run(
-            ["git", "-C", str(HERE), "remote", "get-url", "origin"],
+            ["git", "-C", str(HERE), "config", "--local", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
             encoding="utf-8",

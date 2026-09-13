@@ -4275,6 +4275,72 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
             with mock.patch.dict(os.environ, env):
                 self.assertEqual("acme", pr_review.origin_owner())
 
+    def test_an_instead_of_rewrite_injected_via_git_config_count_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """`insteadOf` rewriting is the vector `git remote get-url` applies and `--local` does not.
+
+        The injected config rewrites this checkout's real `acme` origin to read as
+        `unrelated-owner`. `--local` reads the repository's own config file directly rather than
+        asking git to resolve and rewrite the URL, so the probe still answers for the real owner.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "url.https://github.com/unrelated-owner/.insteadof",
+                "GIT_CONFIG_VALUE_0": "https://github.com/acme/",
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_the_same_instead_of_rewrite_delivered_via_a_git_config_global_file_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """Same rewrite as above, delivered through `GIT_CONFIG_GLOBAL` instead of the count/key/value form.
+
+        `--local` reads only this repository's own config file, so a rewrite sitting in a global
+        config file the environment points at is never consulted and the probe still answers for
+        the real owner.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            global_config = tmp_path / "injected-global-gitconfig"
+            global_config.write_text(
+                '[url "https://github.com/unrelated-owner/"]\n'
+                "\tinsteadOf = https://github.com/acme/\n",
+                encoding="utf-8",
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_a_direct_remote_origin_url_override_injected_via_git_config_count_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """A `remote.origin.url` override injected the same count/key/value way as the rewrite above.
+
+        This one is not a regression guard for the reverted `git remote get-url origin` command:
+        that command ignores this particular override and already answered `acme` before this
+        change. What `--local` guards against here is a plain `git config --get` with no
+        `--local`, which does read this override and answers wrong; `--local` restricts the read
+        to this repository's own config file, so the injected override is never applied.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "remote.origin.url",
+                "GIT_CONFIG_VALUE_0": "https://github.com/unrelated-owner/other-repo.git",
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
+
 
 class TestWaitStaysInScope(unittest.TestCase):
     """#1562: `wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
