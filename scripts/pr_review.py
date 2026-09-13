@@ -148,6 +148,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1995,6 +1996,14 @@ def origin_owner() -> str | None:
     reached from a hub checkout while the repository being answered is named on the command line,
     so the working directory says nothing about who owns either.
     """
+    # Git honors GIT_DIR over `-C` for repository discovery.
+    # An inherited one (a hook, a `git bisect run`, a `git rebase --exec`) would make this answer for a different repository than the one this script sits in.
+    # Stripped rather than the environment being cleared wholesale, since a wider clearing would drop credentials or proxy settings `gh`/`git` still need.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+    }
     try:
         url = subprocess.run(
             ["git", "-C", str(HERE), "remote", "get-url", "origin"],
@@ -2003,6 +2012,7 @@ def origin_owner() -> str | None:
             encoding="utf-8",
             timeout=5,
             check=False,
+            env=env,
         ).stdout.strip()
     # A missing git, a timeout, or any other failure all mean the owner cannot be read.
     except Exception:  # noqa: BLE001

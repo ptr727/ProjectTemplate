@@ -14,9 +14,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -4183,6 +4185,58 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn(str(self.ANCHOR), why)
         self.assertNotIn("this checkout", why)
+
+
+class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
+    """#1561: an inherited GIT_DIR must not redirect the probe to a different repository."""
+
+    def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
+        repo = parent / name
+        repo.mkdir()
+        subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "remote",
+                "add",
+                "origin",
+                f"https://github.com/{owner_slash_repo}.git",
+            ],
+            check=True,
+        )
+        return repo
+
+    def test_a_git_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
+        """A git hook, `git bisect run`, and `git rebase --exec` all export GIT_DIR.
+
+        Git honours it over `-C` for repository discovery, so an inherited one that names a
+        different repository must not make this probe answer for that repository instead.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_the_other_inherited_discovery_variables_are_stripped_too(self) -> None:
+        """GIT_WORK_TREE, GIT_COMMON_DIR, and GIT_OBJECT_DIRECTORY are the same hazard."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_DIR": str(other / ".git"),
+                "GIT_WORK_TREE": str(other),
+                "GIT_COMMON_DIR": str(other / ".git"),
+                "GIT_OBJECT_DIRECTORY": str(other / ".git" / "objects"),
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
 
 
 class TestHarness(unittest.TestCase):
