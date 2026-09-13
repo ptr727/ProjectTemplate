@@ -3523,6 +3523,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         "utf8 and quote": 'Sh\u014dko"x.md',
         "latin1 and quote": 'na\u00efve"y.md',
         "ascii": "plain.md",
+        "space": "with space.md",
+        "utf8 and space": "Sh\u014dko two.md",
     }
 
     def repo(self, quote_path: str, **config: str) -> Path:

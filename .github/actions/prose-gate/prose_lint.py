@@ -197,7 +197,15 @@ def diff_header_path(field: str) -> str | None:
 
     A header naming no `b/` path adds nothing to scope, which is how a deletion's `/dev/null`
     leaves the caller with no file to credit the hunk that follows it.
+
+    Git appends a literal tab to mark where a path holding a space ends, quoted or not, and
+    escapes a literal tab inside the name itself as `\\t` rather than ever emitting it raw. A
+    trailing tab in the field is therefore always that terminator, stripped before the quoting
+    check runs so a spaced name reaches this decode the same as one with no space in it.
     """
+    tab = field.find("\t")
+    if tab != -1:
+        field = field[:tab]
     if field.startswith('"') and field.endswith('"') and len(field) > 1:
         # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
         unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
