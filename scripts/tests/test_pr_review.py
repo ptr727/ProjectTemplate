@@ -11,6 +11,7 @@ Run as `python3 scripts/tests/test_pr_review.py`, or under `python3 -m unittest 
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
@@ -4195,9 +4196,11 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
 class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     """#1561: an inherited environment must not redirect the probe, by either mechanism.
 
-    A `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_OBJECT_DIRECTORY` name overrides repository
-    discovery, and a `GIT_CONFIG*` name injects config into the call, so both halves are covered
-    here rather than only the discovery names the class was previously named for.
+    `GIT_DIR` and `GIT_COMMON_DIR` each override repository discovery on their own. `GIT_WORK_TREE`
+    and `GIT_OBJECT_DIRECTORY` are stripped as part of the same discovery set but demonstrate no
+    redirect of their own here, and `GIT_OBJECT_DIRECTORY` overrides the object store rather than
+    discovery. A `GIT_CONFIG*` name injects config into the call instead, so both mechanisms are
+    covered here.
     """
 
     # The same four discovery names origin_owner() strips, kept local rather than imported from production.
@@ -4350,9 +4353,9 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     def test_two_origin_urls_resolve_to_the_first_one(self) -> None:
         """`remote.origin.url` may carry more than one value; `remote get-url` returns the first.
 
-        `git config --get` instead returns the last, which is the inversion this round exists to
-        close: with two urls, that command answers a different owner than the one a write should
-        stay within. Both commands are run against the same repository here so the difference is
+        `git config --get` instead returns the last: with two urls, that command names a
+        different owner than the one a write should stay within, the opposite of what this probe
+        needs. Both commands are run against the same repository here so the difference is
         the proof, rather than reverting and restoring the production probe.
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -4388,11 +4391,11 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     def test_an_origin_url_delivered_via_include_path_still_resolves(self) -> None:
         """A checkout whose `remote.origin.url` arrives through `include.path` rather than a literal value.
 
-        `git config --local` does not follow `include.path`/`includeIf`, so under that command
-        this state read as no owner and every write refused. `remote get-url` does follow
-        includes, so the probe still resolves the real owner. Both commands are run against the
-        same repository here so the difference is the proof, rather than reverting and restoring
-        the production probe.
+        `git config --local` does not follow `include.path`/`includeIf`, so a probe built on that
+        command instead would read no owner here and refuse every write. `remote get-url` does
+        follow includes, so the probe in this script still resolves the real owner. Both commands
+        are run against the same repository here so the difference is the proof, rather than
+        reverting and restoring the production probe.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4455,7 +4458,8 @@ class TestWaitStaysInScope(unittest.TestCase):
         gh_graphql.assert_not_called()
 
 
-# Update this table when a fourth write subcommand joins the parser's own `cmd` choices.
+# `wait` was already in the parser's `cmd` choices when it became a write, by acquiring a `requestReviews` mutation, with no subcommand added.
+# Update this table whenever a command's write status changes, not only when a new one is added.
 WRITE_COMMANDS: dict[str, list[str]] = {
     "comment": ["comment", "7", "--repo", "someone-else/r", "--body", "Fixed."],
     "reply": [
@@ -4470,6 +4474,10 @@ WRITE_COMMANDS: dict[str, list[str]] = {
     ],
     "wait": ["wait", "7", "--repo", "someone-else/r"],
 }
+
+# The parser's remaining `cmd` choices, none of which write.
+# The partition test below checks that this set and WRITE_COMMANDS together match the parser's choices.
+READ_ONLY_COMMANDS = ["claims", "status"]
 
 
 class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
@@ -4499,6 +4507,34 @@ class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
                 self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
                 gql.assert_not_called()
                 gh_graphql.assert_not_called()
+
+
+class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
+    """WRITE_COMMANDS and READ_ONLY_COMMANDS must together account for every parser choice.
+
+    `wait` became a write without a subcommand being added, so nothing prompted the table to be
+    checked. This ties the two hand-maintained sets to the parser's own `cmd` choices instead of
+    trusting them to stay in step: a subcommand added to the parser and left out of both sets
+    fails this test until someone classifies it as a write or a read.
+    """
+
+    def test_write_and_read_only_commands_together_equal_the_parsers_cmd_choices(self) -> None:
+        original_add_argument = argparse.ArgumentParser.add_argument
+        captured_choices = []
+
+        def capture(self, *args, **kwargs):
+            action = original_add_argument(self, *args, **kwargs)
+            if args and args[0] == "cmd":
+                captured_choices.append(action.choices)
+            return action
+
+        with (
+            mock.patch.object(argparse.ArgumentParser, "add_argument", capture),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            pr_review.main([])
+        self.assertEqual(set(captured_choices[0]), set(WRITE_COMMANDS) | set(READ_ONLY_COMMANDS))
 
 
 class TestHarness(unittest.TestCase):

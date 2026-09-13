@@ -2000,6 +2000,8 @@ def origin_owner() -> str | None:
     """
     # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument and points the probe at another repository's config.
     # An inherited GIT_CONFIG* channel injects config into this call, and `remote get-url` applies `insteadOf` rewriting, so an injected rewrite would make it name an owner this checkout does not have.
+    # This strip closes the channels an inherited tooling environment sets: the four discovery names it drops, and any name starting with GIT_CONFIG that injects config into this one call.
+    # It does not close, and cannot close, an inherited HOME, XDG_CONFIG_HOME, or PATH, because a caller who controls any of those already controls the process that would perform the write, leaving nothing here for this check to defend.
     # The environment is stripped rather than cleared, since git still needs PATH to be found at all, and HOME so the checkout's own global config and `safe.directory` still apply.
     env = {
         k: v
