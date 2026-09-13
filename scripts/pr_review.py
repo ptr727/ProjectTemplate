@@ -1998,8 +1998,7 @@ def origin_owner() -> str | None:
     reached from a hub checkout while the repository being answered is named on the command line,
     so the working directory says nothing about who owns either.
     """
-    # Git honors GIT_DIR over `-C` for repository discovery.
-    # An inherited one (a hook, a `git bisect run`, a `git rebase --exec`) would make this answer for a different repository than the one this script sits in.
+    # An inherited GIT_DIR overrides the `-C` argument for repository discovery, so the probe must not inherit one.
     # Stripped rather than the environment being cleared wholesale, since git still needs PATH to be found at all and HOME to read the config this very call reads.
     env = {
         k: v

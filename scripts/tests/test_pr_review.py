@@ -4195,10 +4195,20 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
 class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
     """#1561: an inherited GIT_DIR must not redirect the probe to a different repository."""
 
+    # The same four names origin_owner() strips, kept local rather than imported from production.
+    _DISCOVERY_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+
     def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
+        """Build one throwaway repo under `parent`, immune to the caller's own git environment.
+
+        `git init` and `git remote add` both honor an inherited GIT_DIR the same way the probe
+        does, so without this strip an ambient one sends `git remote add` writing into whatever
+        repository that variable names instead of the throwaway repo this helper just created.
+        """
+        env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
         repo = parent / name
         repo.mkdir()
-        subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+        subprocess.run(["git", "init", "--quiet", str(repo)], check=True, env=env)
         subprocess.run(
             [
                 "git",
@@ -4210,14 +4220,15 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
                 f"https://github.com/{owner_slash_repo}.git",
             ],
             check=True,
+            env=env,
         )
         return repo
 
     def test_a_git_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
-        """A git hook, `git bisect run`, and `git rebase --exec` all export GIT_DIR.
+        """An inherited GIT_DIR overrides `-C` for repository discovery.
 
-        Git honours it over `-C` for repository discovery, so an inherited one that names a
-        different repository must not make this probe answer for that repository instead.
+        So an inherited one that names a different repository must not make this probe answer
+        for that repository instead.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4227,12 +4238,27 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
             with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
                 self.assertEqual("acme", pr_review.origin_owner())
 
+    def test_a_git_common_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
+        """An inherited GIT_COMMON_DIR redirects the probe on its own, the same way GIT_DIR does.
+
+        Config is read from the common dir, so this one needs no other inherited name alongside
+        it to make the probe answer for the wrong repository.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_COMMON_DIR": str(other / ".git")}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
     def test_the_whole_inherited_discovery_set_does_not_redirect_the_probe(self) -> None:
         """The four names are stripped as a set, and this pins the set rather than each one.
 
-        Only GIT_DIR is shown above to redirect `remote get-url` away from a `-C` argument, so
-        a case per name would assert a redirection the other three are not demonstrated to
-        produce. What this holds is that all four inherited at once still leave the probe
+        GIT_DIR and GIT_COMMON_DIR each redirect `remote get-url` away from a `-C` argument on
+        their own, and each has its own case above. GIT_WORK_TREE and GIT_OBJECT_DIRECTORY are
+        stripped as part of the same discovery set without a demonstrated redirect for this
+        call. What this holds is that all four inherited at once still leave the probe
         answering for the directory the script sits in.
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -4268,6 +4294,52 @@ class TestWaitStaysInScope(unittest.TestCase):
         self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
         gql.assert_not_called()
         gh_graphql.assert_not_called()
+
+
+# Update this table when a fourth write subcommand joins the parser's own `cmd` choices.
+WRITE_COMMANDS: dict[str, list[str]] = {
+    "comment": ["comment", "7", "--repo", "someone-else/r", "--body", "Fixed."],
+    "reply": [
+        "reply",
+        "7",
+        "--repo",
+        "someone-else/r",
+        "--match",
+        "retry count",
+        "--body",
+        "Fixed.",
+    ],
+    "wait": ["wait", "7", "--repo", "someone-else/r"],
+}
+
+
+class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
+    """`requestReviews` once sat outside `in_scope` for its whole life with a green suite.
+
+    The whole-source check in TestContract counts which mutation documents exist, which held
+    that regression invisible since a document can exist and still be reachable without the
+    owner check running first. This pins the command-level invariant instead: every write
+    subcommand refuses a cross-owner target before either transport is touched. It does not
+    pin the static property TestContract's count implied, that every mutation document in the
+    source sits behind `in_scope`; a write reachable by some path this table does not drive
+    would still slip past it.
+    """
+
+    def test_each_write_command_refuses_before_reaching_either_transport(self) -> None:
+        for cmd, argv in WRITE_COMMANDS.items():
+            with self.subTest(cmd=cmd):
+                boom = AssertionError(f"{cmd}: no network call should be reached out of scope")
+                with (
+                    contextlib.redirect_stdout(io.StringIO()) as out,
+                    mock.patch.object(pr_review, "origin_owner", return_value="acme"),
+                    mock.patch.object(pr_review, "gql", side_effect=boom) as gql,
+                    mock.patch.object(pr_review, "gh_graphql", side_effect=boom) as gh_graphql,
+                ):
+                    code = pr_review.main(argv)
+                self.assertEqual(64, code)
+                self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
+                gql.assert_not_called()
+                gh_graphql.assert_not_called()
 
 
 class TestHarness(unittest.TestCase):
