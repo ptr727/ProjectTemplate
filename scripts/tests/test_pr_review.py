@@ -4179,7 +4179,7 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
         self.assertIn(str(self.ANCHOR), why)
         self.assertIn("hub checkout", why)
         self.assertIn("instead of this one", why)
-        self.assertIn("git config --local --get remote.origin.url", why)
+        self.assertIn("git remote get-url origin", why)
         self.assertNotIn("this checkout", why)
 
     def test_a_cross_owner_refusal_names_that_directory_too(self) -> None:
@@ -4192,10 +4192,15 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
         self.assertNotIn("this checkout", why)
 
 
-class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
-    """#1561: an inherited GIT_DIR must not redirect the probe to a different repository."""
+class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
+    """#1561: an inherited environment must not redirect the probe, by either mechanism.
 
-    # The same four names origin_owner() strips, kept local rather than imported from production.
+    A `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_OBJECT_DIRECTORY` name overrides repository
+    discovery, and a `GIT_CONFIG*` name injects config into the call, so both halves are covered
+    here rather than only the discovery names the class was previously named for.
+    """
+
+    # The same four discovery names origin_owner() strips, kept local rather than imported from production.
     _DISCOVERY_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 
     def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
@@ -4253,13 +4258,12 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
                 self.assertEqual("acme", pr_review.origin_owner())
 
     def test_the_whole_inherited_discovery_set_does_not_redirect_the_probe(self) -> None:
-        """The four names are stripped as a set, and this pins the set rather than each one.
+        """GIT_DIR and GIT_COMMON_DIR each redirect the probe on their own, and each has its own case above.
 
-        GIT_DIR and GIT_COMMON_DIR each redirect the probe away from a `-C` argument on
-        their own, and each has its own case above. GIT_WORK_TREE and GIT_OBJECT_DIRECTORY are
-        stripped as part of the same discovery set without a demonstrated redirect for this
-        call. What this holds is that all four inherited at once still leave the probe
-        answering for the directory the script sits in.
+        GIT_WORK_TREE and GIT_OBJECT_DIRECTORY are stripped as part of the same documented
+        discovery set, with no redirect of their own demonstrated for this call. What this holds
+        is that all four inherited at once still leave the probe answering for the directory the
+        script sits in.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4278,11 +4282,12 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
     def test_an_instead_of_rewrite_injected_via_git_config_count_does_not_redirect_the_probe(
         self,
     ) -> None:
-        """`insteadOf` rewriting is the vector `git remote get-url` applies and `--local` does not.
+        """`remote get-url` applies `insteadOf` rewriting, so an unstripped injection here would rewrite the answer.
 
         The injected config rewrites this checkout's real `acme` origin to read as
-        `unrelated-owner`. `--local` reads the repository's own config file directly rather than
-        asking git to resolve and rewrite the URL, so the probe still answers for the real owner.
+        `unrelated-owner`. The `GIT_CONFIG` prefix strip removes `GIT_CONFIG_COUNT`,
+        `GIT_CONFIG_KEY_0`, and `GIT_CONFIG_VALUE_0` before the call runs, so the real config
+        governs and the probe still answers for the real owner.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4301,9 +4306,10 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
     ) -> None:
         """Same rewrite as above, delivered through `GIT_CONFIG_GLOBAL` instead of the count/key/value form.
 
-        `--local` reads only this repository's own config file, so a rewrite sitting in a global
-        config file the environment points at is never consulted and the probe still answers for
-        the real owner.
+        `remote get-url` merges the global config into what it resolves, so an unstripped
+        `GIT_CONFIG_GLOBAL` pointing at a file carrying this rewrite would still rewrite the
+        answer. `GIT_CONFIG_GLOBAL` matches the same `GIT_CONFIG` prefix, so it is stripped
+        before the call runs and the probe still answers for the real owner.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4323,11 +4329,11 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
     ) -> None:
         """A `remote.origin.url` override injected the same count/key/value way as the rewrite above.
 
-        This one is not a regression guard for the reverted `git remote get-url origin` command:
-        that command ignores this particular override and already answered `acme` before this
-        change. What `--local` guards against here is a plain `git config --get` with no
-        `--local`, which does read this override and answers wrong; `--local` restricts the read
-        to this repository's own config file, so the injected override is never applied.
+        Not a regression guard for the current probe: measured directly, `git remote get-url`
+        ignores a config-injected `remote.origin.url` value regardless of whether the
+        `GIT_CONFIG` prefix is stripped, so this case passes with or without that strip. It stays
+        in place for a future change that switches the probe to a command that does honor this
+        vector, such as `git config --get remote.origin.url`, which the strip does guard against.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -4340,6 +4346,93 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
             }
             with mock.patch.dict(os.environ, env):
                 self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_two_origin_urls_resolve_to_the_first_one(self) -> None:
+        """`remote.origin.url` may carry more than one value; `remote get-url` returns the first.
+
+        `git config --get` instead returns the last, which is the inversion this round exists to
+        close: with two urls, that command answers a different owner than the one a write should
+        stay within. Both commands are run against the same repository here so the difference is
+        the proof, rather than reverting and restoring the production probe.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(anchor),
+                    "config",
+                    "--local",
+                    "--add",
+                    "remote.origin.url",
+                    "https://github.com/second-owner/anchor-repo.git",
+                ],
+                check=True,
+                env=env,
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            self.assertEqual("acme", pr_review.origin_owner())
+            reverted = subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                env=env,
+            ).stdout.strip()
+            self.assertIn("second-owner", reverted)
+
+    def test_an_origin_url_delivered_via_include_path_still_resolves(self) -> None:
+        """A checkout whose `remote.origin.url` arrives through `include.path` rather than a literal value.
+
+        `git config --local` does not follow `include.path`/`includeIf`, so under that command
+        this state read as no owner and every write refused. `remote get-url` does follow
+        includes, so the probe still resolves the real owner. Both commands are run against the
+        same repository here so the difference is the proof, rather than reverting and restoring
+        the production probe.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
+            subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--unset", "remote.origin.url"],
+                check=True,
+                env=env,
+            )
+            included = tmp_path / "origin-include.gitconfig"
+            included.write_text(
+                '[remote "origin"]\n\turl = https://github.com/acme/anchor-repo.git\n',
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(anchor),
+                    "config",
+                    "--local",
+                    "--add",
+                    "include.path",
+                    str(included),
+                ],
+                check=True,
+                env=env,
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            self.assertEqual("acme", pr_review.origin_owner())
+            reverted = subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                env=env,
+            )
+            self.assertEqual(1, reverted.returncode)
 
 
 class TestWaitStaysInScope(unittest.TestCase):

@@ -1992,24 +1992,24 @@ def digest(
 
 
 def origin_owner() -> str | None:
-    """The owner `git config --local --get remote.origin.url` yields against this script's own directory, or None.
+    """The owner `git remote get-url origin` yields against this script's own directory, or None.
 
     Anchored on the script's own directory rather than the working directory, because this is
     reached from a hub checkout while the repository being answered is named on the command line,
     so the working directory says nothing about who owns either.
     """
-    # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument for repository discovery, so the probe must not inherit either one.
-    # Stripped rather than the environment being cleared wholesale, since git still needs PATH to be found at all and HOME to read the config this very call reads.
-    # `git remote get-url` applies `insteadOf` rewriting, so an injected rewrite can make it name an owner this checkout does not have.
-    # `--local` reads this repository's own config file directly, which is the question actually being asked: which owner does the checkout this script sits in belong to.
+    # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument and points the probe at another repository's config.
+    # An inherited GIT_CONFIG* channel injects config into this call, and `remote get-url` applies `insteadOf` rewriting, so an injected rewrite would make it name an owner this checkout does not have.
+    # The environment is stripped rather than cleared, since git still needs PATH to be found at all, and HOME so the checkout's own global config and `safe.directory` still apply.
     env = {
         k: v
         for k, v in os.environ.items()
         if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+        and not k.startswith("GIT_CONFIG")
     }
     try:
         url = subprocess.run(
-            ["git", "-C", str(HERE), "config", "--local", "--get", "remote.origin.url"],
+            ["git", "-C", str(HERE), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -2038,7 +2038,7 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
     origin = origin_owner()
     if origin is None:
         return False, (
-            "this script got no owner from `git config --local --get remote.origin.url` against the directory "
+            "this script got no owner from `git remote get-url origin` against the directory "
             f"it sits in, {HERE}, so the owner a write would stay within cannot be "
             "established, and an unverified scope is not a scope. That directory is this "
             "script's own rather than the working directory, so a readable `origin` in the "
@@ -2048,7 +2048,7 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
         )
     if target_owner.lower() != origin:
         return False, (
-            f"the target is under {target_owner}, and `git config --local --get remote.origin.url`, run against "
+            f"the target is under {target_owner}, and `git remote get-url origin`, run against "
             f"the directory this script sits in, {HERE}, named {origin}. A different owner is "
             "the shape this refuses outright: take it through the runbook mutations, where the "
             "write-guard hook reads the maintainer grant"
@@ -2511,7 +2511,7 @@ def main(argv: list[str] | None = None) -> int:
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
 
     # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
-    # Ahead of the first read rather than at the request itself, since a wait that may not request has nothing left to poll for.
+    # The policy is that a cross-owner target is not touched at all, so the refusal precedes the reading half too.
     ok, why = in_scope(owner)
     if not ok:
         print(f"status=OUT_OF_SCOPE nothing was written: {why}")
