@@ -4179,7 +4179,7 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
         self.assertIn(str(self.ANCHOR), why)
         self.assertIn("hub checkout", why)
         self.assertIn("instead of this one", why)
-        self.assertIn("git remote get-url origin", why)
+        self.assertIn("git config --local --get remote.origin.url", why)
         self.assertNotIn("this checkout", why)
 
     def test_a_cross_owner_refusal_names_that_directory_too(self) -> None:
@@ -4255,7 +4255,7 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
     def test_the_whole_inherited_discovery_set_does_not_redirect_the_probe(self) -> None:
         """The four names are stripped as a set, and this pins the set rather than each one.
 
-        GIT_DIR and GIT_COMMON_DIR each redirect `remote get-url` away from a `-C` argument on
+        GIT_DIR and GIT_COMMON_DIR each redirect the probe away from a `-C` argument on
         their own, and each has its own case above. GIT_WORK_TREE and GIT_OBJECT_DIRECTORY are
         stripped as part of the same discovery set without a demonstrated redirect for this
         call. What this holds is that all four inherited at once still leave the probe

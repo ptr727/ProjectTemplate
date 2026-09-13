@@ -1992,7 +1992,7 @@ def digest(
 
 
 def origin_owner() -> str | None:
-    """The owner `git remote get-url origin` yields against this script's own directory, or None.
+    """The owner `git config --local --get remote.origin.url` yields against this script's own directory, or None.
 
     Anchored on the script's own directory rather than the working directory, because this is
     reached from a hub checkout while the repository being answered is named on the command line,
@@ -2038,7 +2038,7 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
     origin = origin_owner()
     if origin is None:
         return False, (
-            "this script got no owner from `git remote get-url origin` against the directory "
+            "this script got no owner from `git config --local --get remote.origin.url` against the directory "
             f"it sits in, {HERE}, so the owner a write would stay within cannot be "
             "established, and an unverified scope is not a scope. That directory is this "
             "script's own rather than the working directory, so a readable `origin` in the "
@@ -2048,7 +2048,7 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
         )
     if target_owner.lower() != origin:
         return False, (
-            f"the target is under {target_owner}, and `git remote get-url origin`, run against "
+            f"the target is under {target_owner}, and `git config --local --get remote.origin.url`, run against "
             f"the directory this script sits in, {HERE}, named {origin}. A different owner is "
             "the shape this refuses outright: take it through the runbook mutations, where the "
             "write-guard hook reads the maintainer grant"
