@@ -3499,6 +3499,56 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
         self.assertNotIn("UnicodeEncodeError", done.stderr)
 
 
+class TestDiffScopeReachesAQuotedName(unittest.TestCase):
+    """A name git quotes in a diff header must still land in scope.
+
+    `core.quotePath` defaults on and quotes every byte at or above 0x80, so the header of an
+    ordinary non-ASCII filename never matched the `+++ b/` parse and the file left scope. An
+    empty scope is falsy, so `main`'s no-match refusal did not fire either, and the run reported
+    a clean gate on a file it never read. That is the production path, since the action always
+    passes `--diff`.
+    """
+
+    BAIT = "It has a dupword dupword here.\n"
+
+    def repo(self) -> Path:
+        """A committed-into temp repository, configured so no host identity or signing applies."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for key, value in (
+            ("commit.gpgsign", "false"),
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+        ):
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+        return root
+
+    def test_each_name_git_quotes_still_maps_its_added_line(self) -> None:
+        """The three quoting routes, and a deletion, whose header names no file to scope."""
+        names = {
+            "utf8": "Sh\u014dko.md",
+            "backslash": "back\\slash.md",
+            "quote": 'quo"te.md',
+            "ascii": "plain.md",
+        }
+        root = self.repo()
+        for name in [*names.values(), "gone.md"]:
+            (root / name).write_text("Title.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        for name in names.values():
+            (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
+        (root / "gone.md").unlink()
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        for label, name in names.items():
+            with self.subTest(label):
+                self.assertIn(2, got.get(name, set()))
+        # A deletion's header is `/dev/null`, which names no file to put in scope.
+        self.assertNotIn("gone.md", got)
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
