@@ -278,6 +278,7 @@ def canonical_blob_sha(path):
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="surrogateescape",
         check=False,
     )
     if result.returncode != 0:
@@ -1960,6 +1961,7 @@ def _git_revisions(rel_path, rev=None):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
         if t.returncode != 0:

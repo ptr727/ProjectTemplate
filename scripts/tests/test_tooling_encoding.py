@@ -75,6 +75,9 @@ def scanned_python_files() -> list[Path]:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # A name git emits raw under -z need not be UTF-8.
+            # A scan claiming to be exhaustive cannot end on the one file whose name it missed.
+            errors="surrogateescape",
             check=True,
         ).stdout
         names.update(name for name in listed.split("\0") if name)

@@ -781,6 +781,8 @@ def _is_primary_checkout(target_dir, git_dir=None):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # These two lines are paths, and a strict decode of one that is not UTF-8 raises into the handler below, which reads it as unresolvable, and unresolvable is the fail-open branch.
+            errors="surrogateescape",
             timeout=5,
             check=False,
         )
@@ -3361,8 +3363,35 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
+    # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
+    got = _is_primary_checkout_selftest()
+    mark = "ok  " if got is True else "FAIL"
+    if got is not True:
+        ok = False
+    print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
+
+
+def _is_primary_checkout_selftest():
+    """Resolve a real primary checkout whose directory name is not valid UTF-8.
+
+    None where the platform will not take such a name, which is not a failure: Windows rejects
+    it outright, so the case reports as skipped rather than pretending to have run.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.join(tmp, os.fsdecode(b"checkout_\xe9"))
+        try:
+            os.mkdir(target)
+        except (OSError, UnicodeError):
+            return True
+        r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+        if r.returncode != 0:
+            return True
+        return _is_primary_checkout(target)
 
 
 # --- Hook entrypoint (PreToolUse) --------------------------------------------------------------------

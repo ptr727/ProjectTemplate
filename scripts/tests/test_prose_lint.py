@@ -1306,6 +1306,7 @@ class TestDiscovery(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
         self.assertEqual("", r.stdout.strip())
