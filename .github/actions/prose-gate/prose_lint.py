@@ -200,8 +200,9 @@ def diff_header_path(field: str) -> str | None:
 
     Git appends a literal tab to mark where a path holding a space ends, quoted or not, and
     escapes a literal tab inside the name itself as `\\t` rather than ever emitting it raw. A
-    trailing tab in the field is therefore always that terminator, stripped before the quoting
-    check runs so a spaced name reaches this decode the same as one with no space in it.
+    tab in the field is therefore always that terminator, so the field is truncated at its first
+    tab before the quoting check runs, letting a spaced name reach this decode the same as one
+    with no space in it.
     """
     tab = field.find("\t")
     if tab != -1:
@@ -241,11 +242,17 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "--unified=0",
                 "--no-color",
                 "--ignore-cr-at-eol",
-                # Pins the prefixes so diff.noprefix, diff.mnemonicPrefix, and diff.dstPrefix cannot rename or empty the `b/` this parse keys on.
+                # `--src-prefix=a/` pins diff.srcPrefix, matching the dst side below for symmetry.
+                # The src side has no parse consequence of its own, since this loop only reads `+++` headers.
                 "--src-prefix=a/",
+                # Pins diff.dstPrefix, and outruns diff.noprefix and diff.mnemonicPrefix, so `+++` keeps naming a `b/` this parse keys on.
                 "--dst-prefix=b/",
                 # Bypasses diff.external, which would otherwise replace the parsed body with an arbitrary command's output.
                 "--no-ext-diff",
+                # Disables textconv, on by default for a porcelain diff, whose driver can shift every line number this parse reads.
+                "--no-textconv",
+                # Forces text handling so a file an attribute marks non-diffable still emits the `+++` header this parse needs.
+                "--text",
                 base,
                 "--",
             ],

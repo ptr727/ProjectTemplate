@@ -17,6 +17,7 @@ import json
 import locale
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -3509,6 +3510,11 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     empty scope is falsy, so `main`'s no-match refusal did not fire either, and the run reported
     a clean gate on a file it never read. That is the production path, since the action always
     passes `--diff`.
+
+    This class is POSIX-only in general, not only for the one test carrying an explicit skip:
+    `NAMES` already holds three names containing `"`, and Windows reserves that character from a
+    filename, so no case in this class can run there. The explicit `skipUnless` below is needed
+    on top of that because its own name adds a tab, a second and distinct reserved character.
     """
 
     BAIT = "It has a dupword dupword here.\n"
@@ -3532,10 +3538,7 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
 
         `core.quotePath` is set rather than left inherited, since it decides which names reach
         the decoder at all and a host turning it off would silently retire the headline case.
-        `diff.noprefix`, `diff.mnemonicPrefix`, and `diff.dstPrefix` are pinned off the same way,
-        since each is an ordinary developer setting that would otherwise empty or rename the
-        `b/` prefix `changed_lines` keys its output on. `config` overrides one of these for a
-        case that means to prove the invocation survives the setting rather than avoid it.
+        `config` overrides a setting for a case that means to prove the invocation survives it.
         """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -3544,9 +3547,6 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
             "user.name": "Test",
             "user.email": "test@example.invalid",
             "core.quotePath": quote_path,
-            "diff.noprefix": "false",
-            "diff.mnemonicPrefix": "false",
-            "diff.dstPrefix": "b/",
             **config,
         }
         for key, value in settings.items():
@@ -3595,7 +3595,7 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
             with self.subTest(f"core.quotePath={quote_path}"):
                 self.assertIn(2, got.get(name, set()))
 
-    # Each value is a setting that would empty scope on its own without the pinned invocation.
+    # Each key is a setting, and each value a hostile setting for it, that takes the file out of scope one way or another when the invocation below does not pin against it.
     HOST_DIFF_SETTINGS: ClassVar[dict[str, str]] = {
         "diff.noprefix": "true",
         "diff.mnemonicPrefix": "true",
@@ -3616,6 +3616,62 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
             with self.subTest(key):
                 assert got is not None, "git failed, so this case proved nothing about scoping"
                 self.assertIn(2, got.get("plain.md", set()))
+
+    def test_a_textconv_driver_does_not_shift_the_reported_line(self) -> None:
+        """`--no-textconv` must correct the reported line, not merely keep the file in scope.
+
+        A driver that prepends a line renumbers every hunk without touching whether the file is
+        diffed at all, so a case asserting only that the name lands in scope would still pass
+        with the flag removed: what proves the fix is the real line number, `2`, rather than the
+        driver-shifted one the same setup produces without it.
+        """
+        root = self.repo("true")
+        driver = root / "textconv.py"
+        driver.write_text(
+            "import sys\n"
+            "sys.stdout.write('PREPENDED\\n' + open(sys.argv[1], encoding='utf-8').read())\n",
+            encoding="utf-8",
+        )
+        (root / ".gitattributes").write_text("*.md diff=mdconv\n", encoding="utf-8")
+        driver_command = f"{shlex.quote(sys.executable)} {shlex.quote(str(driver))}"
+        subprocess.run(
+            ["git", "-C", str(root), "config", "diff.mdconv.textconv", driver_command], check=True
+        )
+        (root / "doc.md").write_text("Title.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        (root / "doc.md").write_text("Title.\n" + self.BAIT, encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({2}, got.get("doc.md"))
+
+    def test_a_non_diffable_file_still_reaches_scope(self) -> None:
+        """`--text` must hold against `-diff` marked two ways: committed, and a host setting.
+
+        Either route leaves the pair reported as binary and absent from `+++` headers entirely,
+        which takes the file out of scope by a second route `--no-textconv` does not touch.
+        """
+        for source in ("a committed .gitattributes", "a host core.attributesFile"):
+            root = self.repo("true")
+            if source == "a committed .gitattributes":
+                (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
+            else:
+                attrs = Path(self.enterContext(tempfile.TemporaryDirectory())) / "attributes"
+                attrs.write_text("*.md -diff\n", encoding="utf-8")
+                subprocess.run(
+                    ["git", "-C", str(root), "config", "core.attributesFile", str(attrs)],
+                    check=True,
+                )
+            (root / "doc.md").write_text("Title.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            (root / "doc.md").write_text("Title.\n" + self.BAIT, encoding="utf-8")
+
+            got = prose_lint.changed_lines("HEAD", root)
+            with self.subTest(source):
+                assert got is not None, "git failed, so this case proved nothing about scoping"
+                self.assertIn(2, got.get("doc.md", set()))
 
     def test_a_deletion_header_names_no_file(self) -> None:
         """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
