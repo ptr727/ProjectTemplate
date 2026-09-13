@@ -3397,13 +3397,33 @@ def _is_primary_checkout_selftest():
             os.mkdir(target)
         except (OSError, UnicodeError):
             return "skip"
+        # An ambient GIT_DIR points `git init` at that repository rather than at this temp one, and `_is_primary_checkout` then resolves both of its answers to it and reports a pass the decode never reached, leaving a repository behind outside the temp tree.
+        # Cleared around both spawns rather than passed to either, since `_is_primary_checkout` reads the environment it inherits and honoring GIT_DIR is deliberate there.
+        cleared = {}
+        for name in (
+            "GIT_DIR",
+            "GIT_COMMON_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_CEILING_DIRECTORIES",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_NAMESPACE",
+            "GIT_PREFIX",
+        ):
+            if name in os.environ:
+                cleared[name] = os.environ.pop(name)
         try:
-            r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
-        except OSError:
-            return "skip"
-        if r.returncode != 0:
-            return "skip"
-        return _is_primary_checkout(target)
+            try:
+                r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+            except OSError:
+                return "skip"
+            if r.returncode != 0:
+                return "skip"
+            return _is_primary_checkout(target)
+        finally:
+            os.environ.update(cleared)
 
 
 # --- Hook entrypoint (PreToolUse) --------------------------------------------------------------------
