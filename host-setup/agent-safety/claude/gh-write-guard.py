@@ -3368,9 +3368,10 @@ def _selftest():
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
-    # None is the skip, which is neither a pass nor a failure: it says the case could not run here.
-    mark = "ok  " if got is True else ("skip" if got is None else "FAIL")
-    if got is False:
+    # "skip" is the setup failing, which is neither a pass nor a failure, and it is deliberately not None.
+    # None is `_is_primary_checkout` answering unresolvable, which is the defect shape this case exists to catch, so sharing the skip channel with it would report that defect as a skip and pass.
+    mark = "ok  " if got is True else ("skip" if got == "skip" else "FAIL")
+    if got is not True and got != "skip":
         ok = False
     print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
@@ -3380,25 +3381,28 @@ def _selftest():
 def _is_primary_checkout_selftest():
     """Resolve a real primary checkout whose directory name is not valid UTF-8.
 
-    None where the case could not run at all, which is neither a pass nor a failure and is
-    printed as a skip. Windows refuses such a name outright, a sandbox can refuse the directory,
-    and a host can have no git, and reporting any of those as a pass would say the decode was
-    exercised when it never ran.
+    "skip" where the case could not run at all, which is neither a pass nor a failure. Windows
+    refuses such a name outright, a sandbox can refuse the directory, and a host can have no git,
+    and reporting any of those as a pass would say the decode was exercised when it never ran.
+
+    A string rather than None, since None is what `_is_primary_checkout` answers when git did not
+    resolve, which is the defect this case exists to catch and must stay a failure.
     """
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
-        target = os.path.join(tmp, os.fsdecode(b"checkout_\xe9"))
         try:
+            # The decode is inside the guard too, since Windows decodes a filesystem name with surrogatepass, which refuses this byte rather than carrying it the way Linux does.
+            target = os.path.join(tmp, os.fsdecode(b"checkout_\xe9"))
             os.mkdir(target)
         except (OSError, UnicodeError):
-            return None
+            return "skip"
         try:
             r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
         except OSError:
-            return None
+            return "skip"
         if r.returncode != 0:
-            return None
+            return "skip"
         return _is_primary_checkout(target)
 
 
