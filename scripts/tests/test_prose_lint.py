@@ -1726,11 +1726,16 @@ class TestChangedLines(unittest.TestCase):
         # Untracked files are a second source for the same map and are asserted separately.
         # The parse is read here alone rather than through whatever the tree happens to hold.
         # Bytes, matching the real call's capture: a str here would hide a decode-site regression.
-        done = subprocess.CompletedProcess(
-            args=[], returncode=returncode, stdout=stdout.encode("utf-8"), stderr=b""
-        )
+        # `changed_lines` now makes a second, `--numstat`-flagged call this class holds no case for.
+        # That call gets an empty, undiffable-free answer rather than the same patch text, which a numstat parse would misread.
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+            body = b"" if "--numstat" in cmd else stdout.encode("utf-8")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=returncode, stdout=body, stderr=b""
+            )
+
         with (
-            mock.patch.object(prose_lint.subprocess, "run", return_value=done),
+            mock.patch.object(prose_lint.subprocess, "run", side_effect=fake_run),
             mock.patch.object(prose_lint, "untracked_paths", return_value=[]),
         ):
             return prose_lint.changed_lines("origin/develop", Path("."))
@@ -1877,7 +1882,7 @@ class TestChangedLines(unittest.TestCase):
         self.assertEqual({2, 15}, got["real.md"])
 
     @unittest.skipUnless(
-        os.name == "posix", "ru_maxrss is not reported on Windows, and reports bytes on macOS"
+        sys.platform == "linux", "ru_maxrss is reported in kibibytes only on Linux"
     )
     def test_a_large_binary_change_costs_little_time_or_memory(self) -> None:
         """Removing `--text` must show up as a real cost difference, not merely a correct scope.
@@ -3845,10 +3850,11 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                 self.assertEqual({1, 2, 3}, got.get("doc.md"))
 
     def test_a_non_diffable_file_named_with_a_non_ascii_character_is_credited(self) -> None:
-        """The binary-notice line quotes a non-ASCII name the same way a `+++` header does.
+        """A `-diff` path's non-ASCII name reaches scope with no quoting to undo at all.
 
-        `core.quotePath=true` is what the caller pins, so this is the form the parse must
-        actually handle rather than the raw UTF-8 byte a disabled setting would emit instead.
+        `core.quotePath=true` is what the caller pins for the `+++`-header route, which would
+        quote this name, but `git diff --numstat -z` names an undiffable path with no quoting
+        regardless of that setting, so the raw UTF-8 bytes are what this parse actually reads.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
@@ -3861,6 +3867,69 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         got = prose_lint.changed_lines("HEAD", root)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({1, 2}, got.get(name))
+
+    def test_a_non_diffable_name_containing_and_is_credited_in_full(self) -> None:
+        """A `-diff` file whose name holds " and " must not be split on that substring.
+
+        The parse this replaced read git's prose `Binary files a/<path> and b/<path> differ`
+        line, and its capture backtracked to the rightmost " and " in that line. For a name
+        containing that exact substring, the rightmost split falls inside the name rather than
+        between the two paths, leaving the captured half without its `b/` prefix and out of
+        scope. `git diff --numstat -z` never renders that prose line at all, so there is no
+        " and " to split on.
+        """
+        root = self.repo("true")
+        (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
+        name = "alpha and beta.md"
+        (root / name).write_text("Title.\nBody.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        (root / name).write_text("Title changed.\nBody.\n" + self.BAIT, encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1, 2, 3}, got.get(name))
+
+    def test_a_non_diffable_name_needing_quoting_and_holding_and_is_credited(self) -> None:
+        """A name needing both `core.quotePath` quoting and the " and " split must still land.
+
+        The old capture decoded a quoted match before splitting could even be judged correct, so
+        a name combining both problems proved neither fix alone was enough. `-z` needs no decode
+        step, since the name arrives byte for byte, unquoted, regardless of `core.quotePath`.
+        """
+        root = self.repo("true")
+        (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
+        name = "Sh\u014dko and beta.md"
+        (root / name).write_text("Title.\nBody.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        (root / name).write_text("Title changed.\nBody.\n" + self.BAIT, encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1, 2, 3}, got.get(name))
+
+    def test_a_renamed_non_diffable_file_is_credited_at_its_new_path(self) -> None:
+        """A rename record names its old and new path as two bare fields, not one.
+
+        Its own record carries no path at all, an empty field where one normally sits, so a
+        parse that expected every record to carry its path inline would misread the fields that
+        follow. Crediting the wrong one would leave the new name out of scope, or resurrect a
+        name the working tree no longer holds.
+        """
+        root = self.repo("true")
+        (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
+        old_name = "old.md"
+        new_name = "new name.md"
+        (root / old_name).write_text("Title.\nBody.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        subprocess.run(["git", "-C", str(root), "mv", old_name, new_name], check=True)
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1, 2}, got.get(new_name))
+        self.assertNotIn(old_name, got)
 
     def test_a_deletion_header_names_no_file(self) -> None:
         """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
