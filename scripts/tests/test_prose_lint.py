@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[2] / ".github/actions/prose-gate/prose_lint.py"
@@ -3511,42 +3512,62 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
 
     BAIT = "It has a dupword dupword here.\n"
 
-    def repo(self) -> Path:
-        """A committed-into temp repository, configured so no host identity or signing applies."""
+    # Every route by which git quotes a header, plus two names taking two of them at once.
+    # A mixed name is what an inherited `core.quotePath=false` corrupts.
+    # Git then leaves its high bytes raw inside the quotes it still adds for the quote character.
+    NAMES: ClassVar[dict[str, str]] = {
+        "utf8": "Sh\u014dko.md",
+        "backslash": "back\\slash.md",
+        "quote": 'quo"te.md',
+        "utf8 and quote": 'Sh\u014dko"x.md',
+        "latin1 and quote": 'na\u00efve"y.md',
+        "ascii": "plain.md",
+    }
+
+    def repo(self, quote_path: str) -> Path:
+        """A committed-into temp repository, with the settings this case depends on pinned.
+
+        `core.quotePath` is set rather than left inherited, since it decides which names reach
+        the decoder at all and a host turning it off would silently retire the headline case.
+        """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         for key, value in (
             ("commit.gpgsign", "false"),
             ("user.name", "Test"),
             ("user.email", "test@example.invalid"),
+            ("core.quotePath", quote_path),
         ):
             subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
         return root
 
     def test_each_name_git_quotes_still_maps_its_added_line(self) -> None:
-        """The three quoting routes, and a deletion, whose header names no file to scope."""
-        names = {
-            "utf8": "Sh\u014dko.md",
-            "backslash": "back\\slash.md",
-            "quote": 'quo"te.md',
-            "ascii": "plain.md",
-        }
-        root = self.repo()
-        for name in [*names.values(), "gone.md"]:
-            (root / name).write_text("Title.\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
-        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
-        for name in names.values():
-            (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
-        (root / "gone.md").unlink()
+        """Both host settings, since the gate pins its own and must not read the inherited one."""
+        for quote_path in ("true", "false"):
+            root = self.repo(quote_path)
+            for name in [*self.NAMES.values(), "gone.md"]:
+                (root / name).write_text("Title.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            for name in self.NAMES.values():
+                (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
+            (root / "gone.md").unlink()
 
-        got = prose_lint.changed_lines("HEAD", root)
-        assert got is not None, "git failed, so this case proved nothing about scoping"
-        for label, name in names.items():
-            with self.subTest(label):
-                self.assertIn(2, got.get(name, set()))
-        # A deletion's header is `/dev/null`, which names no file to put in scope.
-        self.assertNotIn("gone.md", got)
+            got = prose_lint.changed_lines("HEAD", root)
+            assert got is not None, "git failed, so this case proved nothing about scoping"
+            for label, name in self.NAMES.items():
+                with self.subTest(f"core.quotePath={quote_path}", name=label):
+                    self.assertIn(2, got.get(name, set()))
+            self.assertNotIn("gone.md", got)
+
+    def test_a_deletion_header_names_no_file(self) -> None:
+        """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
+
+        Reading `/dev/null` as a path would leave `cur` naming a file that is not there, which
+        the surrounding loop would then credit with the next hunk it reads.
+        """
+        self.assertIsNone(prose_lint.diff_header_path("/dev/null"))
+        self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
 class TestHarness(unittest.TestCase):

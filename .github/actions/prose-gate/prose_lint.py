@@ -188,14 +188,16 @@ def diff_header_path(field: str) -> str | None:
     Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
     or a control character, escaping it the way C does. Reading the quoted form as a literal path
     dropped the file from scope, and an empty scope is falsy, so `main`'s no-match refusal did
-    not fire either and the run reported a clean gate on a file it never read. Decoding the
-    escape covers every quoted name, which setting `core.quotePath=false` would not: that only
-    stops git quoting the first of those three, leaving the other two to miss the same way.
+    not fire either and the run reported a clean gate on a file it never read.
 
-    `/dev/null` is the header of a deletion, which adds no line to scope.
+    The caller pins `core.quotePath=true`, which is what makes a quoted field ASCII and so what
+    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
+    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
+    raw inside the quotes, which this decode cannot carry.
+
+    A header naming no `b/` path adds nothing to scope, which is how a deletion's `/dev/null`
+    leaves the caller with no file to credit the hunk that follows it.
     """
-    if field == "/dev/null":
-        return None
     if field.startswith('"') and field.endswith('"') and len(field) > 1:
         # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
         unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
@@ -222,6 +224,11 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "git",
                 "-C",
                 str(root),
+                # `diff_header_path` decodes a quoted name as ASCII, and this is what makes it so.
+                # An inherited `false` leaves a high byte raw inside the quotes git still adds.
+                # That field is then not ASCII, and the decode either corrupts it or raises.
+                "-c",
+                "core.quotePath=true",
                 "diff",
                 "--unified=0",
                 "--no-color",
