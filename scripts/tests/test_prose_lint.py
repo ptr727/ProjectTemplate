@@ -1722,7 +1722,7 @@ class TestChangedLines(unittest.TestCase):
         "-gone\n-also gone\n"
     )
 
-    def run_diff(self, stdout: str = "", returncode: int = 0):
+    def run_diff(self, stdout: str = ""):
         # Untracked files are a second source for the same map and are asserted separately.
         # The parse is read here alone rather than through whatever the tree happens to hold.
         # Bytes, matching the real call's capture: a str here would hide a decode-site regression.
@@ -1730,9 +1730,9 @@ class TestChangedLines(unittest.TestCase):
         # That call gets an empty, undiffable-free answer rather than the same patch text, which a numstat parse would misread.
         def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
             body = b"" if "--numstat" in cmd else stdout.encode("utf-8")
-            return subprocess.CompletedProcess(
-                args=cmd, returncode=returncode, stdout=body, stderr=b""
-            )
+            # Always a success, since the real call passes `check=True` and a non-zero code there raises rather than returning.
+            # A mock handing back a failing CompletedProcess would exercise no failure path at all while looking as though it did.
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr=b"")
 
         with (
             mock.patch.object(prose_lint.subprocess, "run", side_effect=fake_run),
