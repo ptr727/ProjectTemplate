@@ -325,6 +325,7 @@ class RegistryNameUniquenessCase(unittest.TestCase):
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,
                 check=False,
             )
@@ -679,6 +680,7 @@ class RegistryEntryGateCase(unittest.TestCase):
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,
                 check=False,
             )
@@ -951,6 +953,7 @@ class RegistryEntryGateCase(unittest.TestCase):
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,
                 check=False,
             )
@@ -972,6 +975,7 @@ class RegistryEntryGateCase(unittest.TestCase):
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,
                 check=False,
             )
@@ -1270,6 +1274,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
             [node, "-e", probe, json.dumps([patterns, corpus])],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=True,
         )
@@ -1471,6 +1476,7 @@ class AuditRepoSlugCase(unittest.TestCase):
                     [sys.executable, str(validate.ROOT / "spec" / "audit.py"), "--branch", bad],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     timeout=60,
                     check=False,
                     cwd=validate.ROOT,
@@ -1484,6 +1490,7 @@ class AuditRepoSlugCase(unittest.TestCase):
             [sys.executable, str(validate.ROOT / "spec" / "audit.py"), "--branch", "main?x"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
             cwd=validate.ROOT,
@@ -1665,6 +1672,7 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,
                 check=False,
             )

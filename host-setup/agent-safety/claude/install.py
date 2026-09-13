@@ -138,7 +138,11 @@ def source_ref():
         # Letting FileNotFoundError escape would crash both the install and the read-only report.
         try:
             r = subprocess.run(
-                ["git", "-C", str(HERE), *args], capture_output=True, text=True, check=False
+                ["git", "-C", str(HERE), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
             )
         except OSError:
             return None
@@ -497,7 +501,11 @@ def main():
         pass
     print(f"  hook -> {hook_dst}")
     r = subprocess.run(
-        [sys.executable, str(hook_dst), "--selftest"], capture_output=True, text=True, check=False
+        [sys.executable, str(hook_dst), "--selftest"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
     if r.returncode != 0:
         sys.stderr.write(

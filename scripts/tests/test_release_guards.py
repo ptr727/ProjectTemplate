@@ -108,6 +108,7 @@ class ReleaseGuardCase(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
@@ -145,7 +146,12 @@ class ReleaseGuardCase(unittest.TestCase):
                 env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2}
                 env["GITHUB_OUTPUT"] = str(output)
                 verdict = run(
-                    ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                    ["bash", "-c", script],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
                 )
                 return verdict.returncode
 
@@ -173,7 +179,12 @@ class ReleaseGuardCase(unittest.TestCase):
                     env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
                     env["GITHUB_OUTPUT"] = str(output)
                     verdict = run(
-                        ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                        ["bash", "-c", script],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        check=False,
                     )
                     self.assertEqual(1, verdict.returncode)
                     self.assertIn("injected", verdict.stdout)
@@ -187,7 +198,12 @@ class ReleaseGuardCase(unittest.TestCase):
             env = {**os.environ, "BRANCH": injected, "SEMVER2": "1.2.34"}
             env["GITHUB_OUTPUT"] = str(output)
             verdict = run(
-                ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                ["bash", "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
             )
             self.assertEqual(0, verdict.returncode)
             self.assertEqual("version=1.2.34\n", output.read_text(encoding="utf-8"))
@@ -223,7 +239,12 @@ class ReleaseGuardCase(unittest.TestCase):
         def gate(branch: str, semver2: str, smoke: str = "false") -> tuple[int, str]:
             env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2, "SMOKE": smoke}
             verdict = run(
-                ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+                ["bash", "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
             )
             return verdict.returncode, verdict.stdout + verdict.stderr
 
@@ -342,6 +363,7 @@ class ReleaseGuardCase(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual("", tracked_text.stdout)
         self.assertEqual(1, tracked_text.returncode)
@@ -558,6 +580,7 @@ gh() {
                     env={**os.environ, "PYTHON_VERSIONS": value},
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     check=False,
                 )
                 self.assertEqual(expected, verdict.returncode)
@@ -570,6 +593,7 @@ gh() {
             env={**os.environ, "PYTHON_VERSIONS": injected},
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(1, verdict.returncode)
@@ -583,6 +607,7 @@ gh() {
             env={**os.environ, "PYTHON_VERSIONS": "x\ry"},
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(1, verdict.returncode)
@@ -596,6 +621,7 @@ gh() {
             env={**os.environ, "PYTHON_VERSIONS": "%"},
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(1, verdict.returncode)
