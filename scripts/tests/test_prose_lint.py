@@ -1719,7 +1719,10 @@ class TestChangedLines(unittest.TestCase):
     def run_diff(self, stdout: str = "", returncode: int = 0):
         # Untracked files are a second source for the same map and are asserted separately.
         # The parse is read here alone rather than through whatever the tree happens to hold.
-        done = subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
+        # Bytes, matching the real call's capture: a str here would hide a decode-site regression.
+        done = subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout=stdout.encode("utf-8"), stderr=b""
+        )
         with (
             mock.patch.object(prose_lint.subprocess, "run", return_value=done),
             mock.patch.object(prose_lint, "untracked_paths", return_value=[]),
@@ -1771,6 +1774,65 @@ class TestChangedLines(unittest.TestCase):
             self.assertIsNone(prose_lint.changed_lines("origin/develop", Path(".")))
         with mock.patch.object(prose_lint.subprocess, "run", side_effect=FileNotFoundError):
             self.assertIsNone(prose_lint.changed_lines("origin/develop", Path(".")))
+
+    def real_repo(self) -> Path:
+        """A committed-into temp repository, matching the settings the CR-forging cases depend on.
+
+        A real `git diff` subprocess call is required rather than the mocked helper above, since
+        the bug these cases guard against lives in how Python's text mode decodes the pipe, and a
+        mock that hands back a canned `CompletedProcess` never exercises that decode at all.
+        """
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+        for key, value in {
+            "core.autocrlf": "false",
+            "commit.gpgsign": "false",
+            "user.name": "Test",
+            "user.email": "test@example.invalid",
+        }.items():
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+        return root
+
+    def test_a_carriage_return_in_added_content_does_not_forge_a_file_header(self) -> None:
+        """A lone `\\r` inside added content must not open a second file inside this parse.
+
+        Text-mode decoding turns that `\\r` into a line break of its own, so a forged
+        `+++ b/decoy.md` line reads as a real header and steals credit for every hunk of the
+        same file that follows it.
+        """
+        root = self.real_repo()
+        doc = root / "doc.md"
+        doc.write_text("".join(f"Line {n}.\n" for n in range(1, 14)), encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "doc.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+        lines = [f"Line {n}.\n" for n in range(1, 14)]
+        lines[1] = "note.\r+++ b/decoy.md\n"  # line 2, the forged header hidden in a lone \r
+        lines[12] = "Line 13 changed.\n"  # line 13, must still be credited to doc.md afterward
+        doc.write_bytes("".join(lines).encode("utf-8"))
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertNotIn("decoy.md", got)
+        self.assertEqual({2, 13}, got["doc.md"])
+
+    def test_a_carriage_return_in_added_content_does_not_forge_a_hunk_header(self) -> None:
+        """A lone `\\r` inside added content must not open a forged `@@` header either.
+
+        The same translation that forges a `+++` header forges an `@@` header just as easily,
+        crediting scope with line numbers the file never held.
+        """
+        root = self.real_repo()
+        doc = root / "doc.md"
+        doc.write_text("Old title.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "doc.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+        doc.write_bytes(b"bait.\r@@ -1 +900,3 @@\n")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1}, got["doc.md"])
 
 
 class TestCli(unittest.TestCase):
@@ -3511,10 +3573,10 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     a clean gate on a file it never read. That is the production path, since the action always
     passes `--diff`.
 
-    This class is POSIX-only in general, not only for the one test carrying an explicit skip:
-    `NAMES` already holds three names containing `"`, and Windows reserves that character from a
-    filename, so no case in this class can run there. The explicit `skipUnless` below is needed
-    on top of that because its own name adds a tab, a second and distinct reserved character.
+    `NAMES` holds names containing `"` and `\\`, both characters Windows reserves from a
+    filename, so the one case that materializes a `NAMES` file cannot run there. The remaining
+    cases in this class materialize no `NAMES` file and are not limited to POSIX for that reason;
+    each of those that still carries a `skipUnless` states its own, separate reason for it.
     """
 
     BAIT = "It has a dupword dupword here.\n"
@@ -3617,6 +3679,7 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                 assert got is not None, "git failed, so this case proved nothing about scoping"
                 self.assertIn(2, got.get("plain.md", set()))
 
+    @unittest.skipUnless(os.name == "posix", "the driver command below is quoted for a POSIX shell")
     def test_a_textconv_driver_does_not_shift_the_reported_line(self) -> None:
         """`--no-textconv` must correct the reported line, not merely keep the file in scope.
 

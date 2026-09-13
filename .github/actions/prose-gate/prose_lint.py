@@ -226,9 +226,13 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
 
     A name git quotes even with `core.quotePath=false`, one holding a quote, a backslash, or a
     control character, is unquoted here rather than left to miss the same way.
+
+    Captured as bytes and decoded explicitly rather than read in text mode, since text mode's
+    universal-newline translation turns a lone `\\r` inside added content into a line break of
+    its own, letting one added line forge a second `+++` or `@@` header the parse below then acts on.
     """
     try:
-        d = subprocess.run(
+        raw = subprocess.run(
             [
                 "git",
                 "-C",
@@ -242,8 +246,7 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "--unified=0",
                 "--no-color",
                 "--ignore-cr-at-eol",
-                # `--src-prefix=a/` pins diff.srcPrefix, matching the dst side below for symmetry.
-                # The src side has no parse consequence of its own, since this loop only reads `+++` headers.
+                # `--src-prefix=a/` pins diff.srcPrefix for symmetry with the dst side and has no parse consequence, since only `+++` is read.
                 "--src-prefix=a/",
                 # Pins diff.dstPrefix, and outruns diff.noprefix and diff.mnemonicPrefix, so `+++` keeps naming a `b/` this parse keys on.
                 "--dst-prefix=b/",
@@ -257,13 +260,11 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "--",
             ],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+    d = raw.decode("utf-8", "surrogateescape")
     out: dict[str, set[int]] = {}
     cur = None
     for line in d.split("\n"):
