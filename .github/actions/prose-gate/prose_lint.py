@@ -262,6 +262,10 @@ def undiffable_paths(base: str, root: Path) -> set[str] | None:
         added, _, rest = record.partition("\t")
         removed, _, path = rest.partition("\t")
         if not path:
+            # A rename's two trailing fields are the old path and the new one, in that order.
+            # A stream ending between them is refused rather than parsed on, since dropping the records after it would under-report exactly the paths this function exists to name.
+            if i + 1 >= len(fields):
+                return None
             i += 1  # the old path, unused since the new path is where the content now lives
             path = fields[i]
             i += 1
