@@ -1745,14 +1745,7 @@ class TestChangedLines(unittest.TestCase):
 
     def test_a_line_ending_only_change_adds_no_lines(self) -> None:
         """Renormalizing CRLF to LF does not make existing prose newly authored."""
-        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        subprocess.run(["git", "init", "--quiet", str(root)], check=True)
-        subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"], check=True)
-        subprocess.run(["git", "-C", str(root), "config", "commit.gpgsign", "false"], check=True)
-        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
-        subprocess.run(
-            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True
-        )
+        root = self.real_repo()
         bait = root / "bait.md"
         bait.write_bytes(b"Existing prose.\r\n")
         subprocess.run(["git", "-C", str(root), "add", "bait.md"], check=True)
@@ -1776,11 +1769,11 @@ class TestChangedLines(unittest.TestCase):
             self.assertIsNone(prose_lint.changed_lines("origin/develop", Path(".")))
 
     def real_repo(self) -> Path:
-        """A committed-into temp repository, matching the settings the CR-forging cases depend on.
+        """A committed-into temp repository, with the settings the cases below share.
 
-        A real `git diff` subprocess call is required rather than the mocked helper above, since
-        the bug these cases guard against lives in how Python's text mode decodes the pipe, and a
-        mock that hands back a canned `CompletedProcess` never exercises that decode at all.
+        A real `git diff` subprocess call is required rather than the mocked helper above for a
+        case exercising the pipe's own decode or the working tree `changed_lines` reads, since a
+        mock that hands back a canned `CompletedProcess` exercises neither.
         """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "--quiet", str(root)], check=True)
@@ -1833,6 +1826,25 @@ class TestChangedLines(unittest.TestCase):
         got = prose_lint.changed_lines("HEAD", root)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({1}, got["doc.md"])
+
+    def test_a_binary_change_contributes_no_scope_entry(self) -> None:
+        """A binary path stays out of the map entirely rather than gaining an accumulated range.
+
+        `--text` forces git to emit a `+++` header and a full run of hunks for a binary file the
+        same as for a text one, and without this check every one of those hunks would build up a
+        range of line numbers for a file `discover` and `unread_diff_files` drop right after.
+        """
+        root = self.real_repo()
+        binary = root / "binary.bin"
+        binary.write_bytes(b"\x00binary\x00" * 4)
+        subprocess.run(["git", "-C", str(root), "add", "binary.bin"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+        binary.write_bytes(b"\x00binary\x00changed\x00" * 4)
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertNotIn("binary.bin", got)
 
 
 class TestCli(unittest.TestCase):
@@ -3575,8 +3587,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
 
     `NAMES` holds names containing `"` and `\\`, both characters Windows reserves from a
     filename, so the one case that materializes a `NAMES` file cannot run there. The remaining
-    cases in this class materialize no `NAMES` file and are not limited to POSIX for that reason;
-    each of those that still carries a `skipUnless` states its own, separate reason for it.
+    cases in this class materialize no `NAMES` file and are not limited to POSIX for that reason.
+    Each of those that still carries a `skipUnless` states its own, separate reason for it.
     """
 
     BAIT = "It has a dupword dupword here.\n"
@@ -3615,6 +3627,9 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
         return root
 
+    @unittest.skipUnless(
+        os.name == "posix", 'NAMES holds a `"` and a `\\`, both characters Windows reserves'
+    )
     def test_each_name_git_quotes_still_maps_its_added_line(self) -> None:
         """Both host settings, since the gate pins its own and must not read the inherited one."""
         for quote_path in ("true", "false"):
@@ -3678,6 +3693,30 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
             with self.subTest(key):
                 assert got is not None, "git failed, so this case proved nothing about scoping"
                 self.assertIn(2, got.get("plain.md", set()))
+
+    def test_a_hostile_inter_hunk_context_keeps_the_unchanged_lines_between_two_hunks_out(
+        self,
+    ) -> None:
+        """`--inter-hunk-context=0` must outrank a nonzero `diff.interHunkContext` host default.
+
+        A host value wide enough to span both changes merges them into one hunk whose unified
+        diff carries the unchanged lines between them as context, and this parse credits a
+        merged hunk's whole range to scope. Asserting only that lines 1 and 5 are in scope would
+        still pass with the flag removed, since a merged hunk keeps both of those too: what
+        proves the fix is that lines 2, 3, and 4 stay out.
+        """
+        root = self.repo("true", **{"diff.interHunkContext": "5"})
+        (root / "doc.md").write_text("".join(f"Line {n}.\n" for n in range(1, 6)), encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        lines = [f"Line {n}.\n" for n in range(1, 6)]
+        lines[0] = "Line 1 changed.\n"
+        lines[4] = "Line 5 changed.\n"
+        (root / "doc.md").write_text("".join(lines), encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1, 5}, got.get("doc.md"))
 
     @unittest.skipUnless(os.name == "posix", "the driver command below is quoted for a POSIX shell")
     def test_a_textconv_driver_does_not_shift_the_reported_line(self) -> None:

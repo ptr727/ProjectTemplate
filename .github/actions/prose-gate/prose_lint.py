@@ -230,6 +230,14 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     Captured as bytes and decoded explicitly rather than read in text mode, since text mode's
     universal-newline translation turns a lone `\\r` inside added content into a line break of
     its own, letting one added line forge a second `+++` or `@@` header the parse below then acts on.
+
+    A `+++` header naming a path that exists in the working tree and that `is_text` rejects
+    builds no entry for it, since `--text` forces git to emit that header, and its full range of
+    hunks, for a binary file the same as for a text one. `discover` and `unread_diff_files` both
+    drop such a path later regardless, so the verdict does not change, but the line numbers would
+    otherwise have already been accumulated for a file this gate can never read. A path that does
+    not exist in the working tree is left in scope rather than dropped, so a deleted or otherwise
+    unreadable file this gate could still credit before this check keeps being credited.
     """
     try:
         raw = subprocess.run(
@@ -244,6 +252,8 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "core.quotePath=true",
                 "diff",
                 "--unified=0",
+                # Outranks diff.interHunkContext, whose nonzero host default merges nearby hunks and pulls the unchanged lines between them into scope.
+                "--inter-hunk-context=0",
                 "--no-color",
                 "--ignore-cr-at-eol",
                 # `--src-prefix=a/` pins diff.srcPrefix for symmetry with the dst side and has no parse consequence, since only `+++` is read.
@@ -271,6 +281,12 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
         if line.startswith("+++ "):
             cur = diff_header_path(line[4:])
             if cur is None:
+                continue
+            target = root / cur
+            if target.is_file() and not is_text(target):
+                # A binary path stays out of the map entirely rather than gaining an empty entry.
+                # `discover` and `unread_diff_files` would drop it later anyway.
+                cur = None
                 continue
             out.setdefault(cur, set())
         elif line.startswith("@@") and cur:
