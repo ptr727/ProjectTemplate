@@ -2000,7 +2000,7 @@ def origin_owner() -> str | None:
     """
     # Git honors GIT_DIR over `-C` for repository discovery.
     # An inherited one (a hook, a `git bisect run`, a `git rebase --exec`) would make this answer for a different repository than the one this script sits in.
-    # Stripped rather than the environment being cleared wholesale, since a wider clearing would drop credentials or proxy settings `gh`/`git` still need.
+    # Stripped rather than the environment being cleared wholesale, since git still needs PATH to be found at all and HOME to read the config this very call reads.
     env = {
         k: v
         for k, v in os.environ.items()
@@ -2509,8 +2509,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
 
-    # `wait` mutates too, via the auto-request below, and had no scope check of its own until
-    # #1562: the other two write paths refused a cross-owner target outright and this one did not.
+    # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
+    # Ahead of the first read rather than at the request itself, since a wait that may not request has nothing left to poll for.
     ok, why = in_scope(owner)
     if not ok:
         print(f"status=OUT_OF_SCOPE nothing was written: {why}")

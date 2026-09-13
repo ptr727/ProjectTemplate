@@ -4227,8 +4227,14 @@ class TestOriginOwnerIgnoresInheritedGitDiscovery(unittest.TestCase):
             with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
                 self.assertEqual("acme", pr_review.origin_owner())
 
-    def test_the_other_inherited_discovery_variables_are_stripped_too(self) -> None:
-        """GIT_WORK_TREE, GIT_COMMON_DIR, and GIT_OBJECT_DIRECTORY are the same hazard."""
+    def test_the_whole_inherited_discovery_set_does_not_redirect_the_probe(self) -> None:
+        """The four names are stripped as a set, and this pins the set rather than each one.
+
+        Only GIT_DIR is shown above to redirect `remote get-url` away from a `-C` argument, so
+        a case per name would assert a redirection the other three are not demonstrated to
+        produce. What this holds is that all four inherited at once still leave the probe
+        answering for the directory the script sits in.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
