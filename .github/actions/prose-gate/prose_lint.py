@@ -214,6 +214,13 @@ def diff_header_path(field: str) -> str | None:
     return field[2:] if field.startswith("b/") else None
 
 
+# What git prints in place of a `+++` header for a path it declines to diff as text.
+# The first group is greedy, so it backtracks only as far as the rightmost " and " in the line.
+# That rightmost split is the boundary between the two paths the notice names.
+# The anchored end also stops a path that itself contains " and " from splitting there instead.
+BINARY_NOTICE = re.compile(r"^Binary files .+ and (.+) differ$")
+
+
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     """Map repository-relative path -> line numbers this working tree adds vs `base`.
 
@@ -232,12 +239,21 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     its own, letting one added line forge a second `+++` or `@@` header the parse below then acts on.
 
     A `+++` header naming a path that exists in the working tree and that `is_text` rejects
-    builds no entry for it, since `--text` forces git to emit that header, and its full range of
-    hunks, for a binary file the same as for a text one. `discover` and `unread_diff_files` both
-    drop such a path later regardless, so the verdict does not change, but the line numbers would
-    otherwise have already been accumulated for a file this gate can never read. A path that does
-    not exist in the working tree is left in scope rather than dropped, so a deleted or otherwise
-    unreadable file this gate could still credit before this check keeps being credited.
+    builds no entry for it. A `diff` attribute can force git to treat a genuinely binary file as
+    text, emitting that header and a full range of hunks for it the same as for a text file, and
+    `discover` and `unread_diff_files` both drop such a path later regardless, so the verdict does
+    not change, but the line numbers would otherwise have already been accumulated for a file
+    this gate can never read. A path that does not exist in the working tree is left in scope
+    rather than dropped, so a deleted or otherwise unreadable file this gate could still credit
+    before this check keeps being credited.
+
+    Without `--text`, git reports a path it declines to diff, a real binary or one a `-diff`
+    attribute marks the same way, as a `Binary files a/<path> and b/<path> differ` line rather
+    than a `+++` header, and adds no hunks after it. That line's path is resolved the same way a
+    `+++` header's path is, and `is_text` then tells apart the two reasons git could have declined
+    it: a `-diff` attribute on a file that reads as text, which is credited in full since no hunk
+    will describe its lines, and a file that is genuinely binary, which is left out of the map
+    exactly as a binary `+++` header already is.
     """
     try:
         raw = subprocess.run(
@@ -264,8 +280,6 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "--no-ext-diff",
                 # Disables textconv, on by default for a porcelain diff, whose driver can shift every line number this parse reads.
                 "--no-textconv",
-                # Forces text handling so a file an attribute marks non-diffable still emits the `+++` header this parse needs.
-                "--text",
                 base,
                 "--",
             ],
@@ -277,19 +291,38 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
     d = raw.decode("utf-8", "surrogateescape")
     out: dict[str, set[int]] = {}
     cur = None
+    # A `+++`, binary-notice, or `@@` line is honored only while it opens the block a `diff --git` line just started.
+    # Content can never open a line with `diff --git `, so it can never forge that opening either.
+    in_header = False
     for line in d.split("\n"):
-        if line.startswith("+++ "):
+        if line.startswith("diff --git "):
+            in_header = True
+            cur = None
+            continue
+        if in_header and line.startswith("+++ "):
+            in_header = False
             cur = diff_header_path(line[4:])
             if cur is None:
                 continue
             target = root / cur
             if target.is_file() and not is_text(target):
-                # A binary path stays out of the map entirely rather than gaining an empty entry.
-                # `discover` and `unread_diff_files` would drop it later anyway.
+                # A `diff` attribute can force git to emit a full patch for a genuinely binary file, so this stays reachable even though most binaries never reach `+++` at all now.
+                # Dropped here rather than left as an empty entry, since `discover` and `unread_diff_files` would drop it later anyway.
                 cur = None
                 continue
             out.setdefault(cur, set())
+        elif in_header and (bm := BINARY_NOTICE.match(line)):
+            # Without `--text`, this is what git emits instead of a `+++` header for a path it will not diff, so a `-diff`-marked text file is credited only through this route.
+            in_header = False
+            path = diff_header_path(bm.group(1))
+            cur = None
+            if path is not None:
+                target = root / path
+                if is_text(target):
+                    # No hunk will follow for this path, so the whole file is the changed scope.
+                    out[path] = all_lines(target)
         elif line.startswith("@@") and cur:
+            in_header = False
             m = re.search(r"\+(\d+)(?:,(\d+))?", line)
             if m:
                 start = int(m.group(1))

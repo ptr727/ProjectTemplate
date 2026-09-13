@@ -21,11 +21,17 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
 from unittest import mock
+
+try:
+    import resource  # POSIX only, absent on Windows entirely rather than merely restricted
+except ImportError:
+    resource = None  # type: ignore[assignment]
 
 PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[2] / ".github/actions/prose-gate/prose_lint.py"
 sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
@@ -1828,11 +1834,11 @@ class TestChangedLines(unittest.TestCase):
         self.assertEqual({1}, got["doc.md"])
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
-        """A binary path stays out of the map entirely rather than gaining an accumulated range.
+        """A genuinely binary path stays out of the map entirely, gaining no entry at all.
 
-        `--text` forces git to emit a `+++` header and a full run of hunks for a binary file the
-        same as for a text one, and without this check every one of those hunks would build up a
-        range of line numbers for a file `discover` and `unread_diff_files` drop right after.
+        Without `--text`, git reports such a file on a `Binary files ... differ` line rather than
+        a `+++` header, and `is_text` rejecting it is what keeps it out of the map the same way a
+        `+++`-headed binary is dropped, rather than crediting it with a range no hunk will follow.
         """
         root = self.real_repo()
         binary = root / "binary.bin"
@@ -1845,6 +1851,67 @@ class TestChangedLines(unittest.TestCase):
         got = prose_lint.changed_lines("HEAD", root)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertNotIn("binary.bin", got)
+
+    def test_a_forged_header_in_added_content_does_not_steal_a_later_hunk(self) -> None:
+        """A line of added text reading `++ b/decoy.md` must not open a second file mid-block.
+
+        Git prefixes every added line with its own `+`, so content beginning `++ ` arrives in the
+        diff as a line starting `+++ b/decoy.md`, indistinguishable from a real header to a parse
+        that trusts any `+++` line regardless of position. The real proof is the second hunk: a
+        parse fooled by the forged header attributes it to `decoy.md` instead of the real file.
+        """
+        root = self.real_repo()
+        doc = root / "real.md"
+        doc.write_text("".join(f"Line {n}.\n" for n in range(1, 21)), encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "real.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+        lines = [f"Line {n}.\n" for n in range(1, 21)]
+        lines[1] = "++ b/decoy.md\n"  # line 2, reads as "+++ b/decoy.md" once git prefixes it
+        lines[14] = "Line 15 changed.\n"  # line 15, must still be credited to real.md afterward
+        doc.write_text("".join(lines), encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertNotIn("decoy.md", got)
+        self.assertEqual({2, 15}, got["real.md"])
+
+    @unittest.skipUnless(
+        os.name == "posix", "ru_maxrss is not reported on Windows, and reports bytes on macOS"
+    )
+    def test_a_large_binary_change_costs_little_time_or_memory(self) -> None:
+        """Removing `--text` must show up as a real cost difference, not merely a correct scope.
+
+        `--text` forced git to render an 18 MB rewrite as a full text patch, and this function
+        captured that whole diff into memory before the binary drop could apply to it. Without
+        the flag git reports one `Binary files ... differ` line regardless of the file's size, so
+        the bounds below hold easily now and would not have held with `--text` still in place.
+        """
+        root = self.real_repo()
+        binary = root / "large.bin"
+        binary.write_bytes(os.urandom(18 * 1024 * 1024))
+        subprocess.run(["git", "-C", str(root), "add", "large.bin"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        binary.write_bytes(os.urandom(18 * 1024 * 1024))
+
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        start = time.perf_counter()
+        got = prose_lint.changed_lines("HEAD", root)
+        elapsed = time.perf_counter() - start
+        after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        delta_kib = after - before
+
+        assert got is not None, "git failed, so this case proved nothing about cost"
+        self.assertNotIn("large.bin", got)
+        print(
+            f"\nlarge-binary changed_lines: {elapsed:.3f}s elapsed, {delta_kib:.0f} KiB RSS delta"
+        )
+        self.assertLess(
+            elapsed, 5.0, "an 18 MB binary must cost close to nothing once --text is gone"
+        )
+        self.assertLess(
+            delta_kib, 50 * 1024, "the diff for a binary is one short line, not the file"
+        )
 
 
 class TestCli(unittest.TestCase):
@@ -3748,11 +3815,13 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({2}, got.get("doc.md"))
 
-    def test_a_non_diffable_file_still_reaches_scope(self) -> None:
-        """`--text` must hold against `-diff` marked two ways: committed, and a host setting.
+    def test_a_non_diffable_text_file_is_credited_in_full(self) -> None:
+        """A `-diff` mark, committed or set as a host default, must still reach scope.
 
-        Either route leaves the pair reported as binary and absent from `+++` headers entirely,
-        which takes the file out of scope by a second route `--no-textconv` does not touch.
+        Without `--text`, either route reports the pair as binary on a `Binary files ... differ`
+        line rather than a `+++` header, so no hunk ever names which lines changed. The only
+        scope this parse can build for such a file is the whole of it, proved here by a line the
+        edit below never touches landing in scope alongside the two it does.
         """
         for source in ("a committed .gitattributes", "a host core.attributesFile"):
             root = self.repo("true")
@@ -3765,15 +3834,33 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                     ["git", "-C", str(root), "config", "core.attributesFile", str(attrs)],
                     check=True,
                 )
-            (root / "doc.md").write_text("Title.\n", encoding="utf-8")
+            (root / "doc.md").write_text("Title.\nBody.\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
             subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
-            (root / "doc.md").write_text("Title.\n" + self.BAIT, encoding="utf-8")
+            (root / "doc.md").write_text("Title changed.\nBody.\n" + self.BAIT, encoding="utf-8")
 
             got = prose_lint.changed_lines("HEAD", root)
             with self.subTest(source):
                 assert got is not None, "git failed, so this case proved nothing about scoping"
-                self.assertIn(2, got.get("doc.md", set()))
+                self.assertEqual({1, 2, 3}, got.get("doc.md"))
+
+    def test_a_non_diffable_file_named_with_a_non_ascii_character_is_credited(self) -> None:
+        """The binary-notice line quotes a non-ASCII name the same way a `+++` header does.
+
+        `core.quotePath=true` is what the caller pins, so this is the form the parse must
+        actually handle rather than the raw UTF-8 byte a disabled setting would emit instead.
+        """
+        root = self.repo("true")
+        (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
+        name = "Sh\u014dko.md"
+        (root / name).write_text("Title.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+        (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({1, 2}, got.get(name))
 
     def test_a_deletion_header_names_no_file(self) -> None:
         """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
