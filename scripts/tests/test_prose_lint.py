@@ -3572,6 +3572,29 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                     self.assertIn(2, got.get(name, set()))
             self.assertNotIn("gone.md", got)
 
+    @unittest.skipUnless(os.name == "posix", "a tab is not a legal filename character on Windows")
+    def test_a_name_holding_a_tab_keeps_it_rather_than_losing_its_own_path(self) -> None:
+        """The terminator strip rests on git never emitting a raw tab inside a name itself.
+
+        This passes with that strip removed, and is not a regression guard for it. What it holds
+        is the precondition the strip needs: git quotes such a name and escapes the tab as a
+        two-character `\\t`, so no raw tab from the name itself ever reaches the field, and the
+        only raw tab a header can carry is the terminator. Were that not so, stripping at the
+        first tab would cut a real path short and drop the file from scope for a second reason.
+        """
+        name = "tab\tname.md"
+        for quote_path in ("true", "false"):
+            root = self.repo(quote_path)
+            (root / name).write_text("Title.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            (root / name).write_text("Title.\n" + self.BAIT, encoding="utf-8")
+
+            got = prose_lint.changed_lines("HEAD", root)
+            assert got is not None, "git failed, so this case proved nothing about scoping"
+            with self.subTest(f"core.quotePath={quote_path}"):
+                self.assertIn(2, got.get(name, set()))
+
     # Each value is a setting that would empty scope on its own without the pinned invocation.
     HOST_DIFF_SETTINGS: ClassVar[dict[str, str]] = {
         "diff.noprefix": "true",
