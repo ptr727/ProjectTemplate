@@ -134,6 +134,8 @@ Subcommands
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
+           64 = the write scope could not be established or excludes the target, checked before
+           the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
 mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
@@ -148,6 +150,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1995,6 +1998,17 @@ def origin_owner() -> str | None:
     reached from a hub checkout while the repository being answered is named on the command line,
     so the working directory says nothing about who owns either.
     """
+    # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument and points the probe at another repository's config.
+    # An inherited GIT_CONFIG* channel injects config into this call, and `remote get-url` applies `insteadOf` rewriting, so an injected rewrite would make it name an owner this checkout does not have.
+    # This strip closes the channels an inherited tooling environment sets: the four discovery names it drops, and any name starting with GIT_CONFIG that injects config into this one call.
+    # It does not close, and cannot close, an inherited HOME, XDG_CONFIG_HOME, or PATH, because a caller who controls any of those already controls the process that would perform the write, leaving nothing here for this check to defend.
+    # The environment is stripped rather than cleared, since git still needs PATH to be found at all, and HOME so the checkout's own global config and `safe.directory` still apply.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+        and not k.startswith("GIT_CONFIG")
+    }
     try:
         url = subprocess.run(
             ["git", "-C", str(HERE), "remote", "get-url", "origin"],
@@ -2003,6 +2017,7 @@ def origin_owner() -> str | None:
             encoding="utf-8",
             timeout=5,
             check=False,
+            env=env,
         ).stdout.strip()
     # A missing git, a timeout, or any other failure all mean the owner cannot be read.
     except Exception:  # noqa: BLE001
@@ -2496,6 +2511,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
+
+    # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
+    # The policy is that a cross-owner target is not touched at all, so the refusal precedes the reading half too.
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
+        return 64
 
     # In-process backoff, so the whole wait costs one agent turn.
     delays = [15, 20, 30, 45, 60, 120]

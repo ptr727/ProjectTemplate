@@ -11,12 +11,15 @@ Run as `python3 scripts/tests/test_pr_review.py`, or under `python3 -m unittest 
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -321,6 +324,10 @@ class GqlCase(unittest.TestCase):
         never reaches the real `gh_graphql` since the mock above replaces it wholesale, so the
         two patches govern disjoint call sites and neither can shadow the other. A case
         exercising the auto-request itself re-patches `gh_graphql` after calling this.
+
+        `origin_owner` is patched to this suite's own "o" too, since `wait` now runs the same
+        in-scope check `comment` and `reply` already did, and this suite's cases run against a
+        real checkout whose actual origin has nothing to do with the "o/r" they exercise.
         """
         queue = list(responses)
 
@@ -328,6 +335,7 @@ class GqlCase(unittest.TestCase):
             return queue.pop(0) if len(queue) > 1 else queue[0]
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -4183,6 +4191,363 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn(str(self.ANCHOR), why)
         self.assertNotIn("this checkout", why)
+
+
+class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
+    """#1561: an inherited environment must not redirect the probe, by either mechanism.
+
+    `GIT_DIR` and `GIT_COMMON_DIR` each override repository discovery on their own. `GIT_WORK_TREE`
+    and `GIT_OBJECT_DIRECTORY` are stripped as part of the same discovery set but demonstrate no
+    redirect of their own here, and `GIT_OBJECT_DIRECTORY` overrides the object store rather than
+    discovery. A `GIT_CONFIG*` name injects config into the call instead, so both mechanisms are
+    covered here.
+    """
+
+    # The same four discovery names origin_owner() strips, kept local rather than imported from production.
+    _DISCOVERY_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+
+    def _clean_env(self) -> dict[str, str]:
+        """The caller's environment minus every channel the probe itself drops.
+
+        A fixture that left them in place would build its repositories under the same influence
+        the cases exist to rule out, and the two halves have to match for that reason rather
+        than because the setup commands are known to read each one.
+        """
+        return {
+            k: v
+            for k, v in os.environ.items()
+            if k not in self._DISCOVERY_VARS and not k.startswith("GIT_CONFIG")
+        }
+
+    def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
+        """Build one throwaway repo under `parent`, immune to the caller's own git environment.
+
+        `git init` and `git remote add` both honor an inherited GIT_DIR the same way the probe
+        does, so without this strip an ambient one sends `git remote add` writing into whatever
+        repository that variable names instead of the throwaway repo this helper just created.
+        """
+        env = self._clean_env()
+        repo = parent / name
+        repo.mkdir()
+        subprocess.run(["git", "init", "--quiet", str(repo)], check=True, env=env)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "remote",
+                "add",
+                "origin",
+                f"https://github.com/{owner_slash_repo}.git",
+            ],
+            check=True,
+            env=env,
+        )
+        return repo
+
+    def test_a_git_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
+        """An inherited GIT_DIR overrides `-C` for repository discovery.
+
+        So an inherited one that names a different repository must not make this probe answer
+        for that repository instead.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_a_git_common_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
+        """An inherited GIT_COMMON_DIR redirects the probe on its own, the same way GIT_DIR does.
+
+        Config is read from the common dir, so this one needs no other inherited name alongside
+        it to make the probe answer for the wrong repository.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_COMMON_DIR": str(other / ".git")}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_the_whole_inherited_discovery_set_does_not_redirect_the_probe(self) -> None:
+        """GIT_DIR and GIT_COMMON_DIR each redirect the probe on their own, and each has its own case above.
+
+        GIT_WORK_TREE and GIT_OBJECT_DIRECTORY are stripped as part of the same documented
+        discovery set, with no redirect of their own demonstrated for this call. What this holds
+        is that all four inherited at once still leave the probe answering for the directory the
+        script sits in.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            other = self.make_repo(tmp_path, "other", "unrelated-owner/other-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_DIR": str(other / ".git"),
+                "GIT_WORK_TREE": str(other),
+                "GIT_COMMON_DIR": str(other / ".git"),
+                "GIT_OBJECT_DIRECTORY": str(other / ".git" / "objects"),
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_an_instead_of_rewrite_injected_via_git_config_count_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """`remote get-url` applies `insteadOf` rewriting, so an unstripped injection here would rewrite the answer.
+
+        The injected config rewrites this checkout's real `acme` origin to read as
+        `unrelated-owner`. The `GIT_CONFIG` prefix strip removes `GIT_CONFIG_COUNT`,
+        `GIT_CONFIG_KEY_0`, and `GIT_CONFIG_VALUE_0` before the call runs, so the real config
+        governs and the probe still answers for the real owner.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "url.https://github.com/unrelated-owner/.insteadof",
+                "GIT_CONFIG_VALUE_0": "https://github.com/acme/",
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_the_same_instead_of_rewrite_delivered_via_a_git_config_global_file_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """Same rewrite as above, delivered through `GIT_CONFIG_GLOBAL` instead of the count/key/value form.
+
+        `remote get-url` merges the global config into what it resolves, so an unstripped
+        `GIT_CONFIG_GLOBAL` pointing at a file carrying this rewrite would still rewrite the
+        answer. `GIT_CONFIG_GLOBAL` matches the same `GIT_CONFIG` prefix, so it is stripped
+        before the call runs and the probe still answers for the real owner.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            global_config = tmp_path / "injected-global-gitconfig"
+            global_config.write_text(
+                '[url "https://github.com/unrelated-owner/"]\n'
+                "\tinsteadOf = https://github.com/acme/\n",
+                encoding="utf-8",
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_a_direct_remote_origin_url_override_injected_via_git_config_count_does_not_redirect_the_probe(
+        self,
+    ) -> None:
+        """A `remote.origin.url` override injected the same count/key/value way as the rewrite above.
+
+        Not a regression guard for the current probe: measured directly, `git remote get-url`
+        ignores a config-injected `remote.origin.url` value regardless of whether the
+        `GIT_CONFIG` prefix is stripped, so this case passes with or without that strip. It stays
+        in place for a future change that switches the probe to a command that does honor this
+        vector, such as `git config --get remote.origin.url`, which the strip does guard against.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            env = {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "remote.origin.url",
+                "GIT_CONFIG_VALUE_0": "https://github.com/unrelated-owner/other-repo.git",
+            }
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual("acme", pr_review.origin_owner())
+
+    def test_two_origin_urls_resolve_to_the_first_one(self) -> None:
+        """`remote.origin.url` may carry more than one value; `remote get-url` returns the first.
+
+        `git config --get` instead returns the last: with two urls, that command names a
+        different owner than the one a write should stay within, the opposite of what this probe
+        needs. Both commands are run against the same repository here so the difference is
+        the proof, rather than reverting and restoring the production probe.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            env = self._clean_env()
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(anchor),
+                    "config",
+                    "--local",
+                    "--add",
+                    "remote.origin.url",
+                    "https://github.com/second-owner/anchor-repo.git",
+                ],
+                check=True,
+                env=env,
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            self.assertEqual("acme", pr_review.origin_owner())
+            reverted = subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                env=env,
+            ).stdout.strip()
+            self.assertIn("second-owner", reverted)
+
+    def test_an_origin_url_delivered_via_include_path_still_resolves(self) -> None:
+        """A checkout whose `remote.origin.url` arrives through `include.path` rather than a literal value.
+
+        `git config --local` does not follow `include.path`/`includeIf`, so a probe built on that
+        command instead would read no owner here and refuse every write. `remote get-url` does
+        follow includes, so the probe in this script still resolves the real owner. Both commands
+        are run against the same repository here so the difference is the proof, rather than
+        reverting and restoring the production probe.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
+            env = self._clean_env()
+            subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--unset", "remote.origin.url"],
+                check=True,
+                env=env,
+            )
+            included = tmp_path / "origin-include.gitconfig"
+            included.write_text(
+                '[remote "origin"]\n\turl = https://github.com/acme/anchor-repo.git\n',
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(anchor),
+                    "config",
+                    "--local",
+                    "--add",
+                    "include.path",
+                    str(included),
+                ],
+                check=True,
+                env=env,
+            )
+            self.enterContext(mock.patch.object(pr_review, "HERE", anchor))
+            self.assertEqual("acme", pr_review.origin_owner())
+            reverted = subprocess.run(
+                ["git", "-C", str(anchor), "config", "--local", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                env=env,
+            )
+            self.assertEqual(1, reverted.returncode)
+
+
+class TestWaitStaysInScope(unittest.TestCase):
+    """#1562: `wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
+
+    def test_a_cross_owner_target_is_refused_before_the_wait_reads_or_writes_anything(self) -> None:
+        """Both transports raise on any call, so a reverted check fails fast rather than
+        falling into the real, minutes-long backoff loop with a mocked GraphQL response."""
+        out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="acme"))
+        boom = AssertionError("no network call should be reached for an out-of-scope target")
+        with (
+            mock.patch.object(pr_review, "gql", side_effect=boom) as gql,
+            mock.patch.object(pr_review, "gh_graphql", side_effect=boom) as gh_graphql,
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "someone-else/r"])
+        self.assertEqual(64, code)
+        self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
+        gql.assert_not_called()
+        gh_graphql.assert_not_called()
+
+
+# `wait` was already in the parser's `cmd` choices when it became a write, by acquiring a `requestReviews` mutation, with no subcommand added.
+# Update this table whenever a command's write status changes, not only when a new one is added.
+WRITE_COMMANDS: dict[str, list[str]] = {
+    "comment": ["comment", "7", "--repo", "someone-else/r", "--body", "Fixed."],
+    "reply": [
+        "reply",
+        "7",
+        "--repo",
+        "someone-else/r",
+        "--match",
+        "retry count",
+        "--body",
+        "Fixed.",
+    ],
+    "wait": ["wait", "7", "--repo", "someone-else/r"],
+}
+
+# The parser's remaining `cmd` choices, none of which write.
+# The partition test below checks that this set and WRITE_COMMANDS together match the parser's choices.
+READ_ONLY_COMMANDS = ["claims", "status"]
+
+
+class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
+    """`requestReviews` once sat outside `in_scope` for its whole life with a green suite.
+
+    The whole-source check in TestContract counts which mutation documents exist, which held
+    that regression invisible since a document can exist and still be reachable without the
+    owner check running first. This pins the command-level invariant instead: every write
+    subcommand refuses a cross-owner target before either transport is touched. It does not
+    pin the static property TestContract's count implied, that every mutation document in the
+    source sits behind `in_scope`; a write reachable by some path this table does not drive
+    would still slip past it.
+    """
+
+    def test_each_write_command_refuses_before_reaching_either_transport(self) -> None:
+        for cmd, argv in WRITE_COMMANDS.items():
+            with self.subTest(cmd=cmd):
+                boom = AssertionError(f"{cmd}: no network call should be reached out of scope")
+                with (
+                    contextlib.redirect_stdout(io.StringIO()) as out,
+                    mock.patch.object(pr_review, "origin_owner", return_value="acme"),
+                    mock.patch.object(pr_review, "gql", side_effect=boom) as gql,
+                    mock.patch.object(pr_review, "gh_graphql", side_effect=boom) as gh_graphql,
+                ):
+                    code = pr_review.main(argv)
+                self.assertEqual(64, code)
+                self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
+                gql.assert_not_called()
+                gh_graphql.assert_not_called()
+
+
+class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
+    """WRITE_COMMANDS and READ_ONLY_COMMANDS must together account for every parser choice.
+
+    `wait` became a write without a subcommand being added, so nothing prompted the table to be
+    checked. This ties the two hand-maintained sets to the parser's own `cmd` choices instead of
+    trusting them to stay in step: a subcommand added to the parser and left out of both sets
+    fails this test until someone classifies it as a write or a read.
+    """
+
+    def test_write_and_read_only_commands_together_equal_the_parsers_cmd_choices(self) -> None:
+        original_add_argument = argparse.ArgumentParser.add_argument
+        captured_choices = []
+
+        def capture(self, *args, **kwargs):
+            action = original_add_argument(self, *args, **kwargs)
+            if args and args[0] == "cmd":
+                captured_choices.append(action.choices)
+            return action
+
+        with (
+            mock.patch.object(argparse.ArgumentParser, "add_argument", capture),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            pr_review.main([])
+        self.assertEqual(set(captured_choices[0]), set(WRITE_COMMANDS) | set(READ_ONLY_COMMANDS))
 
 
 class TestHarness(unittest.TestCase):
