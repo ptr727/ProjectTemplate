@@ -3525,20 +3525,29 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         "ascii": "plain.md",
     }
 
-    def repo(self, quote_path: str) -> Path:
+    def repo(self, quote_path: str, **config: str) -> Path:
         """A committed-into temp repository, with the settings this case depends on pinned.
 
         `core.quotePath` is set rather than left inherited, since it decides which names reach
         the decoder at all and a host turning it off would silently retire the headline case.
+        `diff.noprefix`, `diff.mnemonicPrefix`, and `diff.dstPrefix` are pinned off the same way,
+        since each is an ordinary developer setting that would otherwise empty or rename the
+        `b/` prefix `changed_lines` keys its output on. `config` overrides one of these for a
+        case that means to prove the invocation survives the setting rather than avoid it.
         """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(root)], check=True)
-        for key, value in (
-            ("commit.gpgsign", "false"),
-            ("user.name", "Test"),
-            ("user.email", "test@example.invalid"),
-            ("core.quotePath", quote_path),
-        ):
+        settings = {
+            "commit.gpgsign": "false",
+            "user.name": "Test",
+            "user.email": "test@example.invalid",
+            "core.quotePath": quote_path,
+            "diff.noprefix": "false",
+            "diff.mnemonicPrefix": "false",
+            "diff.dstPrefix": "b/",
+            **config,
+        }
+        for key, value in settings.items():
             subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
         return root
 
@@ -3560,6 +3569,28 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                 with self.subTest(f"core.quotePath={quote_path}", name=label):
                     self.assertIn(2, got.get(name, set()))
             self.assertNotIn("gone.md", got)
+
+    # Each value is a setting that would empty scope on its own without the pinned invocation.
+    HOST_DIFF_SETTINGS: ClassVar[dict[str, str]] = {
+        "diff.noprefix": "true",
+        "diff.mnemonicPrefix": "true",
+        "diff.dstPrefix": "y/",
+        "diff.external": "echo",
+    }
+
+    def test_the_invocation_survives_each_host_diff_setting(self) -> None:
+        """The pinned flags on the `git diff` call must outrank every setting in the table."""
+        for key, value in self.HOST_DIFF_SETTINGS.items():
+            root = self.repo("true", **{key: value})
+            (root / "plain.md").write_text("Title.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "base"], check=True)
+            (root / "plain.md").write_text("Title.\n" + self.BAIT, encoding="utf-8")
+
+            got = prose_lint.changed_lines("HEAD", root)
+            with self.subTest(key):
+                assert got is not None, "git failed, so this case proved nothing about scoping"
+                self.assertIn(2, got.get("plain.md", set()))
 
     def test_a_deletion_header_names_no_file(self) -> None:
         """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.

@@ -233,6 +233,11 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "--unified=0",
                 "--no-color",
                 "--ignore-cr-at-eol",
+                # Pins the prefixes so diff.noprefix, diff.mnemonicPrefix, and diff.dstPrefix cannot rename or empty the `b/` this parse keys on.
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                # Bypasses diff.external, which would otherwise replace the parsed body with an arbitrary command's output.
+                "--no-ext-diff",
                 base,
                 "--",
             ],
