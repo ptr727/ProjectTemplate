@@ -4206,6 +4206,19 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     # The same four discovery names origin_owner() strips, kept local rather than imported from production.
     _DISCOVERY_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 
+    def _clean_env(self) -> dict[str, str]:
+        """The caller's environment minus every channel the probe itself drops.
+
+        A fixture that left them in place would build its repositories under the same influence
+        the cases exist to rule out, and the two halves have to match for that reason rather
+        than because the setup commands are known to read each one.
+        """
+        return {
+            k: v
+            for k, v in os.environ.items()
+            if k not in self._DISCOVERY_VARS and not k.startswith("GIT_CONFIG")
+        }
+
     def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
         """Build one throwaway repo under `parent`, immune to the caller's own git environment.
 
@@ -4213,7 +4226,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         does, so without this strip an ambient one sends `git remote add` writing into whatever
         repository that variable names instead of the throwaway repo this helper just created.
         """
-        env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
+        env = self._clean_env()
         repo = parent / name
         repo.mkdir()
         subprocess.run(["git", "init", "--quiet", str(repo)], check=True, env=env)
@@ -4361,7 +4374,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
-            env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
+            env = self._clean_env()
             subprocess.run(
                 [
                     "git",
@@ -4400,7 +4413,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             anchor = self.make_repo(tmp_path, "anchor", "acme/anchor-repo")
-            env = {k: v for k, v in os.environ.items() if k not in self._DISCOVERY_VARS}
+            env = self._clean_env()
             subprocess.run(
                 ["git", "-C", str(anchor), "config", "--local", "--unset", "remote.origin.url"],
                 check=True,
