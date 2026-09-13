@@ -50,6 +50,7 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
         [bash, "-c", f"{options}\n{script}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
         check=False,
     )

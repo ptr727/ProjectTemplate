@@ -216,6 +216,7 @@ def _origin_owner_repo(cwd):
             ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         ).stdout.strip()
@@ -276,6 +277,7 @@ def _live_branch_rules(owner, repo, branch):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )
@@ -302,6 +304,9 @@ def _current_push_branch(cwd):
                 ["git", "-C", cwd or ".", *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                # A ref name is bytes like a path, and a strict decode of one that is not UTF-8 raises into the handler below, which answers None, and None leaves `_check_push_bypass` with no target to test against the protected branches.
+                errors="surrogateescape",
                 timeout=5,
                 check=False,
             )
@@ -777,6 +782,9 @@ def _is_primary_checkout(target_dir, git_dir=None):
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            # These two lines are paths, and a strict decode of one that is not UTF-8 raises into the handler below, which reads it as unresolvable, and unresolvable is the fail-open branch.
+            errors="surrogateescape",
             timeout=5,
             check=False,
         )
@@ -894,6 +902,7 @@ def _resolves_as_ref(target_dir, ref, verify=None):
             ["git", "-C", target_dir or ".", "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         )
@@ -919,6 +928,7 @@ def _config_alias(target_dir, name, config_lookup=None):
             ["git", "-C", target_dir or ".", "config", "--get", f"alias.{name}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         )
@@ -3355,8 +3365,65 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
+    # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
+    got = _is_primary_checkout_selftest()
+    # "skip" is the setup failing, which is neither a pass nor a failure, and it is deliberately not None.
+    # None is `_is_primary_checkout` answering unresolvable, which is the defect shape this case exists to catch, so sharing the skip channel with it would report that defect as a skip and pass.
+    mark = "ok  " if got is True else ("skip" if got == "skip" else "FAIL")
+    if got is not True and got != "skip":
+        ok = False
+    print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
+
+
+def _is_primary_checkout_selftest():
+    """Resolve a real primary checkout whose directory name is not valid UTF-8.
+
+    "skip" where the case could not run at all, which is neither a pass nor a failure. Windows
+    refuses such a name outright, a sandbox can refuse the directory, and a host can have no git,
+    and reporting any of those as a pass would say the decode was exercised when it never ran.
+
+    A string rather than None, since None is what `_is_primary_checkout` answers when git did not
+    resolve, which is the defect this case exists to catch and must stay a failure.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            # The decode is inside the guard too, since Windows decodes a filesystem name with surrogatepass, which refuses this byte rather than carrying it the way Linux does.
+            target = os.path.join(tmp, os.fsdecode(b"checkout_\xe9"))
+            os.mkdir(target)
+        except (OSError, UnicodeError):
+            return "skip"
+        # An ambient GIT_DIR points `git init` at that repository rather than at this temp one, and `_is_primary_checkout` then resolves both of its answers to it and reports a pass the decode never reached, leaving a repository behind outside the temp tree.
+        # Cleared around both spawns rather than passed to either, since `_is_primary_checkout` reads the environment it inherits and honoring GIT_DIR is deliberate there.
+        cleared = {}
+        for name in (
+            "GIT_DIR",
+            "GIT_COMMON_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_CEILING_DIRECTORIES",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_NAMESPACE",
+            "GIT_PREFIX",
+        ):
+            if name in os.environ:
+                cleared[name] = os.environ.pop(name)
+        try:
+            try:
+                r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+            except OSError:
+                return "skip"
+            if r.returncode != 0:
+                return "skip"
+            return _is_primary_checkout(target)
+        finally:
+            os.environ.update(cleared)
 
 
 # --- Hook entrypoint (PreToolUse) --------------------------------------------------------------------
