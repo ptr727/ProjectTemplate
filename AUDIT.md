@@ -132,11 +132,14 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
       exit 0
   fi
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
-  # Accept either quote or none, as the mechanical check does, so the two agree on the same file.
+  # Accept either quote or none, as the mechanical check does.
   # The trailing class is the mechanical check's own, so a value carrying a digit is read whole rather than truncated to its leading letters.
   eco_re="^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*[\"']?[[:alnum:]_-]+"
   # A file declaring no ecosystem at all matches nothing, and grep exiting 1 would otherwise abort the run under the header above.
-  decl=$(grep -oE "$eco_re" <<<"$dependabot_yaml" | grep -oE '[[:alnum:]_-]+$' | sort -u) || decl=""
+  # The two greps are separate statements so that only a no-match is absorbed.
+  # Chained through a pipe they are not, because a failing first stage produces no output, the second stage then no-matches, and pipefail reports that exit 1 rather than the failure.
+  matched=$(grep -oE "$eco_re" <<<"$dependabot_yaml") || [ "$?" -eq 1 ]
+  decl=$(grep -oE '[[:alnum:]_-]+$' <<<"$matched" | sort -u) || [ "$?" -eq 1 ]
 
   if has .github/workflows; then
       # The contents API answers with an object rather than an array where the path is a file, so the type is tested rather than assumed.
@@ -151,7 +154,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
   # Then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry.
   ```
 
-- **Dependabot on self-hosted runners (account setting)** - the account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue for up to 24 hours, then get cancelled, and ordinary CI is unaffected throughout. GitHub routes only a private repo through this setting, which is why the fleet's public repos updated throughout while its private ones stalled (ptr727/ProjectTemplate#1015), so read the audited repo's visibility first with `gh repo view <owner>/<repo> --json visibility` and treat a public one as N/A. On a private repo, read the newest Dependabot run's job:
+- **Dependabot on self-hosted runners (owner setting)** - the owner-level toggle named `Dependabot on self-hosted runners`, which for a user-account owner sits at `https://github.com/settings/security_analysis`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the owner, those jobs queue for up to 24 hours, then get cancelled, and ordinary CI is unaffected throughout. GitHub routes only a private repo through this setting, which is why the fleet's public repos updated throughout while its private ones stalled (ptr727/ProjectTemplate#1015), so read the audited repo's visibility first with `gh repo view <owner>/<repo> --json visibility` and treat a public one as N/A. On a private repo, read the newest Dependabot run's job:
 
   ```bash
   #!/usr/bin/env bash
@@ -162,7 +165,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
   # Dependabot's own update jobs run under the dynamic event rather than from a workflow file, so they are selected by path.
   # Read the newest run rather than the history, since a repo whose account setting has since been turned off keeps every run cancelled while it was on.
   # The dynamic event is shared with GitHub's other generated runs, Copilot's reviewer among them, which on an active repo fill whole pages, so the pages are walked rather than the first alone, within the 1000 runs this endpoint returns at most.
-  # The run's date is carried out with its id, since a cancelled run says nothing on its own about whether the routing is still in place.
+  # The run's date is carried out with its id so the report can say when this repo's updates last ran, which the finding below does not turn on.
   runs=$(gh api --paginate "repos/$repo/actions/runs?event=dynamic&per_page=100" --jq '.workflow_runs[] | select((.path // "") | startswith("dynamic/dependabot")) | "\(.id) \(.created_at)"')
   if [ -z "$runs" ]; then
       echo "no Dependabot run in this repo's dynamic run history"
@@ -174,7 +177,7 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
   gh api "repos/$repo/actions/runs/${run%% *}/jobs" --jq '.jobs[] | "\(.conclusion) labels=\(.labels | join(",")) runner=\(.runner_name // "") steps=\(.steps | length)"'
   ```
 
-  A job reading `labels=dependabot` with no runner name was routed to the pool, its empty step list saying it never started, where a job GitHub's own runners took reads `labels=ubuntu-latest` with a runner name and the steps it ran. What a cancelled newest run means now is decided by its date, because turning the toggle off reruns nothing already queued and starts no new run, so a repo remedied weeks ago keeps a cancelled newest run until someone clicks `Check for Updates` on its own Dependabot page. Read a recent one as the routing still in place, and an old one as that click still owed. The Dependabot page says which in words, reading `Self-hosted runner unavailable` while the routing is live. Detection stops there, like the rest of this audit. The remedy is an account-level change no target-repo pull request can carry, so it is reported as a maintainer action rather than converged under section 10: turn the toggle off, along with `Automatically enable for new repositories` beside it, or register a matching self-hosted runner instead of disabling it. Disabling the toggle does not rerun jobs already queued, so each affected repo still needs its own manual `Check for Updates` click on its own Dependabot page.
+  A job reading `labels=dependabot` with no runner name was routed to the pool, its empty step list saying it never started, where a job GitHub's own runners took reads `labels=ubuntu-latest` with a runner name and the steps it ran. Those four fields together are the finding: a newest run that was routed and then cancelled having run no step says this repo's Dependabot updates last failed that way and have not succeeded since, because a later success would be the newest run instead. Why they are still failing is not something the API answers, since the toggle's own state, whether a matching runner is registered and online, and whether the queue was ever restarted all sit outside it. The audit reports the repo and that run's date, and leaves the choice of remedy to the maintainer. Detection stops there, like the rest of this audit. Every remedy here is an owner-level or web-UI action no target-repo pull request can carry, so this is reported rather than converged under section 10: turn the toggle off, along with `Automatically enable for new repositories` beside it, or bring a matching self-hosted runner online instead. Disabling the toggle reruns nothing already queued, so an affected repo also needs its own manual `Check for Updates` click on its own Dependabot page, and a repo whose toggle is already off needs only that click.
 
 ## 7. Verdict Model
 

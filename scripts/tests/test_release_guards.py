@@ -15,6 +15,23 @@ from subprocess import run
 REPO = Path(__file__).resolve().parents[2]
 
 
+def fenced_bash_block(markdown: str, marker: str) -> str:
+    """The one fenced bash block in `markdown` containing `marker`, dedented out of its list item.
+
+    Anchoring on what a block is about rather than on a variable name inside it keeps this
+    finding the block after the block is rewritten, which is how a rename silently stopped the
+    probe below from being exercised at all.
+    """
+    blocks = [
+        block
+        for block in re.findall(r"^ *```bash\n(.*?)^ *```", markdown, re.DOTALL | re.MULTILINE)
+        if marker in block
+    ]
+    if len(blocks) != 1:
+        raise AssertionError(f"expected one bash block mentioning {marker!r}, found {len(blocks)}")
+    return "\n".join(line.removeprefix("  ") for line in blocks[0].splitlines())
+
+
 def hash_files(pattern: str, present: set[str]) -> bool:
     """Whether a workflow `hashFiles(<pattern>)` would match anything in `present`.
 
@@ -400,15 +417,46 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertIn("\"needs.validate.result == 'success'\"", files_spec)
 
-    def test_audit_probes_fail_before_local_path_checks(self) -> None:
+    def test_audit_runnable_blocks_parse_as_printed(self) -> None:
+        """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
+
+        No repository gate reads a snippet inside a Markdown file, and both blocks once shipped
+        an unquoted `repo=<owner>/<repo>`, which bash parses as a redirection, so each died of a
+        syntax error before its own `set` header took effect. Checking the substituted form is
+        what hid it, so this checks the printed form.
+        """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        lines = audit.splitlines()
-        start = next(i for i, line in enumerate(lines) if line.startswith("  dependabot_content="))
-        probe = "\n".join(line.removeprefix("  ") for line in lines[start : start + 6])
+        blocks = re.findall(r"^ *```bash\n(.*?)^ *```", audit, re.DOTALL | re.MULTILINE)
+        self.assertTrue(blocks, "AUDIT.md carries no bash block")
+        for block in blocks:
+            source = "\n".join(line.removeprefix("  ") for line in block.splitlines())
+            with self.subTest(block=source.splitlines()[0][:60]):
+                parsed = run(
+                    ["bash", "-n", "-c", source],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                self.assertEqual(0, parsed.returncode, parsed.stderr)
+
+    def test_audit_probes_fail_before_local_path_checks(self) -> None:
+        """AUDIT.md's ecosystem probe reports an API failure rather than reading it as a clean tree.
+
+        A failed read that returns nothing looks exactly like a repository declaring no
+        ecosystem, so the probe has to exit non-zero rather than print a MISSING line nobody
+        can tell from a real finding.
+        """
+        audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
+        probe = fenced_bash_block(audit, "package-ecosystem").replace(
+            'repo="<owner>/<repo>"', "repo=owner/name"
+        )
         fake_api = r"""
 gh() {
+  # The workflows leg answers the count its --jq filter would compute, since this stub runs no jq.
   case "$2" in
-    repos/*/contents/.github/dependabot.yml\?*) printf '%s\n' '- package-ecosystem: github-actions' '- package-ecosystem: devcontainers' | base64 ;;
+    repos/*/contents/.github/dependabot.yml\?*) printf '%s\n' '- package-ecosystem: github-actions' '- package-ecosystem: devcontainers' ;;
+    repos/*/contents/.github/workflows\?*) printf '1\n' ;;
     repos/*/contents/.github\?*) printf '%s\n' .github/dependabot.yml .github/workflows ;;
     repos/*/contents\?*) printf '%s\n' .devcontainer .github ;;
     *) return 17 ;;
@@ -417,21 +465,29 @@ gh() {
 """
 
         success = run(
-            ["bash", "-c", f"{fake_api}\n{probe}\nhas .github/workflows && has .devcontainer"],
+            ["bash", "-c", f"{fake_api}\n{probe}"],
             check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
-        failure = run(
-            ["bash", "-c", f"gh() {{ return 17; }}\n{probe}\nexit 0"],
+        failure = run(["bash", "-c", f"gh() {{ return 17; }}\n{probe}"], check=False)
+        empty_read = run(
+            ["bash", "-c", f"gh() {{ printf ''; }}\n{probe}"],
             check=False,
-        )
-        decode_failure = run(
-            ["bash", "-c", f"gh() {{ printf invalid; }}\n{probe}\nexit 0"],
-            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
 
-        self.assertEqual(0, success.returncode)
+        self.assertEqual(0, success.returncode, success.stderr)
+        self.assertIn("github-actions: present", success.stdout)
+        self.assertIn("devcontainers: present", success.stdout)
+        # Every read failing must stop the run, never reach the per-ecosystem lines.
         self.assertNotEqual(0, failure.returncode)
-        self.assertNotEqual(0, decode_failure.returncode)
+        # An empty listing is not a tree: nothing is implied, so no ecosystem may be called missing.
+        self.assertNotIn("MISSING", empty_read.stdout)
+        # The suppressed-output probe this guard replaced must not come back.
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',
             audit,
