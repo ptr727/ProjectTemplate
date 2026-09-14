@@ -135,6 +135,31 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     return blocks
 
 
+# A call whose argument does not open with a quote is taken as unnamed, which over-reaches.
+# A named constant passed by name reads the same here as no argument at all.
+# The conservative direction is the right one.
+# Its cost is a comment, where the alternative is the class of defect this exists to stop.
+BARE_PREDICATE = re.compile(r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![\"'])")
+# A wide class written into a pattern does the same as a bare call.
+# `re.UNICODE` is the default for a `str` pattern.
+WIDE_CLASS = re.compile(r"\\s")
+
+
+def bare_whitespace_predicates(source: str) -> tuple[list[str], int]:
+    """The lines of `source` taking Python's whitespace class, and how many are marked exempt."""
+    offenders: list[str] = []
+    exempt = 0
+    for line in source.split("\n"):
+        hits = len(BARE_PREDICATE.findall(line)) + len(WIDE_CLASS.findall(line))
+        if not hits:
+            continue
+        if "any-whitespace:" in line:
+            exempt += hits
+            continue
+        offenders.append(line.strip())  # any-whitespace: a report of a line, not a parse of one
+    return offenders, exempt
+
+
 BASH_ONLY = ("<(", "<<<", "$'", "[[")
 
 
@@ -552,7 +577,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertIn("\"needs.validate.result == 'success'\"", files_spec)
 
     def test_no_bare_whitespace_predicate_in_the_block_scanner(self) -> None:
-        """The block scanner names the characters it calls whitespace, everywhere.
+        r"""The block scanner names the characters it calls whitespace, everywhere.
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
         content. Five silent defects in this scanner were one bare predicate each, and each was
@@ -571,21 +596,39 @@ class ReleaseGuardCase(unittest.TestCase):
         derived, so a predicate placed outside both is caught by the behaviour cases or not at all
         (ptr727/ProjectTemplate#1618).
         """
-        # A call whose argument is not a quoted literal takes Python's own whitespace class.
-        # `\s` in a pattern does the same, and `re.UNICODE` is the default for a `str` pattern.
-        bare = re.compile(r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![\"'])")
-        wide_class = re.compile(r"\\s")
-        offenders: list[tuple[str, int, str]] = []
+        # The detector is run against source written to fail it.
+        # One that only ever sees a clean file can stop working with nothing to show for it.
+        dirty = [
+            "    return line.strip()",
+            "    return line.split(None)",
+            "    return line.split(maxsplit=1)",
+            "    return line.rsplit()",
+            "    return line.isspace()",
+            "    return line.lstrip()",
+            "    return line.rstrip()",
+            "    return line.splitlines()",
+            "    return str.strip(line)",
+            '    return re.sub(r"\\s", "", line)',
+        ]
+        for line in dirty:
+            with self.subTest(dirty=line.strip()):
+                self.assertEqual(([line.strip()], 0), bare_whitespace_predicates(line))
+        self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip(" \t")'))
+        self.assertEqual(
+            ([], 1), bare_whitespace_predicates("    x = y.split()  # any-whitespace:")
+        )
+        # Exemptions are counted per predicate, so two on one line cannot pass as one.
+        self.assertEqual(
+            ([], 2),
+            bare_whitespace_predicates("    x = y.split() + z.strip()  # any-whitespace:"),
+        )
+
+        offenders: list[tuple[str, str]] = []
         exempt = 0
         for function in (fenced_blocks, shell_blocks, mislabeled_posix_blocks, fenced_shell_block):
-            for number, line in enumerate(inspect.getsource(function).split("\n"), start=1):
-                hits = len(bare.findall(line)) + len(wide_class.findall(line))
-                if not hits:
-                    continue
-                if "any-whitespace:" in line:
-                    exempt += hits
-                    continue
-                offenders.append((function.__name__, number, line.strip()))
+            found, marked = bare_whitespace_predicates(inspect.getsource(function))
+            offenders.extend((function.__name__, line) for line in found)
+            exempt += marked
         self.assertEqual([], offenders, "a whitespace predicate here names its characters")
         # The escape hatch is the narrow kind, so it is counted rather than trusted.
         self.assertEqual(1, exempt, "each reasoned exception is reviewed on its own")
@@ -595,9 +638,10 @@ class ReleaseGuardCase(unittest.TestCase):
 
         Each case pins one rule, and a rule no case exercises can be dropped without any test
         noticing, so a rule added to the extractor is owed a case here. The read cases are the
-        shapes this fleet's documents use; everything else is refused, because reading it would
-        need the container the fence sits in and a wrong guess there is the silent miss this
-        scan exists to prevent.
+        shapes this scan accepts rather than the ones these documents happen to use, since a
+        rule is worth pinning before a document reaches for it. Everything else is refused,
+        because reading it would need the container the fence sits in, and a wrong guess there
+        is the silent miss this scan exists to prevent.
         """
         read = [
             ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
