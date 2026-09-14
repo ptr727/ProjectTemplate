@@ -53,15 +53,18 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     No document here uses any of it.
 
     Where a container still changes what a renderer sees, an HTML block and a list item ended by
-    a column-zero line being the two found, this over-reads rather than under-reads: it can take
-    in a block a reader never sees, and it does not drop one that is there. That direction is
-    the property worth keeping, since an extra block is parsed and judged while a dropped one is
-    never looked at, and it is why those are left rather than refused. Whether the extra block
-    also fails its parse is not promised, only that nothing real goes unread.
+    a column-zero line being the two found, this over-reads rather than under-reads for a block
+    carrying a label, which is the only kind it is read for. An HTML block holding an odd number
+    of fence-shaped lines flips the open and closed parity, and an unlabelled block can be lost
+    that way, but a labelled opener landing in closer position always raises on its info string.
+    That direction is the property worth keeping, since an extra block is parsed and judged
+    while a dropped one is never looked at, and it is why those are left rather than refused.
 
-    Only a space or a tab may follow a closing fence, which is what `str.strip` with no argument
-    gets wrong: it also clears characters a renderer treats as content, so a fence line ending
-    in one closed a block early here and left the rest of a real block unread.
+    Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
+    Python's `str.strip` with no argument and `str.isspace` are both Unicode-aware, where a
+    renderer is not, so each one read a character a renderer keeps as content as whitespace to
+    be discarded. One closed a block early and lost the rest of it, the other ate the start of a
+    body line, and both are compared against the literal characters now.
     """
     blocks: list[FencedBlock] = []
     # A renderer ends a line on a carriage return, alone or paired, and on nothing else.
@@ -100,7 +103,9 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
             FencedBlock(
                 opened_at,
                 words[0] if words else "",
-                "\n".join(line[indent:] if line[:indent].isspace() else line for line in body),
+                "\n".join(
+                    line[indent:] if line[:indent] == " " * indent else line for line in body
+                ),
             )
         )
         opener = None
@@ -569,6 +574,13 @@ class ReleaseGuardCase(unittest.TestCase):
                 "a body line indented partway",
                 "- x\n\n  ```bash\n  J=15\n J=16\n  ```\n",
                 ["J=15\n J=16"],
+            ),
+            # Only a space carries an indent.
+            # A renderer keeps every other blank-looking character as part of the body.
+            (
+                "a body line opening on a no-break space",
+                "  ```bash\n\u00a0\u00a0J=17\n  ```\n",
+                ["\u00a0\u00a0J=17"],
             ),
             ("an empty block", "```bash\n```\n", [""]),
             ("a label that is not a shell", "```python\nK=15\n```\n", []),
