@@ -11,6 +11,7 @@ The hub holds all fleet-wide repository configuration:
 - `develop.json` declares the release-model `develop` ruleset.
 - `operational/develop.json` declares the operational-model `develop` ruleset.
 - `labels.json` declares the fleet label set.
+- `project.json` declares the fleet project every repository is linked to, by owner, number, and title.
 - `configure.sh` applies or checks those payloads through the GitHub API.
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts, both read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
@@ -25,7 +26,7 @@ Downstream repositories carry no copy of `spec/secrets.json`. `baseline` applies
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, the label set, and both rulesets. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
+Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, the label set, both rulesets, and the link to the fleet project. The link is written only where it is absent, and the declared project title is compared with the live one first, since a project number is reusable and the same declared number is applied to every fleet repository. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
 
 ```sh
 repo-config/configure.sh apply owner/repo release|operational
