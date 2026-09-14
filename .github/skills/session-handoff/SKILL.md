@@ -240,13 +240,13 @@ which is the one case where the label's absence is unproven rather than establis
 Creating an issue, commenting on one, closing one, and editing a body are each outward-facing
 writes. `new` creates, comments, and closes, the label riding inside the one create call rather than
 being a write of its own. `link` edits a body, comments, and closes. Each of them is bound by
-`GOVERNANCE.md` "Repository Boundaries and Write Safety" exactly as any other write is. They reach
-the repository `AGENTS.md` "Session Scope" sends the link to, the one holding the work the next
-session resumes, and no other. `link`'s body edit is the one write that rule does not ask for at
-all, since it has the new link name its predecessor at create time and so describes no
-after-the-fact edit. `link` also reaches an issue this chain never created, since the caller names
-both numbers and its refusals ask for a block and a label to be added by hand first, so the two
-issues it is given are chosen deliberately rather than swept up.
+`GOVERNANCE.md` "Repository Boundaries and Write Safety" exactly as any other write is. Point them
+at the repository `AGENTS.md` "Session Scope" sends the link to, the one holding the work the next
+session resumes, and at no other. `--repo` takes whatever it is given and those rules permit any
+repository under this owner, so nothing but this sentence stops a link landing in a repository that
+holds none of the work. `link` also reaches an issue this chain never created, since the caller
+names both numbers and its refusals ask for a block and a label to be added by hand first, so the
+two issues it is given are chosen deliberately rather than swept up.
 
 Where the caller names an issue, which is `link` alone, it reads both live before writing and
 writes only what those reads returned. Every other identifier a write targets is captured from a
