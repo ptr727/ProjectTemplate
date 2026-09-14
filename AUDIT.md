@@ -98,26 +98,65 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
 
 ## 6. Validate Settings, Rulesets, and Secrets
 
-- **General settings, labels, rulesets, the Dependabot security features, the fleet project link, and deployment environments** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The token needs project access as well as the admin the ruleset endpoints require, since a token without it cannot read the project link and the command reports that group as failing rather than as clean, and the command's own error names the scope to grant. The command checks what `configure.sh apply` writes: the declared settings, the derived settings and the registry description, the declared labels, the Dependabot security features, the shared `main` ruleset, the `develop` ruleset the model selects, and the link to the fleet project the hub declares. It preserves and reports `bypass_actors` without asserting them because bypass authority is a per-repository human decision. It also checks one group apply never writes, the deployment environments the registry's `environments` declares for the repo: each one exists, its deployment-branch policy is the form declared, and under a `custom` policy the entries it allows are exactly the declared branches, so anything added by hand reads as drift. An environment the registry declares nothing about is reported rather than asserted, since GitHub creates some on its own. Neither this command nor the **Secrets** bullet below queries an environment's own secret and variable stores, where the API exposes a secret's name but not its value and a variable's name and value both, so a clean run says nothing about whether an environment holds what a deploy needs.
+- **General settings, the registry description, labels, rulesets, the Dependabot security features, the fleet project link, and deployment environments** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The token needs project access as well as the admin the ruleset endpoints require, since a token without it cannot read the project link and the command reports that group as failing rather than as clean, and the command's own error names the scope to grant. The host needs a runnable `py -3` or `python3` too, since a run against a hub checkout resolves the registry description through [`spec/resolve_description.py`][resolve-description] and exits before the first check when neither interpreter answers. The command checks what `configure.sh apply` writes: the declared settings, the derived settings and the registry description, the declared labels, the Dependabot security features, the shared `main` ruleset, the `develop` ruleset the model selects, and the link to the fleet project the hub declares. It reports the live `bypass_actors` list without asserting it, because bypass authority is a per-repository human decision. It also checks one group apply never writes, the deployment environments the registry's `environments` declares for the repo: each one exists, its deployment-branch policy is the form declared, and under a `custom` policy the entries it allows are exactly the declared branches, so anything added by hand reads as drift. An environment the registry declares nothing about is reported rather than asserted, since GitHub creates some on its own. Neither this command nor the **Secrets** bullet below queries an environment's own secret and variable stores, where the API exposes a secret's name but not its value and a variable's name and value both, so a clean run says nothing about whether an environment holds what a deploy needs.
 
-- **Secrets** - from the same hub checkout, run [`spec/audit.py`][audit-runner] `[repo]` and read its Secrets section. It resolves the required set from the hub's own [`spec/secrets.json`][secrets] plus the registry entry's `publish[]`/`types[]`/`requiredSecrets[]`, confirming each required name exists (name only, not the values) in the Actions store and, where the mechanism needs it (Docker Hub, codegen App), the Dependabot store too.
+- **Secrets** - from the same hub checkout, run [`spec/audit.py`][audit-runner] `[RepoName]` and read its Secrets section. That argument is the registry entry name rather than the `<owner>/<repo>` form `configure.sh` takes, and an `<owner>/<repo>` argument prints `Not cataloged` and exits 2. It resolves the required set from the hub's own [`spec/secrets.json`][secrets] plus the registry entry's `publish[]`/`types[]`/`requiredSecrets[]`, reading the Actions store and, for every mechanism whose `stores` list in that file includes `dependabot`, the Dependabot store too. It reports three things: a required name missing from a store, a forbidden name present in either store, and a configured name no applicable mechanism claims. Names are read, never values.
 
-- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` is present (its workflows reference actions, and otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge), and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**. A tree-implied ecosystem declared nowhere is a **drift finding** (the file exists, so its absence would instead be a file-presence letter). Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model], since the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` holds at least one `.yml` or `.yaml` entry (those workflows reference actions, and otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge), and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**, and it runs at all only where `.github/dependabot.yml` exists, since a missing `dependabot.yml` is a file-presence letter of its own. A tree-implied ecosystem that file declares nowhere is a **drift finding**. Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model], since the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
   ```bash
-  # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
-  dependabot_content=$(gh api "repos/<owner>/<repo>/contents/.github/dependabot.yml?ref=<ground>" --jq '.content') || exit 1
-  dependabot_yaml=$(base64 -d <<<"$dependabot_content") || exit 1
-  decl=$(grep -oE '^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*"?[a-z-]+' <<<"$dependabot_yaml" | grep -oE '[a-z-]+$' | sort -u)
-  root_paths=$(gh api "repos/<owner>/<repo>/contents?ref=<ground>" --jq '.[].path') || exit 1
-  github_paths=$(gh api "repos/<owner>/<repo>/contents/.github?ref=<ground>" --jq '.[].path') || exit 1
+  # Save and run this as a script rather than pasting it into a shell, since it exits rather than returns.
+  # It prints one line per implied ecosystem, and its exit status reports only whether the reads succeeded.
+  set -Eeuo pipefail
+  repo=<owner>/<repo>
+  ground=main # Section 1 reads main as ground truth, and the repo's registry groundTruthBranch declares the same.
+
+  root_paths=$(gh api "repos/$repo/contents?ref=$ground" --jq '.[].path')
+  # A repo carrying no .github directory would 404 on the listing below, which is an absence rather than the read failure that exit code otherwise means.
+  github_paths=""
+  if grep -Fxq .github <<<"$root_paths"; then
+      github_paths=$(gh api "repos/$repo/contents/.github?ref=$ground" --jq '.[].path')
+  fi
   has() { grep -Fxq "$1" <<<"$root_paths"$'\n'"$github_paths"; }
-  has .github/workflows && { grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (workflows present)"; }
-  has .devcontainer     && { grep -qx devcontainers  <<<"$decl" && echo "devcontainers: present"  || echo "devcontainers: MISSING (.devcontainer present)"; }
-  # then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry
+
+  if ! has .github/dependabot.yml; then
+      echo "dependabot.yml absent: a file-presence finding, and ecosystem coverage is not checked at all"
+      exit 0
+  fi
+  content=$(gh api "repos/$repo/contents/.github/dependabot.yml?ref=$ground" --jq '.content')
+  # An absent or empty content key prints nothing or null and exits 0, which would otherwise read as a file declaring no ecosystem.
+  if [ -z "$content" ] || [ "$content" = "null" ]; then
+      echo "dependabot.yml read returned no content" >&2
+      exit 1
+  fi
+  # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
+  # Accept either quote or none, as the mechanical check does, so the two agree on the same file.
+  eco_re="^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*[\"']?[a-z-]+"
+  decl=$(base64 -d <<<"$content" | grep -oE "$eco_re" | grep -oE '[a-z-]+$' | sort -u)
+
+  # A workflows directory holding no .yml or .yaml entry implies nothing, which is the mechanical check's own test.
+  if has .github/workflows; then
+      workflow_names=$(gh api "repos/$repo/contents/.github/workflows?ref=$ground" --jq '.[].name')
+      if grep -qE '\.(yml|yaml)$' <<<"$workflow_names"; then
+          grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (.github/workflows/ holds a workflow file)"
+      fi
+  fi
+  if has .devcontainer; then
+      grep -qx devcontainers <<<"$decl" && echo "devcontainers: present" || echo "devcontainers: MISSING (.devcontainer present)"
+  fi
+  # Then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry.
   ```
 
-- **Dependabot on self-hosted runners (account setting)** - a repo whose `dependabot-updates` or `update-graph` workflow runs are all `cancelled` with zero steps has this problem. The account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue for up to 24 hours, then get cancelled. The cancelled-with-zero-steps pattern above is the only Actions-API-visible signal, not an explicit cause, and ordinary CI is unaffected. The account-setting root cause surfaces only as a `Self-hosted runner unavailable` message on the repo's own Dependabot page. GitHub never routes a public repo through this setting, so `ProjectTemplate` itself cannot show the symptom (ptr727/ProjectTemplate#1015). Detection stops there, like the rest of this audit. Remediation is a separate, manual action. Confirm the toggle, and `Automatically enable for new repositories` beside it, are both off, or register a matching self-hosted runner instead of disabling it. Disabling the toggle does not rerun jobs already queued. Each affected repo still needs its own manual `Check for Updates` click on its own Dependabot page.
+- **Dependabot on self-hosted runners (account setting)** - the account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue for up to 24 hours, then get cancelled, and ordinary CI is unaffected throughout. GitHub never routes a public repo through this setting, so read the audited repo's visibility first with `gh repo view <owner>/<repo> --json visibility` and record this check as N/A on a public one. `ProjectTemplate` is public and therefore cannot show the symptom itself (ptr727/ProjectTemplate#1015). On a private repo, enumerate the Dependabot runs and read the step count of one that was cancelled:
+
+  ```bash
+  # Dependabot's own update jobs run under the dynamic event rather than from a workflow file, so they are selected by path.
+  gh api "repos/<owner>/<repo>/actions/runs?event=dynamic&per_page=100" --jq '.workflow_runs[] | select(.path | startswith("dynamic/dependabot")) | "\(.conclusion) \(.id) \(.path)"'
+  # Then read one cancelled run's jobs, whose steps array is empty where the job never reached a runner.
+  gh api "repos/<owner>/<repo>/actions/runs/<run-id>/jobs" --jq '.jobs[] | "\(.name) steps=\(.steps | length)"'
+  ```
+
+  Every such run cancelled with zero steps raises the question rather than settles it, since that is the only signal the Actions API exposes and it names no cause. The account setting is confirmed on the repo's own Dependabot page, which reads `Self-hosted runner unavailable`, and nowhere in the API. Detection stops there, like the rest of this audit. The remedy is an account-level change no target-repo pull request can carry, so it is reported as a maintainer action rather than converged under section 10: turn the toggle off, along with `Automatically enable for new repositories` beside it, or register a matching self-hosted runner instead of disabling it. Disabling the toggle does not rerun jobs already queued, so each affected repo still needs its own manual `Check for Updates` click on its own Dependabot page.
 
 ## 7. Verdict Model
 
@@ -193,6 +232,7 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [repo-config]: https://github.com/ptr727/ProjectTemplate/tree/main/repo-config
 [reports]: https://github.com/ptr727/ProjectTemplate/tree/main/reports
 [repos]: https://github.com/ptr727/ProjectTemplate/blob/main/registry/repos.json
+[resolve-description]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/resolve_description.py
 [resync]: https://github.com/ptr727/ProjectTemplate/blob/main/RESYNC.md
 [scope-model]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/scope-model.md
 [secrets]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/secrets.json
