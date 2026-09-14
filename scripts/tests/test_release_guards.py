@@ -140,13 +140,15 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
 
 # A call whose argument does not open with a quote is taken as unnamed, which over-reaches.
-# Whitespace around the parenthesis is stepped over, since a formatter is not what holds this.
-# The skip sits inside the lookahead, where it cannot be given back to reach a quote.
+# Whitespace before the argument is stepped over inside the lookahead.
+# There it cannot be given back to reach a quote.
+# Whitespace before the parenthesis is not stepped over.
+# This file's comments are read too, and a sentence naming a method would read as a call.
 # A named constant passed by name reads the same here as no argument at all.
 # The conservative direction is the right one.
 # Its cost is a comment, where the alternative is the class of defect this exists to stop.
 BARE_PREDICATE = re.compile(
-    r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)[ \t]*\((?![ \t]*[\"'])"
+    r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![ \t]*[\"'])"
 )
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
@@ -621,7 +623,6 @@ class ReleaseGuardCase(unittest.TestCase):
             "    return line.lstrip()",
             "    return line.rstrip()",
             "    return line.splitlines()",
-            "    return line.strip ()",
             "    return line.strip( )",
             "    return str.strip(line)",
             '    return re.sub(r"\\s", "", line)',
@@ -632,7 +633,11 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip(" \t")'))
         # Whitespace before a named argument does not make it unnamed.
         self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip( " ")'))
-        self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip ( " ")'))
+        # A sentence naming a method is prose, not a call, and this file's comments are read.
+        self.assertEqual(
+            ([], 0),
+            bare_whitespace_predicates("    # the .split (first word) of the info string"),
+        )
         self.assertEqual(
             ([], 1), bare_whitespace_predicates("    x = y.split()  # any-whitespace:")
         )
