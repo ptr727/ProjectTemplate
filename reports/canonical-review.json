@@ -3,11 +3,11 @@
   "passes": [
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > (preamble)",
-      "digest": "sha256:17a08a343fd14998af6331fc79e73d6e8af3ee23de61e58ada4a1500f18f0fbb",
+      "digest": "sha256:d5d607957bd6d1a939bbe30c934d22443540c50fe43123b0dfe37c0da2f1f6a8",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T00:05:13Z"
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:55Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Before Assuming",
@@ -42,20 +42,28 @@
       "stamp": "2026-09-05T14:16:35Z"
     },
     {
-      "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
-      "digest": "sha256:09fe765939d60461b11fecc4584aa32a78c51720424c8a5ccd66bfa685e628c2",
+      "unit": ".agents/skills/agent-conduct/SKILL.md > When Work Stops on Another Repository",
+      "digest": "sha256:deafaaea95ba0117be6e27d909a5e9a12d721bad69edab366f35cd0281ad5bca",
       "reviewer": "agent-skill",
-      "findings": 1,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:21:22Z"
+      "findings": 0,
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:55Z"
+    },
+    {
+      "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
+      "digest": "sha256:4ba8bfcf52dc40fedd6c29d2d1ca53477bf77f234f16b3f478902df4a5fb5412",
+      "reviewer": "agent-skill",
+      "findings": 0,
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:55Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Why This Exists",
-      "digest": "sha256:7b15784955af8a8c407da6e59addc11350ea2d2aff8a7a88f0f4c4b8d1c4bdca",
+      "digest": "sha256:edd8b2dfc187528ece1799ec699f8ee6c7bb8f9f3a650d5b42d00f4b0c87fe7e",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "5ae7cf812ebff34ec131bc460799428748295c03",
-      "stamp": "2026-09-08T00:05:14Z"
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:55Z"
     },
     {
       "unit": ".agents/skills/audit-a-repo/SKILL.md > Measuring",
@@ -99,11 +107,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ending the Run",
-      "digest": "sha256:94b4e3978520d4c14d99e345a8ee526764c6f7e5ea210f0aefd0bd134a8c57f7",
+      "digest": "sha256:f3c2bfbd12395061cb034bcde1ee38c329ee3edb55698e1b71b3cfa29870972b",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "136661da1b978f793fd5bbd7daa1d95b7338a919",
-      "stamp": "2026-09-03T19:44:48Z"
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:55Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Grouping and File Claims",
@@ -131,11 +139,11 @@
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Ranking",
-      "digest": "sha256:2ce9d636d57a63c499047925f8bf9b8dca29d1d968c3be5e0668b09f427f1479",
+      "digest": "sha256:2d749a3f0e64a5c750a3a1c8bbc0ed882f1e339b8d6b7debc4750411ddd75af7",
       "reviewer": "agent-skill",
       "findings": 0,
-      "hubCommit": "cf7be2bfe4d9b0175a50d42fdf07ca27b7ece135",
-      "stamp": "2026-09-09T16:26:39Z"
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:56Z"
     },
     {
       "unit": ".agents/skills/backlog-burndown/SKILL.md > Run State",
@@ -947,11 +955,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:1bc2f0a6ab7fec3315c3ce57bdbeec6a645832b27c9fb4c3b13ec281b39f76e0",
+      "digest": "sha256:1c2ca97fc759f96b37a6cef26d5ec83eafac34c07b36efb55f3d77a200072ddf",
       "reviewer": "agent-skill",
-      "findings": 5,
-      "hubCommit": "6aecb8b9b68b04156701a67ee14fbf5144b86332",
-      "stamp": "2026-09-05T14:21:22Z"
+      "findings": 0,
+      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
+      "stamp": "2026-09-14T01:18:56Z"
     },
     {
       "unit": "GOVERNANCE.md > Hub-Hosted Tooling",
