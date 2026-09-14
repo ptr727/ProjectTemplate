@@ -278,7 +278,7 @@ apply_project() { # project-node-id
     fi
     rid="$(jqr '.id' <<<"$live")"
     # The call is guarded rather than left to abort on its own, since a bare command substitution ends the run with gh's error and nothing of this script's.
-    # The failure that reaches it is a token that reads projects and cannot write a link, which the pre-flight's resolution cannot catch because that one is a read.
+    # The failure it was written for is a token that reads projects and cannot write a link, which the pre-flight's resolution cannot catch because that one is a read, and every other non-zero exit lands here too.
     # The response is then read rather than discarded, and the repository it names is asserted against the one just linked, so a write that returned anything else stops the run instead of reporting a link that may not exist.
     # shellcheck disable=SC2016  # $project and $repository are GraphQL query variables, not shell expansions
     if ! out="$(gh api graphql -f query='mutation($project: ID!, $repository: ID!) { linkProjectV2ToRepository(input: { projectId: $project, repositoryId: $repository }) { repository { id } } }' -f project="$pid" -f repository="$rid")"; then
