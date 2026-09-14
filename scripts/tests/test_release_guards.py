@@ -15,21 +15,55 @@ from subprocess import run
 REPO = Path(__file__).resolve().parents[2]
 
 
+SHELL_LABELS = ("bash", "sh", "shell")
+
+
+def shell_blocks(markdown: str) -> list[str]:
+    """Every fenced shell block in `markdown`, dedented out of whatever list item holds it.
+
+    CommonMark lets a fence run longer than three characters and use `~` as well as a backtick,
+    and it closes only on a fence of the same character that is at least as long and carries
+    nothing after it. A fixed three-backtick pattern therefore skips a longer block silently,
+    which is the one outcome a guard over "every shell block" must not have, and a closing
+    pattern that tolerates trailing text can end a block early and test half of it.
+    """
+    blocks: list[str] = []
+    lines = markdown.splitlines()
+    index = 0
+    while index < len(lines):
+        opener = re.match(
+            r"^(?P<indent> *)(?P<fence>`{3,}|~{3,})(?P<label>[A-Za-z0-9_-]*) *$", lines[index]
+        )
+        index += 1
+        if not opener or opener.group("label").lower() not in SHELL_LABELS:
+            continue
+        fence = opener.group("fence")
+        closer = re.compile(rf"^ *{re.escape(fence[0])}{{{len(fence)},}} *$")
+        body: list[str] = []
+        while index < len(lines) and not closer.match(lines[index]):
+            body.append(lines[index])
+            index += 1
+        if index >= len(lines):
+            raise AssertionError(f"unterminated {fence} block opened at line {index}")
+        index += 1
+        indent = len(opener.group("indent"))
+        blocks.append(
+            "\n".join(line[indent:] if line[:indent].isspace() else line for line in body)
+        )
+    return blocks
+
+
 def fenced_bash_block(markdown: str, marker: str) -> str:
-    """The one fenced bash block in `markdown` containing `marker`, dedented out of its list item.
+    """The one fenced shell block in `markdown` containing `marker`.
 
     Anchoring on what a block is about rather than on a variable name inside it keeps this
     finding the block after the block is rewritten, which is how a rename silently stopped the
     probe below from being exercised at all.
     """
-    blocks = [
-        block
-        for block in re.findall(r"^ *```bash\n(.*?)^ *```", markdown, re.DOTALL | re.MULTILINE)
-        if marker in block
-    ]
+    blocks = [block for block in shell_blocks(markdown) if marker in block]
     if len(blocks) != 1:
-        raise AssertionError(f"expected one bash block mentioning {marker!r}, found {len(blocks)}")
-    return "\n".join(line.removeprefix("  ") for line in blocks[0].splitlines())
+        raise AssertionError(f"expected one shell block mentioning {marker!r}, found {len(blocks)}")
+    return blocks[0]
 
 
 def hash_files(pattern: str, present: set[str]) -> bool:
@@ -417,6 +451,36 @@ class ReleaseGuardCase(unittest.TestCase):
         )
         self.assertIn("\"needs.validate.result == 'success'\"", files_spec)
 
+    def test_shell_block_extractor_reads_every_fence_shape(self) -> None:
+        """A block the extractor skips is a block the guard silently never tests.
+
+        The pattern this replaced required exactly three backticks and accepted a closing
+        fence with trailing text, so a CommonMark-legal longer fence returned nothing and a
+        `` ``` `` inside a longer block ended it early. Both shapes are legal Markdown that
+        renders identically, so neither would look wrong in review.
+        """
+        cases = [
+            ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
+            ("a longer fence", "````bash\nB=2\n````\n", ["B=2"]),
+            ("a tilde fence", "~~~sh\nC=3\n~~~\n", ["C=3"]),
+            ("indented in a list item", "  ```shell\n  D=4\n  ```\n", ["D=4"]),
+            # A shorter fence inside a longer one is content, not a close.
+            ("a shorter fence inside", "````bash\nE=5\n```\nE=6\n````\n", ["E=5\n```\nE=6"]),
+            # Trailing text after a fence means it is not a closing fence at all.
+            (
+                "trailing text after a fence",
+                "```bash\nF=7\n``` no\nF=8\n```\n",
+                ["F=7\n``` no\nF=8"],
+            ),
+            ("a label that is not a shell", "```python\nH=9\n```\n", []),
+        ]
+        for name, markdown, expected in cases:
+            with self.subTest(case=name):
+                self.assertEqual(expected, shell_blocks(markdown))
+        # An opener with no close is a malformed document rather than an empty result.
+        with self.assertRaises(AssertionError):
+            shell_blocks("```bash\nI=10\n")
+
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
 
@@ -428,12 +492,9 @@ class ReleaseGuardCase(unittest.TestCase):
         those sat in a `shell`-labeled block.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        blocks = re.findall(
-            r"^ *```(?:bash|sh|shell)\n(.*?)^ *```", audit, re.DOTALL | re.MULTILINE
-        )
+        blocks = shell_blocks(audit)
         self.assertTrue(blocks, "AUDIT.md carries no shell block")
-        for block in blocks:
-            source = "\n".join(line.removeprefix("  ") for line in block.splitlines())
+        for source in blocks:
             with self.subTest(block=source.splitlines()[0][:60]):
                 parsed = run(
                     ["bash", "-n", "-c", source],
