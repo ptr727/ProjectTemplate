@@ -98,14 +98,22 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
                 f"line {number} does not close the block opened at line {opened_at}"
             )
         indent = len(opener.group("indent"))
+        # A renderer strips up to the opener's indent from each body line, expanding a tab first.
+        # A line carrying less than that ends the container, and so ends the block itself.
+        # Both need the container this scan refuses to reason about.
+        # A body line not simply carrying the indent in spaces is refused rather than guessed at.
+        # A blank line carries no indent to check and keeps whatever sits past the opener's.
+        for offset, line in enumerate(body):
+            if line.strip() and line[:indent] != " " * indent:
+                raise AssertionError(
+                    f"line {opened_at + 1 + offset} is indented less than the block's opener"
+                )
         words = opener.group("info").split()
         blocks.append(
             FencedBlock(
                 opened_at,
                 words[0] if words else "",
-                "\n".join(
-                    line[indent:] if line[:indent] == " " * indent else line for line in body
-                ),
+                "\n".join(line[indent:] for line in body),
             )
         )
         opener = None
@@ -563,26 +571,10 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a closer three spaces in", "```bash\nD=5\n   ```\n", ["D=5"]),
             ("an info string with attributes", '```bash title="x"\nH=11\n```\n', ["H=11"]),
             ("a mixed-case label", "```Bash\nI=12\n```\n", ["I=12"]),
-            (
-                "a body line shorter than the indent",
-                "  ```bash\nJ=13\n  J=14\n  ```\n",
-                ["J=13\nJ=14"],
-            ),
-            # A body line indented less than its opener keeps what it has.
-            # Slicing it blindly would eat a character of the body.
-            (
-                "a body line indented partway",
-                "- x\n\n  ```bash\n  J=15\n J=16\n  ```\n",
-                ["J=15\n J=16"],
-            ),
-            # Only a space carries an indent.
-            # A renderer keeps every other blank-looking character as part of the body.
-            (
-                "a body line opening on a no-break space",
-                "  ```bash\n\u00a0\u00a0J=17\n  ```\n",
-                ["\u00a0\u00a0J=17"],
-            ),
             ("an empty block", "```bash\n```\n", [""]),
+            # A blank body line carries no indent to check and keeps what sits past the opener's.
+            ("a whitespace-only body line", "  ```bash\n  A\n    \n  B\n  ```\n", ["A\n  \nB"]),
+            ("an empty body line", "  ```bash\n  A\n\n  B\n  ```\n", ["A\n\nB"]),
             ("a label that is not a shell", "```python\nK=15\n```\n", []),
             ("a label merely starting with one", "```shell-session\n$ x\n```\n", []),
             ("an info string of only spaces", "```   \nK=18\n```\n", []),
@@ -621,6 +613,15 @@ class ReleaseGuardCase(unittest.TestCase):
             ("trailing text on the closer", "```bash\nM=11\n``` no\n"),
             ("a fence indented past the bound inside a body", "```bash\nM=12\n    ```\n"),
             ("an unterminated block", "padding\n\n```bash\nM=13\n"),
+            # A renderer strips up to the opener's indent.
+            # It ends the container on a line carrying less than that.
+            # Such a line is not this block's body as printed.
+            ("a body line indented partway", "- x\n\n  ```bash\n  M=14\n M=15\n  ```\n"),
+            ("a body line at column zero", "- x\n\n  ```bash\n  M=16\nM=17\n  ```\n"),
+            ("a tab where the indent should be", "  ```bash\n  M=18\n\tM=19\n  ```\n"),
+            # Only a space carries an indent.
+            # A merely blank-looking character is not one, so the line is not the body as printed.
+            ("a body line opening on a no-break space", "  ```bash\n\u00a0\u00a0M=20\n  ```\n"),
         ]
         for name, markdown in refused:
             with self.subTest(refused=name), self.assertRaises(AssertionError):
