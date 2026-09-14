@@ -43,16 +43,17 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     blocks it contains.
 
     A line is refused unless the fence run is the whole of it bar up to three leading spaces
-    and an info string carrying no backtick or tilde. Reading one
+    and an info string carrying no backtick or tilde. Reading a line it refuses
     needs the container it sits in, since a renderer measures a fence's indent against its list
     item's content column and takes four spaces past that as an indented code block instead, and
     a scan that guesses at the container reads a block a renderer does not or misses one it
     does. Refusing instead makes a shape this cannot read fail loudly rather than go unchecked,
     which is the whole reason the scan exists, and widening it is a deliberate edit here.
 
-    Being a plain fence line is necessary and not sufficient, so some legal Markdown is refused
-    too, a fence under a second list level and a shorter fence inside a longer one among it.
-    No document here uses any of it.
+    Some legal Markdown is refused: a fence under a second list level, whose content column
+    puts it past the three-space bound, and a shorter fence inside a longer one, which is a
+    plain fence line and still not this block's close. No document here uses either today,
+    and only `AUDIT.md` is under test, so that stays true by convention rather than by check.
 
     One container case is left rather than refused. An HTML block holding an odd number of
     fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
@@ -118,9 +119,9 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
                     f"line {opened_at + 1 + offset} is indented less than the block's opener"
                 )
         # A renderer takes the label as the info string's first word.
-        # Python strips wider whitespace than a renderer does, either side of the token.
-        # Where a renderer's first word is a label, only spaces and tabs precede it, which
-        # Python strips too, so this can read a label a renderer does not and never miss one.
+        # Every character a renderer calls whitespace is whitespace to Python too.
+        # Python calls more of them that.
+        # So this can read a label a renderer does not, and never miss one it does.
         # An over-read adds a block to the parse, where a missed label would drop one from it.
         words = opener.group("info").split()  # any-whitespace: over-reads only, see above
         blocks.append(
@@ -143,7 +144,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 BARE_PREDICATE = re.compile(r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![\"'])")
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
-# Only the `\\s` spelling is reached, not `\\S` or a set built from either
+# Only the `\s` spelling is reached, not `\S` or a set built from either
 # (ptr727/ProjectTemplate#1618).
 WIDE_CLASS = re.compile(r"\\s")
 
@@ -586,8 +587,9 @@ class ReleaseGuardCase(unittest.TestCase):
         r"""The block scanner names the characters it calls whitespace, everywhere.
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
-        content. Five silent defects in this scanner were one bare predicate each, and each was
-        written by someone fixing the previous one, so the rule is worth more than the fixes.
+        content. Five silent defects in this scanner were one bare predicate each, two of them
+        written with it and three while fixing an earlier one, so the rule is worth more than
+        the fixes.
         A comparison needing a wider class than the characters it names states that inline and
         says why, and the exemptions are counted so a second cannot be added quietly.
 
@@ -706,14 +708,17 @@ class ReleaseGuardCase(unittest.TestCase):
             ("four spaces in", "Para.\n\n    ```bash\n    M=5\n    ```\n"),
             ("a fence run mid-line", "text ```bash text\nM=6\n```\n"),
             # A body quoting a fence is the refusal an author here is likeliest to reach.
-            # A scan taking it for content would read the rest of the document as body.
+            # Whether such a line is content or a close needs the container to decide.
+            # This refuses rather than choosing, as it does everywhere else.
             (
                 "a fence run inside an open block",
                 "```bash\nprintf '%s' '```bash'\nM=6b\n```\n",
             ),
             # A fence run is one character repeated.
-            # A mixed run opens nothing.
-            # A scan reading it as one would close it too, taking in a block with no fence in it.
+            # Here the run is the backticks and the tildes are its info string.
+            # That info string carries a tilde, so the line is refused.
+            # A scan reading the whole as one run takes a different body from the same document.
+            # The tildes would then have to be matched to close it.
             ("a mixed fence run", "```~~~\nM=6c\n```~~~\n"),
             ("a backtick in the info string", "```bash `x`\nM=7\n```\n"),
             ("a tilde in a backtick fence's info", "```bash ~x\nM=7b\n```\n"),
