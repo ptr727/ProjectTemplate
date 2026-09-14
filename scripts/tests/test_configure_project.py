@@ -339,7 +339,8 @@ class WiringCase(unittest.TestCase):
     belongs to never runs, which is what these pin. A test of cmd_apply's pre-flight lifts
     that region and calls it from a synthesized body, so an arm reached before the writes
     is tested without stubbing them, and a test of a whole function lifts it and stubs
-    every group and every command beside the one under test. No count is given here,
+    everything it calls, so what is under test is the call site rather than any group it
+    names. No count is given here,
     because a count goes stale as a case is added and the class itself is what says how
     many there are.
     """
@@ -508,8 +509,9 @@ class CheckGroupCase(unittest.TestCase):
     def test_a_link_list_that_cannot_be_counted_fails_rather_than_printing_nothing(self) -> None:
         """An unguarded count aborts the group, so the run skips every group after it.
 
-        Under the options configure.sh sets, the failing command substitution ends check_project
-        where the guard fails it, which is what the guard's own comment in the script says.
+        Under the options configure.sh sets, an unguarded substitution that fails ends the
+        function where it stands, so the groups after it never run and the run reports no
+        verdict of its own.
         """
         result = self.harness([PROJECT_ID], live="not json at all")
         self.assertIn("could not count the repository's other project links", result.stdout)
