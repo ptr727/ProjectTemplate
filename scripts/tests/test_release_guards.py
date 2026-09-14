@@ -141,19 +141,22 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
 # A call whose argument does not open with a quote is taken as unnamed, which over-reaches.
 # A string literal opening the argument list names the characters.
-# It does so written positionally or by keyword, and whatever prefix it carries.
-# Two characters is every prefix Python has, and three letters before a quote do not compile.
+# It does so written positionally or by keyword.
+# A byte, raw or unicode prefix leaves the characters written out.
+# Two of those is every combination the grammar defines.
+# An f-string or a t-string is not admitted, since what it interpolates is not written here.
 # Whitespace before it is stepped over inside the lookahead, where it cannot reach the quote.
 # Whitespace before the parenthesis is not stepped over.
 # The scanned functions' comments are read too, so a sentence naming a method would read as one.
 # What that misses is a call spaced before its parenthesis or after its dot.
-# `ruff format` rewrites both on every commit and CI checks it, so neither reaches a review.
+# CI runs `ruff format --check`, and a clone with the hooks path set fails the commit.
+# So neither spelling reaches a review.
 # A named constant passed by name reads the same here as no argument at all.
 # The conservative direction is the right one.
 # Its cost is a comment, where the alternative is the class of defect this exists to stop.
 BARE_PREDICATE = re.compile(
     r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)"
-    r"\((?![ \t]*(?:\w+[ \t]*=[ \t]*)?[A-Za-z]{0,2}[\"'])"
+    r"\((?![ \t]*(?:\w+[ \t]*=[ \t]*)?[bBrRuU]{0,2}[\"'])"
 )
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
@@ -646,10 +649,13 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(([], 0), bare_whitespace_predicates("    # the split() of an info string"))
         # A prefix does not stop a literal naming its characters.
         self.assertEqual(([], 0), bare_whitespace_predicates('    return data.strip(b" \\t")'))
-        # A name is not a literal, so a variable argument is still unnamed.
+        # Two letters is the longest prefix, and either case spells it.
+        self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip(rb" ")'))
+        self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip(B" ")'))
+        # An f-string names nothing, whatever it interpolates.
         self.assertEqual(
-            (["return line.strip(sep)"], 0),
-            bare_whitespace_predicates("    return line.strip(sep)"),
+            (['return line.strip(f" {ws}")'], 0),
+            bare_whitespace_predicates('    return line.strip(f" {ws}")'),
         )
         # A sentence naming a method is prose, not a call, and this file's comments are read.
         self.assertEqual(
