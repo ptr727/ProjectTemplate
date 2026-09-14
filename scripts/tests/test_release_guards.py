@@ -74,7 +74,8 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     since writing the next comparison bare is how each of those arrived.
     """
     blocks: list[FencedBlock] = []
-    # A renderer ends a line on a carriage return, alone or paired, and on nothing else.
+    # A renderer ends a line on a newline, and on a carriage return alone or paired.
+    # It ends one on nothing else.
     # `str.splitlines` also breaks on separators a renderer keeps as text.
     # The rejoin below would then hand back a line ending the document never carried.
     # Splitting on the newline alone drops the other way, reading a lone return as text.
@@ -142,11 +143,16 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 BARE_PREDICATE = re.compile(r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![\"'])")
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
+# Only the `\\s` spelling is reached, not `\\S` or a set built from either
+# (ptr727/ProjectTemplate#1618).
 WIDE_CLASS = re.compile(r"\\s")
 
 
 def bare_whitespace_predicates(source: str) -> tuple[list[str], int]:
-    """The lines of `source` taking Python's whitespace class, and how many are marked exempt."""
+    """Unmarked lines of `source` taking Python's whitespace class, and the count of marked ones.
+
+    The count is of predicates rather than lines, since two on one line are two decisions.
+    """
     offenders: list[str] = []
     exempt = 0
     for line in source.split("\n"):
@@ -617,6 +623,11 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(
             ([], 1), bare_whitespace_predicates("    x = y.split()  # any-whitespace:")
         )
+        # The marker's colon is load-bearing, since the word alone appears in ordinary prose.
+        self.assertEqual(
+            (["x = y.split()  # any-whitespace"], 0),
+            bare_whitespace_predicates("    x = y.split()  # any-whitespace"),
+        )
         # Exemptions are counted per predicate, so two on one line cannot pass as one.
         self.assertEqual(
             ([], 2),
@@ -677,6 +688,8 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a label merely starting with one", "```shell-session\n$ x\n```\n", []),
             ("an info string of only spaces", "```   \nK=18\n```\n", []),
             ("an inline code span", "Run `bash` now.\n", []),
+            # A run of mixed characters is not a fence run at all, so a body may carry one.
+            ("a body mixing both fence characters", "```bash\nC=14=`~`\n```\n", ["C=14=`~`"]),
             ("two blocks back to back", "```bash\nL=1\n```\n```sh\nL=2\n```\n", ["L=1", "L=2"]),
         ]
         for name, markdown, expected in read:
@@ -692,6 +705,16 @@ class ReleaseGuardCase(unittest.TestCase):
             ("behind a tab", "\t```bash\nM=4\n\t```\n"),
             ("four spaces in", "Para.\n\n    ```bash\n    M=5\n    ```\n"),
             ("a fence run mid-line", "text ```bash text\nM=6\n```\n"),
+            # A body quoting a fence is the refusal an author here is likeliest to reach.
+            # A scan taking it for content would read the rest of the document as body.
+            (
+                "a fence run inside an open block",
+                "```bash\nprintf '%s' '```bash'\nM=6b\n```\n",
+            ),
+            # A fence run is one character repeated.
+            # A mixed run opens nothing.
+            # A scan reading it as one would close it too, taking in a block with no fence in it.
+            ("a mixed fence run", "```~~~\nM=6c\n```~~~\n"),
             ("a backtick in the info string", "```bash `x`\nM=7\n```\n"),
             ("a tilde in a backtick fence's info", "```bash ~x\nM=7b\n```\n"),
             ("a tilde fence in a blockquote", "> ~~~bash\n> M=7c\n> ~~~\n"),
