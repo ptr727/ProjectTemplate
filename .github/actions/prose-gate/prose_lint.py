@@ -197,12 +197,81 @@ def diff_header_path(field: str) -> str | None:
 
     A header naming no `b/` path adds nothing to scope, which is how a deletion's `/dev/null`
     leaves the caller with no file to credit the hunk that follows it.
+
+    Git appends a literal tab to mark where a path holding a space ends, quoted or not, and
+    escapes a literal tab inside the name itself as `\\t` rather than ever emitting it raw. A
+    tab in the field is therefore always that terminator, so the field is truncated at its first
+    tab before the quoting check runs, letting a spaced name reach this decode the same as one
+    with no space in it.
     """
+    tab = field.find("\t")
+    if tab != -1:
+        field = field[:tab]
     if field.startswith('"') and field.endswith('"') and len(field) > 1:
         # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
         unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
         field = unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
     return field[2:] if field.startswith("b/") else None
+
+
+def undiffable_paths(base: str, root: Path) -> set[str] | None:
+    """Repository-relative paths, `-C root` diffed against `base`, that git declines to diff.
+
+    `git diff --numstat` reports `-` for both the added and removed counts on a path it treats as
+    binary, whether genuinely binary or marked `-diff`, and in patch mode emits no `+++` header
+    for such a path at all, only a `Binary files ... differ` prose line naming it. That prose
+    joins the two paths with " and ", so a name holding that exact substring cannot be split back
+    into its two paths without guessing, and a name a shell would quote fares no better either.
+    `-z` sidesteps both problems: every path arrives NUL-terminated and never quoted, whatever
+    bytes it holds, so nothing here needs decoding beyond the raw diff output itself.
+
+    A renamed or copied path's own record carries no path at all, an empty field where one
+    normally sits, and the old and new paths follow as two further NUL-terminated fields in that
+    order. The new path is the one kept, since that is where the working tree holds the file now.
+
+    None if git fails, the same failure `changed_lines` already handles for its own invocation.
+    """
+    try:
+        raw = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "diff",
+                "--numstat",
+                "-z",
+                # Matches the main invocation's own guards, so the two agree on what is binary.
+                "--no-ext-diff",
+                "--no-textconv",
+                base,
+                "--",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    fields = raw.decode("utf-8", "surrogateescape").split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    paths: set[str] = set()
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        added, _, rest = record.partition("\t")
+        removed, _, path = rest.partition("\t")
+        if not path:
+            # A rename's two trailing fields are the old path and the new one, in that order.
+            # A stream ending between them is refused rather than parsed on, since dropping the records after it would under-report exactly the paths this function exists to name.
+            if i + 1 >= len(fields):
+                return None
+            i += 1  # the old path, unused since the new path is where the content now lives
+            path = fields[i]
+            i += 1
+        if added == "-" and removed == "-":
+            paths.add(path)
+    return paths
 
 
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
@@ -217,9 +286,29 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
 
     A name git quotes even with `core.quotePath=false`, one holding a quote, a backslash, or a
     control character, is unquoted here rather than left to miss the same way.
+
+    Captured as bytes and decoded explicitly rather than read in text mode, since text mode's
+    universal-newline translation turns a lone `\\r` inside added content into a line break of
+    its own, letting one added line forge a second `+++` or `@@` header the parse below then acts on.
+
+    A `+++` header naming a path that exists in the working tree and that `is_text` rejects
+    builds no entry for it. A `diff` attribute can force git to treat a genuinely binary file as
+    text, emitting that header and a full range of hunks for it the same as for a text file, and
+    `discover` and `unread_diff_files` both drop such a path later regardless, so the verdict does
+    not change, but the line numbers would otherwise have already been accumulated for a file
+    this gate can never read. A path that does not exist in the working tree is left in scope
+    rather than dropped, so a deleted or otherwise unreadable file this gate could still credit
+    before this check keeps being credited.
+
+    Without `--text`, git reports no `+++` header at all for a path it declines to diff, a real
+    binary or one a `-diff` attribute marks the same way, so no hunk ever adds it to `out` through
+    the loop below. `undiffable_paths` names those paths from a second invocation, and `is_text`
+    then tells apart the two reasons git could have declined one: a `-diff` attribute on a file
+    that reads as text, which is credited in full since no hunk will describe its lines, and a
+    file that is genuinely binary, which is left out of the map.
     """
     try:
-        d = subprocess.run(
+        raw = subprocess.run(
             [
                 "git",
                 "-C",
@@ -231,33 +320,64 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
                 "core.quotePath=true",
                 "diff",
                 "--unified=0",
+                # Outranks diff.interHunkContext, whose nonzero host default merges nearby hunks and pulls the unchanged lines between them into scope.
+                "--inter-hunk-context=0",
                 "--no-color",
                 "--ignore-cr-at-eol",
+                # `--src-prefix=a/` pins diff.srcPrefix for symmetry with the dst side and has no parse consequence, since only `+++` is read.
+                "--src-prefix=a/",
+                # Pins diff.dstPrefix, and outruns diff.noprefix and diff.mnemonicPrefix, so `+++` keeps naming a `b/` this parse keys on.
+                "--dst-prefix=b/",
+                # Bypasses diff.external, which would otherwise replace the parsed body with an arbitrary command's output.
+                "--no-ext-diff",
+                # Disables textconv, on by default for a porcelain diff, whose driver can shift every line number this parse reads.
+                "--no-textconv",
                 base,
                 "--",
             ],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
             check=True,
         ).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+    undiffable = undiffable_paths(base, root)
+    if undiffable is None:
+        return None
+    d = raw.decode("utf-8", "surrogateescape")
     out: dict[str, set[int]] = {}
     cur = None
+    # A `+++` or `@@` line is honored only while it opens the block a `diff --git` line just started.
+    # Content can never open a line with `diff --git `, so it can never forge that opening either.
+    in_header = False
     for line in d.split("\n"):
-        if line.startswith("+++ "):
+        if line.startswith("diff --git "):
+            in_header = True
+            cur = None
+            continue
+        if in_header and line.startswith("+++ "):
+            in_header = False
             cur = diff_header_path(line[4:])
             if cur is None:
                 continue
+            target = root / cur
+            if target.is_file() and not is_text(target):
+                # A `diff` attribute can force git to emit a full patch for a genuinely binary file, so this stays reachable even though most binaries never reach `+++` at all now.
+                # Dropped here rather than left as an empty entry, since `discover` and `unread_diff_files` would drop it later anyway.
+                cur = None
+                continue
             out.setdefault(cur, set())
         elif line.startswith("@@") and cur:
+            in_header = False
             m = re.search(r"\+(\d+)(?:,(\d+))?", line)
             if m:
                 start = int(m.group(1))
                 count = int(m.group(2) or 1)
                 out[cur].update(range(start, start + count))
+    for path in undiffable:
+        target = root / path
+        if is_text(target):
+            # No hunk will describe this path, since git declined to diff it, so credit it whole.
+            out[path] = all_lines(target)
     for name in untracked_paths(root):
         target = root / name
         if is_text(target):
