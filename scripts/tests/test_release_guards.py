@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from subprocess import run
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -18,39 +19,66 @@ REPO = Path(__file__).resolve().parents[2]
 SHELL_LABELS = ("bash", "sh", "shell")
 
 
-def shell_blocks(markdown: str) -> list[str]:
-    """Every fenced shell block in `markdown`, dedented out of whatever list item holds it.
+class FencedBlock(NamedTuple):
+    """One fenced code block: the 1-based line its opener sits on, its label, and its body."""
+
+    line: int
+    label: str
+    body: str
+
+
+def fenced_blocks(markdown: str) -> list[FencedBlock]:
+    """Every fenced code block in `markdown`, dedented out of whatever list item holds it.
+
+    Every fence is recognised and the label is filtered afterwards, rather than recognising
+    only fences whose label the caller wants. A scanner that skips an unwanted opener walks
+    into its body, so a block illustrating Markdown hands out the blocks it contains.
 
     CommonMark lets a fence run longer than three characters and use `~` as well as a backtick,
-    and it closes only on a fence of the same character that is at least as long and carries
-    nothing after it. A fixed three-backtick pattern therefore skips a longer block silently,
-    which is the one outcome a guard over "every shell block" must not have, and a closing
-    pattern that tolerates trailing text can end a block early and test half of it.
+    closes only on a fence of the same character that is at least as long carrying nothing after
+    it, and takes the label from the first word of the info string. A fixed three-backtick
+    pattern therefore skips a longer block silently, which is the one outcome a guard over
+    "every block" must not have, and a closing pattern tolerating trailing text ends a block
+    early and reads half of it.
     """
-    blocks: list[str] = []
+    blocks: list[FencedBlock] = []
     lines = markdown.splitlines()
     index = 0
     while index < len(lines):
-        opener = re.match(
-            r"^(?P<indent> *)(?P<fence>`{3,}|~{3,})(?P<label>[A-Za-z0-9_-]*) *$", lines[index]
-        )
+        opener = re.match(r"^(?P<indent> *)(?P<fence>`{3,}|~{3,})(?P<info>.*)$", lines[index])
         index += 1
-        if not opener or opener.group("label").lower() not in SHELL_LABELS:
+        if not opener:
             continue
         fence = opener.group("fence")
+        # A backtick fence's info string may hold no backtick, which is what keeps a lone
+        # `` `code` `` span in prose from reading as an opener.
+        info = opener.group("info")
+        if fence[0] == "`" and "`" in info:
+            continue
+        start = index
         closer = re.compile(rf"^ *{re.escape(fence[0])}{{{len(fence)},}} *$")
         body: list[str] = []
         while index < len(lines) and not closer.match(lines[index]):
             body.append(lines[index])
             index += 1
         if index >= len(lines):
-            raise AssertionError(f"unterminated {fence} block opened at line {index}")
+            raise AssertionError(f"unterminated {fence} block opened at line {start}")
         index += 1
         indent = len(opener.group("indent"))
+        label = info.split(maxsplit=1)[0] if info.split() else ""
         blocks.append(
-            "\n".join(line[indent:] if line[:indent].isspace() else line for line in body)
+            FencedBlock(
+                start,
+                label,
+                "\n".join(line[indent:] if line[:indent].isspace() else line for line in body),
+            )
         )
     return blocks
+
+
+def shell_blocks(markdown: str) -> list[str]:
+    """The body of every fenced block in `markdown` whose label names a shell."""
+    return [b.body for b in fenced_blocks(markdown) if b.label.lower() in SHELL_LABELS]
 
 
 def fenced_bash_block(markdown: str, marker: str) -> str:
@@ -454,32 +482,56 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_shell_block_extractor_reads_every_fence_shape(self) -> None:
         """A block the extractor skips is a block the guard silently never tests.
 
-        The pattern this replaced required exactly three backticks and accepted a closing
-        fence with trailing text, so a CommonMark-legal longer fence returned nothing and a
-        `` ``` `` inside a longer block ended it early. Both shapes are legal Markdown that
-        renders identically, so neither would look wrong in review.
+        Each case pins one rule, and every rule the extractor states is pinned by one, since a
+        rule no case exercises can be dropped without any test noticing. The pattern this
+        replaced failed the longer-fence, tilde, shorter-fence-inside and trailing-text cases.
         """
         cases = [
             ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
             ("a longer fence", "````bash\nB=2\n````\n", ["B=2"]),
             ("a tilde fence", "~~~sh\nC=3\n~~~\n", ["C=3"]),
-            ("indented in a list item", "  ```shell\n  D=4\n  ```\n", ["D=4"]),
+            ("a four-space indent", "    ```shell\n    D=4\n    ```\n", ["D=4"]),
+            # The close must match the opener's character, not merely be some fence.
+            (
+                "a backtick line inside a tilde fence",
+                "~~~sh\nE=5\n```\nE=6\n~~~\n",
+                ["E=5\n```\nE=6"],
+            ),
             # A shorter fence inside a longer one is content, not a close.
-            ("a shorter fence inside", "````bash\nE=5\n```\nE=6\n````\n", ["E=5\n```\nE=6"]),
+            ("a shorter fence inside", "````bash\nF=7\n```\nF=8\n````\n", ["F=7\n```\nF=8"]),
             # Trailing text after a fence means it is not a closing fence at all.
             (
                 "trailing text after a fence",
-                "```bash\nF=7\n``` no\nF=8\n```\n",
-                ["F=7\n``` no\nF=8"],
+                "```bash\nG=9\n``` no\nG=10\n```\n",
+                ["G=9\n``` no\nG=10"],
             ),
-            ("a label that is not a shell", "```python\nH=9\n```\n", []),
+            # CommonMark takes the label from the first word of the info string.
+            ("an info string with attributes", '```bash title="x"\nH=11\n```\n', ["H=11"]),
+            ("a mixed-case label", "```Bash\nI=12\n```\n", ["I=12"]),
+            # A body line shorter than the opener's indent is left alone rather than sliced.
+            (
+                "a body line shorter than the indent",
+                "  ```bash\nJ=13\n  J=14\n  ```\n",
+                ["J=13\nJ=14"],
+            ),
+            ("a label that is not a shell", "```python\nK=15\n```\n", []),
+            # A block illustrating Markdown must not hand out the blocks inside it.
+            (
+                "a shell fence inside a non-shell block",
+                "````markdown\n```bash\nL=16\n```\n````\n",
+                [],
+            ),
+            # A code span in prose is not an opener.
+            ("an inline code span", "Run `bash` now.\n", []),
         ]
         for name, markdown, expected in cases:
             with self.subTest(case=name):
                 self.assertEqual(expected, shell_blocks(markdown))
         # An opener with no close is a malformed document rather than an empty result.
-        with self.assertRaises(AssertionError):
-            shell_blocks("```bash\nI=10\n")
+        # The message names the opener rather than the end of the file it was detected at.
+        with self.assertRaises(AssertionError) as unterminated:
+            shell_blocks("padding\n\n```bash\nM=17\nM=18\n")
+        self.assertIn("line 3", str(unterminated.exception))
 
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
@@ -495,7 +547,9 @@ class ReleaseGuardCase(unittest.TestCase):
         blocks = shell_blocks(audit)
         self.assertTrue(blocks, "AUDIT.md carries no shell block")
         for source in blocks:
-            with self.subTest(block=source.splitlines()[0][:60]):
+            # An empty block has no first line to name.
+            # Naming the subTest must not be what fails when the document is what is wrong.
+            with self.subTest(block=(source.splitlines() or [""])[0][:60]):
                 parsed = run(
                     ["bash", "-n", "-c", source],
                     check=False,
@@ -772,27 +826,14 @@ gh() {
         self.assertIn("got: %25", verdict.stdout + verdict.stderr)
 
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
-        audit_lines = (REPO / "AUDIT.md").read_text(encoding="utf-8").splitlines()
+        audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
         bash_only = ("<(", "<<<", "$'", "[[")
-        mislabeled = []
-        fence_label = ""
-        fence_start = 0
-        fence_lines: list[str] = []
-
-        for number, line in enumerate(audit_lines, start=1):
-            stripped = line.strip()
-            if not fence_label and stripped.startswith("```"):
-                fence_label = stripped.removeprefix("```").split(maxsplit=1)[0]
-                fence_start = number
-            elif fence_label and stripped == "```":
-                if fence_label in {"sh", "shell"} and any(
-                    token in "\n".join(fence_lines) for token in bash_only
-                ):
-                    mislabeled.append((fence_start, fence_label))
-                fence_label = ""
-                fence_lines = []
-            elif fence_label:
-                fence_lines.append(line)
+        mislabeled = [
+            (block.line, block.label)
+            for block in fenced_blocks(audit)
+            if block.label.lower() in {"sh", "shell"}
+            and any(token in block.body for token in bash_only)
+        ]
 
         self.assertEqual([], mislabeled)
 
