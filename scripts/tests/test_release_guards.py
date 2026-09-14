@@ -45,9 +45,19 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     needs the container it sits in, since a renderer measures a fence's indent against its list
     item's content column and takes four spaces past that as an indented code block instead, and
     a scan that guesses at the container reads a block a renderer does not or misses one it
-    does. Every fence-run line in this fleet's documents is already a plain fence line, so the
-    rule costs nothing today and makes the shapes this scan cannot read fail loudly rather than
-    silently, which is the whole reason the scan exists. Widening it is a deliberate edit here.
+    does. Refusing instead makes a shape this cannot read fail loudly rather than go unchecked,
+    which is the whole reason the scan exists, and widening it is a deliberate edit here.
+
+    Being a plain fence line is necessary and not sufficient, so this refuses two legal shapes:
+    a fence under a second list level, whose content column is four, and a shorter fence inside
+    a longer one, which is how Markdown is shown in Markdown. No document here uses either.
+
+    One divergence is left rather than refused, because closing it would need the container
+    reasoning above. A fence inside an HTML block, which this repository's Markdown linter
+    allows for a `details` collapsible, is raw HTML to a renderer and a block to this scan. It
+    is one-way: an opener consumed as a closer always raises on its info string, so the scan can
+    invent a block a reader never sees and cannot miss one that is there. A phantom block fails
+    loudly under the parse this feeds, where a missed one would pass in silence.
     """
     blocks: list[FencedBlock] = []
     # Split on newlines alone.
@@ -94,7 +104,7 @@ def shell_blocks(markdown: str) -> list[str]:
     return [b.body for b in fenced_blocks(markdown) if b.label.lower() in SHELL_LABELS]
 
 
-def fenced_bash_block(markdown: str, marker: str) -> str:
+def fenced_shell_block(markdown: str, marker: str) -> str:
     """The one fenced shell block in `markdown` containing `marker`.
 
     Anchoring on what a block is about rather than on a variable name inside it keeps this
@@ -507,6 +517,12 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a closer longer than its opener", "```bash\nB=3\n````\n", ["B=3"]),
             ("a tilde fence", "~~~sh\nC=3\n~~~\n", ["C=3"]),
             ("a longer tilde fence", "~~~~sh\nC=4\n~~~~\n", ["C=4"]),
+            # Two backticks are a code span's delimiter, not a fence, so this opens nothing.
+            ("a two-backtick run", "``bash\nC=5\n``\n", []),
+            # Whitespace after a closing fence is not text after it, so the block still closes.
+            ("trailing space on the closer", "```bash\nC=8\n``` \n", ["C=8"]),
+            # A separator a renderer treats as text must not come back as a line ending.
+            ("a line separator inside a body", "```bash\nC=6\u2028C=7\n```\n", ["C=6\u2028C=7"]),
             ("indented inside a list item", "- x\n\n  ```shell\n  D=4\n  ```\n", ["D=4"]),
             ("a closer three spaces in", "```bash\nD=5\n   ```\n", ["D=5"]),
             ("an info string with attributes", '```bash title="x"\nH=11\n```\n', ["H=11"]),
@@ -569,11 +585,11 @@ class ReleaseGuardCase(unittest.TestCase):
         # The single-block helper resolves exactly one block.
         # A rename leaving none and an edit leaving two each stop it testing what it names.
         two = "```bash\nmarker A\n```\n\n```sh\nmarker B\n```\n"
-        self.assertEqual("marker A", fenced_bash_block("```bash\nmarker A\n```\n", "marker"))
+        self.assertEqual("marker A", fenced_shell_block("```bash\nmarker A\n```\n", "marker"))
         with self.assertRaises(AssertionError):
-            fenced_bash_block(two, "marker")
+            fenced_shell_block(two, "marker")
         with self.assertRaises(AssertionError):
-            fenced_bash_block("```bash\nnothing\n```\n", "marker")
+            fenced_shell_block("```bash\nnothing\n```\n", "marker")
 
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
@@ -609,7 +625,7 @@ class ReleaseGuardCase(unittest.TestCase):
         can tell from a real finding.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        probe = fenced_bash_block(audit, "package-ecosystem").replace(
+        probe = fenced_shell_block(audit, "package-ecosystem").replace(
             'repo="<owner>/<repo>"', "repo=owner/name"
         )
         fake_api = r"""
