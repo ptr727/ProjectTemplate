@@ -875,11 +875,11 @@
     },
     {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
-      "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
+      "digest": "sha256:6f1eb4aa366fae200daa13c5c3892116c06ca7106cd0e81825036514b3649bf4",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "findings": 12,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T14:38:06Z"
     },
     {
       "unit": "AUDIT.md > 3. Applicability Gate",
@@ -907,11 +907,11 @@
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
-      "digest": "sha256:6452d1390c89cfe4142629e474f23f093f5aeb9953d04f8343fed03acc46548a",
+      "digest": "sha256:6e99736264ac2e34b719c070b265b6f290288c23e67114b65dc5e54fbfee535f",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "55c2485adbe000082c98abaa21f6bb3835676689",
-      "stamp": "2026-09-14T04:05:18Z"
+      "findings": 12,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T15:02:13Z"
     },
     {
       "unit": "CODESTYLE.md > .NET",

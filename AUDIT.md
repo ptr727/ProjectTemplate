@@ -100,16 +100,17 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
 
 - **General settings, the registry description, labels, rulesets, the Dependabot security features, the fleet project link, and deployment environments** - fetch the hub and check out `main`. Run `repo-config/configure.sh check <owner>/<repo> release|operational` from that checkout. Pass the target repository and its registry `workflowModel` explicitly. The token needs project access as well as the admin the ruleset endpoints require, since a token without it cannot read the project link and the command reports that group as failing rather than as clean, and the command's own error names the scope to grant. The host needs a runnable `py -3` or `python3` too, since a run against a hub checkout resolves the registry description through [`spec/resolve_description.py`][resolve-description] and exits before the first check when neither interpreter answers. The command checks what `configure.sh apply` writes: the declared settings, the derived settings and the registry description, the declared labels, the Dependabot security features, the shared `main` ruleset, the `develop` ruleset the model selects, and the link to the fleet project the hub declares. It reports the live `bypass_actors` list without asserting it, because bypass authority is a per-repository human decision. It also checks one group apply never writes, the deployment environments the registry's `environments` declares for the repo: each one exists, its deployment-branch policy is the form declared, and under a `custom` policy the entries it allows are exactly the declared branches, so anything added by hand reads as drift. An environment the registry declares nothing about is reported rather than asserted, since GitHub creates some on its own. Neither this command nor the **Secrets** bullet below queries an environment's own secret and variable stores, where the API exposes a secret's name but not its value and a variable's name and value both, so a clean run says nothing about whether an environment holds what a deploy needs.
 
-- **Secrets** - from the same hub checkout, run [`spec/audit.py`][audit-runner] `[RepoName]` and read its Secrets section. That argument is the registry entry name rather than the `<owner>/<repo>` form `configure.sh` takes, and an `<owner>/<repo>` argument prints `Not cataloged` and exits 2. It resolves the required set from the hub's own [`spec/secrets.json`][secrets] plus the registry entry's `publish[]`/`types[]`/`requiredSecrets[]`, reading the Actions store and, for every mechanism whose `stores` list in that file includes `dependabot`, the Dependabot store too. It reports three things: a required name missing from a store, a forbidden name present in either store, and a configured name no applicable mechanism claims. Names are read, never values.
+- **Secrets** - from the same hub checkout, run [`spec/audit.py`][audit-runner] `[RepoName]` and read the findings it prints with a `secrets:` prefix. That argument is the registry entry name rather than the `<owner>/<repo>` form `configure.sh` takes, and an `<owner>/<repo>` argument prints `Not cataloged` and exits 2. The runner reads both the Actions and the Dependabot store on every repo, and a token that cannot read either one fails that repo's whole run with an error rather than reporting names as missing. It resolves what each store must hold from the hub's own [`spec/secrets.json`][secrets] plus the registry entry's `publish[]`/`types[]`/`requiredSecrets[]`. That file's `baseline` requires its names in both stores for every fleet repo, and a mechanism adds to a store only where the mechanism's own `stores` list names that store. A declared type claims nothing where the entry's profile for it reads `lint-only`, and claims no coverage token where the tree carries no tests for it, so a repo declaring a language can still owe nothing beyond the baseline. It reports three things: a required name missing from a store, a forbidden name present in either store, and a configured name no applicable mechanism claims. A forbidden name present draws the third as well as the second, since the claimed set is built from the required names alone. Names are read, never values.
 
-- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` holds at least one `.yml` or `.yaml` entry (those workflows reference actions, and otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge), and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**, and it runs at all only where `.github/dependabot.yml` exists, since a missing `dependabot.yml` is a file-presence letter of its own. A tree-implied ecosystem that file declares nowhere is a **drift finding**. Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model], since the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
+- **Dependabot ecosystem coverage** - for each ecosystem the repo's tree implies, `.github/dependabot.yml` must declare it: `github-actions` when `.github/workflows/` holds at least one `.yml` or `.yaml` entry (those workflows reference actions, and otherwise those versions go stale and a stood-up merge-bot has no action-update PRs to auto-merge), and `devcontainers` when a `.devcontainer` is present. The mechanical check (`spec/audit.py`) asserts each implied ecosystem's **presence**, and it runs at all only where `.github/dependabot.yml` exists and is non-empty, since a missing `dependabot.yml` is a file-presence letter of its own. A tree-implied ecosystem that file declares nowhere is a **drift finding**. Then confirm **by inspection** that each declared ecosystem **dual-targets `main` + `develop`** per the [Branching Model][governance-branching-model], since the regex below cannot pair an ecosystem with its `target-branch`. Language ecosystems (`nuget`/`uv`/`npm`) are directory-scoped and audited by inspection too.
 
   ```bash
+  #!/usr/bin/env bash
   # Save and run this as a script rather than pasting it into a shell, since it exits rather than returns.
-  # It prints one line per implied ecosystem, and its exit status reports only whether the reads succeeded.
+  # It prints one line per implied ecosystem, and its exit status reports whether the reads succeeded rather than whether an ecosystem is missing.
   set -Eeuo pipefail
   repo=<owner>/<repo>
-  ground=main # Section 1 reads main as ground truth, and the repo's registry groundTruthBranch declares the same.
+  ground=main # Section 1's ground truth. Set this to the repo's own groundTruthBranch where its registry entry, or the registry defaults, declares another.
 
   root_paths=$(gh api "repos/$repo/contents?ref=$ground" --jq '.[].path')
   # A repo carrying no .github directory would 404 on the listing below, which is an absence rather than the read failure that exit code otherwise means.
@@ -123,21 +124,24 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
       echo "dependabot.yml absent: a file-presence finding, and ecosystem coverage is not checked at all"
       exit 0
   fi
-  content=$(gh api "repos/$repo/contents/.github/dependabot.yml?ref=$ground" --jq '.content')
-  # An absent or empty content key prints nothing or null and exits 0, which would otherwise read as a file declaring no ecosystem.
-  if [ -z "$content" ] || [ "$content" = "null" ]; then
-      echo "dependabot.yml read returned no content" >&2
-      exit 1
+  # The raw media type answers with the file itself, so nothing here decodes base64 or reads a content key that can be absent.
+  dependabot_yaml=$(gh api "repos/$repo/contents/.github/dependabot.yml?ref=$ground" -H "Accept: application/vnd.github.raw")
+  # The mechanical check gates on a non-empty file, so an empty one skips here too rather than reporting every implied ecosystem missing.
+  if [ -z "$dependabot_yaml" ]; then
+      echo "dependabot.yml empty: a file-presence finding, and ecosystem coverage is not checked at all"
+      exit 0
   fi
   # Anchor to the line start (optional list dash) so a commented-out '# package-ecosystem:' is not counted.
   # Accept either quote or none, as the mechanical check does, so the two agree on the same file.
-  eco_re="^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*[\"']?[a-z-]+"
-  decl=$(base64 -d <<<"$content" | grep -oE "$eco_re" | grep -oE '[a-z-]+$' | sort -u)
+  # The trailing class is the mechanical check's own, so a value carrying a digit is read whole rather than truncated to its leading letters.
+  eco_re="^[[:space:]]*-?[[:space:]]*package-ecosystem:[[:space:]]*[\"']?[[:alnum:]_-]+"
+  # A file declaring no ecosystem at all matches nothing, and grep exiting 1 would otherwise abort the run under the header above.
+  decl=$(grep -oE "$eco_re" <<<"$dependabot_yaml" | grep -oE '[[:alnum:]_-]+$' | sort -u) || decl=""
 
-  # A workflows directory holding no .yml or .yaml entry implies nothing, which is the mechanical check's own test.
   if has .github/workflows; then
-      workflow_names=$(gh api "repos/$repo/contents/.github/workflows?ref=$ground" --jq '.[].name')
-      if grep -qE '\.(yml|yaml)$' <<<"$workflow_names"; then
+      # The contents API answers with an object rather than an array where the path is a file, so the type is tested rather than assumed.
+      yaml_count=$(gh api "repos/$repo/contents/.github/workflows?ref=$ground" --jq 'if type == "array" then [.[] | select(.name | test("\\.ya?ml$"))] | length else 0 end')
+      if [ "$yaml_count" -gt 0 ]; then
           grep -qx github-actions <<<"$decl" && echo "github-actions: present" || echo "github-actions: MISSING (.github/workflows/ holds a workflow file)"
       fi
   fi
@@ -147,16 +151,30 @@ Run [`WORKFLOW.md`][workflow]'s methodology against the repo's **own** Actions, 
   # Then read dependabot.yml and confirm each present ecosystem has both a main and a develop target-branch entry.
   ```
 
-- **Dependabot on self-hosted runners (account setting)** - the account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue for up to 24 hours, then get cancelled, and ordinary CI is unaffected throughout. GitHub never routes a public repo through this setting, so read the audited repo's visibility first with `gh repo view <owner>/<repo> --json visibility` and record this check as N/A on a public one. `ProjectTemplate` is public and therefore cannot show the symptom itself (ptr727/ProjectTemplate#1015). On a private repo, enumerate the Dependabot runs and read the step count of one that was cancelled:
+- **Dependabot on self-hosted runners (account setting)** - the account-wide toggle at `https://github.com/settings/security_analysis`, `Dependabot on self-hosted runners`, routes Dependabot's own update jobs to a self-hosted runner pool. With none registered on the account, those jobs queue for up to 24 hours, then get cancelled, and ordinary CI is unaffected throughout. GitHub routes only a private repo through this setting, which is why the fleet's public repos updated throughout while its private ones stalled (ptr727/ProjectTemplate#1015), so read the audited repo's visibility first with `gh repo view <owner>/<repo> --json visibility` and treat a public one as N/A. On a private repo, read the newest Dependabot run's job:
 
   ```bash
+  #!/usr/bin/env bash
+  # Save and run this as a script rather than pasting it into a shell, since it exits rather than returns.
+  set -Eeuo pipefail
+  repo=<owner>/<repo>
+
   # Dependabot's own update jobs run under the dynamic event rather than from a workflow file, so they are selected by path.
-  gh api "repos/<owner>/<repo>/actions/runs?event=dynamic&per_page=100" --jq '.workflow_runs[] | select(.path | startswith("dynamic/dependabot")) | "\(.conclusion) \(.id) \(.path)"'
-  # Then read one cancelled run's jobs, whose steps array is empty where the job never reached a runner.
-  gh api "repos/<owner>/<repo>/actions/runs/<run-id>/jobs" --jq '.jobs[] | "\(.name) steps=\(.steps | length)"'
+  # Read the newest run rather than the history, since a repo whose account setting has since been turned off keeps every run cancelled while it was on.
+  # The dynamic event is shared with GitHub's other generated runs, Copilot's reviewer among them, which on an active repo fill whole pages, so every page is read rather than the first.
+  # The run's date is carried out with its id, since a cancelled run says nothing on its own about whether the routing is still in place.
+  runs=$(gh api --paginate "repos/$repo/actions/runs?event=dynamic&per_page=100" --jq '.workflow_runs[] | select((.path // "") | startswith("dynamic/dependabot")) | "\(.id) \(.created_at)"')
+  if [ -z "$runs" ]; then
+      echo "no Dependabot run in this repo's dynamic run history"
+      exit 0
+  fi
+  # The endpoint answers newest first and paginates in that order, so the first line is the newest Dependabot run whichever page it landed on.
+  run=$(head -n 1 <<<"$runs")
+  echo "newest Dependabot run: $run"
+  gh api "repos/$repo/actions/runs/${run%% *}/jobs" --jq '.jobs[] | "\(.conclusion) labels=\(.labels | join(",")) runner=\(.runner_name // "") steps=\(.steps | length)"'
   ```
 
-  Every such run cancelled with zero steps raises the question rather than settles it, since that is the only signal the Actions API exposes and it names no cause. The account setting is confirmed on the repo's own Dependabot page, which reads `Self-hosted runner unavailable`, and nowhere in the API. Detection stops there, like the rest of this audit. The remedy is an account-level change no target-repo pull request can carry, so it is reported as a maintainer action rather than converged under section 10: turn the toggle off, along with `Automatically enable for new repositories` beside it, or register a matching self-hosted runner instead of disabling it. Disabling the toggle does not rerun jobs already queued, so each affected repo still needs its own manual `Check for Updates` click on its own Dependabot page.
+  A job reading `labels=dependabot` with no runner name was routed to the pool, where a job GitHub's own runners took reads `labels=ubuntu-latest` with a runner name. What a cancelled newest run means now is decided by its date, because turning the toggle off reruns nothing already queued and starts no new run, so a repo remedied weeks ago keeps a cancelled newest run until someone clicks `Check for Updates` on its own Dependabot page. Read a recent one as the routing still in place, and an old one as that click still owed. The Dependabot page says which in words, reading `Self-hosted runner unavailable` while the routing is live. Detection stops there, like the rest of this audit. The remedy is an account-level change no target-repo pull request can carry, so it is reported as a maintainer action rather than converged under section 10: turn the toggle off, along with `Automatically enable for new repositories` beside it, or register a matching self-hosted runner instead of disabling it. Disabling the toggle does not rerun jobs already queued, so each affected repo still needs its own manual `Check for Updates` click on its own Dependabot page.
 
 ## 7. Verdict Model
 
