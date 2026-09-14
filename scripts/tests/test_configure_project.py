@@ -278,7 +278,7 @@ class ApplyLinkCase(unittest.TestCase):
     """The link write itself: never repeated, and never reported without the response confirming it."""
 
     def apply(
-        self, linked: list[str], mutation_repo_id: str = REPO_ID
+        self, linked: list[str], mutation_repo_id: str = REPO_ID, gh_status: int = 0
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         """apply_project against a stubbed link list, recording every `gh` call it makes.
 
@@ -301,7 +301,7 @@ class ApplyLinkCase(unittest.TestCase):
             live = json.dumps({"id": REPO_ID, "projects": linked})
             script = (
                 f"repo=ptr727/Fixture\nproject_file={shlex.quote(str(payload))}\n{JQR}"
-                f"{gh_stub(response, log=log)}"
+                f"{gh_stub(response, status=gh_status, log=log)}"
                 f"repo_projects() {{ printf '%s' {json.dumps(live)}; }}\n"
                 f"{APPLY_PROJECT}apply_project {PROJECT_ID}\n"
             )
@@ -323,6 +323,19 @@ class ApplyLinkCase(unittest.TestCase):
         self.assertIn("linkProjectV2ToRepository", calls)
         self.assertIn(PROJECT_ID, calls)
         self.assertIn(REPO_ID, calls)
+
+    def test_a_refused_write_reports_what_the_operator_can_act_on(self) -> None:
+        """A bare substitution would end the run with gh's error and nothing of the script's.
+
+        The pre-flight's resolution cannot catch this one, since that is a read and this is the
+        write, so a token holding project read alone reaches here with four groups applied.
+        """
+        result, calls = self.apply([], gh_status=1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Failed to link ptr727/Fixture to project 'Fleet Engineering'", result.stderr)
+        self.assertIn("gh auth refresh -s project", result.stderr)
+        self.assertEqual(len(calls.strip().splitlines()), 1)
+        self.assertNotIn("Linked ptr727/Fixture", result.stdout)
 
     def test_a_response_naming_another_repository_stops_the_run(self) -> None:
         """A write that came back describing something else is unconfirmed, which is not success."""
