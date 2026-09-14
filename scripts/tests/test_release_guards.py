@@ -42,7 +42,8 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
     blocks it contains.
 
-    A line carrying a fence run with anything before it but spaces is refused rather than read. Reading one
+    A line is refused unless the fence run is the whole of it bar up to three leading spaces
+    and an info string carrying no backtick or tilde. Reading one
     needs the container it sits in, since a renderer measures a fence's indent against its list
     item's content column and takes four spaces past that as an indented code block instead, and
     a scan that guesses at the container reads a block a renderer does not or misses one it
@@ -64,10 +65,11 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
     Python calls a character whitespace, or a line ending, where a renderer keeps it as content.
     `str.strip` with no argument, `str.isspace`, `str.splitlines` and a newline-only split each
-    read one of those as whitespace to discard, in turn closing a block early and losing the
-    rest of it, eating the start of a body line, rewriting a separator as a line ending,
-    swallowing a body opened on a carriage return, taking a line of content for a blank one
-    and absorbing everything after it, and slicing a tab a renderer expands. Every comparison here names the
+    read one of those as whitespace to discard. They closed a block early and left the rest
+    unread, ate the start of a body line, rewrote a separator as a line ending, and swallowed a
+    body opened on a carriage return. Naming too wide a class does the same: a blank test
+    of spaces and tabs took a tab for an indent and sliced a column a renderer expands.
+    Every comparison here names the
     characters it means, and a test of its own holds that rule over this function's source,
     since writing the next comparison bare is how each of those arrived.
     """
@@ -553,10 +555,15 @@ class ReleaseGuardCase(unittest.TestCase):
         """The block scanner names the characters it calls whitespace, everywhere.
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
-        content. Six silent defects in this scanner were one bare predicate each, and each was
+        content. Five silent defects in this scanner were one bare predicate each, and each was
         written by someone fixing the previous one, so the rule is worth more than the fixes.
         A comparison needing a wider class than the characters it names states that inline and
         says why, and the exemptions are counted so a second cannot be added quietly.
+
+        A sixth defect named its characters and named one too many, `strip(" \t")` where only a
+        space carries an indent, and this cannot see that: any argument opening with a quote is
+        taken as deliberate. Naming a class is where the rule stops and reading the class against
+        the format begins, which is what the behaviour cases are for.
 
         The four functions named below are read, rather than only the one that had the defects,
         since moving a predicate into another of them is the cheapest way past a check that reads
@@ -619,6 +626,8 @@ class ReleaseGuardCase(unittest.TestCase):
             ("an empty block", "```bash\n```\n", [""]),
             # A blank body line carries no indent to check and keeps what sits past the opener's.
             ("a whitespace-only body line", "  ```bash\n  A\n    \n  B\n  ```\n", ["A\n  \nB"]),
+            # A blank line shorter than the opener's indent is still blank, and keeps nothing.
+            ("a blank line shorter than the indent", "  ```bash\n  A\n \n  B\n  ```\n", ["A\n\nB"]),
             ("an empty body line", "  ```bash\n  A\n\n  B\n  ```\n", ["A\n\nB"]),
             ("a label that is not a shell", "```python\nK=15\n```\n", []),
             ("a label merely starting with one", "```shell-session\n$ x\n```\n", []),
