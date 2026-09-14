@@ -43,11 +43,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When Work Stops on Another Repository",
-      "digest": "sha256:deafaaea95ba0117be6e27d909a5e9a12d721bad69edab366f35cd0281ad5bca",
+      "digest": "sha256:2a14fb980a42e22b7f3d71d32d2f242a4d06711e48deb66eb00f2afaa7516500",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T01:18:55Z"
+      "stamp": "2026-09-14T02:57:37Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
@@ -603,11 +603,11 @@
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > Running the Chain",
-      "digest": "sha256:dbf7282b1e2f4ac3aafd71a3dbb68effa625198d5cc024f3dc1e18615af15958",
+      "digest": "sha256:cac01b5718ef539f1dc11b90ec377eb4bafc9cce310ba011ae3cc8ef165b3f0c",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T02:36:42Z"
+      "stamp": "2026-09-14T02:57:38Z"
     },
     {
       "unit": ".agents/skills/session-handoff/SKILL.md > The Chain",

@@ -91,7 +91,14 @@ Two rules that bind at this moment have their homes elsewhere. A review flags an
 
 ## When Work Stops on Another Repository
 
-The rules for this moment are two bullets in the `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" include under "When a Failure Surfaces a Lesson" above. The first, opening "A blocker filed in another repository is recorded in the repository whose work it blocks", states what the two issues are, what the local one says, the `blocked` label it carries, and the backlink the upstream issue takes in return. The second, opening "The blocker record is written under the ordinary write rules", states which write rules bind those three writes, what a session that may not make them does instead, and when the label comes off. Read both there, since a restatement here would be a second copy and nothing would hold it to the first.
+The rules for this moment are two bullets in the `GOVERNANCE.md` "Durable Knowledge and
+Self-Improvement" include under "When a Failure Surfaces a Lesson" above. The first, opening "A
+blocker filed in another repository is recorded in the repository whose work it blocks", states what
+the two issues are, what the local one says, the `blocked` label it carries, and the backlink the
+upstream issue takes in return. The second, opening "The blocker record is written under the
+ordinary write rules", states which write rules bind those writes, what a repository not carrying
+the `blocked` label owes before it can host the record, and when the label comes off. Read both
+there, since a restatement here would be a second copy and nothing would hold it to the first.
 
 ## Delegation, in One Paragraph
 
