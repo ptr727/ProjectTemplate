@@ -51,11 +51,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
-      "digest": "sha256:91a535713f982b81a3a9201c25e9a09505afac2f747e1b93c00bafab45613678",
+      "digest": "sha256:ea17f92e887589b4e629c49faa376e591ce98db8e240c581df30ed28f3f5acb9",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T02:24:27Z"
+      "stamp": "2026-09-14T02:50:06Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > Why This Exists",
@@ -955,11 +955,11 @@
     },
     {
       "unit": "GOVERNANCE.md > Durable Knowledge and Self-Improvement",
-      "digest": "sha256:6dabbf23ec610a65f2f51a80b3b7a37838afb54e21273eede9711c768e830f07",
+      "digest": "sha256:5194fe5f5979a599b00797a5613f880600da23c4bd9ebe56e352a9d8095c53a5",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T02:24:27Z"
+      "stamp": "2026-09-14T02:50:06Z"
     },
     {
       "unit": "GOVERNANCE.md > Hub-Hosted Tooling",
