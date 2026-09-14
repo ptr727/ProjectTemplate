@@ -874,12 +874,20 @@
       "stamp": "2026-09-06T20:42:51Z"
     },
     {
-      "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
-      "digest": "sha256:6bc1e573e6c9cd6dace6df67a0d826aaa910d8d94cdf0f29d7571c53def4ff34",
+      "unit": "AUDIT.md > 0. When to Run and What \"Done\" Means",
+      "digest": "sha256:f474391c5fc951d65fd8b0e432f813a0de10dce5c45758f81265269d8f64f371",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "c3b2898feef97459d01ce7c0b63de25b6c5524bf",
-      "stamp": "2026-09-01T13:57:20Z"
+      "findings": 9,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T16:23:10Z"
+    },
+    {
+      "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
+      "digest": "sha256:6f1eb4aa366fae200daa13c5c3892116c06ca7106cd0e81825036514b3649bf4",
+      "reviewer": "agent-skill",
+      "findings": 12,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T14:38:06Z"
     },
     {
       "unit": "AUDIT.md > 3. Applicability Gate",
@@ -907,11 +915,11 @@
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
-      "digest": "sha256:6452d1390c89cfe4142629e474f23f093f5aeb9953d04f8343fed03acc46548a",
+      "digest": "sha256:d17fc460ca27c783997930d1a5bc574e14e62996259af348bc040c87e3b2062a",
       "reviewer": "agent-skill",
-      "findings": 6,
-      "hubCommit": "55c2485adbe000082c98abaa21f6bb3835676689",
-      "stamp": "2026-09-14T04:05:18Z"
+      "findings": 10,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T16:12:47Z"
     },
     {
       "unit": "CODESTYLE.md > .NET",
