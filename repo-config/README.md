@@ -60,7 +60,9 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 
 Every fleet repository is linked to one user-level project, `Fleet Engineering`, which [`project.json`][project-json] declares by owner, number, and title. The link attaches the repository to the project, and it is a different thing from the `has_projects` setting beside it: the setting is a repository toggle [`settings.json`][settings-json] declares, and the link is an association between two objects that neither payload's PATCH can express, so each is written and read through its own API and each is applied and checked on its own.
 
-The title is declared alongside the number because a project number is unique only per owner and is reusable. A project that is deleted and recreated can leave the declared number pointing at a project the fleet never chose, and `apply` writes the link into every fleet repository, so the title is resolved and compared before the first link is written rather than after the last one.
+The title is declared alongside the number because a project number is unique only per owner and is reusable. A project that is deleted and recreated can leave the declared number pointing at a project the fleet never chose, and `apply` writes the link into every fleet repository, so a number pointing somewhere else would be applied everywhere. `apply` resolves the number and compares the title in its pre-flight, before the first of its five write groups, so a number that resolves to nothing or to a project titled otherwise stops the run with nothing written rather than part way through.
+
+The link is read and written through GraphQL rather than the REST endpoints the other groups use, so both modes need project access on the token beside the admin the ruleset endpoints require. Without it `apply` stops in its pre-flight with nothing written, and `check` reports the project group as failing. Each command's own error names the scope to grant.
 
 A repository linked to a project of its own is left alone, like a label the payload does not declare. `check` reports how many such links a repository carries and asserts none of them.
 

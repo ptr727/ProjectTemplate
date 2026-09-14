@@ -333,13 +333,14 @@ class ApplyLinkCase(unittest.TestCase):
 
 
 class WiringCase(unittest.TestCase):
-    """The three call sites that decide whether any of the above runs at all.
+    """The call sites that decide whether any of the above runs at all.
 
     A diff that deletes one leaves every helper passing its own tests while the group it
-    belongs to never runs, which is what these pin. The two pre-flight tests lift the
-    pre-flight region and call it from a synthesized body, since lifting cmd_apply whole
-    would reach its writes; the other two lift their calling function whole and stub the
-    groups beside the one under test.
+    belongs to never runs, which is what these pin. A test of cmd_apply's pre-flight lifts
+    that region and calls it from a synthesized body, since lifting cmd_apply whole would
+    reach its writes, and a test of a whole function lifts it and stubs the groups beside
+    the one under test. No count is given here, because a count goes stale as a case is
+    added and the class itself is what says how many there are.
     """
 
     def test_apply_preflights_the_project_payload_before_any_write(self) -> None:
@@ -467,7 +468,7 @@ class CheckGroupCase(unittest.TestCase):
     """The check half's own group, whose two reads are stubbed because each is tested above."""
 
     def harness(
-        self, linked: list[str], node_id_status: int = 0
+        self, linked: list[str], node_id_status: int = 0, live: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as tmp:
             payload = Path(tmp) / "project.json"
@@ -475,7 +476,7 @@ class CheckGroupCase(unittest.TestCase):
                 json.dumps({"owner": "ptr727", "number": 1, "title": "Fleet Engineering"}),
                 encoding="utf-8",
             )
-            live = json.dumps({"id": REPO_ID, "projects": linked})
+            live = json.dumps({"id": REPO_ID, "projects": linked}) if live is None else live
             script = (
                 f"repo=ptr727/Fixture\nproject_file={shlex.quote(str(payload))}\n{JQR}"
                 f"{lift(REPORTERS)}\n{lift(JQ_HAS)}{PAYLOAD_OK}{lift(ASSERT)}"
@@ -501,6 +502,12 @@ class CheckGroupCase(unittest.TestCase):
         result = self.harness([PROJECT_ID], node_id_status=1)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("could not resolve the declared project", result.stdout)
+        self.assertIn("FAILED=1", result.stdout)
+
+    def test_a_link_list_that_cannot_be_counted_fails_rather_than_printing_nothing(self) -> None:
+        """An unguarded count renders a failed read as an empty number inside the note line."""
+        result = self.harness([PROJECT_ID], live="not json at all")
+        self.assertIn("could not count the repository's other project links", result.stdout)
         self.assertIn("FAILED=1", result.stdout)
 
     def test_other_links_are_counted_and_not_asserted(self) -> None:

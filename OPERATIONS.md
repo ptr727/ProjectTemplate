@@ -87,6 +87,8 @@ repo-config/configure.sh apply owner/repo release|operational
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives entirely from the committed payloads, so it is a no-op on a conformant repo. `check` also asserts one group `apply` never writes, the existence and deployment-branch policy of every environment the registry's `environments` declares for the repo, so the two are not exact inverses. [docs/repo-config.md](./docs/repo-config.md) "Deployment Environments" says why.
 
+Both modes need admin on the repository and project access on the token, the second because the fleet project link is read and written through GraphQL. `apply` resolves the project before its first write, so a token without that access stops the run with nothing applied rather than part way through, and `check` reports the project group as failing.
+
 `apply` is not a narrow toggle. One run patches every key in `repo-config/settings.json`, sets the default branch, enables both Dependabot features, creates or updates every label in `repo-config/labels.json`, creates or updates both branch rulesets, and links the repository to the fleet project `repo-config/project.json` declares. On a repository that has deliberately drifted it silently reasserts the fleet configuration.
 
 The model argument selects which develop payload is applied, so passing the wrong one applies the wrong ruleset.
