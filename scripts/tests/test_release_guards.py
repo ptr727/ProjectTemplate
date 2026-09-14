@@ -420,14 +420,18 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
 
-        No repository gate reads a snippet inside a Markdown file, and both blocks once shipped
-        an unquoted `repo=<owner>/<repo>`, which bash parses as a redirection, so each died of a
-        syntax error before its own `set` header took effect. Checking the substituted form is
-        what hid it, so this checks the printed form.
+        No repository gate reads a snippet inside a Markdown file, and blocks here once shipped
+        an unquoted `repo=<owner>/<repo>` and an unquoted `--repo <path-to-target-checkout>`,
+        each of which bash parses as a redirection, so they died of a syntax error before any
+        `set` header took effect. Checking the substituted form is what hid it, so this checks
+        the printed form, and every shell label rather than `bash` alone, since the second of
+        those sat in a `shell`-labeled block.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"^ *```bash\n(.*?)^ *```", audit, re.DOTALL | re.MULTILINE)
-        self.assertTrue(blocks, "AUDIT.md carries no bash block")
+        blocks = re.findall(
+            r"^ *```(?:bash|sh|shell)\n(.*?)^ *```", audit, re.DOTALL | re.MULTILINE
+        )
+        self.assertTrue(blocks, "AUDIT.md carries no shell block")
         for block in blocks:
             source = "\n".join(line.removeprefix("  ") for line in block.splitlines())
             with self.subTest(block=source.splitlines()[0][:60]):
@@ -472,8 +476,27 @@ gh() {
             encoding="utf-8",
         )
         failure = run(["bash", "-c", f"gh() {{ return 17; }}\n{probe}"], check=False)
-        empty_read = run(
-            ["bash", "-c", f"gh() {{ printf ''; }}\n{probe}"],
+        # One read failing is the fail-open the "every read fails" case above cannot see.
+        one_read_fails = run(
+            [
+                "bash",
+                "-c",
+                f"{fake_api.replace('''repos/*/contents/.github\\?*) printf''', 'repos/*/contents/.github\\?*) return 17 ;; repos/*/never\\?*) printf')}\n{probe}",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        # A declared name carrying a digit must not truncate to a shorter real name.
+        # A commented-out entry must not count either.
+        # This fixture carries one of each, so both ecosystems have to report as missing.
+        missing_api = fake_api.replace(
+            """printf '%s\\n' '- package-ecosystem: github-actions' '- package-ecosystem: devcontainers'""",
+            """printf '%s\\n' '# - package-ecosystem: devcontainers' '  - package-ecosystem: \"github-actions2\"'""",
+        )
+        missing = run(
+            ["bash", "-c", f"{missing_api}\n{probe}"],
             check=False,
             capture_output=True,
             text=True,
@@ -485,8 +508,12 @@ gh() {
         self.assertIn("devcontainers: present", success.stdout)
         # Every read failing must stop the run, never reach the per-ecosystem lines.
         self.assertNotEqual(0, failure.returncode)
-        # An empty listing is not a tree: nothing is implied, so no ecosystem may be called missing.
-        self.assertNotIn("MISSING", empty_read.stdout)
+        # So must any single read failing, rather than reporting an absence it never established.
+        self.assertNotEqual(0, one_read_fails.returncode, one_read_fails.stdout)
+        # Both MISSING arms have to be reachable, or the block could stop reporting and still pass.
+        self.assertEqual(0, missing.returncode, missing.stderr)
+        self.assertIn("github-actions: MISSING", missing.stdout)
+        self.assertIn("devcontainers: MISSING", missing.stdout)
         # The suppressed-output probe this guard replaced must not come back.
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',

@@ -36,7 +36,7 @@ This audit is not occasional. Run it whenever you **create, adopt, or materially
 **Verify the host before running any hub tool.** The tools carry version floors, and a host below one answers `--version`, looks healthy, and produces a wrong answer, so a clean audit run from a broken host is a clean-looking result rather than a result.
 
 ```shell
-python3 scripts/host_gate.py --repo <path-to-target-checkout>   # run from a hub checkout, floors from spec/host-tools.json
+python3 scripts/host_gate.py --repo "<path-to-target-checkout>"   # run from a hub checkout, floors from spec/host-tools.json
 ```
 
 Pass `--repo`, since the gate reads the target's own `host-tools.json` relative to it and defaults to the working directory. Omitting it does not read the target's declaration at all, so every floor that repo adds goes unapplied, and the run reports nothing about the omission. A finding is a **host** misconfiguration rather than a repo one, and [`docs/host-setup.md`][host-setup] is the contract it checks.

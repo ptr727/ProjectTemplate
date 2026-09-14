@@ -874,6 +874,14 @@
       "stamp": "2026-09-06T20:42:51Z"
     },
     {
+      "unit": "AUDIT.md > 0. When to Run and What \"Done\" Means",
+      "digest": "sha256:f474391c5fc951d65fd8b0e432f813a0de10dce5c45758f81265269d8f64f371",
+      "reviewer": "agent-skill",
+      "findings": 9,
+      "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
+      "stamp": "2026-09-14T16:23:10Z"
+    },
+    {
       "unit": "AUDIT.md > 10. Converge: Apply the Fixes",
       "digest": "sha256:6f1eb4aa366fae200daa13c5c3892116c06ca7106cd0e81825036514b3649bf4",
       "reviewer": "agent-skill",
