@@ -52,19 +52,20 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     too, a fence under a second list level and a shorter fence inside a longer one among it.
     No document here uses any of it.
 
-    Where a container still changes what a renderer sees, an HTML block and a list item ended by
-    a column-zero line being the two found, this over-reads rather than under-reads for a block
-    carrying a label, which is the only kind it is read for. An HTML block holding an odd number
-    of fence-shaped lines flips the open and closed parity, and an unlabelled block can be lost
-    that way, but a labelled opener landing in closer position always raises on its info string.
-    That direction is the property worth keeping, since an extra block is parsed and judged
-    while a dropped one is never looked at, and it is why those are left rather than refused.
+    One container case is left rather than refused. An HTML block holding an odd number of
+    fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
+    HTML and this scan reads each of those lines as a fence, and an unlabelled block can be lost
+    that way. A labelled opener landing in closer position always raises on its info string, so
+    a block carrying a label, which is the only kind this is read for, cannot be lost through
+    it. Recognising an HTML block needs the container reasoning above, so the bound is what
+    holds rather than the shape being handled.
 
     Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
-    Python's `str.strip` with no argument and `str.isspace` are both Unicode-aware, where a
-    renderer is not, so each one read a character a renderer keeps as content as whitespace to
-    be discarded. One closed a block early and lost the rest of it, the other ate the start of a
-    body line, and both are compared against the literal characters now.
+    Python's `str.strip` with no argument, `str.isspace` and `str.splitlines` are each aware of
+    characters a renderer keeps as content or does not end a line on, so each one in turn read
+    one of those as whitespace to discard. They closed a block early and lost the rest of it,
+    ate the start of a body line, and swallowed a body opened on a carriage return. Every one is
+    compared against the literal characters now, which is the rule rather than three fixes.
     """
     blocks: list[FencedBlock] = []
     # A renderer ends a line on a carriage return, alone or paired, and on nothing else.
