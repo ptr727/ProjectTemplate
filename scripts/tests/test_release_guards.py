@@ -36,7 +36,7 @@ FENCE_LINE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^`~
 
 
 def fenced_blocks(markdown: str) -> list[FencedBlock]:
-    """Every fenced code block in `markdown`, dedented out of the list item holding it.
+    """Every fenced code block in `markdown`, dedented by its own opener's indent.
 
     The label is filtered by the caller rather than by the scan, because a scanner that skips
     an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
@@ -558,8 +558,11 @@ class ReleaseGuardCase(unittest.TestCase):
         A comparison needing a wider class than the characters it names states that inline and
         says why, and the exemptions are counted so a second cannot be added quietly.
 
-        Every function the scanner is built from is read, not just the one that had the defects,
-        since moving a predicate into a helper is the cheapest way past a check that reads one.
+        The four functions named below are read, rather than only the one that had the defects,
+        since moving a predicate into another of them is the cheapest way past a check that reads
+        one. Module-level code is not read, and the set of functions is a literal here rather than
+        derived, so a predicate placed outside both is caught by the behaviour cases or not at all
+        (ptr727/ProjectTemplate#1618).
         """
         # A call whose argument is not a quoted literal takes Python's own whitespace class.
         # `\s` in a pattern does the same, and `re.UNICODE` is the default for a `str` pattern.
