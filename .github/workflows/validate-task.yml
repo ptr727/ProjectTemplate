@@ -197,7 +197,7 @@ jobs:
       # This is #729, decided here, the one place the fleet's uvx tools are pinned or floated.
       - name: Setup uv step
         if: hashFiles('pyproject.toml') != ''
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           python-version: "3.13"
 
@@ -339,7 +339,7 @@ jobs:
         if: >-
           hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
           && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           python-version: ${{ matrix.python-version }}
 
