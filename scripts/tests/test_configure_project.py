@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -65,16 +66,20 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-JQR = lift(r"^(jqr\(\) \{ jq -r .*\}\n)")
+JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
 PAYLOAD_OK = lift(r"^(project_payload_ok\(\) \{\n.*?\n\}\n)")
 NODE_ID = lift(r"^(project_node_id\(\) \{ # owner number title\n.*?\n\}\n)")
 REPO_PROJECTS = lift(r"^(repo_projects\(\) \{\n.*?\n\}\n)")
 APPLY_PROJECT = lift(r"^(apply_project\(\) \{\n.*?\n\}\n)")
+CHECK_PROJECT = r"^(check_project\(\) \{\n.*?\n\}\n)"
+REPORTERS = r"(FAILED=0\nnote\(\).*?\nfail\(\) \{.*?\n\})"
+JQ_HAS = r"^(jq_has\(\) \{ jq -e .*?\}\n)"
+ASSERT = r"^(assert\(\) \{\n.*?\n\}\n)"
 
 
 def gh_stub(stdout: str, status: int = 0, log: Path | None = None) -> str:
     """A `gh` that answers with one canned document, optionally recording each call it was given."""
-    record = f'  printf "%s\\n" "$*" >>{log};\n' if log is not None else ""
+    record = f'  printf "%s\\n" "$*" >>{shlex.quote(str(log))};\n' if log is not None else ""
     return f"gh() {{\n{record}  printf '%s' {json.dumps(stdout)}\n  return {status}\n}}\n"
 
 
@@ -86,7 +91,8 @@ class PayloadContractCase(unittest.TestCase):
             path = Path(tmp) / "project.json"
             path.write_text(document, encoding="utf-8")
             result = run_bash(
-                f"project_file={path}\n{PAYLOAD_OK}if project_payload_ok; then echo yes; else echo no; fi\n",
+                f"project_file={shlex.quote(str(path))}\n{PAYLOAD_OK}"
+                "if project_payload_ok; then echo yes; else echo no; fi\n",
                 "jq",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -106,6 +112,18 @@ class PayloadContractCase(unittest.TestCase):
             ("no number", '{"owner": "ptr727", "title": "Fleet Engineering"}'),
             ("number as a string", '{"owner": "ptr727", "number": "1", "title": "Fleet"}'),
             ("fractional number", '{"owner": "ptr727", "number": 1.5, "title": "Fleet"}'),
+            (
+                "integer written as a decimal",
+                '{"owner": "ptr727", "number": 1.0, "title": "Fleet"}',
+            ),
+            (
+                "integer written in exponent form",
+                '{"owner": "ptr727", "number": 1e2, "title": "Fleet"}',
+            ),
+            (
+                "number past a 32-bit Int",
+                '{"owner": "ptr727", "number": 2147483648, "title": "Fleet"}',
+            ),
             ("zero number", '{"owner": "ptr727", "number": 0, "title": "Fleet"}'),
             ("negative number", '{"owner": "ptr727", "number": -1, "title": "Fleet"}'),
             ("tab in title", '{"owner": "ptr727", "number": 1, "title": "Fleet\\tEngineering"}'),
@@ -122,7 +140,9 @@ class PayloadContractCase(unittest.TestCase):
 class ProjectLookupCase(unittest.TestCase):
     """Resolving the declared number to a node id, and refusing every answer that is not the declared project."""
 
-    def lookup(self, response: object, status: int = 0, title: str = "Fleet Engineering"):
+    def lookup(
+        self, response: object, status: int = 0, title: str = "Fleet Engineering"
+    ) -> subprocess.CompletedProcess[str]:
         document = response if isinstance(response, str) else json.dumps(response)
         script = (
             f"project_file=/fixture/project.json\n{JQR}{gh_stub(document, status)}{NODE_ID}"
@@ -179,7 +199,7 @@ class ProjectLookupCase(unittest.TestCase):
 class RepoProjectsCase(unittest.TestCase):
     """Reading the repository's own id and its link list, where a missing repository must not read as no links."""
 
-    def projects(self, response: object, status: int = 0):
+    def projects(self, response: object, status: int = 0) -> subprocess.CompletedProcess[str]:
         document = response if isinstance(response, str) else json.dumps(response)
         script = f"repo=ptr727/Fixture\n{gh_stub(document, status)}{REPO_PROJECTS}repo_projects\n"
         return run_bash(script, "jq")
@@ -207,6 +227,25 @@ class RepoProjectsCase(unittest.TestCase):
         self.assertIn("No repository ptr727/Fixture", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_a_full_page_fails_rather_than_reading_as_the_whole_list(self) -> None:
+        """At the cap the list may be truncated, which would read as the fleet link missing."""
+        nodes = [{"id": f"PVT_{i}"} for i in range(100)]
+        result = self.projects(
+            {"data": {"repository": {"id": REPO_ID, "projectsV2": {"nodes": nodes}}}}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("100 linked projects returned", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_a_page_below_the_cap_is_emitted(self) -> None:
+        """The guard is the count test itself, so the ordinary case must still pass through it."""
+        nodes = [{"id": f"PVT_{i}"} for i in range(99)]
+        result = self.projects(
+            {"data": {"repository": {"id": REPO_ID, "projectsV2": {"nodes": nodes}}}}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(json.loads(result.stdout)["projects"]), 99)
+
     def test_a_failed_call_fails(self) -> None:
         result = self.projects("", status=1)
         self.assertNotEqual(result.returncode, 0)
@@ -216,7 +255,9 @@ class RepoProjectsCase(unittest.TestCase):
 class ApplyLinkCase(unittest.TestCase):
     """The link write itself: never repeated, and never reported without the response confirming it."""
 
-    def apply(self, linked: list[str], mutation_repo_id: str = REPO_ID):
+    def apply(
+        self, linked: list[str], mutation_repo_id: str = REPO_ID
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
         """apply_project against a stubbed link list, recording every `gh` call it makes.
 
         `project_node_id` and `repo_projects` are stubbed because each is exercised whole by its
@@ -236,7 +277,7 @@ class ApplyLinkCase(unittest.TestCase):
             )
             live = json.dumps({"id": REPO_ID, "projects": linked})
             script = (
-                f"repo=ptr727/Fixture\nproject_file={payload}\n{JQR}"
+                f"repo=ptr727/Fixture\nproject_file={shlex.quote(str(payload))}\n{JQR}"
                 f"{gh_stub(response, log=log)}"
                 f'project_node_id() {{ printf "%s\\n" {PROJECT_ID}; }}\n'
                 f"repo_projects() {{ printf '%s' {json.dumps(live)}; }}\n"
@@ -267,6 +308,130 @@ class ApplyLinkCase(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unconfirmed", result.stderr)
         self.assertNotIn("Linked ptr727/Fixture", result.stdout)
+
+
+class WiringCase(unittest.TestCase):
+    """The two call sites that decide whether any of the above runs at all.
+
+    Each harness lifts the calling function whole and stubs the groups beside the one under
+    test, because a diff that deletes a call leaves every helper passing its own tests while
+    the group it belongs to never runs.
+    """
+
+    def test_apply_preflights_the_project_payload_before_any_write(self) -> None:
+        """A payload outside the contract has to abort before the first of the four earlier writes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main", "project"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            preflight = lift(
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n)    echo"
+            )
+            script = (
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={files['project']}\n"
+                "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 1; }\n"
+                f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
+            )
+            result = run_bash(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Aborting before any write", result.stderr)
+        self.assertNotIn("reached-the-writes", result.stdout)
+
+    def test_apply_stops_when_the_project_payload_is_not_there(self) -> None:
+        """The existence loop is what a partial carry hits, and it runs before the contract test."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            absent = shlex.quote(str(Path(tmp) / "project.json"))
+            preflight = lift(
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n)    echo"
+            )
+            script = (
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={absent}\n"
+                "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
+                f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
+            )
+            result = run_bash(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("project.json not found", result.stderr)
+        self.assertNotIn("reached-the-writes", result.stdout)
+
+    def test_check_runs_the_project_group(self) -> None:
+        """The group is only reached because cmd_check names it, and nothing else pins that."""
+        body = lift(r"^(cmd_check\(\) \{\n.*?\n\}\n)")
+        stubs = "".join(
+            f"{name}() {{ :; }}\n"
+            for name in (
+                "check_ruleset",
+                "check_settings",
+                "check_security",
+                "check_labels",
+                "check_environments",
+            )
+        )
+        script = (
+            f"repo=ptr727/Fixture\nmodel=release\ndevelop_ruleset=d\nmain_ruleset=m\nFAILED=0\n"
+            f'note() {{ :; }}\n{stubs}check_project() {{ echo "the project group ran"; }}\n'
+            f"{body}cmd_check\n"
+        )
+        result = run_bash(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("the project group ran", result.stdout)
+
+
+class CheckGroupCase(unittest.TestCase):
+    """The check half's own group, whose two reads are stubbed because each is tested above."""
+
+    def harness(
+        self, linked: list[str], node_id_status: int = 0
+    ) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "project.json"
+            payload.write_text(
+                json.dumps({"owner": "ptr727", "number": 1, "title": "Fleet Engineering"}),
+                encoding="utf-8",
+            )
+            live = json.dumps({"id": REPO_ID, "projects": linked})
+            script = (
+                f"repo=ptr727/Fixture\nproject_file={shlex.quote(str(payload))}\n{JQR}"
+                f"{lift(REPORTERS)}\n{lift(JQ_HAS)}{PAYLOAD_OK}{lift(ASSERT)}"
+                f'project_node_id() {{ printf "%s\\n" {PROJECT_ID}; return {node_id_status}; }}\n'
+                f"repo_projects() {{ printf '%s' {json.dumps(live)}; }}\n"
+                f'{lift(CHECK_PROJECT)}check_project\necho "FAILED=$FAILED"\n'
+            )
+            return run_bash(script, "jq", "sed")
+
+    def test_the_declared_link_passes(self) -> None:
+        result = self.harness([PROJECT_ID, "PVT_other"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok   linked to project 'Fleet Engineering'", result.stdout)
+        self.assertIn("FAILED=0", result.stdout)
+
+    def test_a_missing_link_fails_the_run(self) -> None:
+        result = self.harness(["PVT_other"])
+        self.assertIn("FAIL linked to project 'Fleet Engineering'", result.stdout)
+        self.assertIn("FAILED=1", result.stdout)
+
+    def test_an_unreadable_project_fails_without_ending_the_run(self) -> None:
+        """A read that failed is a failed group rather than an abort that skips the groups after it."""
+        result = self.harness([PROJECT_ID], node_id_status=1)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("could not resolve the declared project", result.stdout)
+        self.assertIn("FAILED=1", result.stdout)
+
+    def test_other_links_are_counted_and_not_asserted(self) -> None:
+        result = self.harness([PROJECT_ID, "PVT_other", "PVT_third"])
+        self.assertIn("projects linked beyond the declared one: 2", result.stdout)
+        self.assertIn("FAILED=0", result.stdout)
 
 
 if __name__ == "__main__":

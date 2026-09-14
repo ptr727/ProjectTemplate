@@ -149,9 +149,12 @@ ruleset_id() {
 
 # ----- Fleet project lookup (shared by apply and check) -----
 # Test with `project_payload_ok`, which is true only when project.json parses to an owner and title that are non-empty strings holding no tab or line break, and a number that is a positive integer.
-# The type tests keep a missing field from rendering as the literal string null in a message or a query variable, and the integer test keeps a fractional or negative number from reaching the typed query variable the API would reject it at.
+# The type tests keep a missing field from rendering as the literal string null in a message or a query variable.
+# The number is tested as the text jq will print rather than as the value jq parsed, because jq preserves the source literal.
+# 1.0 and 1e2 both equal their own floor, and both reach gh as 1.0 and 1E+2, which gh sends to the typed query variable as a string that the API then rejects.
+# The nine-digit cap keeps a number GraphQL's own 32-bit Int cannot carry out of the query for the same reason.
 project_payload_ok() {
-    jq -e '(.owner|type=="string") and (.title|type=="string") and (.number|type=="number") and (.owner|length) > 0 and (.title|length) > 0 and ((.owner+.title)|test("[\t\r\n]")|not) and (.number == (.number|floor)) and (.number > 0)' "$project_file" >/dev/null 2>&1
+    jq -e '(.owner|type=="string") and (.title|type=="string") and (.number|type=="number") and (.owner|length) > 0 and (.title|length) > 0 and ((.owner+.title)|test("[\t\r\n]")|not) and ((.number|tostring)|test("^[1-9][0-9]{0,8}$"))' "$project_file" >/dev/null 2>&1
 }
 
 # Print the node id of the project declared in project.json, or fail with a message naming what could not be resolved.
@@ -190,6 +193,11 @@ repo_projects() {
     fi
     if ! jq -e '.data.repository != null' <<<"$out" >/dev/null 2>&1; then
         echo "No repository $repo in the GraphQL response, so the projects linked to it could not be read." >&2
+        return 1
+    fi
+    # Fail loud at the page cap rather than silently narrow, matching ruleset_id above: past it, check reports the fleet link missing and apply writes a link that is already there.
+    if [ "$(jq '.data.repository.projectsV2.nodes | length' <<<"$out")" -eq 100 ]; then
+        echo "Failed for $repo: 100 linked projects returned (the per-page cap), so the single-fetch lookup is unreliable. Add pagination before applying." >&2
         return 1
     fi
     jq -c '{ id: .data.repository.id, projects: [.data.repository.projectsV2.nodes[].id] }' <<<"$out"
@@ -252,7 +260,7 @@ apply_labels() { # create-or-update every label labels.json declares, by name
     echo "Applied $(wc -l <<<"$rows" | tr -d ' ') labels from labels.json"
 }
 
-# Link the repository to the fleet project, which the settings write above has already enabled on it.
+# Link the repository to the fleet project, which is an association between two objects rather than a repository setting, so it is written through its own API and depends on none of the writes above.
 # The live link list is read first and the mutation runs only when the declared project is absent from it, so a second apply is a read rather than a repeated write, and no write is ever fired to discover whether one was needed.
 apply_project() {
     local owner number title pid live rid out
