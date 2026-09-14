@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + labels + rulesets (writes)
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + labels + rulesets + the fleet project link (writes)
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
-# Both modes need admin on the repo, because the rulesets endpoints require it.
+# Both modes need admin on the repo, because the rulesets endpoints require it, and project access on the token, because the fleet project link is read and written through GraphQL.
 # The command defaults to apply, the repo to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 # The command may be omitted for the apply default, so `configure.sh owner/repo` still applies.
@@ -165,7 +165,8 @@ project_node_id() { # owner number title
     # -f sends a string and -F sends a typed value, so the login goes through -f: an all-digit login under -F would reach a string query variable as a number and fail the query.
     # shellcheck disable=SC2016  # $owner and $number are GraphQL query variables, not shell expansions
     if ! out="$(gh api graphql -f query='query($owner: String!, $number: Int!) { repositoryOwner(login: $owner) { ... on ProjectV2Owner { projectV2(number: $number) { id title } } } }' -f owner="$1" -F number="$2")"; then
-        echo "Failed to read project number $2 owned by $1 (the token needs the project scope: gh auth refresh -s project)." >&2
+        # The call fails on a number that resolves to nothing as well as on a token that cannot see projects, and gh exits 1 on both, so the message names both rather than asserting the one it cannot tell apart.
+        echo "Failed to read project number $2 owned by $1. Either no such project exists or the token cannot read projects (gh auth refresh -s project)." >&2
         return 1
     fi
     id="$(jqr '.data.repositoryOwner.projectV2.id // empty' <<<"$out")"
@@ -187,17 +188,18 @@ project_node_id() { # owner number title
 repo_projects() {
     local out
     # shellcheck disable=SC2016  # $owner and $name are GraphQL query variables, not shell expansions
-    if ! out="$(gh api graphql -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id projectsV2(first: 100) { nodes { id } } } }' -f owner="${repo%%/*}" -f name="${repo##*/}")"; then
-        echo "Failed to read the projects linked to $repo (the token needs the project scope: gh auth refresh -s project)." >&2
+    if ! out="$(gh api graphql -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id projectsV2(first: 100) { totalCount nodes { id } } } }' -f owner="${repo%%/*}" -f name="${repo##*/}")"; then
+        echo "Failed to read the projects linked to $repo. Either the repository is unreadable or the token cannot read projects (gh auth refresh -s project)." >&2
         return 1
     fi
     if ! jq -e '.data.repository != null' <<<"$out" >/dev/null 2>&1; then
         echo "No repository $repo in the GraphQL response, so the projects linked to it could not be read." >&2
         return 1
     fi
-    # Fail loud at the page cap rather than silently narrow, matching ruleset_id above: past it, check reports the fleet link missing and apply writes a link that is already there.
-    if [ "$(jq '.data.repository.projectsV2.nodes | length' <<<"$out")" -eq 100 ]; then
-        echo "Failed for $repo: 100 linked projects returned (the per-page cap), so the single-fetch lookup is unreliable. Add pagination before applying." >&2
+    # Fail loud on a truncated list rather than silently narrow: a page short of the whole set would read as the fleet link missing, and apply would then write a link that is already there.
+    # The comparison is jq's rather than a bash integer test on a captured string, which would read false on any non-numeric output and let the truncated list through.
+    if jq -e '.data.repository.projectsV2.totalCount > (.data.repository.projectsV2.nodes|length)' <<<"$out" >/dev/null 2>&1; then
+        echo "Failed for $repo: more projects are linked than the single page read, so the lookup is unreliable. Add pagination before applying." >&2
         return 1
     fi
     jq -c '{ id: .data.repository.id, projects: [.data.repository.projectsV2.nodes[].id] }' <<<"$out"
@@ -262,13 +264,12 @@ apply_labels() { # create-or-update every label labels.json declares, by name
 
 # Link the repository to the fleet project, which is an association between two objects rather than a repository setting, so it is written through its own API and depends on none of the writes above.
 # The live link list is read first and the mutation runs only when the declared project is absent from it, so a second apply is a read rather than a repeated write, and no write is ever fired to discover whether one was needed.
-apply_project() {
-    local owner number title pid live rid out
+# The project's node id is resolved by cmd_apply's pre-flight and passed in, because resolving it here would abort the run after the four earlier groups had already been written.
+apply_project() { # project-node-id
+    local pid="$1" owner number title live rid out
     owner="$(jqr '.owner' "$project_file")"
     number="$(jqr '.number' "$project_file")"
     title="$(jqr '.title' "$project_file")"
-    # Both reads abort the script on failure, since the link is the last write and an unresolved project is worth no attempt at one.
-    pid="$(project_node_id "$owner" "$number" "$title")"
     live="$(repo_projects)"
     # shellcheck disable=SC2016  # $p is a jq --arg variable, not a shell expansion
     if jq -e --arg p "$pid" '.projects | index($p) != null' <<<"$live" >/dev/null 2>&1; then
@@ -287,7 +288,7 @@ apply_project() {
 }
 
 cmd_apply() {
-    local f private disc payload
+    local f private disc payload project_id
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -302,9 +303,11 @@ cmd_apply() {
     fi
     # The project payload is validated here for the same reason, since apply_project runs last of all and an abort inside it would leave every write before it applied.
     if ! project_payload_ok; then
-        echo "Project payload $project_file did not parse or declares a field outside the contract (a non-empty owner and title holding no tab or line break, and a positive integer number). Aborting before any write." >&2
+        echo "Project payload $project_file did not parse or declares a field outside the contract (a non-empty owner and title holding no tab or line break, and a number written as at most nine plain digits). Aborting before any write." >&2
         exit 1
     fi
+    # The project is resolved here rather than in apply_project, since it is a read and a number that resolves to nothing, or to a project titled otherwise, would otherwise abort the run with four groups of writes already applied.
+    project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
     # They still fail loud, since gh errors go to stderr and a failed write aborts the script.
@@ -338,7 +341,7 @@ cmd_apply() {
     apply_ruleset "$develop_ruleset"
     apply_ruleset "$main_ruleset"
     # ----- Fleet project link -----
-    apply_project
+    apply_project "$project_id"
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
 }
 
@@ -550,13 +553,13 @@ check_labels() {
 }
 
 check_project() {
-    local owner number title pid live
+    local owner number title pid live extra
     if [ ! -e "$project_file" ]; then
         fail "project payload $project_file missing"
         return
     fi
     if ! project_payload_ok; then
-        fail "project payload $project_file did not parse or declares a field outside the contract (a non-empty owner and title holding no tab or line break, and a positive integer number)"
+        fail "project payload $project_file did not parse or declares a field outside the contract (a non-empty owner and title holding no tab or line break, and a number written as at most nine plain digits)"
         return
     fi
     owner="$(jqr '.owner' "$project_file")"
@@ -575,7 +578,11 @@ check_project() {
     assert "linked to project '$title' ($owner, number $number)" jq_has --arg p "$pid" '.projects | index($p) != null' <<<"$live"
     # A project the payload never declared is reported rather than asserted, matching the label group: the fleet link is a floor, and a repo may be linked to a project of its own.
     # shellcheck disable=SC2016  # $p is a jq --arg variable, not a shell expansion
-    note "projects linked beyond the declared one: $(jqr --arg p "$pid" '[.projects[] | select(. != $p)] | length' <<<"$live") (left alone by this script)"
+    if ! extra="$(jqr --arg p "$pid" '[.projects[] | select(. != $p)] | length' <<<"$live")"; then
+        fail "project '$title' ($owner, number $number) - could not count the repository's other project links"
+        return
+    fi
+    note "projects linked beyond the declared one: $extra (left alone by this script)"
 }
 
 check_environments() {

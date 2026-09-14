@@ -3,8 +3,8 @@
 
 The shell is lifted out of the file rather than restated here, so an edit that removes the
 behavior fails these tests instead of leaving a reimplementation to agree with itself. Each
-harness lifts the whole region under test, and the two cases that stub a helper stub only a
-helper this file tests separately, so nothing under test is replaced by a stand-in.
+harness lifts the whole region under test and stubs what surrounds it, never the region
+itself, so the lines under test are always the file's own.
 
 Every case runs offline: `gh` is a shell function the harness defines, which is what lets the
 link write be exercised at all without firing a real mutation at GitHub.
@@ -70,7 +70,7 @@ JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
 PAYLOAD_OK = lift(r"^(project_payload_ok\(\) \{\n.*?\n\}\n)")
 NODE_ID = lift(r"^(project_node_id\(\) \{ # owner number title\n.*?\n\}\n)")
 REPO_PROJECTS = lift(r"^(repo_projects\(\) \{\n.*?\n\}\n)")
-APPLY_PROJECT = lift(r"^(apply_project\(\) \{\n.*?\n\}\n)")
+APPLY_PROJECT = lift(r"^(apply_project\(\) \{ # project-node-id\n.*?\n\}\n)")
 CHECK_PROJECT = r"^(check_project\(\) \{\n.*?\n\}\n)"
 REPORTERS = r"(FAILED=0\nnote\(\).*?\nfail\(\) \{.*?\n\})"
 JQ_HAS = r"^(jq_has\(\) \{ jq -e .*?\}\n)"
@@ -166,8 +166,14 @@ class ProjectLookupCase(unittest.TestCase):
     def test_a_number_owning_no_project_is_refused(self) -> None:
         """A null owner and a null project are the same answer here, and neither may resolve to an id."""
         for label, response in (
-            ("no project", {"data": {"repositoryOwner": {"projectV2": None}}}),
-            ("no owner", {"data": {"repositoryOwner": None}}),
+            # An unresolvable owner is the shape the API actually returns at exit 0.
+            # A null projectV2 beside a resolvable owner is defensive rather than observed.
+            # A number owning no project comes back today as a GraphQL error that gh exits non-zero on, and that arm is covered separately below.
+            ("owner that resolves to nothing", {"data": {"repositoryOwner": None}}),
+            (
+                "project that is null beside a resolvable owner",
+                {"data": {"repositoryOwner": {"projectV2": None}}},
+            ),
         ):
             with self.subTest(label=label):
                 result = self.lookup(response)
@@ -197,12 +203,27 @@ class ProjectLookupCase(unittest.TestCase):
 
 
 class RepoProjectsCase(unittest.TestCase):
-    """Reading the repository's own id and its link list, where a missing repository must not read as no links."""
+    """Reading the repository's own id and its link list, where a partial list must not read as the whole one."""
 
     def projects(self, response: object, status: int = 0) -> subprocess.CompletedProcess[str]:
         document = response if isinstance(response, str) else json.dumps(response)
         script = f"repo=ptr727/Fixture\n{gh_stub(document, status)}{REPO_PROJECTS}repo_projects\n"
         return run_bash(script, "jq")
+
+    @staticmethod
+    def page(count: int, total: int | None = None) -> dict[str, object]:
+        """A response carrying `count` linked projects out of `total`, which defaults to all of them."""
+        return {
+            "data": {
+                "repository": {
+                    "id": REPO_ID,
+                    "projectsV2": {
+                        "totalCount": count if total is None else total,
+                        "nodes": [{"id": f"PVT_{i}"} for i in range(count)],
+                    },
+                }
+            }
+        }
 
     def test_the_id_and_every_linked_project_are_emitted(self) -> None:
         result = self.projects(
@@ -210,7 +231,10 @@ class RepoProjectsCase(unittest.TestCase):
                 "data": {
                     "repository": {
                         "id": REPO_ID,
-                        "projectsV2": {"nodes": [{"id": PROJECT_ID}, {"id": "PVT_other"}]},
+                        "projectsV2": {
+                            "totalCount": 2,
+                            "nodes": [{"id": PROJECT_ID}, {"id": "PVT_other"}],
+                        },
                     }
                 }
             }
@@ -220,31 +244,29 @@ class RepoProjectsCase(unittest.TestCase):
             json.loads(result.stdout), {"id": REPO_ID, "projects": [PROJECT_ID, "PVT_other"]}
         )
 
+    def test_a_truncated_list_fails_rather_than_reading_as_the_whole_list(self) -> None:
+        """A page short of the whole set would read as the fleet link missing."""
+        result = self.projects(self.page(100, total=120))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("more projects are linked than the single page read", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_a_complete_list_passes_even_at_the_page_size(self) -> None:
+        """The test is truncation rather than the page size, so a full page that is the whole set passes."""
+        result = self.projects(self.page(100))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(json.loads(result.stdout)["projects"]), 100)
+
     def test_a_repository_that_is_not_there_fails_rather_than_reporting_no_links(self) -> None:
-        """A response carrying data and a null repository is the fail-open case this guard exists for."""
+        """A null repository beside a 200 would read as a repository linked to nothing.
+
+        Today an unreadable repository comes back as a GraphQL error that gh exits non-zero on,
+        so this guard is defensive rather than a shape the API is known to return.
+        """
         result = self.projects({"data": {"repository": None}})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("No repository ptr727/Fixture", result.stderr)
         self.assertEqual(result.stdout, "")
-
-    def test_a_full_page_fails_rather_than_reading_as_the_whole_list(self) -> None:
-        """At the cap the list may be truncated, which would read as the fleet link missing."""
-        nodes = [{"id": f"PVT_{i}"} for i in range(100)]
-        result = self.projects(
-            {"data": {"repository": {"id": REPO_ID, "projectsV2": {"nodes": nodes}}}}
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("100 linked projects returned", result.stderr)
-        self.assertEqual(result.stdout, "")
-
-    def test_a_page_below_the_cap_is_emitted(self) -> None:
-        """The guard is the count test itself, so the ordinary case must still pass through it."""
-        nodes = [{"id": f"PVT_{i}"} for i in range(99)]
-        result = self.projects(
-            {"data": {"repository": {"id": REPO_ID, "projectsV2": {"nodes": nodes}}}}
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(json.loads(result.stdout)["projects"]), 99)
 
     def test_a_failed_call_fails(self) -> None:
         result = self.projects("", status=1)
@@ -260,9 +282,10 @@ class ApplyLinkCase(unittest.TestCase):
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         """apply_project against a stubbed link list, recording every `gh` call it makes.
 
-        `project_node_id` and `repo_projects` are stubbed because each is exercised whole by its
-        own case above, which leaves this case measuring the one thing it is about: whether the
-        mutation runs, and what the function does with what comes back.
+        The project id is passed in, as cmd_apply's pre-flight passes it, and `repo_projects` is
+        stubbed because it is exercised whole by its own case above, which leaves this case
+        measuring the one thing it is about: whether the mutation runs, and what the function
+        does with what comes back.
         """
         with tempfile.TemporaryDirectory() as tmp:
             payload = Path(tmp) / "project.json"
@@ -279,9 +302,8 @@ class ApplyLinkCase(unittest.TestCase):
             script = (
                 f"repo=ptr727/Fixture\nproject_file={shlex.quote(str(payload))}\n{JQR}"
                 f"{gh_stub(response, log=log)}"
-                f'project_node_id() {{ printf "%s\\n" {PROJECT_ID}; }}\n'
                 f"repo_projects() {{ printf '%s' {json.dumps(live)}; }}\n"
-                f"{APPLY_PROJECT}apply_project\n"
+                f"{APPLY_PROJECT}apply_project {PROJECT_ID}\n"
             )
             result = run_bash(script, "jq", "sed")
             return result, log.read_text(encoding="utf-8")
@@ -311,11 +333,13 @@ class ApplyLinkCase(unittest.TestCase):
 
 
 class WiringCase(unittest.TestCase):
-    """The two call sites that decide whether any of the above runs at all.
+    """The three call sites that decide whether any of the above runs at all.
 
-    Each harness lifts the calling function whole and stubs the groups beside the one under
-    test, because a diff that deletes a call leaves every helper passing its own tests while
-    the group it belongs to never runs.
+    A diff that deletes one leaves every helper passing its own tests while the group it
+    belongs to never runs, which is what these pin. The two pre-flight tests lift the
+    pre-flight region and call it from a synthesized body, since lifting cmd_apply whole
+    would reach its writes; the other two lift their calling function whole and stub the
+    groups beside the one under test.
     """
 
     def test_apply_preflights_the_project_payload_before_any_write(self) -> None:
@@ -363,6 +387,57 @@ class WiringCase(unittest.TestCase):
             result = run_bash(script)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("project.json not found", result.stderr)
+        self.assertNotIn("reached-the-writes", result.stdout)
+
+    def test_apply_runs_the_project_link_write(self) -> None:
+        """cmd_apply lifted whole, with every group and every gh call stubbed out."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main", "project"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            body = lift(r"^(cmd_apply\(\) \{\n.*?\n\}\n)")
+            stubs = (
+                "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
+                'project_node_id() { printf "%s\\n" ' + PROJECT_ID + "; }\n"
+                "apply_labels() { :; }\napply_ruleset() { :; }\n"
+                'apply_project() { echo "the link write ran with $1"; }\n'
+                'gh() { printf "false\\n"; }\njq() { printf "{}\\n"; }\n'
+                'jqr() { printf "1\\n"; }\n'
+            )
+            script = (
+                f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\n"
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={files['project']}\n{stubs}{body}cmd_apply\n"
+            )
+            result = run_bash(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"the link write ran with {PROJECT_ID}", result.stdout)
+
+    def test_apply_resolves_the_project_before_the_first_write(self) -> None:
+        """A number that does not resolve has to stop the run with nothing written yet."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main", "project"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            preflight = lift(
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n"
+                r"    # The project is resolved here.*?\n)    echo"
+            )
+            script = (
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={files['project']}\n{JQR}"
+                "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
+                'project_node_id() { echo "no such project" >&2; return 1; }\n'
+                f"cmd_apply() {{\n    local f project_id\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
+            )
+            result = run_bash(script, "jq", "sed")
+        self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("reached-the-writes", result.stdout)
 
     def test_check_runs_the_project_group(self) -> None:

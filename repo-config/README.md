@@ -53,7 +53,7 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off**, and each branch ruleset then picks its method (merge on `main`, squash on `develop`).
 - **Auto-merge on** (the merge-bot needs it) and **`Always suggest updating pull request branches` on**.
 - **`Automatically delete head branches` is OFF, deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`**, since the explicit flag deletes `develop` regardless of this setting (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
-- **Wikis off. Projects on**, since the fleet plans its work in the one project described under [Fleet Project](#fleet-project) below. **Discussions on public repos only** (off on private). **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
+- **Wikis off. Projects on**, since the fleet plans its work in the one project described under [Fleet Project][fleet-project] below. **Discussions on public repos only** (off on private). **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
 - **Actions / General**: allow GitHub Actions to create and approve pull requests (for the bots).
 
 ## Fleet Project
@@ -66,6 +66,7 @@ A repository linked to a project of its own is left alone, like a label the payl
 
 <!-- Repo -->
 
+[fleet-project]: #fleet-project
 [governance-branching-model]: ../GOVERNANCE.md#branching-model
 [governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
