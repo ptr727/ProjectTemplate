@@ -43,11 +43,11 @@
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When Work Stops on Another Repository",
-      "digest": "sha256:2a14fb980a42e22b7f3d71d32d2f242a4d06711e48deb66eb00f2afaa7516500",
+      "digest": "sha256:3f746644e46810db79e7f3c711f4f3201bbd07faa30f4c86fae47413d40343e6",
       "reviewer": "agent-skill",
       "findings": 0,
       "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T02:57:37Z"
+      "stamp": "2026-09-14T03:02:54Z"
     },
     {
       "unit": ".agents/skills/agent-conduct/SKILL.md > When a Failure Surfaces a Lesson",
