@@ -907,11 +907,11 @@
     },
     {
       "unit": "AUDIT.md > 6. Validate Settings, Rulesets, and Secrets",
-      "digest": "sha256:6e99736264ac2e34b719c070b265b6f290288c23e67114b65dc5e54fbfee535f",
+      "digest": "sha256:c520c5f06a9c68e80bb69c9397a2b088c3847b7ed676debdd36e1ab887f12fa5",
       "reviewer": "agent-skill",
-      "findings": 12,
+      "findings": 9,
       "hubCommit": "f3fd0be8679035bf5a2bdd986e0afe54e5179cb2",
-      "stamp": "2026-09-14T15:02:13Z"
+      "stamp": "2026-09-14T15:18:57Z"
     },
     {
       "unit": "CODESTYLE.md > .NET",
