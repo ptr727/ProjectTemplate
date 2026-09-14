@@ -4,7 +4,8 @@ Hub-only repository and branch configuration held as committed files, kept out o
 
 - `main.json`, `develop.json`, and `operational/develop.json`: the canonical branch rulesets as the managed part of the writable API subset (`name`, `target`, `enforcement`, `conditions`, `rules`). `main.json` is shared. `develop.json` serves release repos, and `operational/develop.json` serves operational repos. `repo-config/configure.sh check owner/repo release|operational` compares the selected payloads with the live rulesets. `bypass_actors` is writable and deliberately unmanaged, so no payload declares one and nothing diffs it: who may bypass a ruleset is a human decision taken in the UI, which `repo-config/configure.sh` preserves on `apply` and reports without asserting on `check`.
 - `labels.json`: the fleet label set, one `name`, `color`, and `description` per label. `repo-config/configure.sh apply owner/repo release|operational` creates or updates every declared label by name and deletes nothing, so a label a repo adds of its own stays. `check` asserts each declared label on all three fields and reports the undeclared ones without judging them.
-- `configure.sh`: run from a hub checkout at `main`, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. It resolves every payload path against the hub's `repo-config/` directory. Name the target repository explicitly, since the command defaults to whichever repository the shell is sitting in. `repo-config/configure.sh apply owner/repo release|operational` creates or updates the settings, Dependabot security features, labels, and rulesets idempotently. `repo-config/configure.sh check owner/repo release|operational` is the read-only counterpart and exits non-zero on drift. It is not an exact inverse: it also asserts that every environment the registry's `environments` declares for the repo exists and carries the declared deployment-branch policy, neither of which `apply` writes, for the reason [docs/repo-config.md][repo-config-doc] "Deployment Environments" gives. The model defaults to the registry `workflowModel` lookup. Pass it explicitly for a repository outside the registry.
+- `project.json`: the fleet project every repository is linked to, declared as the project owner, the project number, and the project title. `repo-config/configure.sh apply owner/repo release|operational` resolves the number to a live project, refuses the run when that project's title is not the declared one, and writes the link only when the repository does not already hold it, so a second apply is a read. `check` asserts the link and counts the repository's other project links without judging them, the same way it treats a label the payload never declared.
+- `configure.sh`: run from a hub checkout at `main`, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. It resolves every payload path against the hub's `repo-config/` directory. Name the target repository explicitly, since the command defaults to whichever repository the shell is sitting in. `repo-config/configure.sh apply owner/repo release|operational` creates or updates the settings, Dependabot security features, labels, rulesets, and the fleet project link idempotently. `repo-config/configure.sh check owner/repo release|operational` is the read-only counterpart and exits non-zero on drift. It is not an exact inverse: it also asserts that every environment the registry's `environments` declares for the repo exists and carries the declared deployment-branch policy, neither of which `apply` writes, for the reason [docs/repo-config.md][repo-config-doc] "Deployment Environments" gives. The model defaults to the registry `workflowModel` lookup. Pass it explicitly for a repository outside the registry.
 
 ## Rulesets
 
@@ -52,14 +53,26 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off**, and each branch ruleset then picks its method (merge on `main`, squash on `develop`).
 - **Auto-merge on** (the merge-bot needs it) and **`Always suggest updating pull request branches` on**.
 - **`Automatically delete head branches` is OFF, deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`**, since the explicit flag deletes `develop` regardless of this setting (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
-- **Wikis and Projects off. Discussions on public repos only** (off on private). **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
+- **Wikis off. Projects on**, since the fleet plans its work in the one project described under [Fleet Project][fleet-project] below. **Discussions on public repos only** (off on private). **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
 - **Actions / General**: allow GitHub Actions to create and approve pull requests (for the bots).
+
+## Fleet Project
+
+Every fleet repository is linked to one user-level project, `Fleet Engineering`, which [`project.json`][project-json] declares by owner, number, and title. The link attaches the repository to the project, and it is a different thing from the `has_projects` setting beside it: the setting is a repository toggle [`settings.json`][settings-json] declares, and the link is an association between two objects that neither payload's PATCH can express, so each is written and read through its own API and each is applied and checked on its own.
+
+The title is declared alongside the number because a project number is unique only per owner and is reusable. A project that is deleted and recreated can leave the declared number pointing at a project the fleet never chose, and `apply` writes the link into every fleet repository, so a number pointing somewhere else would be applied everywhere. `apply` resolves the number and compares the title in its pre-flight, before the first of its five write groups, so a number that resolves to nothing or to a project titled otherwise stops the run with nothing written rather than part way through.
+
+The link is read and written through GraphQL rather than the REST endpoints the other groups use, so both modes need project access on the token beside the admin the ruleset endpoints require. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant, and reads as a failing project group under `check`. A token that can read them but not write one reaches the link write itself and fails there.
+
+A repository linked to a project of its own is left alone, like a label the payload does not declare. `check` reports how many such links a repository carries and asserts none of them.
 
 <!-- Repo -->
 
+[fleet-project]: #fleet-project
 [governance-branching-model]: ../GOVERNANCE.md#branching-model
 [governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[project-json]: ./project.json
 [repo-config-doc]: ../docs/repo-config.md
 [settings-json]: ./settings.json

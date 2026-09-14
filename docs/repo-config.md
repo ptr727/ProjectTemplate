@@ -11,6 +11,7 @@ The hub holds all fleet-wide repository configuration:
 - `develop.json` declares the release-model `develop` ruleset.
 - `operational/develop.json` declares the operational-model `develop` ruleset.
 - `labels.json` declares the fleet label set.
+- `project.json` declares the fleet project every repository is linked to, by owner, number, and title.
 - `configure.sh` applies or checks those payloads through the GitHub API.
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts, both read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
@@ -25,13 +26,13 @@ Downstream repositories carry no copy of `spec/secrets.json`. `baseline` applies
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. The script applies `settings.json`, the Dependabot security features, the label set, and both rulesets. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
+Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. Both modes need project access on the token as well as admin on the repository, since the project link is read and written through GraphQL. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant, and reads as a failing project group under `check`. A token that can read them but not write one reaches the link write itself and fails there. The script applies `settings.json`, the Dependabot security features, the label set, both rulesets, and the link to the fleet project. The link is written only where it is absent, and the declared project title is compared with the live one first, since a project number is reusable and the same declared number is applied to every fleet repository. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
 
 ```sh
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, label, and security feature, plus the deployment environments described below, and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout, which asserts every applied ruleset, setting, label, security feature, and the fleet project link, plus the deployment environments described below, and exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 ## Deployment Environments
 
