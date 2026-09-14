@@ -34,7 +34,7 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`decision`**: a question waiting on the maintainer, alone or beside whatever else the issue carries.
 
-`blocked` is a marker too, and unlike `decision` it never stands alone. The issue carrying it records work this repository is waiting to do, so it carries its own triage label as well, and what the marker adds is that the work waits on an issue in another repository, which the body names. Every count of the open backlog includes it, and only the ranking leaves it out, per the `backlog-burndown` Skill's "Ranking". That is the opposite of what `handoff` below does, which is why the two are stated separately. When it goes on and when it comes off are set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge], which is also what reads it back, so nothing here decides either.
+`blocked` is a marker too, and unlike `decision` it never stands alone. The issue carrying it records work this repository is waiting to do, so it carries its own triage label as well, and what the marker adds is that the work waits on an issue in another repository, which the body names. Every count of the open backlog includes it, which is the opposite of what `handoff` below does and is why the two are stated separately. What a round then does with it, and what it withholds until the blocker clears, is the `backlog-burndown` Skill's "Ranking". When it goes on and when it comes off are set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge], which is also what reads it back, so nothing here decides either.
 
 - **`blocked`**: blocked on an issue in another repository, named in the body.
 
