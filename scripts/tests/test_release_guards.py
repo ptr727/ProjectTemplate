@@ -140,15 +140,20 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
 
 # A call whose argument does not open with a quote is taken as unnamed, which over-reaches.
-# Whitespace before the argument is stepped over inside the lookahead.
-# There it cannot be given back to reach a quote.
+# A string literal opening the argument list names the characters.
+# It does so written positionally or by keyword, and whatever prefix it carries.
+# Two characters is every prefix Python has, and three letters before a quote do not compile.
+# Whitespace before it is stepped over inside the lookahead, where it cannot reach the quote.
 # Whitespace before the parenthesis is not stepped over.
-# This file's comments are read too, and a sentence naming a method would read as a call.
+# The scanned functions' comments are read too, so a sentence naming a method would read as one.
+# What that misses is a call spaced before its parenthesis or after its dot.
+# `ruff format` rewrites both on every commit and CI checks it, so neither reaches a review.
 # A named constant passed by name reads the same here as no argument at all.
 # The conservative direction is the right one.
 # Its cost is a comment, where the alternative is the class of defect this exists to stop.
 BARE_PREDICATE = re.compile(
-    r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![ \t]*[\"'])"
+    r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)"
+    r"\((?![ \t]*(?:\w+[ \t]*=[ \t]*)?[A-Za-z]{0,2}[\"'])"
 )
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
@@ -623,7 +628,6 @@ class ReleaseGuardCase(unittest.TestCase):
             "    return line.lstrip()",
             "    return line.rstrip()",
             "    return line.splitlines()",
-            "    return line.strip( )",
             "    return str.strip(line)",
             '    return re.sub(r"\\s", "", line)',
         ]
@@ -633,6 +637,20 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip(" \t")'))
         # Whitespace before a named argument does not make it unnamed.
         self.assertEqual(([], 0), bare_whitespace_predicates('    return line.strip( " ")'))
+        # A keyword names the characters as plainly as a position does.
+        # `ruff format` leaves both alone, so neither may be reported.
+        self.assertEqual(([], 0), bare_whitespace_predicates('    return line.split(sep=" ")'))
+        # Either quote spells a literal, since a formatter's choice is not a naming rule.
+        self.assertEqual(([], 0), bare_whitespace_predicates("    return line.strip(' \\t')"))
+        # The dot is the anchor, so a bare word in prose is not a call.
+        self.assertEqual(([], 0), bare_whitespace_predicates("    # the split() of an info string"))
+        # A prefix does not stop a literal naming its characters.
+        self.assertEqual(([], 0), bare_whitespace_predicates('    return data.strip(b" \\t")'))
+        # A name is not a literal, so a variable argument is still unnamed.
+        self.assertEqual(
+            (["return line.strip(sep)"], 0),
+            bare_whitespace_predicates("    return line.strip(sep)"),
+        )
         # A sentence naming a method is prose, not a call, and this file's comments are read.
         self.assertEqual(
             ([], 0),
