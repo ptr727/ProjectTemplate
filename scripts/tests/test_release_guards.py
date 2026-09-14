@@ -42,7 +42,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
     blocks it contains.
 
-    A line carrying a fence run with anything before it is refused rather than read. Reading one
+    A line carrying a fence run with anything before it but spaces is refused rather than read. Reading one
     needs the container it sits in, since a renderer measures a fence's indent against its list
     item's content column and takes four spaces past that as an indented code block instead, and
     a scan that guesses at the container reads a block a renderer does not or misses one it
@@ -63,10 +63,11 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
     Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
     Python calls a character whitespace, or a line ending, where a renderer keeps it as content.
-    `str.strip` with no argument, `str.isspace` and `str.splitlines` each read one of those as
-    whitespace to discard, in turn closing a block early and losing the rest of it, eating the
-    start of a body line, swallowing a body opened on a carriage return, and taking a line of
-    content for a blank one and absorbing everything after it. Every comparison here names the
+    `str.strip` with no argument, `str.isspace`, `str.splitlines` and a newline-only split each
+    read one of those as whitespace to discard, in turn closing a block early and losing the
+    rest of it, eating the start of a body line, rewriting a separator as a line ending,
+    swallowing a body opened on a carriage return, taking a line of content for a blank one
+    and absorbing everything after it, and slicing a tab a renderer expands. Every comparison here names the
     characters it means, and a test of its own holds that rule over this function's source,
     since writing the next comparison bare is how each of those arrived.
     """
@@ -103,19 +104,20 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
             )
         indent = len(opener.group("indent"))
         # A renderer strips up to the opener's indent from each body line, expanding a tab first.
-        # A line carrying less than that ends the container, and so ends the block itself.
-        # Both need the container this scan refuses to reason about.
+        # Inside a container a line carrying less than that ends it, and so ends the block.
+        # Telling those apart needs the container this scan refuses to reason about.
         # A body line not simply carrying the indent in spaces is refused rather than guessed at.
-        # A blank line is one of spaces and tabs only, a renderer's sense of blank not Python's.
-        # Such a line carries no indent to check.
+        # A blank line here is one of spaces alone.
+        # A tab is not an indent, since a renderer expands it to a column a slice cannot find.
         for offset, line in enumerate(body):
-            if line.strip(" \t") and line[:indent] != " " * indent:
+            if line.strip(" ") and line[:indent] != " " * indent:
                 raise AssertionError(
                     f"line {opened_at + 1 + offset} is indented less than the block's opener"
                 )
         # A renderer takes the label as the info string's first word.
-        # Python's token is always a prefix of that.
-        # So this can read a label a renderer does not, and never miss one it does.
+        # Python strips wider whitespace than a renderer does, either side of the token.
+        # Where a renderer's first word is a label, only spaces and tabs precede it, which
+        # Python strips too, so this can read a label a renderer does not and never miss one.
         # An over-read adds a block to the parse, where a missed label would drop one from it.
         words = opener.group("info").split()  # any-whitespace: over-reads only, see above
         blocks.append(
@@ -548,29 +550,35 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertIn("\"needs.validate.result == 'success'\"", files_spec)
 
     def test_no_bare_whitespace_predicate_in_the_block_scanner(self) -> None:
-        """`fenced_blocks` names the characters it calls whitespace, everywhere.
+        """The block scanner names the characters it calls whitespace, everywhere.
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
-        content. Five silent defects in this scanner were one bare predicate each, and each was
+        content. Six silent defects in this scanner were one bare predicate each, and each was
         written by someone fixing the previous one, so the rule is worth more than the fixes.
-        A comparison that needs a wider class than space and tab states it and says why.
+        A comparison needing a wider class than the characters it names states that inline and
+        says why, and the exemptions are counted so a second cannot be added quietly.
+
+        Every function the scanner is built from is read, not just the one that had the defects,
+        since moving a predicate into a helper is the cheapest way past a check that reads one.
         """
-        source = inspect.getsource(fenced_blocks)
-        bare = [
-            (number, line.strip())
-            for number, line in enumerate(source.split("\n"), start=1)
-            if re.search(r"\.(strip|lstrip|rstrip|split|splitlines|isspace)\(\)", line)
-            and "any-whitespace:" not in line
-        ]
-        self.assertEqual([], bare, "a whitespace predicate here names its characters")
-        # The escape hatch has to be the narrow kind, so it is checked rather than trusted.
-        allowed = [
-            line
-            for line in source.split("\n")
-            if "any-whitespace:" in line
-            and re.search(r"\.(strip|lstrip|rstrip|split|splitlines|isspace)\(\)", line)
-        ]
-        self.assertEqual(1, len(allowed), "each reasoned exception is reviewed on its own")
+        # A call whose argument is not a quoted literal takes Python's own whitespace class.
+        # `\s` in a pattern does the same, and `re.UNICODE` is the default for a `str` pattern.
+        bare = re.compile(r"\.(strip|lstrip|rstrip|split|rsplit|splitlines|isspace)\((?![\"'])")
+        wide_class = re.compile(r"\\s")
+        offenders: list[tuple[str, int, str]] = []
+        exempt = 0
+        for function in (fenced_blocks, shell_blocks, mislabeled_posix_blocks, fenced_shell_block):
+            for number, line in enumerate(inspect.getsource(function).split("\n"), start=1):
+                hits = len(bare.findall(line)) + len(wide_class.findall(line))
+                if not hits:
+                    continue
+                if "any-whitespace:" in line:
+                    exempt += hits
+                    continue
+                offenders.append((function.__name__, number, line.strip()))
+        self.assertEqual([], offenders, "a whitespace predicate here names its characters")
+        # The escape hatch is the narrow kind, so it is counted rather than trusted.
+        self.assertEqual(1, exempt, "each reasoned exception is reviewed on its own")
 
     def test_shell_block_extractor_reads_every_fence_shape(self) -> None:
         """A block the extractor skips is a block the guard silently never tests.
@@ -653,6 +661,9 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a body line indented partway", "- x\n\n  ```bash\n  M=14\n M=15\n  ```\n"),
             ("a body line at column zero", "- x\n\n  ```bash\n  M=16\nM=17\n  ```\n"),
             ("a tab where the indent should be", "  ```bash\n  M=18\n\tM=19\n  ```\n"),
+            # A tab is not an indent even on an otherwise blank line.
+            # A renderer expands it to a column, where this scan slices characters.
+            ("a body line of one tab", "  ```bash\n  M=25\n\t\n  M=26\n  ```\n"),
             # Only a space carries an indent.
             # A merely blank-looking character is not one, so the line is not the body as printed.
             ("a body line opening on a no-break space", "  ```bash\n\u00a0\u00a0M=20\n  ```\n"),
