@@ -354,7 +354,8 @@ class WiringCase(unittest.TestCase):
                 path.write_text("{}", encoding="utf-8")
                 files[name] = shlex.quote(str(path))
             preflight = lift(
-                r"(    # Pre-flight every required payload before any write.*?\n    fi\n)    echo"
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n"
+                r"    # The project is resolved here.*?\n)    echo"
             )
             script = (
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
@@ -378,7 +379,8 @@ class WiringCase(unittest.TestCase):
                 files[name] = shlex.quote(str(path))
             absent = shlex.quote(str(Path(tmp) / "project.json"))
             preflight = lift(
-                r"(    # Pre-flight every required payload before any write.*?\n    fi\n)    echo"
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n"
+                r"    # The project is resolved here.*?\n)    echo"
             )
             script = (
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
