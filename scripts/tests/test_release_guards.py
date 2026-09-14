@@ -28,8 +28,8 @@ class FencedBlock(NamedTuple):
 
 
 # A run of three or more backticks or tildes opens or closes a code block.
-# This scan reads one only where the whole line is that fence and nothing else.
-# Such a line is indented at most three spaces.
+# This scan reads one only where nothing precedes the run but up to three spaces.
+# What follows the run carries no backtick or tilde of its own.
 FENCE_RUN = re.compile(r"`{3,}|~{3,}")
 FENCE_LINE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^`~]*)$")
 
@@ -41,7 +41,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
     blocks it contains.
 
-    A line carrying a fence run and anything else is refused rather than read. Reading one
+    A line carrying a fence run with anything before it is refused rather than read. Reading one
     needs the container it sits in, since a renderer measures a fence's indent against its list
     item's content column and takes four spaces past that as an indented code block instead, and
     a scan that guesses at the container reads a block a renderer does not or misses one it
@@ -64,10 +64,12 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     in one closed a block early here and left the rest of a real block unread.
     """
     blocks: list[FencedBlock] = []
-    # Split on newlines alone.
-    # `str.splitlines` also breaks on separators a renderer treats as text.
-    # The rejoin below would then rewrite each one as a line ending.
-    lines = markdown.split("\n")
+    # A renderer ends a line on a carriage return, alone or paired, and on nothing else.
+    # `str.splitlines` also breaks on separators a renderer keeps as text.
+    # The rejoin below would then hand back a line ending the document never carried.
+    # Splitting on the newline alone drops the other way, reading a lone return as text.
+    # That loses the body of a block opened on one.
+    lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     opener: re.Match[str] | None = None
     opened_at = 0
     body: list[str] = []
@@ -543,6 +545,11 @@ class ReleaseGuardCase(unittest.TestCase):
             # Whitespace after a closing fence is not text after it, so the block still closes.
             ("trailing space on the closer", "```bash\nC=8\n``` \n", ["C=8"]),
             ("a tab after the closer", "```bash\nC=9\n```\t\n", ["C=9"]),
+            # The label is the first word of the info string, wherever the whitespace falls.
+            ("space before the label", "``` bash\nC=11\n```\n", ["C=11"]),
+            # A carriage return ends a line for a renderer, alone as well as paired.
+            ("a lone carriage return", "```bash\rC=12\r```\r", ["C=12"]),
+            ("carriage returns paired", "```bash\r\nC=13\r\n```\r\n", ["C=13"]),
             # The opener's indent is what the body is dedented by, not the closer's.
             ("a closer less indented than its opener", "- x\n\n  ```bash\n  C=10\n```\n", ["C=10"]),
             # A separator a renderer treats as text must not come back as a line ending.
@@ -555,6 +562,13 @@ class ReleaseGuardCase(unittest.TestCase):
                 "a body line shorter than the indent",
                 "  ```bash\nJ=13\n  J=14\n  ```\n",
                 ["J=13\nJ=14"],
+            ),
+            # A body line indented less than its opener keeps what it has.
+            # Slicing it blindly would eat a character of the body.
+            (
+                "a body line indented partway",
+                "- x\n\n  ```bash\n  J=15\n J=16\n  ```\n",
+                ["J=15\n J=16"],
             ),
             ("an empty block", "```bash\n```\n", [""]),
             ("a label that is not a shell", "```python\nK=15\n```\n", []),
@@ -922,12 +936,23 @@ gh() {
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
 
         self.assertEqual([], mislabeled_posix_blocks(audit))
-        # The same predicate is exercised on a document that must trip it.
+        # The same predicate is exercised on documents that must trip it.
         # One that only ever sees a clean file can stop working with nothing to show for it.
-        self.assertEqual(
-            [(1, "Shell")],
-            mislabeled_posix_blocks('```Shell\ngrep -q x <<<"$y"\n```\n'),
-        )
+        # Every token and every spelling of the label is covered.
+        # Losing one of either is a check that quietly stops catching a whole shape.
+        bodies = {
+            "<(": "diff <(a) b",
+            "<<<": 'grep -q x <<<"$y"',
+            "$'": "x=$'a\\n'",
+            "[[": "[[ -n $x ]]",
+        }
+        for label in ("sh", "shell", "Shell"):
+            for token, body in bodies.items():
+                with self.subTest(label=label, token=token):
+                    self.assertEqual(
+                        [(1, label)],
+                        mislabeled_posix_blocks(f"```{label}\n{body}\n```\n"),
+                    )
 
 
 if __name__ == "__main__":
