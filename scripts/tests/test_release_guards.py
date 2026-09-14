@@ -48,16 +48,20 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     does. Refusing instead makes a shape this cannot read fail loudly rather than go unchecked,
     which is the whole reason the scan exists, and widening it is a deliberate edit here.
 
-    Being a plain fence line is necessary and not sufficient, so this refuses two legal shapes:
-    a fence under a second list level, whose content column is four, and a shorter fence inside
-    a longer one, which is how Markdown is shown in Markdown. No document here uses either.
+    Being a plain fence line is necessary and not sufficient, so some legal Markdown is refused
+    too, a fence under a second list level and a shorter fence inside a longer one among it.
+    No document here uses any of it.
 
-    One divergence is left rather than refused, because closing it would need the container
-    reasoning above. A fence inside an HTML block, which this repository's Markdown linter
-    allows for a `details` collapsible, is raw HTML to a renderer and a block to this scan. It
-    is one-way: an opener consumed as a closer always raises on its info string, so the scan can
-    invent a block a reader never sees and cannot miss one that is there. A phantom block fails
-    loudly under the parse this feeds, where a missed one would pass in silence.
+    Where a container still changes what a renderer sees, an HTML block and a list item ended by
+    a column-zero line being the two found, this over-reads rather than under-reads: it can take
+    in a block a reader never sees, and it does not drop one that is there. That direction is
+    the property worth keeping, since an extra block is parsed and judged while a dropped one is
+    never looked at, and it is why those are left rather than refused. Whether the extra block
+    also fails its parse is not promised, only that nothing real goes unread.
+
+    Only a space or a tab may follow a closing fence, which is what `str.strip` with no argument
+    gets wrong: it also clears characters a renderer treats as content, so a fence line ending
+    in one closed a block early here and left the rest of a real block unread.
     """
     blocks: list[FencedBlock] = []
     # Split on newlines alone.
@@ -80,7 +84,11 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
             continue
         open_fence = opener.group("fence")
         close = fence.group("fence")
-        if close[0] != open_fence[0] or len(close) < len(open_fence) or fence.group("info").strip():
+        if (
+            close[0] != open_fence[0]
+            or len(close) < len(open_fence)
+            or fence.group("info").strip(" \t")
+        ):
             raise AssertionError(
                 f"line {number} does not close the block opened at line {opened_at}"
             )
@@ -97,6 +105,19 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     if opener is not None:
         raise AssertionError(f"unterminated block opened at line {opened_at}")
     return blocks
+
+
+BASH_ONLY = ("<(", "<<<", "$'", "[[")
+
+
+def mislabeled_posix_blocks(markdown: str) -> list[tuple[int, str]]:
+    """Blocks labelled as POSIX shell whose body needs bash, as (line, label) pairs."""
+    return [
+        (block.line, block.label)
+        for block in fenced_blocks(markdown)
+        if block.label.lower() in {"sh", "shell"}
+        and any(token in block.body for token in BASH_ONLY)
+    ]
 
 
 def shell_blocks(markdown: str) -> list[str]:
@@ -521,6 +542,9 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a two-backtick run", "``bash\nC=5\n``\n", []),
             # Whitespace after a closing fence is not text after it, so the block still closes.
             ("trailing space on the closer", "```bash\nC=8\n``` \n", ["C=8"]),
+            ("a tab after the closer", "```bash\nC=9\n```\t\n", ["C=9"]),
+            # The opener's indent is what the body is dedented by, not the closer's.
+            ("a closer less indented than its opener", "- x\n\n  ```bash\n  C=10\n```\n", ["C=10"]),
             # A separator a renderer treats as text must not come back as a line ending.
             ("a line separator inside a body", "```bash\nC=6\u2028C=7\n```\n", ["C=6\u2028C=7"]),
             ("indented inside a list item", "- x\n\n  ```shell\n  D=4\n  ```\n", ["D=4"]),
@@ -553,6 +577,17 @@ class ReleaseGuardCase(unittest.TestCase):
             ("four spaces in", "Para.\n\n    ```bash\n    M=5\n    ```\n"),
             ("a fence run mid-line", "text ```bash text\nM=6\n```\n"),
             ("a backtick in the info string", "```bash `x`\nM=7\n```\n"),
+            ("a tilde in a backtick fence's info", "```bash ~x\nM=7b\n```\n"),
+            ("a tilde fence in a blockquote", "> ~~~bash\n> M=7c\n> ~~~\n"),
+            # Only a space or a tab may follow a closing fence.
+            # A character a renderer treats as content leaves the rest of a real block unread.
+            # The document closes cleanly.
+            # A scan accepting the no-break space returns a short block rather than raising.
+            # This case then fails rather than passing by luck.
+            (
+                "a no-break space after the closer",
+                "```bash\nM=7d\n```\u00a0\nrm -rf /\n```\u00a0\nM=7e\n```\n",
+            ),
             # A closer must match its opener's character and length and carry nothing after it.
             # Otherwise the block it ends is not the block that was opened.
             ("a shorter fence closing a longer one", "````bash\nM=8\n```\nM=9\n````\n"),
@@ -885,15 +920,14 @@ gh() {
 
     def test_audit_bash_blocks_are_not_labeled_as_posix_shell(self) -> None:
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
-        bash_only = ("<(", "<<<", "$'", "[[")
-        mislabeled = [
-            (block.line, block.label)
-            for block in fenced_blocks(audit)
-            if block.label.lower() in {"sh", "shell"}
-            and any(token in block.body for token in bash_only)
-        ]
 
-        self.assertEqual([], mislabeled)
+        self.assertEqual([], mislabeled_posix_blocks(audit))
+        # The same predicate is exercised on a document that must trip it.
+        # One that only ever sees a clean file can stop working with nothing to show for it.
+        self.assertEqual(
+            [(1, "Shell")],
+            mislabeled_posix_blocks('```Shell\ngrep -q x <<<"$y"\n```\n'),
+        )
 
 
 if __name__ == "__main__":
