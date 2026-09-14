@@ -34,9 +34,9 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`decision`**: a question waiting on the maintainer, alone or beside whatever else the issue carries.
 
-`blocked` is a marker too, and unlike `decision` it never stands alone. The issue carrying it records work this repository is waiting to do, so it carries its own triage label as well, and what the marker adds is that the work waits on something outside this repository, which the body names, in the ordinary case an issue in another repository of the fleet. When it goes on and when it comes off are set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge], which is also what reads it back, so nothing here decides either.
+`blocked` is a marker too, and unlike `decision` it never stands alone. The issue carrying it records work this repository is waiting to do, so it carries its own triage label as well, and what the marker adds is that the work waits on an issue in another repository, which the body names. When it goes on and when it comes off are set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge], which is also what reads it back, so nothing here decides either.
 
-- **`blocked`**: blocked on an external dependency, named in the body.
+- **`blocked`**: blocked on an issue in another repository, named in the body.
 
 `handoff` is a surface marker like `agents` and `skills` rather than a triage label, and a handoff issue carries no triage label at all, because it records work to do next rather than work of its own. Without that stated here, the next reader of this taxonomy reads a handoff issue carrying no triage label as drift. The chain it indexes is found by this label rather than by a title search, which is what lets a handoff title carry a human subject with nothing parsing it, and every enumeration that ranks or counts the open backlog excludes the label for the same reason one is always open by design.
 

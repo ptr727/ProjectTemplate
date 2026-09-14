@@ -116,15 +116,15 @@ ranking and out of every count of the open backlog rather than out of the rankin
 
 An issue carrying the `blocked` label is counted and is not ranked while its blocker stands. It
 records real work this repository owes, which is why it stays in the count, and the label says the
-work cannot start yet, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement". So it has no
-group, no worker, and no claim until the blocker clears, and it never takes one of the round's four
-worker slots. Whether the blocker still stands is read from what its body names rather than from the
-label, since the label comes off by hand and lags the fix, and a fix merged into `develop` leaves
-the issue it fixes open, per "Grouping and File Claims" below on closing keywords. Where that read
-cannot be made, from a private or deleted repository or a reference naming no issue, the blocker
+work cannot start yet, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement". So until the
+blocker clears it has no group, no worker, and no claim, and spends none of the round's four worker
+slots. Whether the blocker still stands is read from what its body names rather than from the label,
+since the label comes off by hand and lags the fix, and a fix merged into `develop` leaves the issue
+it fixes open, per "Grouping and File Claims" below on closing keywords. Where that read cannot be
+made, from a private or deleted repository or a reference nothing can be read from, the blocker
 stands rather than being assumed cleared. The round's report names every issue it held back this way
-and the blocker each one waits on, since a dependency nobody states is one the next round
-investigates again.
+and the blocker each one waits on, since the maintainer reads the report rather than the issue
+bodies, and a stuck issue nobody names reads as ordinary backlog that simply never moves.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it

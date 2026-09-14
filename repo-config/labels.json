@@ -1,6 +1,6 @@
 [
     { "name": "agents", "color": "f86915", "description": "Agents instructions" },
-    { "name": "blocked", "color": "d93f0b", "description": "Blocked on an external dependency, named in the body" },
+    { "name": "blocked", "color": "d93f0b", "description": "Blocked on an issue in another repository, named in the body" },
     { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
     { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
     { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },

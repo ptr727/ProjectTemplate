@@ -238,19 +238,15 @@ names the command that applies the fleet label set except where the label read f
 which is the one case where the label's absence is unproven rather than established.
 
 Creating an issue, commenting on one, closing one, and editing a body are each outward-facing
-writes. `new` creates, comments, and closes, the label riding inside the one create call rather
-than being a write of its own. `link` edits a body, comments, and closes. Filing a handoff link is authorized standing by `AGENTS.md` "Session Scope", which
-requires one at every session close and allows no substitute that records the round, so a session
-ending unattended can comply with it. **That authorization reaches the filing and nothing else**,
-meaning the three writes that rule enumerates and the two of them `link` makes where it completes
-a filing that stopped part way. It covers the repository `AGENTS.md` "Session Scope" sends the link to, the one holding the work
-the next session resumes, and no other, and reading it wider is the self-grant `GOVERNANCE.md`
-"Repository Boundaries and Write Safety" forbids. `link`'s body edit is outside it, since that
-rule has the new link name its predecessor at create time and so describes no after-the-fact edit,
-which makes the repair its own act needing its own go-ahead. `link` also reaches an issue this
-chain never created, since the caller names both numbers and its refusals ask for a block and a
-label to be added by hand first, so the two issues it is given are chosen deliberately rather than
-swept up.
+writes. `new` creates, comments, and closes, the label riding inside the one create call rather than
+being a write of its own. `link` edits a body, comments, and closes. Each of them is bound by
+`GOVERNANCE.md` "Repository Boundaries and Write Safety" exactly as any other write is. They reach
+the repository `AGENTS.md` "Session Scope" sends the link to, the one holding the work the next
+session resumes, and no other. `link`'s body edit is the one write that rule does not ask for at
+all, since it has the new link name its predecessor at create time and so describes no
+after-the-fact edit. `link` also reaches an issue this chain never created, since the caller names
+both numbers and its refusals ask for a block and a label to be added by hand first, so the two
+issues it is given are chosen deliberately rather than swept up.
 
 Where the caller names an issue, which is `link` alone, it reads both live before writing and
 writes only what those reads returned. Every other identifier a write targets is captured from a
