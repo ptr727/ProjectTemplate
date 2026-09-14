@@ -337,10 +337,11 @@ class WiringCase(unittest.TestCase):
 
     A diff that deletes one leaves every helper passing its own tests while the group it
     belongs to never runs, which is what these pin. A test of cmd_apply's pre-flight lifts
-    that region and calls it from a synthesized body, since lifting cmd_apply whole would
-    reach its writes, and a test of a whole function lifts it and stubs the groups beside
-    the one under test. No count is given here, because a count goes stale as a case is
-    added and the class itself is what says how many there are.
+    that region and calls it from a synthesized body, so an arm reached before the writes
+    is tested without stubbing them, and a test of a whole function lifts it and stubs
+    every group and every command beside the one under test. No count is given here,
+    because a count goes stale as a case is added and the class itself is what says how
+    many there are.
     """
 
     def test_apply_preflights_the_project_payload_before_any_write(self) -> None:
@@ -505,7 +506,11 @@ class CheckGroupCase(unittest.TestCase):
         self.assertIn("FAILED=1", result.stdout)
 
     def test_a_link_list_that_cannot_be_counted_fails_rather_than_printing_nothing(self) -> None:
-        """An unguarded count renders a failed read as an empty number inside the note line."""
+        """An unguarded count aborts the group, so the run skips every group after it.
+
+        Under the options configure.sh sets, the failing command substitution ends check_project
+        where the guard fails it, which is what the guard's own comment in the script says.
+        """
         result = self.harness([PROJECT_ID], live="not json at all")
         self.assertIn("could not count the repository's other project links", result.stdout)
         self.assertIn("FAILED=1", result.stdout)
