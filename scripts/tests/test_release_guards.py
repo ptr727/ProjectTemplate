@@ -27,6 +27,13 @@ class FencedBlock(NamedTuple):
     body: str
 
 
+# A run of three or more backticks or tildes opens or closes a code block.
+# This scan reads one only where the whole line is that fence and nothing else.
+# Such a line is indented at most three spaces.
+FENCE_RUN = re.compile(r"`{3,}|~{3,}")
+FENCE_LINE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^`~]*)$")
+
+
 def fenced_blocks(markdown: str) -> list[FencedBlock]:
     """Every fenced code block in `markdown`, dedented out of the list item holding it.
 
@@ -34,60 +41,51 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
     blocks it contains.
 
-    This reads the shapes this fleet's documents use rather than all of CommonMark, and it
-    refuses the rest instead of guessing at them. A fence indented four or more spaces is an
-    indented code block to a renderer and a fence to a naive scan, and one inside a blockquote
-    or behind a tab is invisible to this scan entirely, so each of those raises rather than
-    being silently skipped or silently misread. Refusing is what keeps the disclosed gaps from
-    becoming the silent miss this scan exists to prevent, and widening it is a deliberate edit
-    here rather than a document that quietly stops being checked.
+    A line carrying a fence run and anything else is refused rather than read. Reading one
+    needs the container it sits in, since a renderer measures a fence's indent against its list
+    item's content column and takes four spaces past that as an indented code block instead, and
+    a scan that guesses at the container reads a block a renderer does not or misses one it
+    does. Every fence-run line in this fleet's documents is already a plain fence line, so the
+    rule costs nothing today and makes the shapes this scan cannot read fail loudly rather than
+    silently, which is the whole reason the scan exists. Widening it is a deliberate edit here.
     """
     blocks: list[FencedBlock] = []
     # Split on newlines alone.
     # `str.splitlines` also breaks on separators a renderer treats as text.
     # The rejoin below would then rewrite each one as a line ending.
     lines = markdown.split("\n")
+    opener: re.Match[str] | None = None
+    opened_at = 0
+    body: list[str] = []
     for number, line in enumerate(lines, start=1):
-        if re.match(r"^ *> *(`{3,}|~{3,})", line) or re.match(
-            r"^[ \t]*\t[ \t]*(`{3,}|~{3,})", line
-        ):
-            raise AssertionError(f"line {number} carries a fence this scan does not read")
-    index = 0
-    while index < len(lines):
-        opener = re.match(r"^(?P<indent> *)(?P<fence>`{3,}|~{3,})(?P<info>.*)$", lines[index])
-        index += 1
-        if not opener:
+        fence = FENCE_LINE.match(line)
+        if FENCE_RUN.search(line) and not fence:
+            raise AssertionError(f"line {number} carries a fence run that is not a fence line")
+        if not fence:
+            if opener is not None:
+                body.append(line)
             continue
+        if opener is None:
+            opener, opened_at, body = fence, number, []
+            continue
+        open_fence = opener.group("fence")
+        close = fence.group("fence")
+        if close[0] != open_fence[0] or len(close) < len(open_fence) or fence.group("info").strip():
+            raise AssertionError(
+                f"line {number} does not close the block opened at line {opened_at}"
+            )
         indent = len(opener.group("indent"))
-        if indent >= 4:
-            raise AssertionError(f"line {index} carries a fence this scan does not read")
-        fence = opener.group("fence")
-        # A backtick fence's info string may hold no backtick, which is what keeps a lone
-        # `` `code` `` span in prose from reading as an opener.
-        info = opener.group("info")
-        if fence[0] == "`" and "`" in info:
-            continue
-        start = index
-        # CommonMark allows a closing fence up to three spaces past its opener's own indent.
-        # Unbounded, an indented fence printed inside a body closes the block early.
-        # The scan then re-syncs onto the real close and calls it an opener that never terminates.
-        closer = re.compile(rf"^ {{0,{indent + 3}}}{re.escape(fence[0])}{{{len(fence)},}} *$")
-        body: list[str] = []
-        while index < len(lines) and not closer.match(lines[index]):
-            body.append(lines[index])
-            index += 1
-        if index >= len(lines):
-            raise AssertionError(f"unterminated {fence} block opened at line {start}")
-        index += 1
-        words = info.split()
-        label = words[0] if words else ""
+        words = opener.group("info").split()
         blocks.append(
             FencedBlock(
-                start,
-                label,
+                opened_at,
+                words[0] if words else "",
                 "\n".join(line[indent:] if line[:indent].isspace() else line for line in body),
             )
         )
+        opener = None
+    if opener is not None:
+        raise AssertionError(f"unterminated block opened at line {opened_at}")
     return blocks
 
 
@@ -498,84 +496,76 @@ class ReleaseGuardCase(unittest.TestCase):
         """A block the extractor skips is a block the guard silently never tests.
 
         Each case pins one rule, and a rule no case exercises can be dropped without any test
-        noticing, so a rule added to the extractor is owed a case here. The pattern this
-        replaced failed the longer-fence, tilde, shorter-fence-inside and trailing-text cases.
+        noticing, so a rule added to the extractor is owed a case here. The read cases are the
+        shapes this fleet's documents use; everything else is refused, because reading it would
+        need the container the fence sits in and a wrong guess there is the silent miss this
+        scan exists to prevent.
         """
-        cases = [
+        read = [
             ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
             ("a longer fence", "````bash\nB=2\n````\n", ["B=2"]),
+            ("a closer longer than its opener", "```bash\nB=3\n````\n", ["B=3"]),
             ("a tilde fence", "~~~sh\nC=3\n~~~\n", ["C=3"]),
+            ("a longer tilde fence", "~~~~sh\nC=4\n~~~~\n", ["C=4"]),
             ("indented inside a list item", "- x\n\n  ```shell\n  D=4\n  ```\n", ["D=4"]),
-            # A closer may sit up to three spaces past its opener and still close.
-            ("a closer three spaces past its opener", "```bash\nD=5\n   ```\n", ["D=5"]),
-            # The close must match the opener's character, not merely be some fence.
-            (
-                "a backtick line inside a tilde fence",
-                "~~~sh\nE=5\n```\nE=6\n~~~\n",
-                ["E=5\n```\nE=6"],
-            ),
-            # A shorter fence inside a longer one is content, not a close.
-            ("a shorter fence inside", "````bash\nF=7\n```\nF=8\n````\n", ["F=7\n```\nF=8"]),
-            # Trailing text after a fence means it is not a closing fence at all.
-            (
-                "trailing text after a fence",
-                "```bash\nG=9\n``` no\nG=10\n```\n",
-                ["G=9\n``` no\nG=10"],
-            ),
-            # CommonMark takes the label from the first word of the info string.
+            ("a closer three spaces in", "```bash\nD=5\n   ```\n", ["D=5"]),
             ("an info string with attributes", '```bash title="x"\nH=11\n```\n', ["H=11"]),
             ("a mixed-case label", "```Bash\nI=12\n```\n", ["I=12"]),
-            # A body line shorter than the opener's indent is left alone rather than sliced.
             (
                 "a body line shorter than the indent",
                 "  ```bash\nJ=13\n  J=14\n  ```\n",
                 ["J=13\nJ=14"],
             ),
-            ("a label that is not a shell", "```python\nK=15\n```\n", []),
-            # A backtick in a backtick fence's info string means it is not a fence at all.
-            # Without the guard the first line opens a bash block closed on line 3.
-            # So this case fails rather than merely reading differently.
-            ("a backtick in the info string", "```bash `x`\nK=16\n```\nK=17\n```\n", []),
-            # One backtick is as disqualifying as two, so the guard counts presence not pairs.
-            ("one backtick in the info string", "```bash `\nK=16\n```\nK=17\n```\n", []),
-            # A tilde fence carries no such rule, so the same info string opens one.
-            ("the same info string on a tilde fence", "~~~bash `x`\nK=17\n~~~\n", ["K=17"]),
-            ("an info string of only spaces", "```   \nK=18\n```\n", []),
             ("an empty block", "```bash\n```\n", [""]),
-            # A closing fence may be indented up to three spaces past its opener, and no further.
-            (
-                "a fence indented past that inside a body",
-                "```bash\nK=19\n    ```\nK=20\n```\n",
-                ["K=19\n    ```\nK=20"],
-            ),
-            # A block illustrating Markdown must not hand out the blocks inside it.
-            (
-                "a shell fence inside a non-shell block",
-                "````markdown\n```bash\nL=16\n```\n````\n",
-                [],
-            ),
-            # A code span in prose is not an opener.
+            ("a label that is not a shell", "```python\nK=15\n```\n", []),
+            ("a label merely starting with one", "```shell-session\n$ x\n```\n", []),
+            ("an info string of only spaces", "```   \nK=18\n```\n", []),
             ("an inline code span", "Run `bash` now.\n", []),
+            ("two blocks back to back", "```bash\nL=1\n```\n```sh\nL=2\n```\n", ["L=1", "L=2"]),
         ]
-        for name, markdown, expected in cases:
-            with self.subTest(case=name):
+        for name, markdown, expected in read:
+            with self.subTest(read=name):
                 self.assertEqual(expected, shell_blocks(markdown))
-        # An opener with no close is a malformed document rather than an empty result.
-        # The message names the opener rather than the end of the file it was detected at.
-        with self.assertRaises(AssertionError) as unterminated:
-            shell_blocks("padding\n\n```bash\nM=17\nM=18\n")
-        self.assertIn("line 3", str(unterminated.exception))
-        # A shape this scan cannot read is refused rather than skipped or guessed at.
-        # A silent skip is the failure the scan exists to prevent.
-        for name, markdown in [
-            ("four spaces", "Para.\n\n    ```bash\n    X=1\n    ```\n"),
-            ("a tab", "\t```bash\nX=2\n\t```\n"),
-            ("a blockquote", "> ```bash\n> X=3\n> ```\n"),
-        ]:
+
+        refused = [
+            # A fence sharing a line with anything else needs the container to read.
+            # Guessing at the container is what silently drops or swallows a block.
+            ("on a list-marker line", "- ```bash\nM=1\n  ```\n"),
+            ("in a blockquote", "> ```bash\nM=2\n> ```\n"),
+            ("in a nested blockquote", "> > ```bash\nM=3\n> > ```\n"),
+            ("behind a tab", "\t```bash\nM=4\n\t```\n"),
+            ("four spaces in", "Para.\n\n    ```bash\n    M=5\n    ```\n"),
+            ("a fence run mid-line", "text ```bash text\nM=6\n```\n"),
+            ("a backtick in the info string", "```bash `x`\nM=7\n```\n"),
+            # A closer must match its opener's character and length and carry nothing after it.
+            # Otherwise the block it ends is not the block that was opened.
+            ("a shorter fence closing a longer one", "````bash\nM=8\n```\nM=9\n````\n"),
+            ("a tilde closing a backtick fence", "```bash\nM=10\n~~~\n"),
+            ("trailing text on the closer", "```bash\nM=11\n``` no\n"),
+            ("a fence indented past the bound inside a body", "```bash\nM=12\n    ```\n"),
+            ("an unterminated block", "padding\n\n```bash\nM=13\n"),
+        ]
+        for name, markdown in refused:
             with self.subTest(refused=name), self.assertRaises(AssertionError):
                 shell_blocks(markdown)
-        # A label is matched whole, so a console transcript is not fed to a shell parser.
-        self.assertEqual([], shell_blocks("```shell-session\n$ x\n```\n"))
+
+        # A closer shorter than its opener is refused as a bad close.
+        # Left to surface as an unterminated block, it would name a line carrying no fence.
+        with self.assertRaises(AssertionError) as short_close:
+            shell_blocks("````bash\nM=8\n```\nM=9\n````\n")
+        self.assertIn("does not close", str(short_close.exception))
+        # The refusal names the offending line rather than wherever the scan stopped.
+        with self.assertRaises(AssertionError) as unterminated:
+            shell_blocks("padding\n\n```bash\nN=1\nN=2\n")
+        self.assertIn("line 3", str(unterminated.exception))
+        with self.assertRaises(AssertionError) as midline:
+            shell_blocks("ok\nok\n- ```bash\n")
+        self.assertIn("line 3", str(midline.exception))
+        # The line a block reports is its opener's, which only a failure would otherwise render.
+        self.assertEqual(
+            [(1, "bash"), (5, "sh")],
+            [(b.line, b.label) for b in fenced_blocks("```bash\nN=3\n```\n\n```sh\nN=4\n```\n")],
+        )
         # The single-block helper resolves exactly one block.
         # A rename leaving none and an edit leaving two each stop it testing what it names.
         two = "```bash\nmarker A\n```\n\n```sh\nmarker B\n```\n"
@@ -584,11 +574,6 @@ class ReleaseGuardCase(unittest.TestCase):
             fenced_bash_block(two, "marker")
         with self.assertRaises(AssertionError):
             fenced_bash_block("```bash\nnothing\n```\n", "marker")
-        # The line a block reports is its opener's, which only a failure would otherwise render.
-        self.assertEqual(
-            [(1, "bash"), (5, "sh")],
-            [(b.line, b.label) for b in fenced_blocks("```bash\nN=1\n```\n\n```sh\nN=2\n```\n")],
-        )
 
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
