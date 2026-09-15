@@ -1661,9 +1661,9 @@ _COMMAND_POSITION_WORDS = {
 
 # The two bounds this rule reads as written into the loop's own condition.
 # - the test-builtin form, `[ "$i" -lt 120 ]`.
-# - the arithmetic form, `(( SECONDS < 600 ))`.
+# - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
 # Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
-_BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*[<>].*\)\)")
+_BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
 
 
 def _reads_its_input(cond):
@@ -1700,6 +1700,26 @@ def _is_sleep_exe(tok):
     """True if the token invokes `sleep`, recognized the way `_is_timeout_exe` recognizes timeout."""
     base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
     return base in ("sleep", "sleep.exe")
+
+
+def _runs_as_command(toks, w):
+    """True if the token at index w is the command its run executes, past any prefix or `timeout`.
+
+    Whether a wrapper runs is a different question from whether it is bounded, and conflating them
+    let `timeout 0 bash -c '<loop>'` skip its payload entirely: the zero is no bound, so a
+    bound-shaped test refused to look inside a shell that really does run the loop.
+    """
+    if _opens_command(toks, w):
+        return True
+    start = w
+    while start > 0 and not _is_shell_op(toks[start - 1]):
+        start -= 1
+    # The run's own first command decides.
+    # A prefix or a `timeout` runs what follows it, whatever options sit between.
+    # So `sudo -u ci bash -c ...` and `timeout 0 bash -c ...` both execute the shell.
+    # Anything else does not, which is what `echo bash -c ...` is.
+    # Leaning toward executed is deliberate, since not scanning a payload is a bypass.
+    return start < w and (_is_command_prefix(toks[start]) or _is_timeout_exe(toks[start]))
 
 
 def _timeout_bounds_wrapper(toks, w):
@@ -1822,8 +1842,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
         return None
     toks = _shell_tokens(cmd)
     for i, tok in enumerate(toks):
-        # A wrapper is read wherever it appears rather than only in command position, since `timeout 600 bash -c ...` puts it after an argument.
-        if _is_shell_wrapper_exe(tok):
+        # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
+        # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
+        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
             args, _ = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
             ci = next(
@@ -3759,6 +3780,26 @@ _WAIT_CASES = [
         "while (( SECONDS < 600 )); do sleep 10; done",
         "allow",
         "the arithmetic form of that same guard",
+    ),
+    (
+        "while (( 1 << 1 )); do sleep 1; done",
+        "deny",
+        "a shift inside the arithmetic form is not a comparison and bounds nothing",
+    ),
+    (
+        "echo bash -c 'while true; do sleep 1; done'",
+        "allow",
+        "a shell named as an argument to something else runs no payload",
+    ),
+    (
+        "sudo -u ci bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "while a prefix runs what follows it, whatever options sit between",
+    ),
+    (
+        "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "whether a wrapper runs is a separate question from whether it is bounded",
     ),
     (
         "end=$((SECONDS + 600))\nwhile (( SECONDS < end )) && ! [ -f x ]; do sleep 30; done\nif (( SECONDS < end )); then echo MET; else echo 'NOT MET after 600s'; fi",

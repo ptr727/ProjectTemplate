@@ -139,8 +139,12 @@ def _descendants(root, table):
         children.setdefault(ppid, []).append(pid)
     out = []
     queue = list(children.get(root, []))
-    while queue:
-        pid = queue.pop(0)
+    # Walked by index rather than by `pop(0)`, which shifts the whole list on every step.
+    # A busy host's table is large enough for that quadratic walk to be worth the index.
+    head = 0
+    while head < len(queue):
+        pid = queue[head]
+        head += 1
         out.append(pid)
         queue.extend(children.get(pid, []))
     return out
