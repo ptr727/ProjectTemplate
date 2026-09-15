@@ -389,6 +389,18 @@ class TestRegistration(StampCase):
         ]
         self.assertEqual(len(entries), 1)
 
+    def test_a_sweep_under_a_matcher_reports_stale(self):
+        """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
+        self.install()
+        data = self._settings()
+        for group in data["hooks"]["SessionEnd"]:
+            if any(install.SWEEP_STEM in h.get("command", "") for h in group.get("hooks", [])):
+                group["matcher"] = "clear"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("under a matcher", r.stdout)
+
     def test_an_unregistered_sweep_reports_stale_rather_than_current(self):
         self.install()
         data = self._settings()

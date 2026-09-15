@@ -372,6 +372,13 @@ def registration_problems(claude_home):
         for hook in group.get("hooks") or []:
             if isinstance(hook, dict) and SWEEP_STEM in str(hook.get("command", "")):
                 swept += 1
+                # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
+                # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
+                if "matcher" in group:
+                    out.append(
+                        f"the SessionEnd sweep is registered under a matcher "
+                        f"({group['matcher']!r}), so it runs on that exit reason alone"
+                    )
     if swept == 0:
         out.append(
             "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "

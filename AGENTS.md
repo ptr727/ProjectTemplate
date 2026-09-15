@@ -30,7 +30,7 @@ Three rules bound every path above. **Read the hub's `main` branch as ground tru
 
 ## Context and Delegation Discipline
 
-An agent session is billed on the context it carries, not the work it does. Every request re-reads the whole accumulated context, so a token added early is paid for again on every request after it. A long session therefore bills its last task for every earlier one. These are cost rules. The prohibition on an unbounded wait below is not one. It sits here because a wait is written in the same breath as the delegation it waits on. What an unbounded shell loop damages is the maintainer's machine, not the bill. None of these rules licenses doing less work, skipping verification, or shipping something unreviewed.
+An agent session is billed on the context it carries, not the work it does. Every request re-reads the whole accumulated context, so a token added early is paid for again on every request after it. A long session therefore bills its last task for every earlier one. These are cost rules. The prohibition on an unbounded shell loop below is not one. It sits here because a wait is written in the same breath as the delegation it waits on. It is a prohibition because such a loop never ends, not because it is expensive. None of these rules licenses doing less work, skipping verification, or shipping something unreviewed.
 
 ### Session Scope
 

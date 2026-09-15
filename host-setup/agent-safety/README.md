@@ -186,7 +186,7 @@ already happened by the time any tool call is judged.
    agent's to end either: a shell started by a tool call runs in a session of its own, so it
    outlives the turn, the subagent, and the run that started it, and nothing reaps it. Deny a
    `while`/`until` compound whose body calls `sleep`, unless the command text carries its own bound.
-   A bound is one of exactly two forms, and naming them exactly is the point, since a worker
+   A bound is one of three forms, and naming them exactly is the point, since a worker
    reproduces a quoted shape and does not reproduce an adjective. The first is a `timeout
    <duration>` running the `sh -c`/`bash -c` wrapper that holds the loop, `timeout 600 bash -c
    '<the loop>'`. That placement is the only one that works, since `timeout` takes a command and
@@ -199,9 +199,12 @@ already happened by the time any tool call is judged.
    document quoting the forbidden shape is written rather than denied.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
-   `while true` does, while a `for x in <words>` is bounded by its own word list. A loop whose
-   condition is a `read` is bounded by its input, so throttling between iterations with a `sleep` is
-   ordinary work rather than a leak. And a loop the command backgrounds is not bounded by a `timeout`
+   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
+   `read` that draws on an input redirect, which is bounded by that input, so throttling between
+   iterations with a `sleep` is ordinary work rather than a leak. A redirect names a source that
+   ends, where a pipe's producer is unknown from the command text. A loop fed by
+   `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
+   false deny is the safe direction. And a loop the command backgrounds is not bounded by a `timeout`
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
    child is gone, and nothing signals what it left.
 

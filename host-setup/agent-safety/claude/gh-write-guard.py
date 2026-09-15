@@ -1666,14 +1666,20 @@ _COMMAND_POSITION_WORDS = {
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
 
 
-def _reads_its_input(cond):
+def _reads_its_input(cond, after_done):
     """True if the loop's condition is a `read`, which ends the loop when the input is exhausted.
 
     `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
     clock, and throttling between iterations is the ordinary reason such a loop sleeps at all.
-    Only a leading `read`, after any `NAME=value` assignments, counts: a `read` appearing later in
-    the condition is an argument to something else and says nothing about what ends the loop.
+    Two things are required. A leading `read`, after any `NAME=value` assignments, since a `read`
+    later in the condition is an argument to something else. And an input redirect on the loop
+    itself, because a redirect names a source that ends while a pipe's producer is unknown from the
+    command text: `yes | while read line; do sleep 30; done` never exhausts its input. Reading an
+    unknown producer as unbounded costs a false deny on a piped `find | while read`, which is the
+    safe direction, and the bound such a loop needs is the ordinary one.
     """
+    if not any(_is_redir_op(t) and "<" in t for t in after_done):
+        return False
     for tok in cond:
         if _ENV_ASSIGN_RE.match(tok):
             continue
@@ -1782,7 +1788,10 @@ def _sleeps(toks, _depth=0):
     if _depth > 4:
         return False
     for k, tok in enumerate(toks):
-        if _is_sleep_exe(tok) and _opens_command(toks, k):
+        # `_runs_as_command` rather than `_opens_command`, since a launcher's options sit between it and what it runs.
+        # `env -i sleep 30` and `sudo -u ci sleep 30` both sleep.
+        # `grep -i sleep f` does not, its run's first command being no launcher.
+        if _is_sleep_exe(tok) and _runs_as_command(toks, k):
             return True
         if not _is_shell_wrapper_exe(tok):
             continue
@@ -1872,7 +1881,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
             backgrounded = done_at + 1 < len(toks) and toks[done_at + 1] == "&"
-            bounded = (inherited_timeout and not backgrounded) or _reads_its_input(cond)
+            bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
+                cond, toks[done_at + 1 :]
+            )
             if sleeps and not bounded and not _BOUND_IN_CONDITION.search(" ".join(cond)):
                 # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
                 quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
