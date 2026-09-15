@@ -96,8 +96,18 @@ def runs_hook(command, path):
     deployed hook and executes nothing. What this rules out is the decoy that names the hook and
     not its deployed path, which is the shape a stale registration actually takes.
     """
-    bounded = rf"(?:^|[\s\"']){re.escape(str(path))}(?:$|[\s\"'])"
-    return re.search(bounded, str(command)) is not None
+    text = str(command)
+    spellings = {str(path)}
+    home = str(pathlib.Path.home())
+    if str(path).startswith(home):
+        # `~` and `$HOME` are how a person writes this path, and both resolve to the deployed file.
+        spellings.add("~" + str(path)[len(home) :])
+        spellings.add("$HOME" + str(path)[len(home) :])
+    # Forward slashes are accepted on Windows and are the spelling a JSON file usually carries.
+    spellings.update(sp.replace("\\", "/") for sp in set(spellings))
+    return any(
+        re.search(rf"(?:^|[\s\"'(]){re.escape(sp)}(?=$|[\s\"')|&;])", text) for sp in spellings
+    )
 
 
 def matcher_sees_bash(matcher):
@@ -671,12 +681,18 @@ def main():
     staged = []
     for src_name in DEPLOYED_HOOKS:
         tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
-        shutil.copyfile(HERE / src_name, tmp)
+        staged.append((src_name, tmp))
+        try:
+            shutil.copyfile(HERE / src_name, tmp)
+        except OSError as e:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(f"staging {src_name} failed ({e}); nothing was replaced.\n")
+            return 1
         try:
             os.chmod(tmp, 0o755)
         except OSError:
             pass
-        staged.append((src_name, tmp))
         r = subprocess.run(
             [sys.executable, str(tmp), "--selftest"],
             capture_output=True,

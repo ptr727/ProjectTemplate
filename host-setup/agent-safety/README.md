@@ -217,21 +217,25 @@ already happened by the time any tool call is judged.
    every one of those has another spelling: `/proc/self/fd/0` re-opens the pipe `/dev/stdin` does,
    `/dev/full` reads like `/dev/zero`, and a `.` segment or a doubled leading slash defeats a
    literal compare of either. The target is normalized and the whole of both trees is denied,
-   `/dev/null` included.
+   `/dev/null` included. Only an absolute target is read that way, since a relative one resolves
+   against a working directory the rule does not model.
 
    A command that forks work out of a `timeout`'s reach is bounded by nothing, whatever else it
-   carries. Two shapes do that. A background operator lets the shell exit at once, so `timeout`'s
-   own child is gone before it fires and it signals nothing, measurably the same leak as having
-   written no bound at all. And `setsid` starts a session of its own, which no signal to the
-   timeout's process group reaches.
+   carries. Three shapes are recognized. A background operator lets the shell exit at once, so
+   `timeout`'s own child is gone before it fires and it signals nothing, measurably the same leak as
+   having written no bound at all. `coproc` backgrounds with no operator at all, so an operator scan
+   never sees it. And `setsid` starts a session of its own, which no signal to the timeout's process
+   group reaches. Recognized rather than exhaustive: a command can reach a new session through a
+   launcher this does not name, and what those cost is a leak requirement 8 reports after the fact
+   rather than a deny before it.
 
    Both are read over the whole command rather than tied to one loop, deliberately, and that is
    coarser than it could be. Deciding which `&` backgrounds which compound needs a parse this rule
    does not have, and four rounds of narrowing a scan that tried each closed the shapes it was shown
    and left the next one: a statement between the loop and its group's closer, a `disown` before a
    `wait`, a subshell the sequencing had already reaped. Reading any fork as fatal costs a false
-   deny on `<loop> & wait`, a bound nothing in the command text can verify, and it leaves no further
-   spelling to miss. A `timeout` the command backgrounds as a whole still bounds what it runs, since
+   deny on `<loop> & wait`, a bound nothing in the command text can verify. A `timeout` the command
+   backgrounds as a whole still bounds what it runs, since
    that `timeout` process outlives the shell that started it, so the ordinary
    `timeout 900 <command> &` is unaffected.
 

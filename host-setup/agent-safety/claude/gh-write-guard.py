@@ -1963,19 +1963,22 @@ def _loop_parts(toks, i):
 def _forks_out_of_reach(toks):
     """True if the command forks work that a `timeout` around it can no longer signal.
 
-    Two shapes do, and each is read over the whole command rather than tied to one loop. A
+    Three shapes are recognized, each read over the whole command rather than tied to one loop. A
     background operator leaves the shell free to exit, so the timeout's own child is gone before it
-    fires. And `setsid` starts a session of its own, which no signal to the timeout's process group
-    reaches.
+    fires. `coproc` backgrounds with no operator at all. And `setsid` starts a session of its own,
+    which no signal to the timeout's process group reaches.
+    Recognized rather than exhaustive: a command can reach a new session through a launcher this
+    does not name, and the deny those cost is the one requirement 8 reports after the fact.
     Which `&` backgrounds which compound needs a parse a token scan does not have, and four rounds
     of narrowing that scan each closed the shapes they were shown and left the next one: a statement
     between the loop and its group's closer, a `disown` before a `wait`, a subshell the sequencing
     had already reaped.
     A command that forks anything away is read as bounding nothing. That costs a false deny on
-    `<loop> & wait`, which is a bound this rule cannot verify anyway, and it leaves no further
-    spelling to miss.
+    `<loop> & wait`, which is a bound this rule cannot verify anyway.
     """
     for tok in toks:
+        if tok == "coproc":
+            return True
         if tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower() in ("setsid", "setsid.exe"):
             return True
         if not _is_separator(tok):
@@ -1988,7 +1991,8 @@ def _forks_out_of_reach(toks):
             if run[i : i + 2] == "&&":
                 i += 2
                 continue
-            if run[i] == "&":
+            # `|&` is `2>&1 |` and `;&`/`;;&` fall through a `case` arm, so neither backgrounds.
+            if run[i] == "&" and (i == 0 or run[i - 1] not in "|;"):
                 return True
             i += 1
     return False
@@ -2011,7 +2015,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
         # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
         if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
-            args, _after = _collect_arglist(toks, i + 1)
+            args, _ = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
             ci = next(
                 (
@@ -2022,11 +2026,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 None,
             )
             if ci is not None and ci + 1 < len(args):
-                # A `&` after this wrapper backgrounds it, so an outer `timeout` no longer reaches what it runs.
-                # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
                 local = _timeout_bounds_wrapper(toks, i)
-                # The `&` follows this invocation's whole argument list, where `_collect_arglist` stopped.
-                # It does not follow the wrapper token itself.
+                # A fork anywhere in this command puts the payload out of an inherited timeout's reach.
+                # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
                 backgrounded = forks_away
                 bounded = (inherited_timeout and not backgrounded) or local
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
@@ -2043,7 +2045,6 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
-            # The `&` is found past the loop's own redirections, since `done > log &` backgrounds it too.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
@@ -4130,6 +4131,21 @@ _WAIT_CASES = [
         "timeout 600 setsid --fork bash -c 'while true; do sleep 30; done'",
         "deny",
         "and setsid forks into a session no group signal from that timeout reaches",
+    ),
+    (
+        "timeout 600 bash -c 'coproc { while true; do sleep 30; done; }'",
+        "deny",
+        "and coproc backgrounds with no operator for an ampersand scan to find",
+    ),
+    (
+        "timeout 600 bash -c 'make build |& tee build.log; while true; do sleep 30; done'",
+        "allow",
+        "while the ampersand in a pipe-both operator backgrounds nothing",
+    ),
+    (
+        "timeout 600 bash -c 'case $x in a) foo ;& b) bar ;; esac; while true; do sleep 30; done'",
+        "allow",
+        "nor does the one in a case arm that falls through to the next",
     ),
     (
         "timeout 600 bash -c 'setsid bash -c \"while true; do sleep 30; done\" & wait'",
