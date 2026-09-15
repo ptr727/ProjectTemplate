@@ -1708,6 +1708,42 @@ def _is_sleep_exe(tok):
     return base in ("sleep", "sleep.exe")
 
 
+# Commands that name their arguments rather than running them, so a shell after one is text.
+# `echo bash -c '<loop>'` runs no shell.
+# The set is the exemption rather than the rule, so a name missing from it reads as executing.
+# That scans a payload which may not need it, rather than skipping one that does.
+_NAMES_ITS_ARGUMENTS = {
+    "echo",
+    "printf",
+    "ls",
+    "cat",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "sed",
+    "awk",
+    "head",
+    "tail",
+    "wc",
+    "diff",
+    "man",
+    "which",
+    "type",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "file",
+    "stat",
+    # These name a process rather than starting one, so `pkill sleep` runs no sleep.
+    "pkill",
+    "pgrep",
+    "killall",
+    "pidof",
+}
+
+
 def _runs_as_command(toks, w):
     """True if the token at index w is the command its run executes, past any prefix or `timeout`.
 
@@ -1715,17 +1751,25 @@ def _runs_as_command(toks, w):
     let `timeout 0 bash -c '<loop>'` skip its payload entirely: the zero is no bound, so a
     bound-shaped test refused to look inside a shell that really does run the loop.
     """
+
     if _opens_command(toks, w):
         return True
     start = w
-    while start > 0 and not _is_shell_op(toks[start - 1]):
+    while start > 0 and not _is_separator(toks[start - 1]):
         start -= 1
-    # The run's own first command decides.
-    # A prefix or a `timeout` runs what follows it, whatever options sit between.
-    # So `sudo -u ci bash -c ...` and `timeout 0 bash -c ...` both execute the shell.
-    # Anything else does not, which is what `echo bash -c ...` is.
-    # Leaning toward executed is deliberate, since not scanning a payload is a bypass.
-    return start < w and (_is_command_prefix(toks[start]) or _is_timeout_exe(toks[start]))
+    # A leading redirection and its target are not the run's command.
+    # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
+    while start < w and _is_redir_op(toks[start]):
+        start += 2
+    if start >= w:
+        return True
+    # The run's head decides, asked the safe way round.
+    # A shell is executed unless its head names arguments rather than running them.
+    # Asking whether the head is a known launcher read `flock`, `xargs` and a bare redirection as not executing.
+    # Each of those runs the shell after it.
+    # A name missing from the set below therefore costs a scan rather than a skipped one.
+    head = toks[start].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return head not in _NAMES_ITS_ARGUMENTS
 
 
 def _timeout_bounds_wrapper(toks, w):
@@ -3801,6 +3845,36 @@ _WAIT_CASES = [
         "echo bash -c 'while true; do sleep 1; done'",
         "allow",
         "a shell named as an argument to something else runs no payload",
+    ),
+    (
+        "> /tmp/log bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "a leading redirection is not the run's command, and reading it as one skipped the payload",
+    ),
+    (
+        "flock /tmp/l bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "nor is a launcher this rule does not know by name, which is why the exemption is the set",
+    ),
+    (
+        "xargs bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "and the same for one that reads its arguments from a pipe",
+    ),
+    (
+        "while true; do env -i sleep 30; done",
+        "deny",
+        "a launcher's own options sit between it and the sleep it runs",
+    ),
+    (
+        "yes | while read line; do sleep 30; done",
+        "deny",
+        "a pipe's producer is unknown from the command text, so a read on one is no bound",
+    ),
+    (
+        "while true; do grep -i sleep f; done",
+        "allow",
+        "while a command that merely names sleep runs none",
     ),
     (
         "sudo -u ci bash -c 'until [ -f x ]; do sleep 30; done'",
