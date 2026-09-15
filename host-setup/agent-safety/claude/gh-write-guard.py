@@ -88,6 +88,7 @@ Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude 
 
 import json
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -1663,12 +1664,19 @@ _COMMAND_POSITION_WORDS = {
 # - the test-builtin form, `[ "$i" -lt 120 ]`.
 # - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
 # Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
-# The sources a redirect can name that never reach EOF, so a `read` on one never ends the loop.
-# `/dev/stdin` and `/dev/fd/0` re-open the pipe the loop is already reading.
-# `/dev/zero`, `/dev/random` and `/dev/urandom` deliver bytes forever.
-_ENDLESS_SOURCE = re.compile(r"^/dev/(?:stdin|fd/|zero|random|urandom|tty|ptmx)")
-
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+
+
+def _names_a_stream(target):
+    """True if the redirect target is a device or kernel file rather than a file that ends.
+
+    Enumerating the streams that never end does not close, because each one has other spellings.
+    `/proc/self/fd/0` re-opens the same pipe `/dev/stdin` does, `/dev/full` reads like `/dev/zero`,
+    and a `.` segment defeats a literal compare of either.
+    The category is what the command text decides, so the whole of `/dev` and `/proc` reads as no
+    bound, and `/dev/null` is denied with them rather than carved out.
+    """
+    return posixpath.normpath(target).startswith(("/dev/", "/proc/"))
 
 
 def _redirects_stdin(after_done):
@@ -1714,7 +1722,7 @@ def _redirects_stdin(after_done):
             continue  # a redirect on another descriptor leaves descriptor 0 where it was
         if "&" in tok:
             continue  # `<&0` duplicates a descriptor rather than opening a source
-        if _ENDLESS_SOURCE.match(target):
+        if _names_a_stream(target):
             continue
         return True
     return False
@@ -1832,6 +1840,18 @@ def _runs_as_command(toks, w):
     return head not in _NAMES_ITS_ARGUMENTS
 
 
+def _escapes_timeout_group(tok):
+    """True if the token stops a `timeout` signalling the whole process group it started.
+
+    `timeout --foreground` signals its direct child alone, and `setsid` forks into a session of its
+    own, so either way a payload the shell backgrounds outlives the timeout. GNU getopt takes any
+    unambiguous abbreviation of a long option, so `--f` is `--foreground` too.
+    """
+    if tok.startswith("--f") and "--foreground".startswith(tok):
+        return True
+    return tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower() in ("setsid", "setsid.exe")
+
+
 def _timeout_bounds_wrapper(toks, w):
     """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
 
@@ -1853,6 +1873,9 @@ def _timeout_bounds_wrapper(toks, w):
     while start < w and _is_command_prefix(toks[start]):
         start += 1
     if start >= w or not _is_timeout_exe(toks[start]):
+        return False
+    # Read over the whole run rather than stopping at the duration, which hid what follows it.
+    if any(_escapes_timeout_group(tok) for tok in toks[start:w]):
         return False
     i = start + 1
     while i < w:
@@ -1982,9 +2005,15 @@ def _waits_after(toks, start):
     fires on a live process group and signals the loop with it. Without the `wait` the shell exits
     at once and the timeout has nothing left to signal.
     """
-    return any(
-        tok == "wait" and _runs_as_command(toks, i) for i, tok in enumerate(toks) if i >= start
-    )
+    for i in range(start, len(toks)):
+        if toks[i] != "wait" or not _runs_as_command(toks, i):
+            continue
+        # A `wait` carrying an operand waits for that job alone, so the loop is still forked away.
+        # `<loop> & wait $p` returns as soon as `$p` does, measurably leaving the loop behind.
+        following = toks[i + 1] if i + 1 < len(toks) else ""
+        if not following or _is_separator(following):
+            return True
+    return False
 
 
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
@@ -4096,6 +4125,41 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < /dev/zero",
         "deny",
         "and a stream that never reaches EOF ends no loop that reads it",
+    ),
+    (
+        "yes | while read l; do sleep 30; done < /proc/self/fd/0",
+        "deny",
+        "which the /proc spelling of that same pipe does not escape",
+    ),
+    (
+        "while read l; do sleep 30; done < /dev/full",
+        "deny",
+        "nor does a device left out of a list of the devices that never end",
+    ),
+    (
+        "while read l; do sleep 30; done < /dev/./zero",
+        "deny",
+        "nor does a dot segment, since the target is normalized before it is read",
+    ),
+    (
+        "timeout 600 bash -c 'sleep 1 & p=$!; while true; do sleep 30; done & wait $p'",
+        "deny",
+        "a wait naming one job returns when that job does, leaving the loop forked away",
+    ),
+    (
+        "timeout --foreground 600 bash -c 'while true; do sleep 30; done & wait'",
+        "deny",
+        "and --foreground signals the direct child alone rather than the process group",
+    ),
+    (
+        "timeout --f 600 bash -c 'while true; do sleep 30; done & wait'",
+        "deny",
+        "which getopt accepts abbreviated, so the prefix is what is read",
+    ),
+    (
+        "timeout 600 setsid --fork bash -c 'while true; do sleep 30; done'",
+        "deny",
+        "and setsid forks into a session no group signal from that timeout reaches",
     ),
     (
         "while read l; do sleep 30; done 2>&1 < in.txt",

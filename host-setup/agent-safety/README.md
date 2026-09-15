@@ -208,8 +208,11 @@ already happened by the time any tool call is judged.
    `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
    false deny is the safe direction. A process substitution is that same unknown producer behind a
    redirect, so `done < <(yes)` is no bound either. Duplicating a descriptor rather than opening a
-   source, `done <&0`, rebinds that same pipe to itself, and a `/dev/` stream such as `/dev/stdin`
-   or `/dev/zero` is either that pipe again or a source that never reaches EOF.
+   source, `done <&0`, rebinds that same pipe to itself. So does a target under `/dev` or `/proc`,
+   which is read as a category rather than as a list of the streams that never end, since every one
+   of those has another spelling: `/proc/self/fd/0` re-opens the pipe `/dev/stdin` does, `/dev/full`
+   reads like `/dev/zero`, and a `.` segment defeats a literal compare of either. The target is
+   normalized and the whole of both trees is denied, `/dev/null` included.
 
    And a loop the command backgrounds is not bounded by a `timeout`
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
@@ -217,7 +220,11 @@ already happened by the time any tool call is judged.
    command backgrounds, and for a group the command backgrounds the loop inside, since what outlives
    the timeout is whatever it forked away from. A following `wait` is the exception, and restores
    what the `&` took away: it holds the shell open until the loop ends, so the timeout fires on a
-   live process group and signals the loop along with it.
+   live process group and signals the loop along with it. Three things defeat that, and each is
+   denied. A `wait` carrying an operand waits for the job it names and returns while the loop runs
+   on. `timeout --foreground`, abbreviated or not, signals its direct child rather than the group.
+   And a `setsid` anywhere in the timeout's own command run forks into a session no group signal
+   from it reaches.
 
    Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
    here so a reader does not have to find them. A body kept because a shell reads it has its own
@@ -239,7 +246,7 @@ already happened by the time any tool call is judged.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
    being written. This one finds the leaks already running: the ones a session started before that
-   deny reached this machine, the three shapes it deliberately does not reach, and anything else
+   deny reached this machine, the five shapes it deliberately does not reach, and anything else
    this agent left running whether it leaked or not. At the end of a session, report every descendant
    of the agent process that runs outside the agent's own session, since a descendant sharing that
    session ends when the agent does and one in a session of its own does not. Report the root of

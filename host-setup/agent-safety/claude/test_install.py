@@ -484,6 +484,41 @@ class TestRegistration(StampCase):
                 self._write(data)
                 self.assertEqual(install.registration_problems(self.home), [], spelling)
 
+    def test_an_absent_sweep_timeout_is_reported_as_absent(self):
+        """The entry carries no timeout, so a message naming a value of None describes nothing."""
+        self.install()
+        data = self._settings()
+        del data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"]
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertTrue(any("carries no timeout" in p for p in problems), problems)
+        self.assertEqual([p for p in problems if "None" in p], [], problems)
+
+    def test_one_group_defect_is_reported_once_however_many_entries(self):
+        """A matcher belongs to the group, so two entries under it are still one defect."""
+        self.install()
+        for event, key in (("PreToolUse", "Edit"), ("SessionEnd", "clear")):
+            with self.subTest(event=event):
+                data = self._settings()
+                group = data["hooks"][event][0]
+                group["matcher"] = key
+                group["hooks"] = group["hooks"] * 2
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                matcher_lines = [p for p in problems if "matcher" in p and event in p]
+                self.assertEqual(len(matcher_lines), 1, problems)
+
+    def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
+        """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
+        self.install()
+        self.assertEqual(install.DEPLOYED_HOOKS[0], install.GUARD_NAME)
+        self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
+        live = self.home / "hooks" / install.GUARD_NAME
+        self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
+        self.assertIn(
+            install.GUARD_STEM, self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        )
+
     def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
         """A budget larger than this installer writes is better than it, not worse."""
         self.install()

@@ -32,15 +32,18 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-# The SessionEnd sweep's file name, and the substring identifying its registration in settings.json.
+# Each hook's file name, and the substring identifying its registration in settings.json.
 # Named once, since a registration written under one spelling and searched for under another is reported absent forever.
+# The guard was spelled by hand on the search side and by position on the deploy side, which is that same drift one rename away.
+GUARD_NAME = "gh-write-guard.py"
+GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
 SWEEP_STEM = "stray-process-sweep"
 
 # The hook files this kit copies into ~/.claude/hooks, in deploy order.
 # Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
 # That silence reads as a pass.
-DEPLOYED_HOOKS = ("gh-write-guard.py", SWEEP_NAME)
+DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME)
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
 # The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
@@ -77,7 +80,7 @@ def hook_command(launcher, path):
 
 
 def runs_hook(command, path):
-    """Whether `command` runs the hook deployed at `path`, rather than merely naming it.
+    """Whether `command` names the hook deployed at `path`, as its own argument.
 
     The path is compared and the launcher is not. Matching the name alone let an unrelated
     `echo stray-process-sweep` count as a registration, while matching the whole command string
@@ -88,6 +91,10 @@ def runs_hook(command, path):
     The quoting around it is not compared either. This installer writes the path in double quotes,
     and a registration written by hand or through the `/hooks` UI runs the same file bare or in
     single quotes, so requiring one spelling reported those as naming a hook they do not run.
+
+    Whether the command then runs it is not decidable from the string: `echo "<path>"` names the
+    deployed hook and executes nothing. What this rules out is the decoy that names the hook and
+    not its deployed path, which is the shape a stale registration actually takes.
     """
     bounded = rf"(?:^|[\s\"']){re.escape(str(path))}(?:$|[\s\"'])"
     return re.search(bounded, str(command)) is not None
@@ -387,6 +394,11 @@ def registration_problems(claude_home):
         return ["settings.json does not hold an object at its root"]
     out = []
 
+    def report(note):
+        """Append `note` once, since one defect a group carries is not two defects when it holds two entries."""
+        if note not in out:
+            out.append(note)
+
     def event_groups(event):
         """The matcher groups under `event`, or None when the settings shape cannot be read.
 
@@ -399,12 +411,10 @@ def registration_problems(claude_home):
             return []
         if not isinstance(hooks, dict):
             # Reported once rather than per event, since both events read the same wrong key.
-            note = (
+            report(
                 f"settings.json has `hooks` as {type(hooks).__name__} where an object is required, "
                 "so no registration can be read"
             )
-            if note not in out:
-                out.append(note)
             return None
         groups = hooks.get(event)
         if groups is None:
@@ -423,12 +433,12 @@ def registration_problems(claude_home):
     # That line is false, and it sends a reader to the wrong fix.
     named = 0
     registered = 0
-    guard_path = claude_home / "hooks" / DEPLOYED_HOOKS[0]
+    guard_path = claude_home / "hooks" / GUARD_NAME
     for group in groups or []:
         if not isinstance(group, dict):
             continue
         for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or "gh-write-guard" not in str(hook.get("command", "")):
+            if not isinstance(hook, dict) or GUARD_STEM not in str(hook.get("command", "")):
                 continue
             named += 1
             if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
@@ -438,7 +448,7 @@ def registration_problems(claude_home):
                 )
                 continue
             if not matcher_sees_bash(group.get("matcher")):
-                out.append(
+                report(
                     f"the PreToolUse guard is registered under matcher {group.get('matcher')!r}, "
                     "which no Bash call matches, so the guard never sees one"
                 )
@@ -478,8 +488,13 @@ def registration_problems(claude_home):
             if not too_short:
                 too_short = timeout < SWEEP_TIMEOUT_SECONDS
             if too_short:
+                carries = (
+                    "carries no timeout"
+                    if "timeout" not in hook
+                    else f"carries timeout {timeout!r}"
+                )
                 out.append(
-                    f"the SessionEnd sweep carries timeout {timeout!r} where this installer writes "
+                    f"the SessionEnd sweep {carries} where this installer writes "
                     f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
                 )
                 continue
@@ -487,7 +502,7 @@ def registration_problems(claude_home):
             # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
             # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
             if "matcher" in group:
-                out.append(
+                report(
                     f"the SessionEnd sweep is registered under a matcher "
                     f"({group['matcher']!r}), so it runs on that exit reason alone"
                 )
@@ -635,7 +650,7 @@ def main():
         else pathlib.Path.home() / ".claude"
     )
     hooks_dir = claude_home / "hooks"
-    hook_dst = hooks_dir / DEPLOYED_HOOKS[0]
+    hook_dst = hooks_dir / GUARD_NAME
     sweep_dst = hooks_dir / SWEEP_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
@@ -770,9 +785,7 @@ def main():
     for g in pre:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if "gh-write-guard" not in str(h.get("command", ""))
-            ]
+            hooks_list[:] = [h for h in hooks_list if GUARD_STEM not in str(h.get("command", ""))]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
