@@ -37,6 +37,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 SWEEP_NAME = "stray-process-sweep.py"
 SWEEP_STEM = "stray-process-sweep"
 
+# The hook files this kit copies into ~/.claude/hooks, in deploy order.
+# Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
+# That silence reads as a pass.
+DEPLOYED_HOOKS = ("gh-write-guard.py", SWEEP_NAME)
+
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
 # The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
 SWEEP_TIMEOUT_SECONDS = 10
@@ -59,9 +64,7 @@ BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = ("gh-write-guard.py", SWEEP_NAME) + tuple(
-    filename for _, filename in CLAUDE_MD_BLOCKS
-)
+PAYLOAD_FILES = DEPLOYED_HOOKS + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
@@ -524,7 +527,8 @@ def main():
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Deploy each hook, then self-test it before wiring anything up.
-    for src_name, dst in (("gh-write-guard.py", hook_dst), (SWEEP_NAME, sweep_dst)):
+    for src_name in DEPLOYED_HOOKS:
+        dst = hooks_dir / src_name
         shutil.copyfile(HERE / src_name, dst)
         try:
             os.chmod(dst, 0o755)

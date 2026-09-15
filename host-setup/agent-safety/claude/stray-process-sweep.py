@@ -17,8 +17,10 @@ so it is no longer a descendant of the agent and no descendant walk reaches it. 
 for is the backgrounded tool-call shell itself, which stays a child of the agent for the session's
 whole life, and that one it does see.
 
-POSIX only. The detached-session test this rule reads has no Windows equivalent, and the kit does not
-ship a Windows branch nobody has run. See host-setup/agent-safety/README.md requirement 8.
+Linux and WSL only. `etimes` and a decimal `sess` are procps format keywords, which a BSD `ps` does
+not carry, so this reports a boundary rather than a sweep on macOS, and Windows has no session test
+at all. The kit does not ship a branch for either that nobody has run. See
+host-setup/agent-safety/README.md requirement 8.
 
 Run `stray-process-sweep.py --selftest` to verify the reporting matrix without Claude Code.
 """
@@ -43,23 +45,31 @@ _AGENT_IN_ARGS = re.compile(r"(?:^|[/\s])claude(?:-code)?(?:[/\s]|\.(?:js|exe)|$
 
 
 def _read_process_table(runner=None):
-    """{pid: (ppid, session, age_seconds, command)} for every process, or None when ps cannot run."""
-    run = runner or (
-        lambda: (
-            subprocess.run(
-                ["ps", "-eo", _PS_FORMAT],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            ).stdout
+    """{pid: (ppid, session, age_seconds, command)} for every process, or None when ps cannot run.
+
+    A failed `ps` is None rather than an empty table. Reading `.stdout` alone turned an unsupported
+    format keyword into "no processes", which reads as a clean sweep and reaches the caller as the
+    wrong diagnosis, so the exit status and an empty table are both failures here.
+    """
+
+    def _run():
+        done = subprocess.run(
+            ["ps", "-eo", _PS_FORMAT],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
-    )
+        return done.returncode, done.stdout
+
     try:
-        out = run()
+        code, out = (runner or _run)()
     except (OSError, subprocess.SubprocessError):
         return None
-    return _parse_process_table(out)
+    if code != 0:
+        return None
+    table = _parse_process_table(out)
+    return table or None
 
 
 def _parse_process_table(out):
@@ -186,7 +196,9 @@ def main():
     except (ValueError, OSError):
         pass
     if os.name != "posix":
-        return 0  # the detached-session test has no Windows equivalent, so a Windows host carries a hook reporting nothing
+        return (
+            0  # Windows has no session test at all, so the hook is inert there rather than guessing
+        )
     table = _read_process_table()
     if table is None:
         print(
@@ -259,6 +271,18 @@ def _selftest():
             "ages read in whole units",
         ),
         (_agent_pid(100, table) is None, "no agent among the ancestors is a boundary, not a guess"),
+        (
+            _read_process_table(runner=lambda: (1, "")) is None,
+            "a ps that exits non-zero is a failure to read, never an empty machine",
+        ),
+        (
+            _read_process_table(runner=lambda: (0, "")) is None,
+            "and so is a ps that exits 0 having printed nothing",
+        ),
+        (
+            _read_process_table(runner=lambda: (0, "1 0 1 9 init")) == {1: (0, 1, 9, "init")},
+            "a table that reads is returned as itself",
+        ),
     ]
     # A packaged launcher, where the agent is a path component of a later argument rather than argv0.
     # The shell below is the trap: every tool shell sources a snapshot out of a `.claude` directory.

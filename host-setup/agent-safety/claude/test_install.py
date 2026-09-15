@@ -600,14 +600,13 @@ class TestStampContent(StampCase):
         A new snippet passed it while being absent from the digest, so the two sources of truth are
         both checked now, and the derivation below is what actually makes the gap impossible.
         """
-        source = INSTALL.read_text(encoding="utf-8")
-        named = {name for name in re.findall(r'HERE / "([^"]+\.(?:py|md))"', source)}
+        named = set(install.DEPLOYED_HOOKS)
         named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
         named.discard("install.py")
-        # The hook is the only literal read; every other entry arrives from the block list.
-        self.assertGreater(
-            len(named), 1, "the scan matched only one file, so it is not covering the blocks"
-        )
+        # Both sources are the declared lists rather than a scrape of the installer's source.
+        # That scrape went silent the moment the copy became a loop, and reported the silence as a pass.
+        self.assertGreaterEqual(len(install.DEPLOYED_HOOKS), 2, "the deployed hook list is short")
+        self.assertGreater(len(named), 3, "the scan is not covering both the hooks and the blocks")
         for name in sorted(named):
             self.assertIn(
                 name,
@@ -619,9 +618,11 @@ class TestStampContent(StampCase):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
         self.assertEqual(
             install.PAYLOAD_FILES,
-            ("gh-write-guard.py", install.SWEEP_NAME)
-            + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+            install.DEPLOYED_HOOKS + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
         )
+        # The hooks the installer actually copies, read from `main`, are exactly that declared list.
+        source = INSTALL.read_text(encoding="utf-8")
+        self.assertIn("for src_name in DEPLOYED_HOOKS:", source)
 
     def test_every_reader_uses_the_same_marker_list(self):
         """Three readers each carried their own marker pair, so a new block could reach one only."""

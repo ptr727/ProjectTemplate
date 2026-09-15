@@ -1624,7 +1624,21 @@ _LOOP_KEYWORDS = ("while", "until")
 
 # A loop keyword opens a loop only in command position, so the word appearing as an argument value is not one.
 # These are the words a command can follow directly, beside the operator tokens `_is_separator` already recognizes.
-_COMMAND_POSITION_WORDS = {"do", "then", "else", "elif", "if", "{", "!", "time"}
+_COMMAND_POSITION_WORDS = {
+    "do",
+    "then",
+    "else",
+    "elif",
+    "if",
+    "{",
+    "!",
+    "time",
+    # A prefix that runs the command after it, so `do command sleep 30` still sleeps.
+    "command",
+    "env",
+    "exec",
+    "nohup",
+}
 
 # The two bounds this rule reads as written into the loop's own condition.
 # - the test-builtin form, `[ "$i" -lt 120 ]`.
@@ -1633,7 +1647,11 @@ _COMMAND_POSITION_WORDS = {"do", "then", "else", "elif", "if", "{", "!", "time"}
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*[<>].*\)\)")
 
 # A `timeout` duration argument: bare seconds, or one carrying a GNU suffix.
-_TIMEOUT_DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+# A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
+_TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
+
+# The `timeout` options taking their value as a separate argument, which is therefore not the duration.
+_TIMEOUT_VALUE_OPTS = {"-k", "--kill-after", "-s", "--signal"}
 
 
 def _is_timeout_exe(tok):
@@ -1651,21 +1669,36 @@ def _is_sleep_exe(tok):
 def _timeout_bounds_wrapper(toks, w):
     """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
 
+    The test is on the command run the wrapper sits in, the tokens back to the previous shell
+    operator, rather than on the tokens immediately before it. That run is bounded when it begins
+    with `timeout` and carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as
+    bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
+    `echo` in a run of its own.
+
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
     syntax error rather than a bounded loop, so a `timeout` earlier on the line bounds nothing that
-    follows it. Walking back from the wrapper rather than forward from the `timeout` is what keeps
-    `timeout 5 echo hi && bash -c '<loop>'` unbounded, the `timeout` there running `echo`. An option
-    taking a separate value, such as `-k 5`, ends the walk and reads as no bound, which denies rather
-    than allows and is the safe direction for a shape this rule cannot parse.
+    follows it.
     """
-    j = w - 1
-    if j < 0 or not _TIMEOUT_DURATION.match(toks[j]):
+    start = w
+    while start > 0 and not _is_shell_op(toks[start - 1]):
+        start -= 1
+    # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
+    while start < w and toks[start] in _COMMAND_POSITION_WORDS:
+        start += 1
+    if start >= w or not _is_timeout_exe(toks[start]):
         return False
-    j -= 1
-    while j >= 0 and toks[j].startswith("-") and not _is_shell_op(toks[j]):
-        j -= 1
-    return j >= 0 and _is_timeout_exe(toks[j])
+    i = start + 1
+    while i < w:
+        tok = toks[i]
+        if tok in _TIMEOUT_VALUE_OPTS:
+            i += 2  # the option's value is the next token, never the duration
+            continue
+        if tok.startswith("-"):
+            i += 1  # a flag, or a long option carrying its own value
+            continue
+        return bool(_TIMEOUT_DURATION.match(tok))
+    return False
 
 
 def _opens_command(toks, i):
@@ -1690,7 +1723,7 @@ def _loop_parts(toks, i):
     for j in range(do_at + 1, n):
         if toks[j] == "do" and _opens_command(toks, j):
             depth += 1
-        elif toks[j] == "done":
+        elif toks[j] == "done" and _opens_command(toks, j):
             if depth == 0:
                 return toks[i + 1 : do_at], toks[do_at + 1 : j]
             depth -= 1
@@ -1741,7 +1774,11 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
 
 
 # A heredoc opener, `<<TAG`/`<<-TAG`/`<<\'TAG\'`, whose body runs to a line holding the tag alone.
-_HEREDOC_START = re.compile(r"<<-?\s*(?P<q>[\'\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)")
+# The tag charset takes a hyphen and a dot, so `<<\'END-DOC\'` is read as the heredoc it is rather than as commands.
+# The `<<-` form is captured separately, since only that one allows a tabbed terminator.
+_HEREDOC_START = re.compile(
+    r"<<(?P<dash>-?)\s*(?P<q>[\'\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_.\-]*)(?P=q)"
+)
 
 
 def _strip_heredoc_bodies(cmd):
@@ -1763,8 +1800,13 @@ def _strip_heredoc_bodies(cmd):
         m = _HEREDOC_START.search(line)
         if m and not any(_is_shell_wrapper_exe(t) for t in _shell_tokens(line)):
             tag = m.group("tag")
+            dash = bool(m.group("dash"))
+            # A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs.
+            # Accepting any indentation instead ended the body early on a doc line that merely read as the tag, and the rest was scanned as commands.
             i += 1
-            while i < len(lines) and lines[i].strip() != tag:
+            while i < len(lines):
+                if (lines[i].lstrip("\t") if dash else lines[i]) == tag:
+                    break
                 i += 1
             if i < len(lines):
                 kept.append(lines[i])  # the terminator line itself is ordinary text again
@@ -1785,7 +1827,9 @@ def _check_unbounded_wait(cmd):
         "an arithmetic guard in the loop's own condition, such as `(( SECONDS < end ))` or "
         '`[ "$i" -lt 120 ]`. Neither form tells a condition that is failing from one that is merely '
         "unmet, so run the condition once in the foreground first and say so in what the wait "
-        "reports. Prefer the mechanism that already signals: a dispatched task reports its own "
+        "reports. A `break` in the body is not read as a bound here, since only the command text is "
+        "judged and a `break` says nothing about when it is reached. Prefer the mechanism that "
+        "already signals: a dispatched task reports its own "
         "completion, so polling its output file is a second and unreliable channel for an answer "
         'already on its way. See AGENTS.md "Delegation".'
     )
@@ -3391,6 +3435,46 @@ _WAIT_CASES = [
         "timeout 600 bash -c \"bash -c 'until [ -f x ]; do sleep 5; done'\"",
         "allow",
         "a real bound is inherited through a nested wrapper",
+    ),
+    (
+        "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "GNU timeout documents a zero duration as disabling the timeout, so it is not a bound",
+    ),
+    (
+        "timeout -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "an option taking a separate value still leaves the duration findable",
+    ),
+    (
+        "timeout 900 nice bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a command prefix between the timeout and the shell does not hide it",
+    ),
+    (
+        "if timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'; then echo MET; fi",
+        "allow",
+        "a run opening with a keyword is still that run",
+    ),
+    (
+        "until [ -f /tmp/flag ]; do echo done; sleep 30; done",
+        "deny",
+        "the word done inside the body does not close the loop before its sleep is read",
+    ),
+    (
+        "until [ -f x ]; do command sleep 1; done",
+        "deny",
+        "a sleep behind a command prefix is still a sleep",
+    ),
+    (
+        "cat > notes.md <<'END-DOC'\nuntil [ -f x ]; do sleep 5; done\nEND-DOC",
+        "allow",
+        "a hyphenated heredoc tag is a heredoc, so a document using one is written rather than denied",
+    ),
+    (
+        "cat > f <<'EOF'\n  EOF\nwhile true; do sleep 1; done\nEOF",
+        "allow",
+        "an indented line reading as the tag does not end a plain heredoc, so the rest stays data",
     ),
     (
         'i=0; while [ "$i" -lt 5 ]; do until [ -f x ]; do sleep 1; done; i=$((i+1)); done',
