@@ -208,13 +208,13 @@ project at all, which is where the incident behind the kit happened.
 
 ### Codex Host Safety
 
-No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies
+No equivalent host-safety hook ships yet for Codex. Keep Codex's sandbox and execution policies
 enabled meanwhile. [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap
 and what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
 ### opencode Host Safety
 
-No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled
+No equivalent host-safety hook ships yet for opencode. Keep opencode's own permission model enabled
 meanwhile. [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap and
 what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
