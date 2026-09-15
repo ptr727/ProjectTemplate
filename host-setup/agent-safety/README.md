@@ -188,15 +188,17 @@ already happened by the time any tool call is judged.
    `while`/`until` compound whose body calls `sleep`, unless the command text carries its own bound.
    A bound is one of exactly two forms, and naming them exactly is the point, since a worker
    reproduces a quoted shape and does not reproduce an adjective. The first is a `timeout
-   <duration>` invocation ahead of the loop on the same command line, inherited into a `sh
-   -c`/`bash -c` payload from the invocation wrapping it. The second is an arithmetic guard in the
+   <duration>` running the `sh -c`/`bash -c` wrapper that holds the loop, `timeout 600 bash -c
+   '<the loop>'`. That placement is the only one that works, since `timeout` takes a command and
+   a loop keyword is not one, so `timeout 600 until ...; do sleep 30; done` is a syntax error
+   rather than a bounded wait. The second is an arithmetic guard in the
    loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
    document quoting the forbidden shape is written rather than denied.
 
-A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
+   A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. A loop whose
    condition is a `read` is bounded by its input, so throttling between iterations with a `sleep` is
    ordinary work rather than a leak. And a loop the command backgrounds is not bounded by a `timeout`

@@ -593,26 +593,29 @@ class TestStampContent(StampCase):
             target.write_bytes(original)
 
     def test_every_deployed_file_is_in_the_digest(self):
-        """The inverse: the kit copies gh-write-guard.py and every snippet, and each must be covered.
+        """Every file a real install writes is covered by the digest that decides CURRENT.
 
-        The source scan alone was a false positive. It matched only literal `HERE / "..."` reads,
-        which is the hook and nothing else, while the snippet names came from a list inside `main`.
-        A new snippet passed it while being absent from the digest, so the two sources of truth are
-        both checked now, and the derivation below is what actually makes the gap impossible.
+        Two earlier versions of this test each compared one declared list against another, which
+        is a tautology `PAYLOAD_FILES`'s own definition satisfies, and a source scrape, which went
+        silent the moment the copy became a loop. The independent source is the installed home
+        itself: a file the installer actually wrote and the digest does not read is the gap, and
+        reading the disk is the only way to see it without trusting the lists under test.
         """
-        named = set(install.DEPLOYED_HOOKS)
-        named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
-        named.discard("install.py")
-        # Both sources are the declared lists rather than a scrape of the installer's source.
-        # That scrape went silent the moment the copy became a loop, and reported the silence as a pass.
-        self.assertGreaterEqual(len(install.DEPLOYED_HOOKS), 2, "the deployed hook list is short")
-        self.assertGreater(len(named), 3, "the scan is not covering both the hooks and the blocks")
-        for name in sorted(named):
+        self.install()
+        written = {f.name for f in (self.home / "hooks").iterdir() if f.is_file()}
+        self.assertGreaterEqual(len(written), 2, "the install wrote fewer hooks than the kit has")
+        for name in sorted(written):
             self.assertIn(
                 name,
                 install.PAYLOAD_FILES,
-                f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it",
+                f"the installer wrote {name} but PAYLOAD_FILES omits it, so the digest misses it",
             )
+        # The blocks are covered the same way, from the file the installer actually wrote.
+        text = self.md.read_text(encoding="utf-8")
+        for marker in install.BLOCK_MARKERS:
+            self.assertIn(f"<!-- {marker} v", text, f"the install wrote no {marker} block")
+        for _, filename in install.CLAUDE_MD_BLOCKS:
+            self.assertIn(filename, install.PAYLOAD_FILES)
 
     def test_the_payload_list_is_derived_from_the_block_list(self):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""

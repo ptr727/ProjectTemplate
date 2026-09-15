@@ -1757,6 +1757,20 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
+def _sleeps(toks):
+    """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` payload it carries."""
+    for k, tok in enumerate(toks):
+        if _is_sleep_exe(tok) and _opens_command(toks, k):
+            return True
+        if _is_shell_wrapper_exe(tok) and any(
+            _is_sleep_exe(t)
+            for inner in _embedded_wrapper_commands(" ".join(toks))
+            for t in _shell_tokens(inner)
+        ):
+            return True
+    return False
+
+
 def _loop_parts(toks, i):
     """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
 
@@ -1813,7 +1827,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             if parts is None:
                 continue
             cond, body, done_at = parts
-            sleeps = any(_is_sleep_exe(b) and _opens_command(body, k) for k, b in enumerate(body))
+            # `while sleep 30; do ...; done` is the standard poll-forever idiom.
+            # Its condition sleeps as surely as a body does, and a sleep handed to `sh -c` is still one.
+            sleeps = _sleeps(body) or _sleeps(cond)
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
@@ -1826,12 +1842,40 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     return None
 
 
-# A heredoc opener, `<<TAG`/`<<-TAG`/`<<\'TAG\'`, whose body runs to a line holding the tag alone.
-# The tag charset takes a hyphen and a dot, so `<<\'END-DOC\'` is read as the heredoc it is rather than as commands.
-# The `<<-` form is captured separately, since only that one allows a tabbed terminator.
-_HEREDOC_START = re.compile(
-    r"(?:^|\s)<(?!<<)<(?P<dash>-?)\s*(?P<q>[\'\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_.\-]*)(?P=q)"
-)
+# A heredoc tag: the word after a `<<` redirection, whose body runs to a line holding it alone.
+_HEREDOC_TAG = re.compile(r"[A-Za-z_][A-Za-z0-9_.\-]*$")
+
+
+def _heredoc_opener(line):
+    """(tag, is_dash_form, feeds_a_shell) for a heredoc `line` opens, or None.
+
+    Read from tokens rather than from the raw text, so a `<<` inside a quoted argument is the
+    text it is: a commit message explaining the `<< EOF` form opened one, and the strip then
+    deleted every command after it. A `<<<` herestring is a token of its own and not this, and a
+    line carrying arithmetic is skipped outright, since `$(( 1 << n ))` tokenizes to a bare `<<`
+    that no token test can tell from a redirection. Skipping there costs a false deny on a line
+    holding both, which is vanishingly rare, where reading it wrong drops real commands.
+    """
+    toks = _shell_tokens(line)
+    if any("((" in t for t in toks):
+        return None
+    for k, tok in enumerate(toks):
+        if tok != "<<" or k + 1 >= len(toks):
+            continue
+        nxt = toks[k + 1]
+        dash = nxt.startswith("-")
+        tag = nxt[1:] if dash else nxt
+        if not _HEREDOC_TAG.fullmatch(tag):
+            continue
+        # Whether a shell reads this body is the redirection's own command, not the line mentioning one.
+        # `bash -c '...' && cat > doc.md <<EOF` writes a document.
+        start = k
+        while start > 0 and not _is_separator(toks[start - 1]):
+            start -= 1
+        while start < k and _is_command_prefix(toks[start]):
+            start += 1
+        return tag, dash, start < k and _is_shell_wrapper_exe(toks[start])
+    return None
 
 
 def _strip_heredoc_bodies(cmd):
@@ -1850,10 +1894,9 @@ def _strip_heredoc_bodies(cmd):
     while i < len(lines):
         line = lines[i]
         kept.append(line)
-        m = _HEREDOC_START.search(line)
-        if m and not any(_is_shell_wrapper_exe(t) for t in _shell_tokens(line)):
-            tag = m.group("tag")
-            dash = bool(m.group("dash"))
+        opened = _heredoc_opener(line)
+        if opened and not opened[2]:
+            tag, dash, _fed = opened
             # A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs.
             # Accepting any indentation instead ended the body early on a doc line that merely read as the tag, and the rest was scanned as commands.
             i += 1
@@ -1876,7 +1919,9 @@ def _check_unbounded_wait(cmd):
         f"This is an unbounded shell wait ({loop[:60]}). A `while`/`until` loop whose body sleeps "
         "carries no bound of its own, and the shell outlives the turn, the subagent, and the session "
         "that started it, so a condition that never comes true runs until the machine is rebooted. "
-        "Put the bound in the command, as a `timeout <seconds>` invocation ahead of the loop or as "
+        "Put the bound in the command. A `timeout` runs the shell that runs the loop, as "
+        "`timeout <seconds> bash -c '<the loop>'`, since `timeout` takes a command and a loop "
+        "keyword is not one. The other accepted bound is "
         "an arithmetic guard in the loop's own condition, such as `(( SECONDS < end ))` or "
         '`[ "$i" -lt 120 ]`. Neither form tells a condition that is failing from one that is merely '
         "unmet, so run the condition once in the foreground first and say so in what the wait "
@@ -3553,6 +3598,41 @@ _WAIT_CASES = [
         "echo $((a<<b))\nuntil [ -f y ]; do sleep 30; done",
         "deny",
         "nor is an arithmetic shift",
+    ),
+    (
+        "echo $(( 1 << shift ))\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "nor a spaced one, which a raw-text read took for an opener and dropped the command after",
+    ),
+    (
+        "git commit -m 'Explain the << EOF form'\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "and a `<<` inside a quoted value is the text it is",
+    ),
+    (
+        "cat > d.md << EOF\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "allow",
+        "a space between the redirection and its tag still opens a heredoc",
+    ),
+    (
+        "bash -c 'echo hi' && cat > docs/waits.md <<'EOF'\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "allow",
+        "whether a shell reads the body is the redirection's own command, not the line mentioning one",
+    ),
+    (
+        "while sleep 30; do gh pr checks 5 | grep -q COMPLETED && break; done",
+        "deny",
+        "the poll-forever idiom sleeps in its condition, which is a sleep like any other",
+    ),
+    (
+        "while true; do bash -c 'sleep 30'; done",
+        "deny",
+        "and a sleep the body hands to a wrapper is still the body sleeping",
+    ),
+    (
+        "timeout 600 until [ -f x ]; do sleep 30; done",
+        "allow",
+        "bash rejects this before it runs, so it is a syntax error rather than a wait to judge, and the denial no longer names it",
     ),
     (
         "timeout -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
