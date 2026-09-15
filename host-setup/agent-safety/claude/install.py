@@ -346,9 +346,38 @@ def registration_problems(claude_home):
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
     out = []
-    groups = (
-        data.get("hooks", {}).get("PreToolUse") if isinstance(data.get("hooks"), dict) else None
-    )
+
+    def event_groups(event):
+        """The matcher groups under `event`, or None when the settings shape cannot be read.
+
+        A wrong shape is reported as itself rather than counted as zero. Iterating a dict yields
+        its keys and a string yields its characters, so the loops below would find no registration
+        and report the hook as absent, which sends a reader to the wrong fix.
+        """
+        hooks = data.get("hooks")
+        if hooks is None:
+            return []
+        if not isinstance(hooks, dict):
+            # Reported once rather than per event, since both events read the same wrong key.
+            note = (
+                f"settings.json has `hooks` as {type(hooks).__name__} where an object is required, "
+                "so no registration can be read"
+            )
+            if note not in out:
+                out.append(note)
+            return None
+        groups = hooks.get(event)
+        if groups is None:
+            return []
+        if not isinstance(groups, list):
+            out.append(
+                f"settings.json has `hooks.{event}` as {type(groups).__name__} where a list is "
+                f"required, so the {event} registration cannot be read"
+            )
+            return None
+        return groups
+
+    groups = event_groups("PreToolUse")
     registered = 0
     for group in groups or []:
         if not isinstance(group, dict):
@@ -356,7 +385,9 @@ def registration_problems(claude_home):
         for hook in group.get("hooks") or []:
             if isinstance(hook, dict) and "gh-write-guard" in str(hook.get("command", "")):
                 registered += 1
-    if registered == 0:
+    if groups is None:
+        pass  # the shape error is already reported, and a count from it would be meaningless
+    elif registered == 0:
         out.append(
             "the PreToolUse hook is not registered in settings.json, so the guard never runs"
         )
@@ -364,7 +395,7 @@ def registration_problems(claude_home):
         out.append(
             f"the PreToolUse hook is registered {registered} times, so it runs more than once"
         )
-    ends = data.get("hooks", {}).get("SessionEnd") if isinstance(data.get("hooks"), dict) else None
+    ends = event_groups("SessionEnd")
     swept = 0
     for group in ends or []:
         if not isinstance(group, dict):
@@ -379,7 +410,9 @@ def registration_problems(claude_home):
                         f"the SessionEnd sweep is registered under a matcher "
                         f"({group['matcher']!r}), so it runs on that exit reason alone"
                     )
-    if swept == 0:
+    if ends is None:
+        pass  # likewise reported as a shape error above
+    elif swept == 0:
         out.append(
             "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
             "never reported"

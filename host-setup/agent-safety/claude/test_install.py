@@ -389,6 +389,32 @@ class TestRegistration(StampCase):
         ]
         self.assertEqual(len(entries), 1)
 
+    def test_a_wrong_hooks_shape_is_reported_as_itself(self):
+        """Iterating a dict yields keys and a string yields characters, so a wrong shape read as
+        zero registrations and sent a reader to the wrong fix."""
+        self.install()
+        for shape, expected in (
+            ({"SessionEnd": {"a": 1}}, "`hooks.SessionEnd` as dict"),
+            ({"PreToolUse": "nope"}, "`hooks.PreToolUse` as str"),
+            ("nope", "`hooks` as str"),
+        ):
+            data = self._settings()
+            data["hooks"] = shape
+            self._write(data)
+            problems = install.registration_problems(self.home)
+            self.assertTrue(
+                any(expected in p for p in problems),
+                f"{shape!r} reported {problems!r} rather than naming the shape",
+            )
+
+    def test_a_wrong_hooks_type_is_reported_once_rather_than_per_event(self):
+        self.install()
+        data = self._settings()
+        data["hooks"] = "nope"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
+
     def test_a_sweep_under_a_matcher_reports_stale(self):
         """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
         self.install()
