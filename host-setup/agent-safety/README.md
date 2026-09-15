@@ -204,7 +204,8 @@ already happened by the time any tool call is judged.
    iterations with a `sleep` is ordinary work rather than a leak. A redirect names a source that
    ends, where a pipe's producer is unknown from the command text. A loop fed by
    `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
-   false deny is the safe direction. And a loop the command backgrounds is not bounded by a `timeout`
+   false deny is the safe direction. A process substitution is that same unknown producer behind a
+   redirect, so `done < <(yes)` is no bound either. And a loop the command backgrounds is not bounded by a `timeout`
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
    child is gone, and nothing signals what it left.
 

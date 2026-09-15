@@ -1674,10 +1674,16 @@ def _reads_its_input(cond, after_done):
     Two things are required. A leading `read`, after any `NAME=value` assignments, since a `read`
     later in the condition is an argument to something else. And an input redirect on the loop
     itself, because a redirect names a source that ends while a pipe's producer is unknown from the
-    command text: `yes | while read line; do sleep 30; done` never exhausts its input. Reading an
-    unknown producer as unbounded costs a false deny on a piped `find | while read`, which is the
-    safe direction, and the bound such a loop needs is the ordinary one.
+    command text: `yes | while read line; do sleep 30; done` never exhausts its input. A process
+    substitution is that same unknown producer behind a redirect, so `done < <(yes)` is no bound
+    either. Reading an unknown producer as unbounded costs a false deny on a piped
+    `find | while read`, which is the safe direction, and the bound such a loop needs is the
+    ordinary one.
     """
+    # A process substitution wears a redirect's clothes and is the same unknown producer a pipe is:
+    # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
+    if any(t.startswith(("<(", ">(")) for t in after_done):
+        return False
     if not any(_is_redir_op(t) and "<" in t for t in after_done):
         return False
     for tok in cond:
@@ -3870,6 +3876,16 @@ _WAIT_CASES = [
         "yes | while read line; do sleep 30; done",
         "deny",
         "a pipe's producer is unknown from the command text, so a read on one is no bound",
+    ),
+    (
+        "while read l; do sleep 30; done < <(yes)",
+        "deny",
+        "and a process substitution is that same producer behind a redirect",
+    ),
+    (
+        "while read l; do sleep 30; done < f",
+        "allow",
+        "while a redirect from a file names a source that ends",
     ),
     (
         "while true; do grep -i sleep f; done",
