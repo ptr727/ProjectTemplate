@@ -1888,6 +1888,28 @@ def _loop_parts(toks, i):
     return None
 
 
+def _backgrounded_after(toks, done_at):
+    """True if the loop closing at `done_at` is backgrounded, reading past its own redirections.
+
+    A redirection binds to the loop and the `&` follows it, so `done > log &`, `done 2>/dev/null &`
+    and `done >> a 2>&1 &` background exactly as `done &` does. Testing only the token after `done`
+    credited a `timeout` around the wrapper with bounding a loop that outlives it.
+    """
+    i = done_at + 1
+    while i < len(toks):
+        tok = toks[i]
+        # A redirection carries its file descriptor as its own token, so `2>/dev/null` arrives as three.
+        # Reading that leading digit as the command hid the `&` behind it.
+        if tok.isdigit() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
+            i += 1
+            continue
+        if _is_redir_op(tok):
+            i += 2  # the redirection and its target
+            continue
+        return tok == "&"
+    return False
+
+
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     """The first unbounded wait loop in `cmd`, as `<keyword> <condition>` text, or None when none.
 
@@ -1930,7 +1952,8 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
-            backgrounded = done_at + 1 < len(toks) and toks[done_at + 1] == "&"
+            # The `&` is found past the loop's own redirections, since `done > log &` backgrounds it too.
+            backgrounded = _backgrounded_after(toks, done_at)
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
             )
@@ -3656,6 +3679,31 @@ _WAIT_CASES = [
         "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done &'",
         "deny",
         "a backgrounded loop outlives the shell the timeout bounds, so the timeout bounds nothing",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done > /tmp/log &'",
+        "deny",
+        "a redirection before the ampersand does not stop it backgrounding the loop",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done 2>/dev/null &'",
+        "deny",
+        "nor does one carrying its file descriptor as a token of its own",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done >> a 2>&1 &'",
+        "deny",
+        "nor two of them together",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done 2>&1'",
+        "allow",
+        "while a redirection with no ampersand after it backgrounds nothing",
+    ),
+    (
+        "while read l; do sleep 1; done < f &",
+        "allow",
+        "a loop bounded by its input stays bounded backgrounded, since that bound needs no signal",
     ),
     (
         "gtimeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
