@@ -197,7 +197,7 @@ detail lives one level down, following the same contract-vs-implementation split
 for [`host-setup/`][host-setup-dir]'s own per-platform subdirectories: this file states the
 requirement, the per-agent `README.md` owns the how-to.
 
-### Claude Code Write Safety
+### Claude Code Host Safety
 
 The Claude Code safety kit is the first agent-specific control to deploy on a new system, and the
 only one implemented today. Install, verify, scope limits, and the cross-owner write grant
@@ -206,13 +206,13 @@ mechanism are all in [`host-setup/agent-safety/claude/README.md`][agent-safety-c
 the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no
 project at all, which is where the incident behind the kit happened.
 
-### Codex Write Safety
+### Codex Host Safety
 
 No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies
 enabled meanwhile. [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap
 and what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
-### opencode Write Safety
+### opencode Host Safety
 
 No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled
 meanwhile. [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap and
