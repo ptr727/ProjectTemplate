@@ -260,14 +260,15 @@ def installed_digest(claude_home):
     Line endings are normalized first: CLAUDE.md keeps whatever endings it had, and a machine that
     holds identical text with CRLF is current rather than drifted.
     """
-    hook = claude_home / "hooks" / "gh-write-guard.py"
-    sweep = claude_home / "hooks" / SWEEP_NAME
+    # Read from `DEPLOYED_HOOKS` rather than by name, since naming them here is the drift that constant closes.
+    # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
+    deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
-    if not hook.is_file() or not sweep.is_file() or not claude_md.is_file():
+    if not all(f.is_file() for f in deployed) or not claude_md.is_file():
         return None
     h = hashlib.sha256()
-    h.update(normalized(hook.read_bytes()))
-    h.update(normalized(sweep.read_bytes()))
+    for f in deployed:
+        h.update(normalized(f.read_bytes()))
     text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
     for marker in BLOCK_MARKERS:
         found = re.search(

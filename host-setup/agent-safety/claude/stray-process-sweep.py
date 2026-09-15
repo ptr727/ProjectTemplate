@@ -18,9 +18,9 @@ for is the backgrounded tool-call shell itself, which stays a child of the agent
 whole life, and that one it does see.
 
 Linux and WSL only. `etimes` and a decimal `sess` are procps format keywords, which a BSD `ps` does
-not carry, so this reports a boundary rather than a sweep on macOS, and Windows has no session test
-at all. The kit does not ship a branch for either that nobody has run. See
-host-setup/agent-safety/README.md requirement 8.
+not carry, and Windows has no session test at all, so on macOS and on Windows this exits silently
+without sweeping rather than failing at the end of every session. The kit does not ship a branch for
+either that nobody has run. See host-setup/agent-safety/README.md requirement 8.
 
 Run `stray-process-sweep.py --selftest` to verify the reporting matrix without Claude Code.
 """

@@ -630,6 +630,22 @@ class TestStampContent(StampCase):
         finally:
             target.write_bytes(original)
 
+    def test_the_digest_reads_every_deployed_hook(self):
+        """Naming the hooks in `installed_digest` was the drift `DEPLOYED_HOOKS` exists to close.
+
+        Parametrised over the constant rather than over two literals, so a hook added to the deploy
+        list is covered here without anyone remembering to add it.
+        """
+        for name in install.DEPLOYED_HOOKS:
+            with self.subTest(hook=name):
+                self.install()
+                self.assertIsNotNone(install.installed_digest(self.home))
+                (self.home / "hooks" / name).unlink()
+                self.assertIsNone(
+                    install.installed_digest(self.home),
+                    f"{name} is deployed but the digest does not read it",
+                )
+
     def test_every_deployed_file_is_in_the_digest(self):
         """Every file a real install writes is covered by the digest that decides CURRENT.
 
