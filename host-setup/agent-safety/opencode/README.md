@@ -1,4 +1,4 @@
-# opencode Write-Safety Gap
+# opencode Host-Safety Gap
 
 No hook implements [`../README.md`][spec]'s requirements for opencode yet. Tracked at
 [issue #781][issue-781].

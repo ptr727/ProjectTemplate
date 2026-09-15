@@ -1,7 +1,9 @@
-# Agent Write-Safety Spec
+# Agent Host-Safety Spec
 
-What any coding agent must be stopped from doing when it runs on this host with the maintainer's
-`gh` credentials, stated once, independent of which agent implements it. This file is the source
+What any coding agent must be stopped from doing when it runs unattended on this host, stated once,
+independent of which agent implements it. Most of it guards the maintainer's `gh` credentials, which
+is where the harm started. Requirements 7 and 8 guard the machine itself, which is the other thing
+an unattended agent takes down. This file is the source
 of truth: an implementation is built from the requirements below, and an implementation is audited
 by checking its decisions against them, not by reading its source as the implicit spec.
 
@@ -10,15 +12,18 @@ by checking its decisions against them, not by reading its source as the implici
 A mis-targeted GitHub write acts publicly under the maintainer's identity: a fabricated node id
 once posted a stray comment, as the maintainer, to a stranger's repository. A mutating git command
 run directly in a primary checkout destroys another task's uncommitted work without ever reaching
-GitHub. Both incidents happened under prose rules the agent had already read. Neither was fixed by
-writing the rule more clearly. [`GOVERNANCE.md`][governance] "Durable Knowledge and Self-Improvement"
+GitHub. An unbounded shell wait outlives every agent in the run that wrote it, and a machine carrying
+enough of them has to be rebooted. All three incidents happened under prose rules the agent had
+already read. None was fixed by writing the rule more clearly. [`GOVERNANCE.md`][governance] "Durable Knowledge and Self-Improvement"
 states the general criteria for when a rule like this earns a mechanical hook instead of staying
-prose. The requirements below are the write-safety instance of that criteria, applied.
+prose. The requirements below are that criteria applied to this host.
 
 ## Requirements
 
 Each requirement is stated as a decision rule, precise enough to implement against any agent's own
-hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
+hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape. Requirement 8 is the
+one stated against the end of a session rather than against a tool call, because what it covers has
+already happened by the time any tool call is judged.
 
 1. **A GitHub write with its output discarded or forced to success is denied.** A state-changing
    `gh`/API call piped to `>/dev/null`, `2>/dev/null`, `&>/dev/null`, `|| true`, `|| :`, or `|| echo`
@@ -175,6 +180,53 @@ hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape.
    `owner/repo` allowlist, while this one is a boolean escape hatch, granted by any non-falsy value
    and withheld by a recognized falsy one ("0"/"false"/"no"/"off"/empty), not by list membership.
 
+7. **A shell wait carrying no bound is denied.** `until <condition>; do sleep <n>; done` and `while
+   ! <condition>; do sleep <n>; done` are what an agent writes when it is told to poll, and what
+   runs until the machine is rebooted when the condition never comes true. The shell is not the
+   agent's to end either: a shell started by a tool call runs in a session of its own, so it
+   outlives the turn, the subagent, and the run that started it, and nothing reaps it. Deny a
+   `while`/`until` compound whose body calls `sleep`, unless the command text carries its own bound.
+   A bound is one of exactly two forms, and naming them exactly is the point, since a worker
+   reproduces a quoted shape and does not reproduce an adjective. The first is a `timeout
+   <duration>` invocation ahead of the loop on the same command line, inherited into a `sh
+   -c`/`bash -c` payload from the invocation wrapping it. The second is an arithmetic guard in the
+   loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
+   (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
+   denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
+   command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
+   document quoting the forbidden shape is written rather than denied.
+
+   Three shapes this deliberately does not reach, each for the same precision-over-recall reason
+   requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
+   from `while read`, which is ordinary work. A guard comparing against a counter the body never
+   increments is textually a bound and is infinite anyway. And a wait inside a script file is unseen,
+   the same blind spot every requirement here has. A false deny on an ordinary loop costs more work
+   than those three leaks do, and each still falls under `AGENTS.md` "Delegation", which states the
+   prohibition for every agent whether or not a hook is installed.
+
+8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
+   being written. This one finds the leaks already running: the ones a session started before that
+   deny reached this machine, the three shapes it deliberately does not reach, and anything else
+   this agent left running whether it leaked or not. At the end of a session, report every descendant
+   of the agent process that runs outside the agent's own session, since a descendant sharing that
+   session ends when the agent does and one in a session of its own does not. Report the root of
+   each such subtree rather than every process under it, name each root's command and age, and hand
+   over the exact command that ends them.
+
+   What a descendant walk does not reach is a process whose own tool-call shell has already exited,
+   since init reparents it and it leaves the agent's tree entirely. The leak this requirement exists
+   for is the backgrounded tool-call shell itself, which stays a child of the agent for the whole
+   session, so the gap is a process that shell in turn backgrounded and then abandoned. Say so rather
+   than implying the sweep is exhaustive, because a report read as complete is worse than one read as
+   partial.
+
+   **Never kill anything.** A long build backgrounded on purpose is not distinguishable from a
+   leaked wait at this point, and what on the machine is still wanted is the maintainer's call.
+   Report a failure to sweep as loudly as a finding, since a sweep that cannot read the process
+   table and a sweep that finds nothing are different answers that silence renders identically. This
+   is the only requirement here that is not a denial, and it is a requirement rather than a nicety
+   because the alternative is that nobody learns the leak happened at all.
+
 ## Decision Flow
 
 ```mermaid
@@ -183,7 +235,9 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
+    isprimary -- no --> iswait{"A while/until loop\nthat sleeps, with no\ntimeout and no\narithmetic guard?"}
+    iswait -- yes --> deny7["DENY - requirement 7"]
+    iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
     isghwrite -- yes --> suppressed{"Output discarded or\nforced to success?"}
     suppressed -- yes --> deny1["DENY - requirement 1"]
@@ -216,12 +270,15 @@ flowchart LR
 ```
 
 The first diagram is this spec's actual decision flow, generalized from `claude/gh-write-guard.py`'s
-`classify()`. The second is why a failure lands in one layer and not another. A rule that never
+`classify()`. Requirement 8 appears nowhere in it, deliberately: it judges no tool call, and it runs
+once at the end of a session on whatever the denials above did not prevent. The second is why a failure lands in one layer and not another. A rule that never
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
 was still not followed, where the trigger is mechanically decidable and the harm is destructive,
-is promoted to a host hook (requirement 6, above, tracked at [issue #1073][issue-1073], is the
-worked example). A rule whose violation can only be judged, not mechanically decided (was a
+is promoted to a host hook. Requirement 6, above, tracked at [issue #1073][issue-1073], is the
+worked example, and requirement 7, tracked at [issue #1589][issue-1589], is the second: the prose
+rule against an unbounded wait was read, quoted into six worker briefs, and produced the forbidden
+shape in all six. A rule whose violation can only be judged, not mechanically decided (was a
 review finding actually evidence-backed?), stays prose and a chained Skill trigger, since a hook
 there could only nag, never decide.
 
@@ -246,19 +303,20 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 6 requirements, via a `PreToolUse` hook | [`claude/README.md`][claude] |
+| Claude Code | All 8 requirements, via a `PreToolUse` hook and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
 GitHub Copilot carries no subdirectory here: it reviews through GitHub's own hosted infrastructure
 rather than running local shell commands under the maintainer's credentials, so it has no analogous
-local write-safety hazard for this kit to cover.
+local host-safety hazard for this kit to cover.
 
 ## Auditing an Implementation Against This Spec
 
-Run the implementation's own self-test (`claude/gh-write-guard.py --selftest` for Claude Code) and
-compare every case against the requirements list above, one by one, rather than reading the
-implementation's source as though it were the spec. A case the self-test doesn't cover is a gap in
+Run each of the implementation's own self-tests (`claude/gh-write-guard.py --selftest` and
+`claude/stray-process-sweep.py --selftest` for Claude Code) and compare every case against the
+requirements list above, one by one, rather than reading the implementation's source as though it
+were the spec. A case the self-test doesn't cover is a gap in
 the audit, not evidence the requirement is satisfied. This is the concrete shape of "ask Claude to
 audit the Claude hooks against the spec" or "ask Codex to implement Codex's own hooks against the
 spec": point the agent at this file's requirements, not at another agent's source code.
@@ -270,3 +328,4 @@ spec": point the agent at this file's requirements, not at another agent's sourc
 [governance]: ../../GOVERNANCE.md
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [issue-1073]: https://github.com/ptr727/ProjectTemplate/issues/1073
+[issue-1589]: https://github.com/ptr727/ProjectTemplate/issues/1589

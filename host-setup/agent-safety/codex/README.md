@@ -1,4 +1,4 @@
-# Codex Write-Safety Gap
+# Codex Host-Safety Gap
 
 No hook implements [`../README.md`][spec]'s requirements for Codex yet. Tracked at
 [issue #781][issue-781].

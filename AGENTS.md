@@ -30,7 +30,7 @@ Three rules bound every path above. **Read the hub's `main` branch as ground tru
 
 ## Context and Delegation Discipline
 
-An agent session is billed on the context it carries, not the work it does. Every request re-reads the whole accumulated context, so a token added early is paid for again on every request that follows, and a long session bills its last task for every earlier one. These are cost rules. None of them licenses doing less work, skipping verification, or shipping something unreviewed.
+An agent session is billed on the context it carries, not the work it does. Every request re-reads the whole accumulated context, so a token added early is paid for again on every request after it. A long session therefore bills its last task for every earlier one. These are cost rules. The prohibition on an unbounded wait below is not one. It sits here because a wait is written in the same breath as the delegation it waits on. The harm it does is the maintainer's machine rather than the bill. None of these rules licenses doing less work, skipping verification, or shipping something unreviewed.
 
 ### Session Scope
 
@@ -69,8 +69,9 @@ Bounds: <what not to touch, and what to do when a rule looks incomplete>
 If a rule you were given does not cover what you find, stop and report it. Do not guess, and do not read a governance file to resolve it.
 ```
 
-- **Wait in a background process, not in a poll loop.** A review or CI wait is a sequence of near-identical requests, each billed for whatever context it happens to carry. Run the wait as one backgrounded command that returns when the condition is met.
+- **Wait in a background process, not in a poll loop.** A review or CI wait is a sequence of near-identical requests, each billed for whatever context it happens to carry. Run the wait as one backgrounded command, bounded per the prohibition below, that returns when the condition is met.
 - **A wait separates three outcomes, and says which one it reached.** The condition was met, it has not been met yet, and the wait cannot reach it at all are three different results, and a backgrounded wait that emits nothing renders all three identically. Run the command once in the foreground and read its output before backgrounding it, because a wait is only as good as the command inside it, and an unsupported flag on the installed tool version exits non-zero with an empty stdout that every naive test reads as "nothing yet". Never let a fallback stand in for a failed command, since `|| echo '[]'`, `|| true`, and `2>/dev/null` convert an error into that same reading, which is the suppression the write-safety rules already forbid on a mutation. Make the wait emit on failure as loudly as on success, so silence means "still running" and nothing else, and bound it, so a condition that is never coming ends in a report rather than in another wait.
+- **Never write a wait as an unbounded shell loop.** This is a prohibition rather than a preference. A loop that waits for something, with no bound anywhere in the command that runs it, is forbidden. That holds in a tool call, in a script, and in a brief handed to a subagent. The bound goes inside that command. The wait then says which of three things it found: the condition met, the bound reached, or the check itself failing. **Prefer the mechanism that already signals.** Where the dispatch mechanism reports a subagent's completion itself, polling that subagent's output file is a second channel. The answer is already on its way. **The agent that starts a wait owns the process it leaves.** A process a tool call leaves running survives the turn, the subagent, and the run that dispatched it. So a run that dispatched workers does not report itself done while it cannot say what it left running.
 
 ## Where the Rules Live
 

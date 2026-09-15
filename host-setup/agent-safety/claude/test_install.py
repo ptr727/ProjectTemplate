@@ -350,6 +350,75 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_the_sweep_is_deployed_and_registered_once(self):
+        """A second hook is a second chance to install the bytes and wire up nothing."""
+        self.install()
+        self.assertTrue((self.home / "hooks" / install.SWEEP_NAME).is_file())
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+        # A SessionEnd hook's own budget is 1.5s, and only a declared per-hook timeout raises it.
+        self.assertEqual(entries[0]["timeout"], install.SWEEP_TIMEOUT_SECONDS)
+
+    def test_the_sweep_group_carries_no_matcher(self):
+        """A matcher would narrow SessionEnd to one exit reason, and a quit is not the only one."""
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        owning = [
+            g
+            for g in groups
+            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+        ]
+        self.assertEqual(len(owning), 1)
+        self.assertNotIn("matcher", owning[0])
+
+    def test_reinstalling_does_not_duplicate_the_sweep(self):
+        self.install()
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+
+    def test_an_unregistered_sweep_reports_stale_rather_than_current(self):
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = []
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("never reported", r.stdout)
+
+    def test_a_preexisting_matcher_group_is_left_alone(self):
+        """Somebody else's SessionEnd hook keeps its own filter rather than gaining this one."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = [
+            {"matcher": "clear", "hooks": [{"type": "command", "command": "somebody-elses.sh"}]}
+        ]
+        self._write(data)
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        theirs = next(g for g in groups if g.get("matcher") == "clear")
+        self.assertEqual([h["command"] for h in theirs["hooks"]], ["somebody-elses.sh"])
+        self.assertTrue(
+            any(
+                install.SWEEP_STEM in h.get("command", "")
+                for g in groups
+                if "matcher" not in g
+                for h in g.get("hooks", [])
+            )
+        )
+
     def test_reinstalling_clears_an_unregistered_hook(self):
         self.install()
         data = self._settings()
@@ -550,7 +619,8 @@ class TestStampContent(StampCase):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
         self.assertEqual(
             install.PAYLOAD_FILES,
-            ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+            ("gh-write-guard.py", install.SWEEP_NAME)
+            + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
         )
 
     def test_every_reader_uses_the_same_marker_list(self):

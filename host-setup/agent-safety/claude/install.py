@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install the agent write-safety kit for the current user account. Cross-platform, idempotent.
+"""Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, registers it in the user settings.json, merges the permission rules this
-kit owns into the same file, adds the safety rules to the user CLAUDE.md (marker-delimited so re-runs
-update in place), and self-tests the hook before registering it.
+Deploys the PreToolUse hook and the SessionEnd stray-process sweep, registers both in the user
+settings.json, merges the permission rules this kit owns into the same file, adds the safety rules to
+the user CLAUDE.md (marker-delimited so re-runs update in place), and self-tests each hook before
+registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -31,6 +32,15 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
+# The SessionEnd sweep's file name, and the substring identifying its registration in settings.json.
+# Named once, since a registration written under one spelling and searched for under another is reported absent forever.
+SWEEP_NAME = "stray-process-sweep.py"
+SWEEP_STEM = "stray-process-sweep"
+
+# A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
+# The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
+SWEEP_TIMEOUT_SECONDS = 10
+
 # The stamp's own format version, separate from the content it describes.
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
 STAMP_VERSION = 1
@@ -49,7 +59,9 @@ BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = ("gh-write-guard.py",) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+PAYLOAD_FILES = ("gh-write-guard.py", SWEEP_NAME) + tuple(
+    filename for _, filename in CLAUDE_MD_BLOCKS
+)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
@@ -183,7 +195,7 @@ def payload_digest():
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
-    `installed_digest` reads, so the two are directly comparable: the hook, then each block.
+    `installed_digest` reads, so the two are directly comparable: the guard, the sweep, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
@@ -246,11 +258,13 @@ def installed_digest(claude_home):
     holds identical text with CRLF is current rather than drifted.
     """
     hook = claude_home / "hooks" / "gh-write-guard.py"
+    sweep = claude_home / "hooks" / SWEEP_NAME
     claude_md = claude_home / "CLAUDE.md"
-    if not hook.is_file() or not claude_md.is_file():
+    if not hook.is_file() or not sweep.is_file() or not claude_md.is_file():
         return None
     h = hashlib.sha256()
     h.update(normalized(hook.read_bytes()))
+    h.update(normalized(sweep.read_bytes()))
     text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
     for marker in BLOCK_MARKERS:
         found = re.search(
@@ -347,6 +361,21 @@ def registration_problems(claude_home):
         out.append(
             f"the PreToolUse hook is registered {registered} times, so it runs more than once"
         )
+    ends = data.get("hooks", {}).get("SessionEnd") if isinstance(data.get("hooks"), dict) else None
+    swept = 0
+    for group in ends or []:
+        if not isinstance(group, dict):
+            continue
+        for hook in group.get("hooks") or []:
+            if isinstance(hook, dict) and SWEEP_STEM in str(hook.get("command", "")):
+                swept += 1
+    if swept == 0:
+        out.append(
+            "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
+            "never reported"
+        )
+    elif swept > 1:
+        out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
     allow = (
         data.get("permissions", {}).get("allow")
         if isinstance(data.get("permissions"), dict)
@@ -457,7 +486,7 @@ def report(claude_home):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Install the agent write-safety kit, or report whether this machine is current."
+        description="Install the agent host-safety kit, or report whether this machine is current."
     )
     parser.add_argument(
         "--report",
@@ -483,6 +512,7 @@ def main():
     )
     hooks_dir = claude_home / "hooks"
     hook_dst = hooks_dir / "gh-write-guard.py"
+    sweep_dst = hooks_dir / SWEEP_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
 
@@ -490,29 +520,32 @@ def main():
     if args.report:
         return report(claude_home)
 
-    print(f"Installing agent write-safety kit into: {claude_home}")
+    print(f"Installing agent host-safety kit into: {claude_home}")
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Deploy the hook, then self-test it before wiring anything up.
-    shutil.copyfile(HERE / "gh-write-guard.py", hook_dst)
-    try:
-        os.chmod(hook_dst, 0o755)
-    except OSError:
-        pass
-    print(f"  hook -> {hook_dst}")
-    r = subprocess.run(
-        [sys.executable, str(hook_dst), "--selftest"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if r.returncode != 0:
-        sys.stderr.write(
-            "Hook self-test FAILED; aborting before registration.\n" + r.stdout + r.stderr
+    # 1. Deploy each hook, then self-test it before wiring anything up.
+    for src_name, dst in (("gh-write-guard.py", hook_dst), (SWEEP_NAME, sweep_dst)):
+        shutil.copyfile(HERE / src_name, dst)
+        try:
+            os.chmod(dst, 0o755)
+        except OSError:
+            pass
+        print(f"  hook -> {dst}")
+        r = subprocess.run(
+            [sys.executable, str(dst), "--selftest"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
-        return 1
-    print("  hook self-test: PASS")
+        if r.returncode != 0:
+            sys.stderr.write(
+                f"{src_name} self-test FAILED; aborting before registration.\n"
+                + r.stdout
+                + r.stderr
+            )
+            return 1
+        print(f"  {src_name} self-test: PASS")
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
     launcher = hook_launcher()
@@ -554,6 +587,7 @@ def main():
     for path, want in (
         ("hooks", dict),
         ("hooks/PreToolUse", list),
+        ("hooks/SessionEnd", list),
         ("permissions", dict),
         ("permissions/allow", list),
     ):
@@ -566,18 +600,20 @@ def main():
 
     # A list of the right type can still hold the wrong elements.
     # The registration below reads each group as an object, and each group's `hooks` as a list it appends to.
-    groups = at(data, "hooks/PreToolUse")
-    if groups is not MISSING:
+    for event in ("PreToolUse", "SessionEnd"):
+        groups = at(data, f"hooks/{event}")
+        if groups is MISSING:
+            continue
         for i, g in enumerate(groups):
             if not isinstance(g, dict):
-                reject(f"hooks.PreToolUse[{i}]", g, dict)
+                reject(f"hooks.{event}[{i}]", g, dict)
                 return 1
             if "hooks" in g and not isinstance(g["hooks"], list):
-                reject(f"hooks.PreToolUse[{i}].hooks", g["hooks"], list)
+                reject(f"hooks.{event}[{i}].hooks", g["hooks"], list)
                 return 1
             for j, h in enumerate(g.get("hooks") or []):
                 if not isinstance(h, dict):
-                    reject(f"hooks.PreToolUse[{i}].hooks[{j}]", h, dict)
+                    reject(f"hooks.{event}[{i}].hooks[{j}]", h, dict)
                     return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
@@ -596,6 +632,26 @@ def main():
         pre.append(group)
     group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
     done = ["PreToolUse/Bash hook registered"]
+
+    # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
+    # The group carries no matcher, so it fires on every exit reason rather than on one.
+    ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
+    for g in ends:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
+    end_group = next((g for g in ends if "matcher" not in g), None)
+    if end_group is None:
+        end_group = {"hooks": []}
+        ends.append(end_group)
+    end_group.setdefault("hooks", []).append(
+        {
+            "type": "command",
+            "command": f'"{launcher}" "{sweep_dst}"',
+            "timeout": SWEEP_TIMEOUT_SECONDS,
+        }
+    )
+    done.append("SessionEnd sweep registered")
 
     # 3. Permission rules, merged under the prefixes this installer owns.
     # The strip-then-register shape is the hook registration's above, applied to a flat list.

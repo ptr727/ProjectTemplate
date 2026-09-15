@@ -851,11 +851,11 @@
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:41872877c85393e78f84891521cb31d1249d797494ff3cdb7f8001323584e112",
+      "digest": "sha256:402df17644aab1f90531b2058fc15d6d07532e36a5760c9fb6ef0d29d01fe7fe",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T03:16:33Z"
+      "findings": 4,
+      "hubCommit": "ec9f4fede85dea1be9e42de466e6e5e0871e126e",
+      "stamp": "2026-09-15T01:51:57Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",
