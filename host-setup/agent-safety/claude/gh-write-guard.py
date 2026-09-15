@@ -1622,6 +1622,20 @@ def _check_reply_resolve_helper(cmd, environ):
 # --- Rule 7: an unbounded shell wait ------------------------------------------------------------------
 _LOOP_KEYWORDS = ("while", "until")
 
+
+def _opens_loop(toks, i):
+    """True if the token at index i opens a loop this rule judges.
+
+    `while` and `until` always do. `for` does only in its arithmetic form, `for ((;;))`, which can
+    run forever exactly as `while true` can. A `for x in <words>` is bounded by that word list.
+    """
+    if not _opens_command(toks, i):
+        return False
+    if toks[i] in _LOOP_KEYWORDS:
+        return True
+    return toks[i] == "for" and i + 1 < len(toks) and toks[i + 1].startswith("((")
+
+
 # A loop keyword opens a loop only in command position, so the word appearing as an argument value is not one.
 # These are the words a command can follow directly, beside the operator tokens `_is_separator` already recognizes.
 _COMMAND_POSITION_WORDS = {
@@ -1638,6 +1652,11 @@ _COMMAND_POSITION_WORDS = {
     "env",
     "exec",
     "nohup",
+    "setsid",
+    "stdbuf",
+    "sudo",
+    "nice",
+    "ionice",
 }
 
 # The two bounds this rule reads as written into the loop's own condition.
@@ -1645,6 +1664,22 @@ _COMMAND_POSITION_WORDS = {
 # - the arithmetic form, `(( SECONDS < 600 ))`.
 # Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*[<>].*\)\)")
+
+
+def _reads_its_input(cond):
+    """True if the loop's condition is a `read`, which ends the loop when the input is exhausted.
+
+    `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
+    clock, and throttling between iterations is the ordinary reason such a loop sleeps at all.
+    Only a leading `read`, after any `NAME=value` assignments, counts: a `read` appearing later in
+    the condition is an argument to something else and says nothing about what ends the loop.
+    """
+    for tok in cond:
+        if _ENV_ASSIGN_RE.match(tok):
+            continue
+        return tok.rsplit("/", 1)[-1] == "read"
+    return False
+
 
 # A `timeout` duration argument: bare seconds, or one carrying a GNU suffix.
 # A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
@@ -1657,7 +1692,8 @@ _TIMEOUT_VALUE_OPTS = {"-k", "--kill-after", "-s", "--signal"}
 def _is_timeout_exe(tok):
     """True if the token invokes `timeout`, path-qualified or `.exe`-suffixed like `_is_git_exe`."""
     base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-    return base in ("timeout", "timeout.exe")
+    # `gtimeout` is the Homebrew coreutils spelling, and the only GNU timeout a macOS host has.
+    return base in ("timeout", "timeout.exe", "gtimeout")
 
 
 def _is_sleep_exe(tok):
@@ -1684,7 +1720,7 @@ def _timeout_bounds_wrapper(toks, w):
     while start > 0 and not _is_shell_op(toks[start - 1]):
         start -= 1
     # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
-    while start < w and toks[start] in _COMMAND_POSITION_WORDS:
+    while start < w and _is_command_prefix(toks[start]):
         start += 1
     if start >= w or not _is_timeout_exe(toks[start]):
         return False
@@ -1701,16 +1737,28 @@ def _timeout_bounds_wrapper(toks, w):
     return False
 
 
+def _is_command_prefix(tok):
+    """True if the token runs the command after it, so what follows is still in command position.
+
+    Path-stripped and assignment-aware for the same reason `_is_sleep_exe` is: `/usr/bin/env sleep`
+    and `FOO=1 sleep` are both a sleep, and reading only the bare spellings let each through.
+    """
+    if _ENV_ASSIGN_RE.match(tok):
+        return True
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return base in _COMMAND_POSITION_WORDS
+
+
 def _opens_command(toks, i):
     """True if the token at index i sits where a shell reads a command name rather than an argument."""
     if i == 0:
         return True
     prev = toks[i - 1]
-    return _is_separator(prev) or prev in _COMMAND_POSITION_WORDS
+    return _is_separator(prev) or _is_command_prefix(prev)
 
 
 def _loop_parts(toks, i):
-    """(condition tokens, body tokens) for the loop keyword at index i, or None.
+    """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
 
     None means the loop is not closed in this command string, a shape this rule leaves alone rather
     than denies, matching the precision-over-recall stance rules 1-3 take.
@@ -1725,7 +1773,7 @@ def _loop_parts(toks, i):
             depth += 1
         elif toks[j] == "done" and _opens_command(toks, j):
             if depth == 0:
-                return toks[i + 1 : do_at], toks[do_at + 1 : j]
+                return toks[i + 1 : do_at], toks[do_at + 1 : j], j
             depth -= 1
     return None
 
@@ -1760,13 +1808,18 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
                 if inner is not None:
                     return inner
-        elif tok in _LOOP_KEYWORDS and _opens_command(toks, i):
+        elif _opens_loop(toks, i):
             parts = _loop_parts(toks, i)
             if parts is None:
                 continue
-            cond, body = parts
+            cond, body, done_at = parts
             sleeps = any(_is_sleep_exe(b) and _opens_command(body, k) for k, b in enumerate(body))
-            if sleeps and not inherited_timeout and not _BOUND_IN_CONDITION.search(" ".join(cond)):
+            # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
+            # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
+            # Measured: the same leak as having written no bound at all.
+            backgrounded = done_at + 1 < len(toks) and toks[done_at + 1] == "&"
+            bounded = (inherited_timeout and not backgrounded) or _reads_its_input(cond)
+            if sleeps and not bounded and not _BOUND_IN_CONDITION.search(" ".join(cond)):
                 # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
                 quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
                 return " ".join([tok] + quoted)
@@ -1777,7 +1830,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
 # The tag charset takes a hyphen and a dot, so `<<\'END-DOC\'` is read as the heredoc it is rather than as commands.
 # The `<<-` form is captured separately, since only that one allows a tabbed terminator.
 _HEREDOC_START = re.compile(
-    r"<<(?P<dash>-?)\s*(?P<q>[\'\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_.\-]*)(?P=q)"
+    r"(?:^|\s)<(?!<<)<(?P<dash>-?)\s*(?P<q>[\'\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_.\-]*)(?P=q)"
 )
 
 
@@ -3440,6 +3493,66 @@ _WAIT_CASES = [
         "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
         "deny",
         "GNU timeout documents a zero duration as disabling the timeout, so it is not a bound",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done &'",
+        "deny",
+        "a backgrounded loop outlives the shell the timeout bounds, so the timeout bounds nothing",
+    ),
+    (
+        "gtimeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "gtimeout is the only GNU timeout a macOS host has",
+    ),
+    (
+        "sudo timeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "a privilege prefix does not hide the timeout behind it",
+    ),
+    (
+        "TMPDIR=/tmp timeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "nor does an assignment prefix",
+    ),
+    (
+        "until [ -f x ]; do /usr/bin/env sleep 1; done",
+        "deny",
+        "a prefix is recognized path-qualified, the way the exe helpers already recognize one",
+    ),
+    (
+        "until [ -f x ]; do FOO=1 sleep 1; done",
+        "deny",
+        "and an assignment before the sleep is not an argument to it",
+    ),
+    (
+        'while IFS= read -r pr; do gh pr view "$pr"; sleep 2; done < prs.txt',
+        "allow",
+        "a loop reading its input ends when the input does, and throttling it is ordinary work",
+    ),
+    (
+        "while grep -q read file; do sleep 5; done",
+        "deny",
+        "while a read named later in the condition is an argument and bounds nothing",
+    ),
+    (
+        "for ((;;)); do sleep 30; done",
+        "deny",
+        "the arithmetic for runs forever exactly as while true does",
+    ),
+    (
+        "for (( i=0; i<10; i++ )); do sleep 1; done",
+        "allow",
+        "and carries its own guard when it has one",
+    ),
+    (
+        "grep -q x <<< foo\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "a herestring is not a heredoc, and reading one as one deleted the command after it",
+    ),
+    (
+        "echo $((a<<b))\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "nor is an arithmetic shift",
     ),
     (
         "timeout -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",

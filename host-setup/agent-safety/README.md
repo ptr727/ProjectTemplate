@@ -196,9 +196,16 @@ already happened by the time any tool call is judged.
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
    document quoting the forbidden shape is written rather than denied.
 
+A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
+   `while true` does, while a `for x in <words>` is bounded by its own word list. A loop whose
+   condition is a `read` is bounded by its input, so throttling between iterations with a `sleep` is
+   ordinary work rather than a leak. And a loop the command backgrounds is not bounded by a `timeout`
+   around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
+   child is gone, and nothing signals what it left.
+
    Three shapes this deliberately does not reach, each for the same precision-over-recall reason
    requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
-   from `while read`, which is ordinary work. A guard comparing against a counter the body never
+   from a loop doing ordinary work in its body. A guard comparing against a counter the body never
    increments is textually a bound and is infinite anyway. And a wait inside a script file is unseen,
    the same blind spot every requirement here has. A false deny on an ordinary loop costs more work
    than those three leaks do, and each still falls under `AGENTS.md` "Delegation", which states the

@@ -109,10 +109,25 @@ def _agent_pid(pid, table):
         base = argv0.rsplit("/", 1)[-1].lower()
         if base in _AGENT_EXE:
             return candidate
+    # The outermost match, and never a shell.
+    # Nearest-first returned a tool shell that merely named a `claude` path in its own arguments.
+    # A sweep anchored there walks none of its siblings, so it reports a clean machine.
+    # A silent clean report is the one answer this must never give wrongly.
+    outermost = None
     for candidate in chain:
-        if _AGENT_IN_ARGS.search(table[candidate][3].lower()):
-            return candidate
-    return None
+        args = table[candidate][3]
+        argv0 = args.split()[0] if args.split() else ""
+        if _is_shell(argv0):
+            continue
+        if _AGENT_IN_ARGS.search(args.lower()):
+            outermost = candidate
+    return outermost
+
+
+def _is_shell(argv0):
+    """True if argv0 invokes a shell, which is never the agent process however its arguments read."""
+    base = argv0.rsplit("/", 1)[-1].lower().removesuffix(".exe").lstrip("-")
+    return base in ("sh", "bash", "zsh", "ksh", "dash", "fish")
 
 
 def _descendants(root, table):
@@ -195,10 +210,10 @@ def main():
         json.loads(sys.stdin.read() or "{}")  # the payload is read and not otherwise used
     except (ValueError, OSError):
         pass
-    if os.name != "posix":
-        return (
-            0  # Windows has no session test at all, so the hook is inert there rather than guessing
-        )
+    # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal
+    # `sess`, so on both the hook is inert rather than printing a failure at every session end.
+    if os.name != "posix" or sys.platform == "darwin":
+        return 0
     table = _read_process_table()
     if table is None:
         print(
@@ -293,6 +308,15 @@ def _selftest():
         "500 400 400 5 python3 hooks/stray-process-sweep.py",
     ]
     packaged = _parse_process_table("\n".join(packaged_rows))
+    # The same launcher, with a tool shell between it and the sweep naming a `claude` path of its own.
+    # Nearest-first anchored on that shell and reported its siblings as nothing.
+    shelled_rows = [
+        "100 1 100 900 -bash",
+        "200 100 100 800 node /usr/lib/node_modules/claude-code/cli.js",
+        "400 200 400 600 /bin/bash -c cd ~/repos/claude/x && sleep 999",
+        "500 400 400 5 python3 hooks/stray-process-sweep.py",
+    ]
+    shelled = _parse_process_table("\n".join(shelled_rows))
     checks += [
         (
             _agent_pid(500, packaged) == 200,
@@ -301,6 +325,10 @@ def _selftest():
         (
             _agent_pid(500, packaged) != 400,
             "a shell mentioning a .claude directory is not the agent",
+        ),
+        (
+            _agent_pid(500, shelled) == 200,
+            "nor is one whose own arguments name a claude path",
         ),
     ]
     ok = True
