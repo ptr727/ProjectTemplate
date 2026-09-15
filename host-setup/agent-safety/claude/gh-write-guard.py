@@ -1886,11 +1886,12 @@ def _heredoc_opener(line):
             continue
         nxt = toks[k + 1]
         dash = nxt.startswith("-")
-        # `<<-EOF` carries the dash on the tag token, `<<- EOF` on its own, and both are bash.
-        if nxt == "-" and k + 2 < len(toks):
-            tag = toks[k + 2]
-        else:
-            tag = nxt[1:] if dash else nxt
+        # A bare `-` token is left unread rather than treated as the dash form.
+        # `<<- EOF` and `<< - EOF` tokenize identically, and bash reads the second one's delimiter as `-`.
+        # Reading both as tag `EOF` strips past a real `-` terminator and drops the commands after it.
+        # Not reading either costs a false deny on a document written through the spaced dash form.
+        # That is the safe direction of the two.
+        tag = nxt[1:] if dash else nxt
         if not _HEREDOC_TAG.fullmatch(tag):
             continue
         # Whether a shell reads this body is a question about the heredoc's whole pipeline.
@@ -3680,9 +3681,9 @@ _WAIT_CASES = [
         "and a prefix before that shell does not hide it",
     ),
     (
-        "cat <<- EOF\nuntil [ -f x ]; do sleep 30; done\nEOF",
-        "allow",
-        "the dash form spells its tag as its own token when spaced, and is still a heredoc",
+        "cat << - EOF\ndoc line\n-\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "a bare dash token is left unread, since bash reads that spelling's delimiter as the dash",
     ),
     (
         "timeout 600 until [ -f x ]; do sleep 30; done",

@@ -205,6 +205,13 @@ already happened by the time any tool call is judged.
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
    child is gone, and nothing signals what it left.
 
+   Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
+   here so a reader does not have to find them. A body kept because a shell reads it has its own
+   lines re-tested as openers, so an unterminated opener inside one swallows the top-level lines
+   after it. And the scan for a shell over the heredoc's pipeline reads every token in it rather
+   than only the ones in command position, so `cat <<EOF | shellcheck -s bash -` keeps a body no
+   shell runs and denies a document being linted.
+
    Three shapes this deliberately does not reach, each for the same precision-over-recall reason
    requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
    from a loop doing ordinary work in its body. A guard comparing against a counter the body never
