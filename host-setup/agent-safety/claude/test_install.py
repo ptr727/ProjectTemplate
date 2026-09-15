@@ -415,6 +415,151 @@ class TestRegistration(StampCase):
         problems = install.registration_problems(self.home)
         self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
 
+    def test_a_decoy_command_naming_the_sweep_is_not_a_registration(self):
+        """Matching any command containing the sweep's name let a decoy report a machine current.
+
+        Each shape asserts the problem it should raise rather than that it raised one, since a
+        second and false "not registered" line satisfied a bare truthiness check by itself.
+        """
+        self.install()
+        good = self._settings()["hooks"]["SessionEnd"][0]["hooks"][0]
+        for label, entry, expected in (
+            (
+                "decoy",
+                {"type": "command", "command": "echo stray-process-sweep"},
+                "does not run the deployed one",
+            ),
+            ("timeout", dict(good, timeout=1), "carries timeout 1"),
+            ("type", dict(good, type="prompt"), "does not run the deployed one"),
+        ):
+            with self.subTest(shape=label):
+                data = self._settings()
+                data["hooks"]["SessionEnd"] = [{"hooks": [entry]}]
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                self.assertTrue(
+                    any(expected in p for p in problems),
+                    f"{label} shape reported {problems!r} rather than naming its own defect",
+                )
+
+    def test_an_entry_with_a_defect_is_not_also_reported_absent(self):
+        """Counting only the sound entries added "the guard never runs" under every other problem."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["type"] = "prompt"
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual([p for p in problems if "is not registered" in p], [], problems)
+        self.assertEqual([p for p in problems if "never runs" in p], [], problems)
+
+    def test_a_matcher_every_bash_call_reaches_is_not_a_defect(self):
+        """Requiring the exact string "Bash" reported three working registrations as broken."""
+        self.install()
+        for matcher in ("Bash", "Bash|Task", "*", ""):
+            with self.subTest(matcher=matcher):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["matcher"] = matcher
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], matcher)
+        data = self._settings()
+        del data["hooks"]["PreToolUse"][0]["matcher"]
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+        data = self._settings()
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        self.assertTrue(
+            any("so that group never fires" in p for p in install.registration_problems(self.home))
+        )
+
+    def test_a_registration_is_read_however_its_path_is_quoted(self):
+        """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""
+        self.install()
+        guard = self.home / "hooks" / install.DEPLOYED_HOOKS[0]
+        for spelling in (f"python3 {guard}", f"python3 '{guard}'", f'python3 "{guard}"'):
+            with self.subTest(command=spelling):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = spelling
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], spelling)
+
+    def test_an_absent_sweep_timeout_is_reported_as_absent(self):
+        """The entry carries no timeout, so a message naming a value of None describes nothing."""
+        self.install()
+        data = self._settings()
+        del data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"]
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertTrue(any("carries no timeout" in p for p in problems), problems)
+        self.assertEqual([p for p in problems if "None" in p], [], problems)
+
+    def test_one_group_defect_is_reported_once_however_many_entries(self):
+        """A matcher belongs to the group, so two entries under it are still one defect."""
+        self.install()
+        for event, key in (("PreToolUse", "Edit"), ("SessionEnd", "clear")):
+            with self.subTest(event=event):
+                data = self._settings()
+                group = data["hooks"][event][0]
+                group["matcher"] = key
+                group["hooks"] = group["hooks"] * 2
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                matcher_lines = [p for p in problems if "matcher" in p and event in p]
+                self.assertEqual(len(matcher_lines), 1, problems)
+
+    def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
+        """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
+        self.install()
+        self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
+        live = self.home / "hooks" / install.GUARD_NAME
+        self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
+        self.assertIn(
+            install.GUARD_STEM, self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        )
+
+    def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
+        """A budget larger than this installer writes is better than it, not worse."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] = install.SWEEP_TIMEOUT_SECONDS + 20
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+
+    def test_a_failed_self_test_leaves_the_live_hook_alone(self):
+        """Copying onto the live path and testing after left a broken hook installed and registered."""
+        self.install()
+        live = self.home / "hooks" / install.SWEEP_NAME
+        before = live.read_bytes()
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        broken = root / "claude"
+        shutil.copytree(HERE, broken, ignore=shutil.ignore_patterns("__pycache__"))
+        sweep = broken / install.SWEEP_NAME
+        sweep.write_text(
+            sweep.read_text(encoding="utf-8").replace(
+                'print("SELFTEST PASS" if ok else "SELFTEST FAIL")',
+                'ok = False; print("SELFTEST FAIL")',
+            ),
+            encoding="utf-8",
+        )
+        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        r = subprocess.run(
+            [sys.executable, str(broken / "install.py")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(live.read_bytes(), before, "the live hook was replaced by a failing one")
+        self.assertEqual(
+            sorted(f.name for f in (self.home / "hooks").iterdir()),
+            sorted(install.DEPLOYED_HOOKS),
+            "a staged file was left behind",
+        )
+
     def test_a_sweep_under_a_matcher_reports_stale(self):
         """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
         self.install()

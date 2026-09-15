@@ -200,14 +200,44 @@ already happened by the time any tool call is judged.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
-   `read` that draws on an input redirect, which is bounded by that input, so throttling between
-   iterations with a `sleep` is ordinary work rather than a leak. A redirect names a source that
-   ends, where a pipe's producer is unknown from the command text. A loop fed by
-   `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
-   false deny is the safe direction. A process substitution is that same unknown producer behind a
-   redirect, so `done < <(yes)` is no bound either. And a loop the command backgrounds is not bounded by a `timeout`
-   around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
-   child is gone, and nothing signals what it left.
+   `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
+   which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
+   rather than a leak. Four things have to hold, and a real command defeated each of them.
+   The redirect binds descriptor 0, since a `read` consumes that one and a redirect on any other
+   leaves it reading whatever it read before. The `read` itself names no descriptor, since
+   `read -u 3` draws on the one it names rather than on the one the redirect bound. The redirect
+   counted is the last one binding descriptor 0, since a shell applies redirections in order and
+   each replaces the last, so an earlier `< file` cannot vouch for a later `< /dev/zero`. And its
+   target names a source that ends, where a pipe's producer is unknown from the command text. A loop
+   fed by `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and
+   that false deny is the safe direction. A process substitution is that same unknown producer
+   behind a redirect, so `done < <(yes)` is no bound either. Duplicating a descriptor rather than
+   opening a source, `done <&0`, rebinds that same pipe to itself. So does a target under `/dev` or
+   `/proc`, which is read as a category rather than as a list of the streams that never end, since
+   every one of those has another spelling: `/proc/self/fd/0` re-opens the pipe `/dev/stdin` does,
+   `/dev/full` reads like `/dev/zero`, and a `.` segment or a doubled leading slash defeats a
+   literal compare of either. The target is normalized and the whole of both trees is denied,
+   `/dev/null` included. Only an absolute target is read that way, since a relative one resolves
+   against a working directory the rule does not model.
+
+   A command that forks work out of a `timeout`'s reach is bounded by nothing, whatever else it
+   carries. Three shapes are recognized. A background operator lets the shell exit at once, so
+   `timeout`'s own child is gone before it fires and it signals nothing, measurably the same leak as
+   having written no bound at all. `coproc` backgrounds with no operator at all, so an operator scan
+   never sees it. And `setsid` starts a session of its own, which no signal to the timeout's process
+   group reaches. Recognized rather than exhaustive: a command can reach a new session through a
+   launcher this does not name, and what those cost is a leak requirement 8 reports after the fact
+   rather than a deny before it.
+
+   Both are read over the whole command rather than tied to one loop, deliberately, and that is
+   coarser than it could be. Deciding which `&` backgrounds which compound needs a parse this rule
+   does not have, and four rounds of narrowing a scan that tried each closed the shapes it was shown
+   and left the next one: a statement between the loop and its group's closer, a `disown` before a
+   `wait`, a subshell the sequencing had already reaped. Reading any fork as fatal costs a false
+   deny on `<loop> & wait`, a bound nothing in the command text can verify. A `timeout` the command
+   backgrounds as a whole still bounds what it runs, since
+   that `timeout` process outlives the shell that started it, so the ordinary
+   `timeout 900 <command> &` is unaffected.
 
    Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
    here so a reader does not have to find them. A body kept because a shell reads it has its own
@@ -216,17 +246,18 @@ already happened by the time any tool call is judged.
    than only the ones in command position, so `cat <<EOF | shellcheck -s bash -` keeps a body no
    shell runs and denies a document being linted.
 
-   Three shapes this deliberately does not reach, each for the same precision-over-recall reason
+   Four shapes this deliberately does not reach, each for the same precision-over-recall reason
    requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
    from a loop doing ordinary work in its body. A guard comparing against a counter the body never
-   increments is textually a bound and is infinite anyway. And a wait inside a script file is unseen,
-   the same blind spot every requirement here has. A false deny on an ordinary loop costs more work
-   than those three leaks do, and each still falls under `AGENTS.md` "Delegation", which states the
-   prohibition for every agent whether or not a hook is installed.
+   increments is textually a bound and is infinite anyway. A wait inside a script file is unseen,
+   the same blind spot every requirement here has. And a redirect from a named pipe is a file path
+   in the command text, indistinguishable from a redirect from a file. A false deny on an ordinary
+   loop costs more work than those four leaks do, and each still falls under `AGENTS.md`
+   "Delegation", which states the prohibition for every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
    being written. This one finds the leaks already running: the ones a session started before that
-   deny reached this machine, the three shapes it deliberately does not reach, and anything else
+   deny reached this machine, the four shapes it deliberately does not reach, and anything else
    this agent left running whether it leaked or not. At the end of a session, report every descendant
    of the agent process that runs outside the agent's own session, since a descendant sharing that
    session ends when the agent does and one in a session of its own does not. Report the root of
