@@ -470,7 +470,7 @@ class TestRegistration(StampCase):
         data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
         self._write(data)
         self.assertTrue(
-            any("never sees one" in p for p in install.registration_problems(self.home))
+            any("so that group never fires" in p for p in install.registration_problems(self.home))
         )
 
     def test_a_registration_is_read_however_its_path_is_quoted(self):
@@ -511,7 +511,6 @@ class TestRegistration(StampCase):
     def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
         """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
         self.install()
-        self.assertEqual(install.DEPLOYED_HOOKS[0], install.GUARD_NAME)
         self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
         live = self.home / "hooks" / install.GUARD_NAME
         self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")

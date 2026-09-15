@@ -449,8 +449,9 @@ def registration_problems(claude_home):
                 continue
             if not matcher_sees_bash(group.get("matcher")):
                 report(
-                    f"the PreToolUse guard is registered under matcher {group.get('matcher')!r}, "
-                    "which no Bash call matches, so the guard never sees one"
+                    f"a PreToolUse group registers the guard under matcher "
+                    f"{group.get('matcher')!r}, which no Bash call matches, so that group never "
+                    "fires"
                 )
                 continue
             registered += 1
