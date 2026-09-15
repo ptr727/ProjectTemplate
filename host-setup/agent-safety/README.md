@@ -203,14 +203,21 @@ already happened by the time any tool call is judged.
    `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
    which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
    rather than a leak. The descriptor matters, since a `read` consumes descriptor 0 and a redirect
-   on any other leaves it reading whatever it read before. A redirect names a source that
-   ends, where a pipe's producer is unknown from the command text. A loop fed by
+   on any other leaves it reading whatever it read before. The redirect also has to name a
+   source that ends, where a pipe's producer is unknown from the command text. A loop fed by
    `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
    false deny is the safe direction. A process substitution is that same unknown producer behind a
-   redirect, so `done < <(yes)` is no bound either. And a loop the command backgrounds is not bounded by a `timeout`
+   redirect, so `done < <(yes)` is no bound either. Duplicating a descriptor rather than opening a
+   source, `done <&0`, rebinds that same pipe to itself, and a `/dev/` stream such as `/dev/stdin`
+   or `/dev/zero` is either that pipe again or a source that never reaches EOF.
+
+   And a loop the command backgrounds is not bounded by a `timeout`
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
    child is gone, and nothing signals what it left. The same holds for an intermediate wrapper the
-   command backgrounds, since what outlives the timeout is whatever it forked away from.
+   command backgrounds, and for a group the command backgrounds the loop inside, since what outlives
+   the timeout is whatever it forked away from. A following `wait` is the exception, and restores
+   what the `&` took away: it holds the shell open until the loop ends, so the timeout fires on a
+   live process group and signals the loop along with it.
 
    Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
    here so a reader does not have to find them. A body kept because a shell reads it has its own
@@ -219,13 +226,16 @@ already happened by the time any tool call is judged.
    than only the ones in command position, so `cat <<EOF | shellcheck -s bash -` keeps a body no
    shell runs and denies a document being linted.
 
-   Three shapes this deliberately does not reach, each for the same precision-over-recall reason
+   Five shapes this deliberately does not reach, each for the same precision-over-recall reason
    requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
    from a loop doing ordinary work in its body. A guard comparing against a counter the body never
-   increments is textually a bound and is infinite anyway. And a wait inside a script file is unseen,
-   the same blind spot every requirement here has. A false deny on an ordinary loop costs more work
-   than those three leaks do, and each still falls under `AGENTS.md` "Delegation", which states the
-   prohibition for every agent whether or not a hook is installed.
+   increments is textually a bound and is infinite anyway. A wait inside a script file is unseen,
+   the same blind spot every requirement here has. A loop in a function body that the command
+   backgrounds at the call site, `f() { <loop>; }; f &`, needs the function followed from its call
+   rather than the command read in order. And a redirect from a named pipe is a file path in the
+   command text, indistinguishable from a redirect from a file. A false deny on an ordinary loop
+   costs more work than those five leaks do, and each still falls under `AGENTS.md` "Delegation",
+   which states the prohibition for every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
    being written. This one finds the leaks already running: the ones a session started before that

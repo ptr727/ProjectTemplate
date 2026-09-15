@@ -84,8 +84,30 @@ def runs_hook(command, path):
     reported a working machine stale, since `hook_launcher()` resolves at check time and a machine
     installed under a different PATH carries the other spelling. The path is what the installer
     writes and never drifts, so it is the half worth comparing.
+
+    The quoting around it is not compared either. This installer writes the path in double quotes,
+    and a registration written by hand or through the `/hooks` UI runs the same file bare or in
+    single quotes, so requiring one spelling reported those as naming a hook they do not run.
     """
-    return f'"{path}"' in str(command)
+    bounded = rf"(?:^|[\s\"']){re.escape(str(path))}(?:$|[\s\"'])"
+    return re.search(bounded, str(command)) is not None
+
+
+def matcher_sees_bash(matcher):
+    """Whether a PreToolUse matcher group receives a Bash call.
+
+    An absent or empty matcher runs on every tool and `*` is the all-tools spelling, so neither is
+    a defect. A matcher is otherwise a regular expression, which makes `Bash|Task` as good as
+    `Bash`. Requiring the exact string reported all three of those working shapes as broken.
+    """
+    if matcher is None or matcher in ("", "*"):
+        return True
+    if not isinstance(matcher, str):
+        return False
+    try:
+        return re.fullmatch(matcher, "Bash") is not None
+    except re.error:
+        return False
 
 
 def owns(entry, prefix):
@@ -396,6 +418,10 @@ def registration_problems(claude_home):
         return groups
 
     groups = event_groups("PreToolUse")
+    # Counted apart from the registrations, since an entry with a problem is still an entry.
+    # Counting only the sound ones added "the guard never runs" under every problem reported here.
+    # That line is false, and it sends a reader to the wrong fix.
+    named = 0
     registered = 0
     guard_path = claude_home / "hooks" / DEPLOYED_HOOKS[0]
     for group in groups or []:
@@ -404,22 +430,23 @@ def registration_problems(claude_home):
         for hook in group.get("hooks") or []:
             if not isinstance(hook, dict) or "gh-write-guard" not in str(hook.get("command", "")):
                 continue
+            named += 1
             if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
                 out.append(
                     "a PreToolUse entry names the guard but does not run the deployed one "
                     f"({hook.get('type')!r} running {hook.get('command')!r})"
                 )
                 continue
-            if group.get("matcher") != "Bash":
+            if not matcher_sees_bash(group.get("matcher")):
                 out.append(
-                    f"the PreToolUse guard is registered under matcher {group.get('matcher')!r} "
-                    "rather than Bash, so it never sees a Bash call"
+                    f"the PreToolUse guard is registered under matcher {group.get('matcher')!r}, "
+                    "which no Bash call matches, so the guard never sees one"
                 )
                 continue
             registered += 1
     if groups is None:
         pass  # the shape error is already reported, and a count from it would be meaningless
-    elif registered == 0:
+    elif named == 0:
         out.append(
             "the PreToolUse hook is not registered in settings.json, so the guard never runs"
         )
@@ -428,6 +455,7 @@ def registration_problems(claude_home):
             f"the PreToolUse hook is registered {registered} times, so it runs more than once"
         )
     ends = event_groups("SessionEnd")
+    sweeps_named = 0
     swept = 0
     for group in ends or []:
         if not isinstance(group, dict):
@@ -436,16 +464,23 @@ def registration_problems(claude_home):
         for hook in group.get("hooks") or []:
             if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
                 continue
+            sweeps_named += 1
             if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
                 out.append(
                     "a SessionEnd entry names the sweep but does not run the deployed one "
                     f"({hook.get('type')!r} running {hook.get('command')!r})"
                 )
                 continue
-            if hook.get("timeout") != SWEEP_TIMEOUT_SECONDS:
+            # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
+            # The event's own default is 1.5s, which is what the sweep needs more than.
+            timeout = hook.get("timeout")
+            too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            if not too_short:
+                too_short = timeout < SWEEP_TIMEOUT_SECONDS
+            if too_short:
                 out.append(
-                    f"the SessionEnd sweep carries timeout {hook.get('timeout')!r} where this "
-                    f"installer writes {SWEEP_TIMEOUT_SECONDS}, and the event's own budget is 1.5s"
+                    f"the SessionEnd sweep carries timeout {timeout!r} where this installer writes "
+                    f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
                 )
                 continue
             swept += 1
@@ -458,7 +493,7 @@ def registration_problems(claude_home):
                 )
     if ends is None:
         pass  # likewise reported as a shape error above
-    elif swept == 0:
+    elif sweeps_named == 0:
         out.append(
             "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
             "never reported"
@@ -600,7 +635,7 @@ def main():
         else pathlib.Path.home() / ".claude"
     )
     hooks_dir = claude_home / "hooks"
-    hook_dst = hooks_dir / "gh-write-guard.py"
+    hook_dst = hooks_dir / DEPLOYED_HOOKS[0]
     sweep_dst = hooks_dir / SWEEP_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
@@ -615,9 +650,11 @@ def main():
     # 1. Stage every hook beside its live path, self-test each staged copy, and only then replace.
     # Copying onto the live path first and testing afterwards left a failed self-test's broken copy installed.
     # The existing registration still pointed at it, so an install that refused to register disabled the guard.
+    # Named per process, since two installs sharing one staged path clobber each other's copy.
+    # A kill between staging and the replace still leaves one behind, which nothing here can prevent.
     staged = []
     for src_name in DEPLOYED_HOOKS:
-        tmp = hooks_dir / f"{src_name}.staged"
+        tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
         shutil.copyfile(HERE / src_name, tmp)
         try:
             os.chmod(tmp, 0o755)

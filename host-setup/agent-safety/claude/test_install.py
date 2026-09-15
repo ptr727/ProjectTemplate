@@ -416,20 +416,81 @@ class TestRegistration(StampCase):
         self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
 
     def test_a_decoy_command_naming_the_sweep_is_not_a_registration(self):
-        """Matching any command containing the sweep's name let a decoy report a machine current."""
+        """Matching any command containing the sweep's name let a decoy report a machine current.
+
+        Each shape asserts the problem it should raise rather than that it raised one, since a
+        second and false "not registered" line satisfied a bare truthiness check by itself.
+        """
         self.install()
         good = self._settings()["hooks"]["SessionEnd"][0]["hooks"][0]
-        for label, entry in (
-            ("decoy", {"type": "command", "command": "echo stray-process-sweep"}),
-            ("timeout", dict(good, timeout=1)),
-            ("type", dict(good, type="prompt")),
+        for label, entry, expected in (
+            (
+                "decoy",
+                {"type": "command", "command": "echo stray-process-sweep"},
+                "does not run the deployed one",
+            ),
+            ("timeout", dict(good, timeout=1), "carries timeout 1"),
+            ("type", dict(good, type="prompt"), "does not run the deployed one"),
         ):
             with self.subTest(shape=label):
                 data = self._settings()
                 data["hooks"]["SessionEnd"] = [{"hooks": [entry]}]
                 self._write(data)
                 problems = install.registration_problems(self.home)
-                self.assertTrue(problems, f"{label} shape reported no problem")
+                self.assertTrue(
+                    any(expected in p for p in problems),
+                    f"{label} shape reported {problems!r} rather than naming its own defect",
+                )
+
+    def test_an_entry_with_a_defect_is_not_also_reported_absent(self):
+        """Counting only the sound entries added "the guard never runs" under every other problem."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["type"] = "prompt"
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual([p for p in problems if "is not registered" in p], [], problems)
+        self.assertEqual([p for p in problems if "never runs" in p], [], problems)
+
+    def test_a_matcher_every_bash_call_reaches_is_not_a_defect(self):
+        """Requiring the exact string "Bash" reported three working registrations as broken."""
+        self.install()
+        for matcher in ("Bash", "Bash|Task", "*", ""):
+            with self.subTest(matcher=matcher):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["matcher"] = matcher
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], matcher)
+        data = self._settings()
+        del data["hooks"]["PreToolUse"][0]["matcher"]
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+        data = self._settings()
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        self.assertTrue(
+            any("never sees one" in p for p in install.registration_problems(self.home))
+        )
+
+    def test_a_registration_is_read_however_its_path_is_quoted(self):
+        """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""
+        self.install()
+        guard = self.home / "hooks" / install.DEPLOYED_HOOKS[0]
+        for spelling in (f"python3 {guard}", f"python3 '{guard}'", f'python3 "{guard}"'):
+            with self.subTest(command=spelling):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = spelling
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], spelling)
+
+    def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
+        """A budget larger than this installer writes is better than it, not worse."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] = install.SWEEP_TIMEOUT_SECONDS + 20
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
 
     def test_a_failed_self_test_leaves_the_live_hook_alone(self):
         """Copying onto the live path and testing after left a broken hook installed and registered."""

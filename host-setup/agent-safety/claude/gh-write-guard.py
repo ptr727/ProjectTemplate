@@ -1663,30 +1663,59 @@ _COMMAND_POSITION_WORDS = {
 # - the test-builtin form, `[ "$i" -lt 120 ]`.
 # - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
 # Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
+# The sources a redirect can name that never reach EOF, so a `read` on one never ends the loop.
+# `/dev/stdin` and `/dev/fd/0` re-open the pipe the loop is already reading.
+# `/dev/zero`, `/dev/random` and `/dev/urandom` deliver bytes forever.
+_ENDLESS_SOURCE = re.compile(r"^/dev/(?:stdin|fd/|zero|random|urandom|tty|ptmx)")
+
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
 
 
 def _redirects_stdin(after_done):
-    """True if `after_done` redirects descriptor 0, which is the one a `read` consumes.
+    """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
-    `2<errors` reaches here as `2`, `<`, `errors`, and accepting any `<` read it as a bound while
-    the `read` went on consuming the pipe on descriptor 0. Only an implicit redirect, or an
-    explicit `0<`, binds what the loop actually reads.
+    Three things have to hold, and reading only the first accepted loops that never end.
+    The redirect has to bind descriptor 0, since `2<errors` left the `read` on the pipe.
+    It has to name a source rather than duplicate a descriptor, since `<&0` rebinds the pipe to
+    itself.
+    And the source has to be a file rather than a stream, since `/dev/stdin` is the pipe again and
+    `/dev/zero` never reaches EOF.
     """
-    for i, tok in enumerate(after_done):
+    i = 0
+    while i < len(after_done):
+        tok = after_done[i]
         # Only this loop's own invocation, since a redirect on a later command binds nothing it reads.
         # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
         if _is_separator(tok):
             return False
-        if not (_is_redir_op(tok) and "<" in tok):
+        fd = ""
+        # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
+        # Reading the token before the `<` as a descriptor read the previous redirect's target as one.
+        if (
+            (tok.isdecimal() or tok.startswith("{"))
+            and i + 1 < len(after_done)
+            and _is_redir_op(after_done[i + 1])
+        ):
+            fd = tok
+            i += 1
+            tok = after_done[i]
+        if not _is_redir_op(tok):
+            i += 1
             continue
-        fd = after_done[i - 1] if i else ""
-        # Compared as a number, since bash resolves `00<` to descriptor 0 while a text compare did not.
+        target = after_done[i + 1] if i + 1 < len(after_done) else ""
+        i += 2
+        if "<" not in tok:
+            continue  # an output redirect leaves descriptor 0 where it was
         # A `{name}<` form names a variable rather than a literal and is never descriptor 0.
         if fd.startswith("{"):
             continue
-        if fd.isdigit() and int(fd) != 0:
+        # Compared as a number, since bash resolves `00<` to descriptor 0 while a text compare did not.
+        if fd and int(fd) != 0:
             continue  # a redirect on another descriptor leaves descriptor 0 where it was
+        if "&" in tok:
+            continue  # `<&0` duplicates a descriptor rather than opening a source
+        if _ENDLESS_SOURCE.match(target):
+            continue
         return True
     return False
 
@@ -1925,18 +1954,37 @@ def _backgrounded_after(toks, done_at):
         tok = toks[i]
         # A redirection carries its file descriptor as its own token, so `2>/dev/null` arrives as three.
         # Reading that leading digit as the command hid the `&` behind it.
-        if tok.isdigit() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
+        if tok.isdecimal() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
             i += 1
             continue
         if _is_redir_op(tok):
             i += 2  # the redirection and its target
             continue
+        # A group can close between the loop and the `&` that backgrounds it.
+        # `( <loop> ) &` and `{ <loop>; } &` leak exactly as `done &` does.
+        # Stopping at the closer read them as not backgrounded at all.
+        rest = "" if tok == "}" else tok.lstrip(");")
+        if not rest:
+            i += 1
+            continue
         # The tokenizer fuses a run of operator characters, so a background `&` arrives fused with whatever follows it.
         # Testing equality read `&` plus a newline as not backgrounded, and a Bash tool call is routinely multi-line.
         # `&&` is a separator rather than a background operator.
         # `&>` is a redirection the branch above already consumed.
-        return tok.startswith("&") and not tok.startswith("&&")
+        return rest.startswith("&") and not rest.startswith("&&")
     return False
+
+
+def _waits_after(toks, start):
+    """True if a `wait` builtin runs at or after `start`, which is what gives a `timeout` its reach back.
+
+    `timeout 600 bash -c '<loop> & wait'` holds the shell open until the loop ends, so the timeout
+    fires on a live process group and signals the loop with it. Without the `wait` the shell exits
+    at once and the timeout has nothing left to signal.
+    """
+    return any(
+        tok == "wait" and _runs_as_command(toks, i) for i, tok in enumerate(toks) if i >= start
+    )
 
 
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
@@ -1971,7 +2019,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 local = _timeout_bounds_wrapper(toks, i)
                 # The `&` follows this invocation's whole argument list, where `_collect_arglist` stopped.
                 # It does not follow the wrapper token itself.
-                backgrounded = _backgrounded_after(toks, after - 1)
+                backgrounded = _backgrounded_after(toks, after - 1) and not _waits_after(
+                    toks, after
+                )
                 bounded = (inherited_timeout and not backgrounded) or local
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
                 if inner is not None:
@@ -1988,7 +2038,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
             # The `&` is found past the loop's own redirections, since `done > log &` backgrounds it too.
-            backgrounded = _backgrounded_after(toks, done_at)
+            backgrounded = _backgrounded_after(toks, done_at) and not _waits_after(
+                toks, done_at + 1
+            )
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
             )
@@ -4004,6 +4056,61 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < f",
         "allow",
         "while a redirect from a file names a source that ends",
+    ),
+    (
+        "timeout 600 bash -c '(while true; do sleep 30; done) &'",
+        "deny",
+        "a group closing between the loop and the ampersand backgrounds it just the same",
+    ),
+    (
+        "timeout 600 bash -c '{ while true; do sleep 30; done; } &'",
+        "deny",
+        "and so does a brace group, whose closer arrives after the separator before it",
+    ),
+    (
+        "timeout 600 bash -c '(while true; do sleep 30; done)&'",
+        "deny",
+        "and the tokenizer fuses that closer with the ampersand, which lstrip reads past",
+    ),
+    (
+        "timeout 600 bash -c 'while true; do sleep 30; done & wait'",
+        "allow",
+        "while a wait holds the shell open, so the timeout fires on a live process group",
+    ),
+    (
+        "timeout 600 bash -c \"bash -c 'while true; do sleep 30; done' & wait\"",
+        "allow",
+        "which is as true of a backgrounded wrapper as of a backgrounded loop",
+    ),
+    (
+        "yes | while read l; do sleep 30; done < /dev/stdin",
+        "deny",
+        "a redirect from /dev/stdin re-opens the pipe the loop is already reading",
+    ),
+    (
+        "yes | while read l; do sleep 30; done <&0",
+        "deny",
+        "and duplicating a descriptor rebinds that same pipe rather than opening a source",
+    ),
+    (
+        "while read l; do sleep 30; done < /dev/zero",
+        "deny",
+        "and a stream that never reaches EOF ends no loop that reads it",
+    ),
+    (
+        "while read l; do sleep 30; done 2>&1 < in.txt",
+        "allow",
+        "while an earlier redirect's target is not this one's descriptor",
+    ),
+    (
+        "while read l; do sleep 30; done > 2 < in.txt",
+        "allow",
+        "which holds when that target is itself a digit",
+    ),
+    (
+        "while read l; do sleep 1; done \u00b2< f",
+        "allow",
+        "and a superscript digit reaches a verdict rather than raising, which failed every rule open",
     ),
     (
         "while true; do grep -i sleep f; done",
