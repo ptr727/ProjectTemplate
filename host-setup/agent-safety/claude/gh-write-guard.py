@@ -74,8 +74,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      value such as "0"/"false" reads as not granted, not as any-non-empty-string-is-truthy), the same
      channel shape as GH_WRITE_GUARD_ALLOW.
   7. a shell wait carrying no bound: a `while`/`until` compound whose body calls `sleep`, with neither a
-     `timeout <duration>` invocation ahead of it on the same command line (inherited into a `sh -c`/`bash
-     -c` payload) nor an arithmetic guard in its own condition. This is the harm behind a third incident,
+     `timeout <duration>` running the `sh -c`/`bash -c` wrapper that holds it nor an arithmetic guard in
+     its own condition. The placement matters: `timeout` takes a command and a loop keyword is not one. This is the harm behind a third incident,
      where seven such loops outlived the subagents that started them, the run that dispatched those
      subagents, and every worktree it had already retired, each forking a fresh `sleep` every half minute
      against a condition that could never become true, until they were killed by PID by hand. A shell
@@ -1757,15 +1757,32 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
-def _sleeps(toks):
+def _sleeps(toks, _depth=0):
     """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` payload it carries."""
+    if _depth > 4:
+        return False
     for k, tok in enumerate(toks):
         if _is_sleep_exe(tok) and _opens_command(toks, k):
             return True
-        if _is_shell_wrapper_exe(tok) and any(
-            _is_sleep_exe(t)
-            for inner in _embedded_wrapper_commands(" ".join(toks))
-            for t in _shell_tokens(inner)
+        if not _is_shell_wrapper_exe(tok):
+            continue
+        # The payload is read from its own token, since re-joining the token list dropped its quoting.
+        # `bash -c 'echo a; sleep 30'` rejoined to a command ending at the `;`, and the sleep was lost.
+        args, _ = _collect_arglist(toks, k + 1)
+        ci = next(
+            (
+                x
+                for x, a in enumerate(args)
+                if a.startswith("-") and not a.startswith("--") and a.endswith("c")
+            ),
+            None,
+        )
+        # Recursed rather than scanned, so the payload gets the same command-position test: a
+        # `pkill sleep` inside one names a sleep as an argument and does not run one.
+        if (
+            ci is not None
+            and ci + 1 < len(args)
+            and _sleeps(_shell_tokens(args[ci + 1]), _depth + 1)
         ):
             return True
     return False
@@ -1846,6 +1863,11 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
 _HEREDOC_TAG = re.compile(r"[A-Za-z_][A-Za-z0-9_.\-]*$")
 
 
+def _ends_pipeline(tok):
+    """True if the token ends a pipeline. A `|` continues one, every other separator ends it."""
+    return _is_separator(tok) and tok != "|"
+
+
 def _heredoc_opener(line):
     """(tag, is_dash_form, feeds_a_shell) for a heredoc `line` opens, or None.
 
@@ -1864,17 +1886,25 @@ def _heredoc_opener(line):
             continue
         nxt = toks[k + 1]
         dash = nxt.startswith("-")
-        tag = nxt[1:] if dash else nxt
+        # `<<-EOF` carries the dash on the tag token, `<<- EOF` on its own, and both are bash.
+        if nxt == "-" and k + 2 < len(toks):
+            tag = toks[k + 2]
+        else:
+            tag = nxt[1:] if dash else nxt
         if not _HEREDOC_TAG.fullmatch(tag):
             continue
-        # Whether a shell reads this body is the redirection's own command, not the line mentioning one.
-        # `bash -c '...' && cat > doc.md <<EOF` writes a document.
+        # Whether a shell reads this body is a question about the heredoc's whole pipeline.
+        # `cat <<EOF | bash` really does hand the body to bash, and so does any prefix before one.
+        # A non-pipe separator ends it, so `bash -c '...' && cat > doc.md <<EOF` writes a document.
+        # Over-approximating within the pipeline is the safe direction.
+        # Keeping a body gets it scanned, where dropping one hides what it holds from every rule below.
         start = k
-        while start > 0 and not _is_separator(toks[start - 1]):
+        while start > 0 and not _ends_pipeline(toks[start - 1]):
             start -= 1
-        while start < k and _is_command_prefix(toks[start]):
-            start += 1
-        return tag, dash, start < k and _is_shell_wrapper_exe(toks[start])
+        end = k
+        while end < len(toks) and not _ends_pipeline(toks[end]):
+            end += 1
+        return tag, dash, any(_is_shell_wrapper_exe(t) for t in toks[start:end])
     return None
 
 
@@ -3628,6 +3658,31 @@ _WAIT_CASES = [
         "while true; do bash -c 'sleep 30'; done",
         "deny",
         "and a sleep the body hands to a wrapper is still the body sleeping",
+    ),
+    (
+        "while true; do bash -c 'echo a; sleep 30'; done",
+        "deny",
+        "wherever in that payload it sits, which re-joining the tokens once lost",
+    ),
+    (
+        "while true; do bash -c 'pkill sleep'; done",
+        "allow",
+        "while a sleep named as an argument to something else runs none",
+    ),
+    (
+        "cat <<'EOF' | bash\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "a heredoc piped into a shell is a script that shell runs, whatever owns the redirection",
+    ),
+    (
+        "nice -n 10 bash <<'EOF'\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "and a prefix before that shell does not hide it",
+    ),
+    (
+        "cat <<- EOF\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "allow",
+        "the dash form spells its tag as its own token when spaced, and is still a heredoc",
     ),
     (
         "timeout 600 until [ -f x ]; do sleep 30; done",
