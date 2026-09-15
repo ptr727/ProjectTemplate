@@ -436,7 +436,9 @@ class TestRegistration(StampCase):
         self.install()
         live = self.home / "hooks" / install.SWEEP_NAME
         before = live.read_bytes()
-        broken = pathlib.Path(tempfile.mkdtemp()) / "claude"
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        broken = root / "claude"
         shutil.copytree(HERE, broken, ignore=shutil.ignore_patterns("__pycache__"))
         sweep = broken / install.SWEEP_NAME
         sweep.write_text(

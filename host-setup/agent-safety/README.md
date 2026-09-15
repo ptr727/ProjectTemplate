@@ -200,14 +200,17 @@ already happened by the time any tool call is judged.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
-   `read` that draws on an input redirect, which is bounded by that input, so throttling between
-   iterations with a `sleep` is ordinary work rather than a leak. A redirect names a source that
+   `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
+   which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
+   rather than a leak. The descriptor matters, since a `read` consumes descriptor 0 and a redirect
+   on any other leaves it reading whatever it read before. A redirect names a source that
    ends, where a pipe's producer is unknown from the command text. A loop fed by
    `yes | while read line; do sleep 30; done` never exhausts, so a piped read is denied, and that
    false deny is the safe direction. A process substitution is that same unknown producer behind a
    redirect, so `done < <(yes)` is no bound either. And a loop the command backgrounds is not bounded by a `timeout`
    around the shell that started it, measurably: the shell forks the loop and exits, `timeout`'s own
-   child is gone, and nothing signals what it left.
+   child is gone, and nothing signals what it left. The same holds for an intermediate wrapper the
+   command backgrounds, since what outlives the timeout is whatever it forked away from.
 
    Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
    here so a reader does not have to find them. A body kept because a shell reads it has its own

@@ -72,13 +72,20 @@ MISSING = object()
 
 
 def hook_command(launcher, path):
-    """The `command` string a registered hook carries, spelled once for writer and reader alike.
-
-    The registration check matched any command merely containing the sweep's name, so an unrelated
-    `echo stray-process-sweep` counted as registered and `--report` called such a machine current
-    with no sweep installed at all.
-    """
+    """The `command` string a registered hook carries, spelled once for writer and reader alike."""
     return f'"{launcher}" "{path}"'
+
+
+def runs_hook(command, path):
+    """Whether `command` runs the hook deployed at `path`, rather than merely naming it.
+
+    The path is compared and the launcher is not. Matching the name alone let an unrelated
+    `echo stray-process-sweep` count as a registration, while matching the whole command string
+    reported a working machine stale, since `hook_launcher()` resolves at check time and a machine
+    installed under a different PATH carries the other spelling. The path is what the installer
+    writes and never drifts, so it is the half worth comparing.
+    """
+    return f'"{path}"' in str(command)
 
 
 def owns(entry, prefix):
@@ -390,12 +397,26 @@ def registration_problems(claude_home):
 
     groups = event_groups("PreToolUse")
     registered = 0
+    guard_path = claude_home / "hooks" / DEPLOYED_HOOKS[0]
     for group in groups or []:
         if not isinstance(group, dict):
             continue
         for hook in group.get("hooks") or []:
-            if isinstance(hook, dict) and "gh-write-guard" in str(hook.get("command", "")):
-                registered += 1
+            if not isinstance(hook, dict) or "gh-write-guard" not in str(hook.get("command", "")):
+                continue
+            if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
+                out.append(
+                    "a PreToolUse entry names the guard but does not run the deployed one "
+                    f"({hook.get('type')!r} running {hook.get('command')!r})"
+                )
+                continue
+            if group.get("matcher") != "Bash":
+                out.append(
+                    f"the PreToolUse guard is registered under matcher {group.get('matcher')!r} "
+                    "rather than Bash, so it never sees a Bash call"
+                )
+                continue
+            registered += 1
     if groups is None:
         pass  # the shape error is already reported, and a count from it would be meaningless
     elif registered == 0:
@@ -411,15 +432,14 @@ def registration_problems(claude_home):
     for group in ends or []:
         if not isinstance(group, dict):
             continue
-        expected = hook_command(hook_launcher(), claude_home / "hooks" / SWEEP_NAME)
+        sweep_path = claude_home / "hooks" / SWEEP_NAME
         for hook in group.get("hooks") or []:
             if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
                 continue
-            if hook.get("command") != expected or hook.get("type") != "command":
+            if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
                 out.append(
-                    "a SessionEnd entry names the sweep but is not the registration this installer "
-                    f"writes ({hook.get('type')!r} running {hook.get('command')!r}), so it may run "
-                    "nothing"
+                    "a SessionEnd entry names the sweep but does not run the deployed one "
+                    f"({hook.get('type')!r} running {hook.get('command')!r})"
                 )
                 continue
             if hook.get("timeout") != SWEEP_TIMEOUT_SECONDS:
@@ -619,10 +639,22 @@ def main():
             )
             return 1
         print(f"  {src_name} self-test: PASS")
-    for src_name, tmp in staged:
+    for done_count, (src_name, tmp) in enumerate(staged):
         dst = hooks_dir / src_name
         # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
-        os.replace(tmp, dst)
+        # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
+        # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
+        try:
+            os.replace(tmp, dst)
+        except OSError as e:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(
+                f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
+                "the rest are unchanged, nothing was registered, and the staged copies are removed. "
+                "Re-run the installer.\n"
+            )
+            return 1
         print(f"  hook -> {dst}")
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.

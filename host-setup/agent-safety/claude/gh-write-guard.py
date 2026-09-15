@@ -1674,10 +1674,18 @@ def _redirects_stdin(after_done):
     explicit `0<`, binds what the loop actually reads.
     """
     for i, tok in enumerate(after_done):
+        # Only this loop's own invocation, since a redirect on a later command binds nothing it reads.
+        # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
+        if _is_separator(tok):
+            return False
         if not (_is_redir_op(tok) and "<" in tok):
             continue
         fd = after_done[i - 1] if i else ""
-        if fd.isdigit() and fd != "0":
+        # Compared as a number, since bash resolves `00<` to descriptor 0 while a text compare did not.
+        # A `{name}<` form names a variable rather than a literal and is never descriptor 0.
+        if fd.startswith("{"):
+            continue
+        if fd.isdigit() and int(fd) != 0:
             continue  # a redirect on another descriptor leaves descriptor 0 where it was
         return True
     return False
@@ -1923,7 +1931,11 @@ def _backgrounded_after(toks, done_at):
         if _is_redir_op(tok):
             i += 2  # the redirection and its target
             continue
-        return tok == "&"
+        # The tokenizer fuses a run of operator characters, so a background `&` arrives fused with whatever follows it.
+        # Testing equality read `&` plus a newline as not backgrounded, and a Bash tool call is routinely multi-line.
+        # `&&` is a separator rather than a background operator.
+        # `&>` is a redirection the branch above already consumed.
+        return tok.startswith("&") and not tok.startswith("&&")
     return False
 
 
@@ -3967,6 +3979,26 @@ _WAIT_CASES = [
         "timeout 600 bash -c \"bash -c 'while true; do sleep 30; done' &\"",
         "deny",
         "an inherited timeout does not survive a wrapper the payload backgrounds",
+    ),
+    (
+        "timeout 600 bash -c \"bash -c 'while true; do sleep 30; done' &\necho later\"",
+        "deny",
+        "and the tokenizer fuses that ampersand with the newline after it, which equality missed",
+    ),
+    (
+        "yes | while read l; do sleep 30; done; cat < f",
+        "deny",
+        "a redirect on a later command binds nothing this loop reads",
+    ),
+    (
+        "yes | while read l; do sleep 30; done {fd}< f",
+        "deny",
+        "nor does a descriptor named by a variable, which is never descriptor 0",
+    ),
+    (
+        "yes | while read l; do sleep 30; done 00< in.txt",
+        "allow",
+        "while a padded zero is descriptor 0, which bash resolves as a number",
     ),
     (
         "while read l; do sleep 30; done < f",
