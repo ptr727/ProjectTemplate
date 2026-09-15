@@ -57,6 +57,8 @@ def _read_process_table(runner=None):
             ["ps", "-eo", _PS_FORMAT],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
         )
