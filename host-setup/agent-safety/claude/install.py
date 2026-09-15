@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install the agent write-safety kit for the current user account. Cross-platform, idempotent.
+"""Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, registers it in the user settings.json, merges the permission rules this
-kit owns into the same file, adds the safety rules to the user CLAUDE.md (marker-delimited so re-runs
-update in place), and self-tests the hook before registering it.
+Deploys the PreToolUse hook and the SessionEnd stray-process sweep, registers both in the user
+settings.json, merges the permission rules this kit owns into the same file, adds the safety rules to
+the user CLAUDE.md (marker-delimited so re-runs update in place), and self-tests each hook before
+registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -31,6 +32,23 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
+# Each hook's file name, and the substring identifying its registration in settings.json.
+# Named once, since a registration written under one spelling and searched for under another is reported absent forever.
+# The guard was spelled by hand on the search side and by position on the deploy side, which is that same drift one rename away.
+GUARD_NAME = "gh-write-guard.py"
+GUARD_STEM = "gh-write-guard"
+SWEEP_NAME = "stray-process-sweep.py"
+SWEEP_STEM = "stray-process-sweep"
+
+# The hook files this kit copies into ~/.claude/hooks, in deploy order.
+# Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
+# That silence reads as a pass.
+DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME)
+
+# A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
+# The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
+SWEEP_TIMEOUT_SECONDS = 10
+
 # The stamp's own format version, separate from the content it describes.
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
 STAMP_VERSION = 1
@@ -49,11 +67,64 @@ BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = ("gh-write-guard.py",) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+PAYLOAD_FILES = DEPLOYED_HOOKS + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
 MISSING = object()
+
+
+def hook_command(launcher, path):
+    """The `command` string a registered hook carries, spelled once for writer and reader alike."""
+    return f'"{launcher}" "{path}"'
+
+
+def runs_hook(command, path):
+    """Whether `command` names the hook deployed at `path`, as its own argument.
+
+    The path is compared and the launcher is not. Matching the name alone let an unrelated
+    `echo stray-process-sweep` count as a registration, while matching the whole command string
+    reported a working machine stale, since `hook_launcher()` resolves at check time and a machine
+    installed under a different PATH carries the other spelling. The path is what the installer
+    writes and never drifts, so it is the half worth comparing.
+
+    The quoting around it is not compared either. This installer writes the path in double quotes,
+    and a registration written by hand or through the `/hooks` UI runs the same file bare or in
+    single quotes, so requiring one spelling reported those as naming a hook they do not run.
+
+    Whether the command then runs it is not decidable from the string: `echo "<path>"` names the
+    deployed hook and executes nothing. What this rules out is the decoy that names the hook and
+    not its deployed path, which is the shape a stale registration actually takes.
+    """
+    text = str(command)
+    spellings = {str(path)}
+    home = str(pathlib.Path.home())
+    if str(path).startswith(home):
+        # `~` and `$HOME` are how a person writes this path, and both resolve to the deployed file.
+        spellings.add("~" + str(path)[len(home) :])
+        spellings.add("$HOME" + str(path)[len(home) :])
+    # Forward slashes are accepted on Windows and are the spelling a JSON file usually carries.
+    spellings.update(sp.replace("\\", "/") for sp in set(spellings))
+    return any(
+        re.search(rf"(?:^|[\s\"'(]){re.escape(sp)}(?=$|[\s\"')|&;])", text) for sp in spellings
+    )
+
+
+def matcher_sees_bash(matcher):
+    """Whether a PreToolUse matcher group receives a Bash call.
+
+    An absent or empty matcher runs on every tool and `*` is the all-tools spelling, so neither is
+    a defect. A matcher is otherwise a regular expression, which makes `Bash|Task` as good as
+    `Bash`. Requiring the exact string reported all three of those working shapes as broken.
+    """
+    if matcher is None or matcher in ("", "*"):
+        return True
+    if not isinstance(matcher, str):
+        return False
+    try:
+        return re.fullmatch(matcher, "Bash") is not None
+    except re.error:
+        return False
 
 
 def owns(entry, prefix):
@@ -183,7 +254,7 @@ def payload_digest():
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
-    `installed_digest` reads, so the two are directly comparable: the hook, then each block.
+    `installed_digest` reads, so the two are directly comparable: the guard, the sweep, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
@@ -245,12 +316,15 @@ def installed_digest(claude_home):
     Line endings are normalized first: CLAUDE.md keeps whatever endings it had, and a machine that
     holds identical text with CRLF is current rather than drifted.
     """
-    hook = claude_home / "hooks" / "gh-write-guard.py"
+    # Read from `DEPLOYED_HOOKS` rather than by name, since naming them here is the drift that constant closes.
+    # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
+    deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
-    if not hook.is_file() or not claude_md.is_file():
+    if not all(f.is_file() for f in deployed) or not claude_md.is_file():
         return None
     h = hashlib.sha256()
-    h.update(normalized(hook.read_bytes()))
+    for f in deployed:
+        h.update(normalized(f.read_bytes()))
     text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
     for marker in BLOCK_MARKERS:
         found = re.search(
@@ -329,17 +403,71 @@ def registration_problems(claude_home):
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
     out = []
-    groups = (
-        data.get("hooks", {}).get("PreToolUse") if isinstance(data.get("hooks"), dict) else None
-    )
+
+    def report(note):
+        """Append `note` once, since one defect a group carries is not two defects when it holds two entries."""
+        if note not in out:
+            out.append(note)
+
+    def event_groups(event):
+        """The matcher groups under `event`, or None when the settings shape cannot be read.
+
+        A wrong shape is reported as itself rather than counted as zero. Iterating a dict yields
+        its keys and a string yields its characters, so the loops below would find no registration
+        and report the hook as absent, which sends a reader to the wrong fix.
+        """
+        hooks = data.get("hooks")
+        if hooks is None:
+            return []
+        if not isinstance(hooks, dict):
+            # Reported once rather than per event, since both events read the same wrong key.
+            report(
+                f"settings.json has `hooks` as {type(hooks).__name__} where an object is required, "
+                "so no registration can be read"
+            )
+            return None
+        groups = hooks.get(event)
+        if groups is None:
+            return []
+        if not isinstance(groups, list):
+            out.append(
+                f"settings.json has `hooks.{event}` as {type(groups).__name__} where a list is "
+                f"required, so the {event} registration cannot be read"
+            )
+            return None
+        return groups
+
+    groups = event_groups("PreToolUse")
+    # Counted apart from the registrations, since an entry with a problem is still an entry.
+    # Counting only the sound ones added "the guard never runs" under every problem reported here.
+    # That line is false, and it sends a reader to the wrong fix.
+    named = 0
     registered = 0
+    guard_path = claude_home / "hooks" / GUARD_NAME
     for group in groups or []:
         if not isinstance(group, dict):
             continue
         for hook in group.get("hooks") or []:
-            if isinstance(hook, dict) and "gh-write-guard" in str(hook.get("command", "")):
-                registered += 1
-    if registered == 0:
+            if not isinstance(hook, dict) or GUARD_STEM not in str(hook.get("command", "")):
+                continue
+            named += 1
+            if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
+                out.append(
+                    "a PreToolUse entry names the guard but does not run the deployed one "
+                    f"({hook.get('type')!r} running {hook.get('command')!r})"
+                )
+                continue
+            if not matcher_sees_bash(group.get("matcher")):
+                report(
+                    f"a PreToolUse group registers the guard under matcher "
+                    f"{group.get('matcher')!r}, which no Bash call matches, so that group never "
+                    "fires"
+                )
+                continue
+            registered += 1
+    if groups is None:
+        pass  # the shape error is already reported, and a count from it would be meaningless
+    elif named == 0:
         out.append(
             "the PreToolUse hook is not registered in settings.json, so the guard never runs"
         )
@@ -347,6 +475,57 @@ def registration_problems(claude_home):
         out.append(
             f"the PreToolUse hook is registered {registered} times, so it runs more than once"
         )
+    ends = event_groups("SessionEnd")
+    sweeps_named = 0
+    swept = 0
+    for group in ends or []:
+        if not isinstance(group, dict):
+            continue
+        sweep_path = claude_home / "hooks" / SWEEP_NAME
+        for hook in group.get("hooks") or []:
+            if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
+                continue
+            sweeps_named += 1
+            if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
+                out.append(
+                    "a SessionEnd entry names the sweep but does not run the deployed one "
+                    f"({hook.get('type')!r} running {hook.get('command')!r})"
+                )
+                continue
+            # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
+            # The event's own default is 1.5s, which is what the sweep needs more than.
+            timeout = hook.get("timeout")
+            too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            if not too_short:
+                too_short = timeout < SWEEP_TIMEOUT_SECONDS
+            if too_short:
+                carries = (
+                    "carries no timeout"
+                    if "timeout" not in hook
+                    else f"carries timeout {timeout!r}"
+                )
+                out.append(
+                    f"the SessionEnd sweep {carries} where this installer writes "
+                    f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
+                )
+                continue
+            swept += 1
+            # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
+            # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
+            if "matcher" in group:
+                report(
+                    f"the SessionEnd sweep is registered under a matcher "
+                    f"({group['matcher']!r}), so it runs on that exit reason alone"
+                )
+    if ends is None:
+        pass  # likewise reported as a shape error above
+    elif sweeps_named == 0:
+        out.append(
+            "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
+            "never reported"
+        )
+    elif swept > 1:
+        out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
     allow = (
         data.get("permissions", {}).get("allow")
         if isinstance(data.get("permissions"), dict)
@@ -457,7 +636,7 @@ def report(claude_home):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Install the agent write-safety kit, or report whether this machine is current."
+        description="Install the agent host-safety kit, or report whether this machine is current."
     )
     parser.add_argument(
         "--report",
@@ -482,7 +661,8 @@ def main():
         else pathlib.Path.home() / ".claude"
     )
     hooks_dir = claude_home / "hooks"
-    hook_dst = hooks_dir / "gh-write-guard.py"
+    hook_dst = hooks_dir / GUARD_NAME
+    sweep_dst = hooks_dir / SWEEP_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
 
@@ -490,34 +670,66 @@ def main():
     if args.report:
         return report(claude_home)
 
-    print(f"Installing agent write-safety kit into: {claude_home}")
+    print(f"Installing agent host-safety kit into: {claude_home}")
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Deploy the hook, then self-test it before wiring anything up.
-    shutil.copyfile(HERE / "gh-write-guard.py", hook_dst)
-    try:
-        os.chmod(hook_dst, 0o755)
-    except OSError:
-        pass
-    print(f"  hook -> {hook_dst}")
-    r = subprocess.run(
-        [sys.executable, str(hook_dst), "--selftest"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if r.returncode != 0:
-        sys.stderr.write(
-            "Hook self-test FAILED; aborting before registration.\n" + r.stdout + r.stderr
+    # 1. Stage every hook beside its live path, self-test each staged copy, and only then replace.
+    # Copying onto the live path first and testing afterwards left a failed self-test's broken copy installed.
+    # The existing registration still pointed at it, so an install that refused to register disabled the guard.
+    # Named per process, since two installs sharing one staged path clobber each other's copy.
+    # A kill between staging and the replace still leaves one behind, which nothing here can prevent.
+    staged = []
+    for src_name in DEPLOYED_HOOKS:
+        tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
+        staged.append((src_name, tmp))
+        try:
+            shutil.copyfile(HERE / src_name, tmp)
+        except OSError as e:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(f"staging {src_name} failed ({e}); nothing was replaced.\n")
+            return 1
+        try:
+            os.chmod(tmp, 0o755)
+        except OSError:
+            pass
+        r = subprocess.run(
+            [sys.executable, str(tmp), "--selftest"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
-        return 1
-    print("  hook self-test: PASS")
+        if r.returncode != 0:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(
+                f"{src_name} self-test FAILED; nothing was replaced.\n" + r.stdout + r.stderr
+            )
+            return 1
+        print(f"  {src_name} self-test: PASS")
+    for done_count, (src_name, tmp) in enumerate(staged):
+        dst = hooks_dir / src_name
+        # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
+        # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
+        # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
+        try:
+            os.replace(tmp, dst)
+        except OSError as e:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(
+                f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
+                "the rest are unchanged, nothing was registered, and the staged copies are removed. "
+                "Re-run the installer.\n"
+            )
+            return 1
+        print(f"  hook -> {dst}")
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
     launcher = hook_launcher()
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
-    hook_cmd = f'"{launcher}" "{hook_dst}"'
+    hook_cmd = hook_command(launcher, hook_dst)
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
     # Two reads can also disagree, since another process may write between them.
     data = {}
@@ -554,6 +766,7 @@ def main():
     for path, want in (
         ("hooks", dict),
         ("hooks/PreToolUse", list),
+        ("hooks/SessionEnd", list),
         ("permissions", dict),
         ("permissions/allow", list),
     ):
@@ -566,18 +779,20 @@ def main():
 
     # A list of the right type can still hold the wrong elements.
     # The registration below reads each group as an object, and each group's `hooks` as a list it appends to.
-    groups = at(data, "hooks/PreToolUse")
-    if groups is not MISSING:
+    for event in ("PreToolUse", "SessionEnd"):
+        groups = at(data, f"hooks/{event}")
+        if groups is MISSING:
+            continue
         for i, g in enumerate(groups):
             if not isinstance(g, dict):
-                reject(f"hooks.PreToolUse[{i}]", g, dict)
+                reject(f"hooks.{event}[{i}]", g, dict)
                 return 1
             if "hooks" in g and not isinstance(g["hooks"], list):
-                reject(f"hooks.PreToolUse[{i}].hooks", g["hooks"], list)
+                reject(f"hooks.{event}[{i}].hooks", g["hooks"], list)
                 return 1
             for j, h in enumerate(g.get("hooks") or []):
                 if not isinstance(h, dict):
-                    reject(f"hooks.PreToolUse[{i}].hooks[{j}]", h, dict)
+                    reject(f"hooks.{event}[{i}].hooks[{j}]", h, dict)
                     return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
@@ -587,15 +802,33 @@ def main():
     for g in pre:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if "gh-write-guard" not in str(h.get("command", ""))
-            ]
+            hooks_list[:] = [h for h in hooks_list if GUARD_STEM not in str(h.get("command", ""))]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
         pre.append(group)
     group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
     done = ["PreToolUse/Bash hook registered"]
+
+    # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
+    # The group carries no matcher, so it fires on every exit reason rather than on one.
+    ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
+    for g in ends:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
+    end_group = next((g for g in ends if "matcher" not in g), None)
+    if end_group is None:
+        end_group = {"hooks": []}
+        ends.append(end_group)
+    end_group.setdefault("hooks", []).append(
+        {
+            "type": "command",
+            "command": hook_command(launcher, sweep_dst),
+            "timeout": SWEEP_TIMEOUT_SECONDS,
+        }
+    )
+    done.append("SessionEnd sweep registered")
 
     # 3. Permission rules, merged under the prefixes this installer owns.
     # The strip-then-register shape is the hook registration's above, applied to a flat list.

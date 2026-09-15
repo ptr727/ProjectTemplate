@@ -843,19 +843,19 @@
     },
     {
       "unit": ".markdownlint-cli2.jsonc",
-      "digest": "sha256:826753ef2717b77ccc1fef5cd20ee7f2437a8b5c9218cd25f9a66fbfa8390509",
+      "digest": "sha256:7a7cd77c93dbddcc5ba2c44d3c5d8b00c2f430b9c7bc42888d755bb57e4e3a88",
       "reviewer": "agent-skill",
       "findings": 3,
-      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
-      "stamp": "2026-09-09T21:02:31Z"
+      "hubCommit": "e1559c98c5fbcf9ae0dd3b3344247d012e7a4e44",
+      "stamp": "2026-09-15T14:32:02Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
-      "digest": "sha256:41872877c85393e78f84891521cb31d1249d797494ff3cdb7f8001323584e112",
+      "digest": "sha256:91faa2b36186133e3e4befac76b1b06d6899e5ebb74cc7442560e8e4a625086a",
       "reviewer": "agent-skill",
-      "findings": 0,
-      "hubCommit": "3d13223f2e28ff50f6954e7db39521a8840dbeb6",
-      "stamp": "2026-09-14T03:16:33Z"
+      "findings": 4,
+      "hubCommit": "ec9f4fede85dea1be9e42de466e6e5e0871e126e",
+      "stamp": "2026-09-15T05:13:54Z"
     },
     {
       "unit": "AGENTS.md > Where the Rules Live",

@@ -350,6 +350,258 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_the_sweep_is_deployed_and_registered_once(self):
+        """A second hook is a second chance to install the bytes and wire up nothing."""
+        self.install()
+        self.assertTrue((self.home / "hooks" / install.SWEEP_NAME).is_file())
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+        # A SessionEnd hook's own budget is 1.5s, and only a declared per-hook timeout raises it.
+        self.assertEqual(entries[0]["timeout"], install.SWEEP_TIMEOUT_SECONDS)
+
+    def test_the_sweep_group_carries_no_matcher(self):
+        """A matcher would narrow SessionEnd to one exit reason, and a quit is not the only one."""
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        owning = [
+            g
+            for g in groups
+            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+        ]
+        self.assertEqual(len(owning), 1)
+        self.assertNotIn("matcher", owning[0])
+
+    def test_reinstalling_does_not_duplicate_the_sweep(self):
+        self.install()
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+
+    def test_a_wrong_hooks_shape_is_reported_as_itself(self):
+        """Iterating a dict yields keys and a string yields characters, so a wrong shape read as
+        zero registrations and sent a reader to the wrong fix."""
+        self.install()
+        for shape, expected in (
+            ({"SessionEnd": {"a": 1}}, "`hooks.SessionEnd` as dict"),
+            ({"PreToolUse": "nope"}, "`hooks.PreToolUse` as str"),
+            ("nope", "`hooks` as str"),
+        ):
+            data = self._settings()
+            data["hooks"] = shape
+            self._write(data)
+            problems = install.registration_problems(self.home)
+            self.assertTrue(
+                any(expected in p for p in problems),
+                f"{shape!r} reported {problems!r} rather than naming the shape",
+            )
+
+    def test_a_wrong_hooks_type_is_reported_once_rather_than_per_event(self):
+        self.install()
+        data = self._settings()
+        data["hooks"] = "nope"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
+
+    def test_a_decoy_command_naming_the_sweep_is_not_a_registration(self):
+        """Matching any command containing the sweep's name let a decoy report a machine current.
+
+        Each shape asserts the problem it should raise rather than that it raised one, since a
+        second and false "not registered" line satisfied a bare truthiness check by itself.
+        """
+        self.install()
+        good = self._settings()["hooks"]["SessionEnd"][0]["hooks"][0]
+        for label, entry, expected in (
+            (
+                "decoy",
+                {"type": "command", "command": "echo stray-process-sweep"},
+                "does not run the deployed one",
+            ),
+            ("timeout", dict(good, timeout=1), "carries timeout 1"),
+            ("type", dict(good, type="prompt"), "does not run the deployed one"),
+        ):
+            with self.subTest(shape=label):
+                data = self._settings()
+                data["hooks"]["SessionEnd"] = [{"hooks": [entry]}]
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                self.assertTrue(
+                    any(expected in p for p in problems),
+                    f"{label} shape reported {problems!r} rather than naming its own defect",
+                )
+
+    def test_an_entry_with_a_defect_is_not_also_reported_absent(self):
+        """Counting only the sound entries added "the guard never runs" under every other problem."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["type"] = "prompt"
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual([p for p in problems if "is not registered" in p], [], problems)
+        self.assertEqual([p for p in problems if "never runs" in p], [], problems)
+
+    def test_a_matcher_every_bash_call_reaches_is_not_a_defect(self):
+        """Requiring the exact string "Bash" reported three working registrations as broken."""
+        self.install()
+        for matcher in ("Bash", "Bash|Task", "*", ""):
+            with self.subTest(matcher=matcher):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["matcher"] = matcher
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], matcher)
+        data = self._settings()
+        del data["hooks"]["PreToolUse"][0]["matcher"]
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+        data = self._settings()
+        data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
+        self._write(data)
+        self.assertTrue(
+            any("so that group never fires" in p for p in install.registration_problems(self.home))
+        )
+
+    def test_a_registration_is_read_however_its_path_is_quoted(self):
+        """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""
+        self.install()
+        guard = self.home / "hooks" / install.DEPLOYED_HOOKS[0]
+        for spelling in (f"python3 {guard}", f"python3 '{guard}'", f'python3 "{guard}"'):
+            with self.subTest(command=spelling):
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = spelling
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [], spelling)
+
+    def test_an_absent_sweep_timeout_is_reported_as_absent(self):
+        """The entry carries no timeout, so a message naming a value of None describes nothing."""
+        self.install()
+        data = self._settings()
+        del data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"]
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertTrue(any("carries no timeout" in p for p in problems), problems)
+        self.assertEqual([p for p in problems if "None" in p], [], problems)
+
+    def test_one_group_defect_is_reported_once_however_many_entries(self):
+        """A matcher belongs to the group, so two entries under it are still one defect."""
+        self.install()
+        for event, key in (("PreToolUse", "Edit"), ("SessionEnd", "clear")):
+            with self.subTest(event=event):
+                data = self._settings()
+                group = data["hooks"][event][0]
+                group["matcher"] = key
+                group["hooks"] = group["hooks"] * 2
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                matcher_lines = [p for p in problems if "matcher" in p and event in p]
+                self.assertEqual(len(matcher_lines), 1, problems)
+
+    def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
+        """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
+        self.install()
+        self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
+        live = self.home / "hooks" / install.GUARD_NAME
+        self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
+        self.assertIn(
+            install.GUARD_STEM, self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        )
+
+    def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
+        """A budget larger than this installer writes is better than it, not worse."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] = install.SWEEP_TIMEOUT_SECONDS + 20
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+
+    def test_a_failed_self_test_leaves_the_live_hook_alone(self):
+        """Copying onto the live path and testing after left a broken hook installed and registered."""
+        self.install()
+        live = self.home / "hooks" / install.SWEEP_NAME
+        before = live.read_bytes()
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        broken = root / "claude"
+        shutil.copytree(HERE, broken, ignore=shutil.ignore_patterns("__pycache__"))
+        sweep = broken / install.SWEEP_NAME
+        sweep.write_text(
+            sweep.read_text(encoding="utf-8").replace(
+                'print("SELFTEST PASS" if ok else "SELFTEST FAIL")',
+                'ok = False; print("SELFTEST FAIL")',
+            ),
+            encoding="utf-8",
+        )
+        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        r = subprocess.run(
+            [sys.executable, str(broken / "install.py")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(live.read_bytes(), before, "the live hook was replaced by a failing one")
+        self.assertEqual(
+            sorted(f.name for f in (self.home / "hooks").iterdir()),
+            sorted(install.DEPLOYED_HOOKS),
+            "a staged file was left behind",
+        )
+
+    def test_a_sweep_under_a_matcher_reports_stale(self):
+        """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
+        self.install()
+        data = self._settings()
+        for group in data["hooks"]["SessionEnd"]:
+            if any(install.SWEEP_STEM in h.get("command", "") for h in group.get("hooks", [])):
+                group["matcher"] = "clear"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("under a matcher", r.stdout)
+
+    def test_an_unregistered_sweep_reports_stale_rather_than_current(self):
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = []
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("never reported", r.stdout)
+
+    def test_a_preexisting_matcher_group_is_left_alone(self):
+        """Somebody else's SessionEnd hook keeps its own filter rather than gaining this one."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = [
+            {"matcher": "clear", "hooks": [{"type": "command", "command": "somebody-elses.sh"}]}
+        ]
+        self._write(data)
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        theirs = next(g for g in groups if g.get("matcher") == "clear")
+        self.assertEqual([h["command"] for h in theirs["hooks"]], ["somebody-elses.sh"])
+        self.assertTrue(
+            any(
+                install.SWEEP_STEM in h.get("command", "")
+                for g in groups
+                if "matcher" not in g
+                for h in g.get("hooks", [])
+            )
+        )
+
     def test_reinstalling_clears_an_unregistered_hook(self):
         self.install()
         data = self._settings()
@@ -523,35 +775,56 @@ class TestStampContent(StampCase):
         finally:
             target.write_bytes(original)
 
-    def test_every_deployed_file_is_in_the_digest(self):
-        """The inverse: the kit copies gh-write-guard.py and every snippet, and each must be covered.
+    def test_the_digest_reads_every_deployed_hook(self):
+        """Naming the hooks in `installed_digest` was the drift `DEPLOYED_HOOKS` exists to close.
 
-        The source scan alone was a false positive. It matched only literal `HERE / "..."` reads,
-        which is the hook and nothing else, while the snippet names came from a list inside `main`.
-        A new snippet passed it while being absent from the digest, so the two sources of truth are
-        both checked now, and the derivation below is what actually makes the gap impossible.
+        Parametrised over the constant rather than over two literals, so a hook added to the deploy
+        list is covered here without anyone remembering to add it.
         """
-        source = INSTALL.read_text(encoding="utf-8")
-        named = {name for name in re.findall(r'HERE / "([^"]+\.(?:py|md))"', source)}
-        named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
-        named.discard("install.py")
-        # The hook is the only literal read; every other entry arrives from the block list.
-        self.assertGreater(
-            len(named), 1, "the scan matched only one file, so it is not covering the blocks"
-        )
-        for name in sorted(named):
+        for name in install.DEPLOYED_HOOKS:
+            with self.subTest(hook=name):
+                self.install()
+                self.assertIsNotNone(install.installed_digest(self.home))
+                (self.home / "hooks" / name).unlink()
+                self.assertIsNone(
+                    install.installed_digest(self.home),
+                    f"{name} is deployed but the digest does not read it",
+                )
+
+    def test_every_deployed_file_is_in_the_digest(self):
+        """Every file a real install writes is covered by the digest that decides CURRENT.
+
+        Two earlier versions of this test each compared one declared list against another, which
+        is a tautology `PAYLOAD_FILES`'s own definition satisfies, and a source scrape, which went
+        silent the moment the copy became a loop. The independent source is the installed home
+        itself: a file the installer actually wrote and the digest does not read is the gap, and
+        reading the disk is the only way to see it without trusting the lists under test.
+        """
+        self.install()
+        written = {f.name for f in (self.home / "hooks").iterdir() if f.is_file()}
+        self.assertGreaterEqual(len(written), 2, "the install wrote fewer hooks than the kit has")
+        for name in sorted(written):
             self.assertIn(
                 name,
                 install.PAYLOAD_FILES,
-                f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it",
+                f"the installer wrote {name} but PAYLOAD_FILES omits it, so the digest misses it",
             )
+        # The blocks are covered the same way, from the file the installer actually wrote.
+        text = self.md.read_text(encoding="utf-8")
+        for marker in install.BLOCK_MARKERS:
+            self.assertIn(f"<!-- {marker} v", text, f"the install wrote no {marker} block")
+        for _, filename in install.CLAUDE_MD_BLOCKS:
+            self.assertIn(filename, install.PAYLOAD_FILES)
 
     def test_the_payload_list_is_derived_from_the_block_list(self):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
         self.assertEqual(
             install.PAYLOAD_FILES,
-            ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+            install.DEPLOYED_HOOKS + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
         )
+        # The hooks the installer actually copies, read from `main`, are exactly that declared list.
+        source = INSTALL.read_text(encoding="utf-8")
+        self.assertIn("for src_name in DEPLOYED_HOOKS:", source)
 
     def test_every_reader_uses_the_same_marker_list(self):
         """Three readers each carried their own marker pair, so a new block could reach one only."""
