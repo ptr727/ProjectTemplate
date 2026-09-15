@@ -187,9 +187,9 @@ gh auth login --hostname github.com --git-protocol ssh
 
 Choose the SSH key generated above when prompted.
 
-## Agent Write-Safety
+## Agent Host-Safety
 
-Host-level write safety is required where an agent runs with the maintainer's `gh` credentials. Each provider's implementation stays in its own subsection.
+Host-level safety guards are required where an agent runs with the maintainer's `gh` credentials, and where it runs unattended on the maintainer's machine. Each provider's implementation stays in its own subsection.
 
 The requirements every agent's kit is built and audited against, agent-agnostic, are in
 [`host-setup/agent-safety/README.md`][agent-safety], the spec. Each agent's own implementation
@@ -197,7 +197,7 @@ detail lives one level down, following the same contract-vs-implementation split
 for [`host-setup/`][host-setup-dir]'s own per-platform subdirectories: this file states the
 requirement, the per-agent `README.md` owns the how-to.
 
-### Claude Code Write Safety
+### Claude Code Host Safety
 
 The Claude Code safety kit is the first agent-specific control to deploy on a new system, and the
 only one implemented today. Install, verify, scope limits, and the cross-owner write grant
@@ -206,15 +206,15 @@ mechanism are all in [`host-setup/agent-safety/claude/README.md`][agent-safety-c
 the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no
 project at all, which is where the incident behind the kit happened.
 
-### Codex Write Safety
+### Codex Host Safety
 
-No equivalent host write hook ships yet for Codex. Keep Codex's sandbox and execution policies
+No equivalent host-safety hook ships yet for Codex. Keep Codex's sandbox and execution policies
 enabled meanwhile. [`host-setup/agent-safety/codex/README.md`][agent-safety-codex] states the gap
 and what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
-### opencode Write Safety
+### opencode Host Safety
 
-No equivalent host write hook ships yet for opencode. Keep opencode's own permission model enabled
+No equivalent host-safety hook ships yet for opencode. Keep opencode's own permission model enabled
 meanwhile. [`host-setup/agent-safety/opencode/README.md`][agent-safety-opencode] states the gap and
 what implementing against the spec would look like. [Issue #781][issue-781] tracks it.
 
@@ -349,7 +349,7 @@ Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `python3 scri
 | Run the four linters locally, matching CI | `docker` runs each as the same pinned image CI uses |
 | Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
-| Let an agent work with the `gh` credentials live | the write-safety kit is installed |
+| Let an agent work with the `gh` credentials live | the host-safety kit is installed |
 | Have the fleet skills surface in every agent session | the skills install stamp is current per `skills_install.py --report` |
 
 A host that fails any row is not ready for the procedure that row names, and the fix belongs on the host rather than in a repo.

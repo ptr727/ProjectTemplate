@@ -350,6 +350,113 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_the_sweep_is_deployed_and_registered_once(self):
+        """A second hook is a second chance to install the bytes and wire up nothing."""
+        self.install()
+        self.assertTrue((self.home / "hooks" / install.SWEEP_NAME).is_file())
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+        # A SessionEnd hook's own budget is 1.5s, and only a declared per-hook timeout raises it.
+        self.assertEqual(entries[0]["timeout"], install.SWEEP_TIMEOUT_SECONDS)
+
+    def test_the_sweep_group_carries_no_matcher(self):
+        """A matcher would narrow SessionEnd to one exit reason, and a quit is not the only one."""
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        owning = [
+            g
+            for g in groups
+            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+        ]
+        self.assertEqual(len(owning), 1)
+        self.assertNotIn("matcher", owning[0])
+
+    def test_reinstalling_does_not_duplicate_the_sweep(self):
+        self.install()
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        entries = [
+            h
+            for g in groups
+            for h in g.get("hooks", [])
+            if install.SWEEP_STEM in h.get("command", "")
+        ]
+        self.assertEqual(len(entries), 1)
+
+    def test_a_wrong_hooks_shape_is_reported_as_itself(self):
+        """Iterating a dict yields keys and a string yields characters, so a wrong shape read as
+        zero registrations and sent a reader to the wrong fix."""
+        self.install()
+        for shape, expected in (
+            ({"SessionEnd": {"a": 1}}, "`hooks.SessionEnd` as dict"),
+            ({"PreToolUse": "nope"}, "`hooks.PreToolUse` as str"),
+            ("nope", "`hooks` as str"),
+        ):
+            data = self._settings()
+            data["hooks"] = shape
+            self._write(data)
+            problems = install.registration_problems(self.home)
+            self.assertTrue(
+                any(expected in p for p in problems),
+                f"{shape!r} reported {problems!r} rather than naming the shape",
+            )
+
+    def test_a_wrong_hooks_type_is_reported_once_rather_than_per_event(self):
+        self.install()
+        data = self._settings()
+        data["hooks"] = "nope"
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
+
+    def test_a_sweep_under_a_matcher_reports_stale(self):
+        """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
+        self.install()
+        data = self._settings()
+        for group in data["hooks"]["SessionEnd"]:
+            if any(install.SWEEP_STEM in h.get("command", "") for h in group.get("hooks", [])):
+                group["matcher"] = "clear"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("under a matcher", r.stdout)
+
+    def test_an_unregistered_sweep_reports_stale_rather_than_current(self):
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = []
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("never reported", r.stdout)
+
+    def test_a_preexisting_matcher_group_is_left_alone(self):
+        """Somebody else's SessionEnd hook keeps its own filter rather than gaining this one."""
+        self.install()
+        data = self._settings()
+        data["hooks"]["SessionEnd"] = [
+            {"matcher": "clear", "hooks": [{"type": "command", "command": "somebody-elses.sh"}]}
+        ]
+        self._write(data)
+        self.install()
+        groups = self._settings()["hooks"]["SessionEnd"]
+        theirs = next(g for g in groups if g.get("matcher") == "clear")
+        self.assertEqual([h["command"] for h in theirs["hooks"]], ["somebody-elses.sh"])
+        self.assertTrue(
+            any(
+                install.SWEEP_STEM in h.get("command", "")
+                for g in groups
+                if "matcher" not in g
+                for h in g.get("hooks", [])
+            )
+        )
+
     def test_reinstalling_clears_an_unregistered_hook(self):
         self.install()
         data = self._settings()
@@ -523,35 +630,56 @@ class TestStampContent(StampCase):
         finally:
             target.write_bytes(original)
 
-    def test_every_deployed_file_is_in_the_digest(self):
-        """The inverse: the kit copies gh-write-guard.py and every snippet, and each must be covered.
+    def test_the_digest_reads_every_deployed_hook(self):
+        """Naming the hooks in `installed_digest` was the drift `DEPLOYED_HOOKS` exists to close.
 
-        The source scan alone was a false positive. It matched only literal `HERE / "..."` reads,
-        which is the hook and nothing else, while the snippet names came from a list inside `main`.
-        A new snippet passed it while being absent from the digest, so the two sources of truth are
-        both checked now, and the derivation below is what actually makes the gap impossible.
+        Parametrised over the constant rather than over two literals, so a hook added to the deploy
+        list is covered here without anyone remembering to add it.
         """
-        source = INSTALL.read_text(encoding="utf-8")
-        named = {name for name in re.findall(r'HERE / "([^"]+\.(?:py|md))"', source)}
-        named |= {filename for _, filename in install.CLAUDE_MD_BLOCKS}
-        named.discard("install.py")
-        # The hook is the only literal read; every other entry arrives from the block list.
-        self.assertGreater(
-            len(named), 1, "the scan matched only one file, so it is not covering the blocks"
-        )
-        for name in sorted(named):
+        for name in install.DEPLOYED_HOOKS:
+            with self.subTest(hook=name):
+                self.install()
+                self.assertIsNotNone(install.installed_digest(self.home))
+                (self.home / "hooks" / name).unlink()
+                self.assertIsNone(
+                    install.installed_digest(self.home),
+                    f"{name} is deployed but the digest does not read it",
+                )
+
+    def test_every_deployed_file_is_in_the_digest(self):
+        """Every file a real install writes is covered by the digest that decides CURRENT.
+
+        Two earlier versions of this test each compared one declared list against another, which
+        is a tautology `PAYLOAD_FILES`'s own definition satisfies, and a source scrape, which went
+        silent the moment the copy became a loop. The independent source is the installed home
+        itself: a file the installer actually wrote and the digest does not read is the gap, and
+        reading the disk is the only way to see it without trusting the lists under test.
+        """
+        self.install()
+        written = {f.name for f in (self.home / "hooks").iterdir() if f.is_file()}
+        self.assertGreaterEqual(len(written), 2, "the install wrote fewer hooks than the kit has")
+        for name in sorted(written):
             self.assertIn(
                 name,
                 install.PAYLOAD_FILES,
-                f"install.py reads {name} but PAYLOAD_FILES omits it, so the digest misses it",
+                f"the installer wrote {name} but PAYLOAD_FILES omits it, so the digest misses it",
             )
+        # The blocks are covered the same way, from the file the installer actually wrote.
+        text = self.md.read_text(encoding="utf-8")
+        for marker in install.BLOCK_MARKERS:
+            self.assertIn(f"<!-- {marker} v", text, f"the install wrote no {marker} block")
+        for _, filename in install.CLAUDE_MD_BLOCKS:
+            self.assertIn(filename, install.PAYLOAD_FILES)
 
     def test_the_payload_list_is_derived_from_the_block_list(self):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
         self.assertEqual(
             install.PAYLOAD_FILES,
-            ("gh-write-guard.py",) + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+            install.DEPLOYED_HOOKS + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
         )
+        # The hooks the installer actually copies, read from `main`, are exactly that declared list.
+        source = INSTALL.read_text(encoding="utf-8")
+        self.assertIn("for src_name in DEPLOYED_HOOKS:", source)
 
     def test_every_reader_uses_the_same_marker_list(self):
         """Three readers each carried their own marker pair, so a new block could reach one only."""

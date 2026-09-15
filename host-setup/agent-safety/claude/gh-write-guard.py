@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: deny the GitHub-write footguns and the primary-checkout mutation behind two incidents.
+"""PreToolUse guard: deny the GitHub-write footguns, the primary-checkout mutation, and the unbounded wait behind three incidents.
 
 Registered as a Claude Code PreToolUse hook on the Bash tool. It reads the tool-input JSON on stdin,
 classifies the command, and DENIES (with a reason shown to the agent) when a command is a GitHub *write*
-matching a known-dangerous pattern, or a mutating git operation run directly against a primary checkout.
-Reads and everything that is not a clear write pass through. See host-setup/agent-safety/README.md for
+matching a known-dangerous pattern, a mutating git operation run directly against a primary checkout, or a
+shell wait carrying no bound. Reads and everything that is not a clear write pass through. See host-setup/agent-safety/README.md for
 the requirements this implements, stated once, agent-agnostic, and for how to audit this file against
 them.
 
-Precision over recall for the write-footgun shapes (1-3) and the primary-checkout shape (6): they deny
-the specific shapes that caused an incident, not everything unparseable, since a false deny would break the
+Precision over recall for the write-footgun shapes (1-3), the primary-checkout shape (6), and the
+unbounded-wait shape (7): they deny the specific shapes that caused an incident, not everything unparseable, since a false deny would break the
 agent, and a miss still falls under the GOVERNANCE.md "Repository Boundaries and Write Safety" prose
 rules. The branch-bypass rule (4) instead fails CLOSED on the protected-by-default branches, because the
 harm there is a silent success under the maintainer's admin bypass. The denied shapes:
@@ -73,6 +73,15 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      only by GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT (a recognized falsy
      value such as "0"/"false" reads as not granted, not as any-non-empty-string-is-truthy), the same
      channel shape as GH_WRITE_GUARD_ALLOW.
+  7. a shell wait carrying no bound: a `while`/`until` compound whose body calls `sleep`, with neither a
+     `timeout <duration>` running the `sh -c`/`bash -c` wrapper that holds it nor an arithmetic guard in
+     its own condition. The placement matters: `timeout` takes a command and a loop keyword is not one. This is the harm behind a third incident,
+     where seven such loops outlived the subagents that started them, the run that dispatched those
+     subagents, and every worktree it had already retired, each forking a fresh `sleep` every half minute
+     against a condition that could never become true, until they were killed by PID by hand. A shell
+     started by a tool call runs in its own session, so it survives the agent that started it and nothing
+     reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
+     shell, which is the script that shell runs.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -1610,6 +1619,456 @@ def _check_reply_resolve_helper(cmd, environ):
     return "allow", ""
 
 
+# --- Rule 7: an unbounded shell wait ------------------------------------------------------------------
+_LOOP_KEYWORDS = ("while", "until")
+
+
+def _opens_loop(toks, i):
+    """True if the token at index i opens a loop this rule judges.
+
+    `while` and `until` always do. `for` does only in its arithmetic form, `for ((;;))`, which can
+    run forever exactly as `while true` can. A `for x in <words>` is bounded by that word list.
+    """
+    if not _opens_command(toks, i):
+        return False
+    if toks[i] in _LOOP_KEYWORDS:
+        return True
+    return toks[i] == "for" and i + 1 < len(toks) and toks[i + 1].startswith("((")
+
+
+# A loop keyword opens a loop only in command position, so the word appearing as an argument value is not one.
+# These are the words a command can follow directly, beside the operator tokens `_is_separator` already recognizes.
+_COMMAND_POSITION_WORDS = {
+    "do",
+    "then",
+    "else",
+    "elif",
+    "if",
+    "{",
+    "!",
+    "time",
+    # A prefix that runs the command after it, so `do command sleep 30` still sleeps.
+    "command",
+    "env",
+    "exec",
+    "nohup",
+    "setsid",
+    "stdbuf",
+    "sudo",
+    "nice",
+    "ionice",
+}
+
+# The two bounds this rule reads as written into the loop's own condition.
+# - the test-builtin form, `[ "$i" -lt 120 ]`.
+# - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
+# Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
+_BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+
+
+def _reads_its_input(cond, after_done):
+    """True if the loop's condition is a `read`, which ends the loop when the input is exhausted.
+
+    `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
+    clock, and throttling between iterations is the ordinary reason such a loop sleeps at all.
+    Two things are required. A leading `read`, after any `NAME=value` assignments, since a `read`
+    later in the condition is an argument to something else. And an input redirect on the loop
+    itself, because a redirect names a source that ends while a pipe's producer is unknown from the
+    command text: `yes | while read line; do sleep 30; done` never exhausts its input. A process
+    substitution is that same unknown producer behind a redirect, so `done < <(yes)` is no bound
+    either. Reading an unknown producer as unbounded costs a false deny on a piped
+    `find | while read`, which is the safe direction, and the bound such a loop needs is the
+    ordinary one.
+    """
+    # A process substitution wears a redirect's clothes and is the same unknown producer a pipe is:
+    # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
+    if any(t.startswith(("<(", ">(")) for t in after_done):
+        return False
+    if not any(_is_redir_op(t) and "<" in t for t in after_done):
+        return False
+    for tok in cond:
+        if _ENV_ASSIGN_RE.match(tok):
+            continue
+        return tok.rsplit("/", 1)[-1] == "read"
+    return False
+
+
+# A `timeout` duration argument: bare seconds, or one carrying a GNU suffix.
+# A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
+_TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
+
+# The `timeout` options taking their value as a separate argument, which is therefore not the duration.
+_TIMEOUT_VALUE_OPTS = {"-k", "--kill-after", "-s", "--signal"}
+
+
+def _is_timeout_exe(tok):
+    """True if the token invokes `timeout`, path-qualified or `.exe`-suffixed like `_is_git_exe`."""
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    # `gtimeout` is the Homebrew coreutils spelling, and the only GNU timeout a macOS host has.
+    return base in ("timeout", "timeout.exe", "gtimeout")
+
+
+def _is_sleep_exe(tok):
+    """True if the token invokes `sleep`, recognized the way `_is_timeout_exe` recognizes timeout."""
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return base in ("sleep", "sleep.exe")
+
+
+# Commands that name their arguments rather than running them, so a shell after one is text.
+# `echo bash -c '<loop>'` runs no shell.
+# The set is the exemption rather than the rule, so a name missing from it reads as executing.
+# That scans a payload which may not need it, rather than skipping one that does.
+_NAMES_ITS_ARGUMENTS = {
+    "echo",
+    "printf",
+    "ls",
+    "cat",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "sed",
+    "awk",
+    "head",
+    "tail",
+    "wc",
+    "diff",
+    "man",
+    "which",
+    "type",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "file",
+    "stat",
+    # These name a process rather than starting one, so `pkill sleep` runs no sleep.
+    "pkill",
+    "pgrep",
+    "killall",
+    "pidof",
+}
+
+
+def _runs_as_command(toks, w):
+    """True if the token at index w is the command its run executes, past any prefix or `timeout`.
+
+    Whether a wrapper runs is a different question from whether it is bounded, and conflating them
+    let `timeout 0 bash -c '<loop>'` skip its payload entirely: the zero is no bound, so a
+    bound-shaped test refused to look inside a shell that really does run the loop.
+    """
+
+    if _opens_command(toks, w):
+        return True
+    start = w
+    while start > 0 and not _is_separator(toks[start - 1]):
+        start -= 1
+    # A leading redirection and its target are not the run's command.
+    # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
+    while start < w and _is_redir_op(toks[start]):
+        start += 2
+    if start >= w:
+        return True
+    # The run's head decides, asked the safe way round.
+    # A shell is executed unless its head names arguments rather than running them.
+    # Asking whether the head is a known launcher read `flock`, `xargs` and a bare redirection as not executing.
+    # Each of those runs the shell after it.
+    # A name missing from the set below therefore costs a scan rather than a skipped one.
+    head = toks[start].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return head not in _NAMES_ITS_ARGUMENTS
+
+
+def _timeout_bounds_wrapper(toks, w):
+    """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
+
+    The test is on the command run the wrapper sits in, the tokens back to the previous shell
+    operator, rather than on the tokens immediately before it. That run is bounded when it begins
+    with `timeout` and carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as
+    bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
+    `echo` in a run of its own.
+
+    A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
+    command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
+    syntax error rather than a bounded loop, so a `timeout` earlier on the line bounds nothing that
+    follows it.
+    """
+    start = w
+    while start > 0 and not _is_shell_op(toks[start - 1]):
+        start -= 1
+    # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
+    while start < w and _is_command_prefix(toks[start]):
+        start += 1
+    if start >= w or not _is_timeout_exe(toks[start]):
+        return False
+    i = start + 1
+    while i < w:
+        tok = toks[i]
+        if tok in _TIMEOUT_VALUE_OPTS:
+            i += 2  # the option's value is the next token, never the duration
+            continue
+        if tok.startswith("-"):
+            i += 1  # a flag, or a long option carrying its own value
+            continue
+        return bool(_TIMEOUT_DURATION.match(tok))
+    return False
+
+
+def _is_command_prefix(tok):
+    """True if the token runs the command after it, so what follows is still in command position.
+
+    Path-stripped and assignment-aware for the same reason `_is_sleep_exe` is: `/usr/bin/env sleep`
+    and `FOO=1 sleep` are both a sleep, and reading only the bare spellings let each through.
+    """
+    if _ENV_ASSIGN_RE.match(tok):
+        return True
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return base in _COMMAND_POSITION_WORDS
+
+
+def _opens_command(toks, i):
+    """True if the token at index i sits where a shell reads a command name rather than an argument."""
+    if i == 0:
+        return True
+    prev = toks[i - 1]
+    return _is_separator(prev) or _is_command_prefix(prev)
+
+
+def _sleeps(toks, _depth=0):
+    """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` payload it carries."""
+    if _depth > 4:
+        return False
+    for k, tok in enumerate(toks):
+        # `_runs_as_command` rather than `_opens_command`, since a launcher's options sit between it and what it runs.
+        # `env -i sleep 30` and `sudo -u ci sleep 30` both sleep.
+        # `grep -i sleep f` does not, its run's first command being no launcher.
+        if _is_sleep_exe(tok) and _runs_as_command(toks, k):
+            return True
+        if not _is_shell_wrapper_exe(tok):
+            continue
+        # The payload is read from its own token, since re-joining the token list dropped its quoting.
+        # `bash -c 'echo a; sleep 30'` rejoined to a command ending at the `;`, and the sleep was lost.
+        args, _ = _collect_arglist(toks, k + 1)
+        ci = next(
+            (
+                x
+                for x, a in enumerate(args)
+                if a.startswith("-") and not a.startswith("--") and a.endswith("c")
+            ),
+            None,
+        )
+        # Recursed rather than scanned, so the payload gets the same command-position test: a
+        # `pkill sleep` inside one names a sleep as an argument and does not run one.
+        if (
+            ci is not None
+            and ci + 1 < len(args)
+            and _sleeps(_shell_tokens(args[ci + 1]), _depth + 1)
+        ):
+            return True
+    return False
+
+
+def _loop_parts(toks, i):
+    """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
+
+    None means the loop is not closed in this command string, a shape this rule leaves alone rather
+    than denies, matching the precision-over-recall stance rules 1-3 take.
+    """
+    n = len(toks)
+    do_at = next((j for j in range(i + 1, n) if toks[j] == "do" and _opens_command(toks, j)), None)
+    if do_at is None:
+        return None
+    depth = 0
+    for j in range(do_at + 1, n):
+        if toks[j] == "do" and _opens_command(toks, j):
+            depth += 1
+        elif toks[j] == "done" and _opens_command(toks, j):
+            if depth == 0:
+                return toks[i + 1 : do_at], toks[do_at + 1 : j], j
+            depth -= 1
+    return None
+
+
+def _backgrounded_after(toks, done_at):
+    """True if the loop closing at `done_at` is backgrounded, reading past its own redirections.
+
+    A redirection binds to the loop and the `&` follows it, so `done > log &`, `done 2>/dev/null &`
+    and `done >> a 2>&1 &` background exactly as `done &` does. Testing only the token after `done`
+    credited a `timeout` around the wrapper with bounding a loop that outlives it.
+    """
+    i = done_at + 1
+    while i < len(toks):
+        tok = toks[i]
+        # A redirection carries its file descriptor as its own token, so `2>/dev/null` arrives as three.
+        # Reading that leading digit as the command hid the `&` behind it.
+        if tok.isdigit() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
+            i += 1
+            continue
+        if _is_redir_op(tok):
+            i += 2  # the redirection and its target
+            continue
+        return tok == "&"
+    return False
+
+
+def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
+    """The first unbounded wait loop in `cmd`, as `<keyword> <condition>` text, or None when none.
+
+    A wait loop is a `while`/`until` compound whose body calls `sleep`. It passes when its own
+    condition carries an arithmetic guard, or when it sits inside a `sh -c`/`bash -c` payload that a
+    `timeout <duration>` runs. A `timeout` never bounds a loop at its own level, since `timeout`
+    takes a command and a loop keyword is not one. A nested loop is judged on its own terms, so an
+    unbounded inner wait is denied even inside a bounded outer one, which is what it is: unbounded.
+    """
+    if _depth > 4:
+        return None
+    toks = _shell_tokens(cmd)
+    for i, tok in enumerate(toks):
+        # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
+        # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
+        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
+            args, _ = _collect_arglist(toks, i + 1)
+            # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
+            ci = next(
+                (
+                    x
+                    for x, a in enumerate(args)
+                    if a.startswith("-") and not a.startswith("--") and a.endswith("c")
+                ),
+                None,
+            )
+            if ci is not None and ci + 1 < len(args):
+                bounded = inherited_timeout or _timeout_bounds_wrapper(toks, i)
+                inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
+                if inner is not None:
+                    return inner
+        elif _opens_loop(toks, i):
+            parts = _loop_parts(toks, i)
+            if parts is None:
+                continue
+            cond, body, done_at = parts
+            # `while sleep 30; do ...; done` is the standard poll-forever idiom.
+            # Its condition sleeps as surely as a body does, and a sleep handed to `sh -c` is still one.
+            sleeps = _sleeps(body) or _sleeps(cond)
+            # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
+            # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
+            # Measured: the same leak as having written no bound at all.
+            # The `&` is found past the loop's own redirections, since `done > log &` backgrounds it too.
+            backgrounded = _backgrounded_after(toks, done_at)
+            bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
+                cond, toks[done_at + 1 :]
+            )
+            if sleeps and not bounded and not _BOUND_IN_CONDITION.search(" ".join(cond)):
+                # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
+                quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
+                return " ".join([tok] + quoted)
+    return None
+
+
+# A heredoc tag: the word after a `<<` redirection, whose body runs to a line holding it alone.
+_HEREDOC_TAG = re.compile(r"[A-Za-z_][A-Za-z0-9_.\-]*$")
+
+
+def _ends_pipeline(tok):
+    """True if the token ends a pipeline. A `|` continues one, every other separator ends it."""
+    return _is_separator(tok) and tok != "|"
+
+
+def _heredoc_opener(line):
+    """(tag, is_dash_form, feeds_a_shell) for a heredoc `line` opens, or None.
+
+    Read from tokens rather than from the raw text, so a `<<` inside a quoted argument is the
+    text it is: a commit message explaining the `<< EOF` form opened one, and the strip then
+    deleted every command after it. A `<<<` herestring is a token of its own and not this, and a
+    line carrying arithmetic is skipped outright, since `$(( 1 << n ))` tokenizes to a bare `<<`
+    that no token test can tell from a redirection. Skipping there costs a false deny on a line
+    holding both, which is vanishingly rare, where reading it wrong drops real commands.
+    """
+    toks = _shell_tokens(line)
+    if any("((" in t for t in toks):
+        return None
+    for k, tok in enumerate(toks):
+        if tok != "<<" or k + 1 >= len(toks):
+            continue
+        nxt = toks[k + 1]
+        dash = nxt.startswith("-")
+        # A bare `-` token is left unread rather than treated as the dash form.
+        # `<<- EOF` and `<< - EOF` tokenize identically, and bash reads the second one's delimiter as `-`.
+        # Reading both as tag `EOF` strips past a real `-` terminator and drops the commands after it.
+        # Not reading either costs a false deny on a document written through the spaced dash form.
+        # That is the safe direction of the two.
+        tag = nxt[1:] if dash else nxt
+        if not _HEREDOC_TAG.fullmatch(tag):
+            continue
+        # Whether a shell reads this body is a question about the heredoc's whole pipeline.
+        # `cat <<EOF | bash` really does hand the body to bash, and so does any prefix before one.
+        # A non-pipe separator ends it, so `bash -c '...' && cat > doc.md <<EOF` writes a document.
+        # Over-approximating within the pipeline is the safe direction.
+        # Keeping a body gets it scanned, where dropping one hides what it holds from every rule below.
+        start = k
+        while start > 0 and not _ends_pipeline(toks[start - 1]):
+            start -= 1
+        end = k
+        while end < len(toks) and not _ends_pipeline(toks[end]):
+            end += 1
+        return tag, dash, any(_is_shell_wrapper_exe(t) for t in toks[start:end])
+    return None
+
+
+def _strip_heredoc_bodies(cmd):
+    """`cmd` with every heredoc body removed, except one fed to a shell, which really is a script.
+
+    A heredoc body is data rather than a command line, so `cat > notes.md <<EOF` writing this rule's
+    own forbidden shape into a document is not that shape being run. A body fed to `sh`/`bash` is
+    kept, since there it is the script the shell executes. This is precision over recall in the same
+    direction the kit takes elsewhere: a wait inside a script file is likewise unseen.
+    """
+    if "<<" not in cmd:
+        return cmd
+    lines = cmd.split("\n")
+    kept = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        kept.append(line)
+        opened = _heredoc_opener(line)
+        if opened and not opened[2]:
+            tag, dash, _fed = opened
+            # A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs.
+            # Accepting any indentation instead ended the body early on a doc line that merely read as the tag, and the rest was scanned as commands.
+            i += 1
+            while i < len(lines):
+                if (lines[i].lstrip("\t") if dash else lines[i]) == tag:
+                    break
+                i += 1
+            if i < len(lines):
+                kept.append(lines[i])  # the terminator line itself is ordinary text again
+        i += 1
+    return "\n".join(kept)
+
+
+def _check_unbounded_wait(cmd):
+    """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text."""
+    loop = _unbounded_wait_loop(_strip_heredoc_bodies(cmd))
+    if loop is None:
+        return "allow", ""
+    return "deny", (
+        f"This is an unbounded shell wait ({loop[:60]}). A `while`/`until` loop whose body sleeps "
+        "carries no bound of its own, and the shell outlives the turn, the subagent, and the session "
+        "that started it, so a condition that never comes true runs until the machine is rebooted. "
+        "Put the bound in the command. A `timeout` runs the shell that runs the loop, as "
+        "`timeout <seconds> bash -c '<the loop>'`, since `timeout` takes a command and a loop "
+        "keyword is not one. The other accepted bound is "
+        "an arithmetic guard in the loop's own condition, such as `(( SECONDS < end ))` or "
+        '`[ "$i" -lt 120 ]`. Neither form tells a condition that is failing from one that is merely '
+        "unmet, so run the condition once in the foreground first and say so in what the wait "
+        "reports. A `break` in the body is not read as a bound here, since only the command text is "
+        "judged and a `break` says nothing about when it is reached. Prefer the mechanism that "
+        "already signals: a dispatched task reports its own "
+        "completion, so polling its output file is a second and unreliable channel for an answer "
+        'already on its way. See AGENTS.md "Delegation".'
+    )
+
+
 def classify(
     cmd,
     cwd=None,
@@ -1652,6 +2111,10 @@ def classify(
     dec, reason = _check_primary_checkout_mutation(
         cmd, cwd, environ, primary_checkout_lookup, ref_resolver, config_lookup
     )
+    if dec == "deny":
+        return dec, reason
+    # Rule 7 covers an unbounded shell wait, which is neither a GitHub write nor a git operation, so it is checked here too, before the gh-write gate below would skip past it.
+    dec, reason = _check_unbounded_wait(cmd)
     if dec == "deny":
         return dec, reason
 
@@ -3164,6 +3627,363 @@ _PRIMARY_CHECKOUT_CASES = [
 ]
 
 
+# Rule 7: an unbounded shell wait. (command, expected_decision, label)
+_WAIT_CASES = [
+    (
+        'until [ -s "/tmp/t/tasks/abc.output" ]; do sleep 30; done',
+        "deny",
+        "the incident: a poll on a file the awaited process may never write",
+    ),
+    (
+        "while ! gh pr checks 5 | grep -q COMPLETED; do sleep 60; done",
+        "deny",
+        "a review wait whose condition can stay false forever",
+    ),
+    ("while true; do sleep 30; done", "deny", "the shape with no condition to become true at all"),
+    (
+        "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
+        "deny",
+        "a wrapper payload is read the same as a bare command line",
+    ),
+    (
+        "until [ -f /tmp/done ]; do sleep 5; done &",
+        "deny",
+        "backgrounding the loop is what makes it outlive the turn, not what excuses it",
+    ),
+    (
+        "timeout --help bash -c 'until [ -f x ]; do sleep 1; done'",
+        "deny",
+        "a timeout carrying no duration is not a bound",
+    ),
+    (
+        "timeout 5 echo hi && until [ -f x ]; do sleep 5; done",
+        "deny",
+        "a timeout at the loop's own level bounds nothing, a loop keyword being no command to run",
+    ),
+    (
+        "timeout 5 echo hi && bash -c 'until [ -f x ]; do sleep 5; done'",
+        "deny",
+        "and a timeout running something else does not reach a wrapper later on the line",
+    ),
+    (
+        "timeout 600 bash -c \"bash -c 'until [ -f x ]; do sleep 5; done'\"",
+        "allow",
+        "a real bound is inherited through a nested wrapper",
+    ),
+    (
+        "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "GNU timeout documents a zero duration as disabling the timeout, so it is not a bound",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done &'",
+        "deny",
+        "a backgrounded loop outlives the shell the timeout bounds, so the timeout bounds nothing",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done > /tmp/log &'",
+        "deny",
+        "a redirection before the ampersand does not stop it backgrounding the loop",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done 2>/dev/null &'",
+        "deny",
+        "nor does one carrying its file descriptor as a token of its own",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done >> a 2>&1 &'",
+        "deny",
+        "nor two of them together",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done 2>&1'",
+        "allow",
+        "while a redirection with no ampersand after it backgrounds nothing",
+    ),
+    (
+        "while read l; do sleep 1; done < f &",
+        "allow",
+        "a loop bounded by its input stays bounded backgrounded, since that bound needs no signal",
+    ),
+    (
+        "gtimeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "gtimeout is the only GNU timeout a macOS host has",
+    ),
+    (
+        "sudo timeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "a privilege prefix does not hide the timeout behind it",
+    ),
+    (
+        "TMPDIR=/tmp timeout 60 bash -c 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "nor does an assignment prefix",
+    ),
+    (
+        "until [ -f x ]; do /usr/bin/env sleep 1; done",
+        "deny",
+        "a prefix is recognized path-qualified, the way the exe helpers already recognize one",
+    ),
+    (
+        "until [ -f x ]; do FOO=1 sleep 1; done",
+        "deny",
+        "and an assignment before the sleep is not an argument to it",
+    ),
+    (
+        'while IFS= read -r pr; do gh pr view "$pr"; sleep 2; done < prs.txt',
+        "allow",
+        "a loop reading its input ends when the input does, and throttling it is ordinary work",
+    ),
+    (
+        "while grep -q read file; do sleep 5; done",
+        "deny",
+        "while a read named later in the condition is an argument and bounds nothing",
+    ),
+    (
+        "for ((;;)); do sleep 30; done",
+        "deny",
+        "the arithmetic for runs forever exactly as while true does",
+    ),
+    (
+        "for (( i=0; i<10; i++ )); do sleep 1; done",
+        "allow",
+        "and carries its own guard when it has one",
+    ),
+    (
+        "grep -q x <<< foo\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "a herestring is not a heredoc, and reading one as one deleted the command after it",
+    ),
+    (
+        "echo $((a<<b))\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "nor is an arithmetic shift",
+    ),
+    (
+        "echo $(( 1 << shift ))\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "nor a spaced one, which a raw-text read took for an opener and dropped the command after",
+    ),
+    (
+        "git commit -m 'Explain the << EOF form'\nuntil [ -f y ]; do sleep 30; done",
+        "deny",
+        "and a `<<` inside a quoted value is the text it is",
+    ),
+    (
+        "cat > d.md << EOF\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "allow",
+        "a space between the redirection and its tag still opens a heredoc",
+    ),
+    (
+        "bash -c 'echo hi' && cat > docs/waits.md <<'EOF'\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "allow",
+        "whether a shell reads the body is the redirection's own command, not the line mentioning one",
+    ),
+    (
+        "while sleep 30; do gh pr checks 5 | grep -q COMPLETED && break; done",
+        "deny",
+        "the poll-forever idiom sleeps in its condition, which is a sleep like any other",
+    ),
+    (
+        "while true; do bash -c 'sleep 30'; done",
+        "deny",
+        "and a sleep the body hands to a wrapper is still the body sleeping",
+    ),
+    (
+        "while true; do bash -c 'echo a; sleep 30'; done",
+        "deny",
+        "wherever in that payload it sits, which re-joining the tokens once lost",
+    ),
+    (
+        "while true; do bash -c 'pkill sleep'; done",
+        "allow",
+        "while a sleep named as an argument to something else runs none",
+    ),
+    (
+        "cat <<'EOF' | bash\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "a heredoc piped into a shell is a script that shell runs, whatever owns the redirection",
+    ),
+    (
+        "nice -n 10 bash <<'EOF'\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "and a prefix before that shell does not hide it",
+    ),
+    (
+        "cat << - EOF\ndoc line\n-\nuntil [ -f x ]; do sleep 30; done\nEOF",
+        "deny",
+        "a bare dash token is left unread, since bash reads that spelling's delimiter as the dash",
+    ),
+    (
+        "timeout 600 until [ -f x ]; do sleep 30; done",
+        "allow",
+        "bash rejects this before it runs, so it is a syntax error rather than a wait to judge, and the denial no longer names it",
+    ),
+    (
+        "timeout -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "an option taking a separate value still leaves the duration findable",
+    ),
+    (
+        "timeout 900 nice bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a command prefix between the timeout and the shell does not hide it",
+    ),
+    (
+        "if timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'; then echo MET; fi",
+        "allow",
+        "a run opening with a keyword is still that run",
+    ),
+    (
+        "until [ -f /tmp/flag ]; do echo done; sleep 30; done",
+        "deny",
+        "the word done inside the body does not close the loop before its sleep is read",
+    ),
+    (
+        "until [ -f x ]; do command sleep 1; done",
+        "deny",
+        "a sleep behind a command prefix is still a sleep",
+    ),
+    (
+        "cat > notes.md <<'END-DOC'\nuntil [ -f x ]; do sleep 5; done\nEND-DOC",
+        "allow",
+        "a hyphenated heredoc tag is a heredoc, so a document using one is written rather than denied",
+    ),
+    (
+        "cat > f <<'EOF'\n  EOF\nwhile true; do sleep 1; done\nEOF",
+        "allow",
+        "an indented line reading as the tag does not end a plain heredoc, so the rest stays data",
+    ),
+    (
+        'i=0; while [ "$i" -lt 5 ]; do until [ -f x ]; do sleep 1; done; i=$((i+1)); done',
+        "deny",
+        "an unbounded inner wait is unbounded however bounded the loop around it is",
+    ),
+    (
+        "until [ -f x ]; do /bin/sleep 5; done",
+        "deny",
+        "a path-qualified sleep is the same sleep",
+    ),
+    (
+        "bash <<'EOF'\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "deny",
+        "a heredoc fed to a shell is the script that shell runs",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f /tmp/done ]; do sleep 30; done'",
+        "allow",
+        "a timeout wrapper is the bound, inherited into the payload it wraps",
+    ),
+    (
+        "timeout 10m bash -c 'while ! test -f x; do sleep 2; done'",
+        "allow",
+        "a suffixed duration is a duration",
+    ),
+    (
+        'i=0; while [ "$i" -lt 120 ] && ! curl -sf http://x; do sleep 5; i=$((i+1)); done',
+        "allow",
+        "a counter the condition reads is the other bound",
+    ),
+    (
+        "while (( SECONDS < 600 )); do sleep 10; done",
+        "allow",
+        "the arithmetic form of that same guard",
+    ),
+    (
+        "while (( 1 << 1 )); do sleep 1; done",
+        "deny",
+        "a shift inside the arithmetic form is not a comparison and bounds nothing",
+    ),
+    (
+        "echo bash -c 'while true; do sleep 1; done'",
+        "allow",
+        "a shell named as an argument to something else runs no payload",
+    ),
+    (
+        "> /tmp/log bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "a leading redirection is not the run's command, and reading it as one skipped the payload",
+    ),
+    (
+        "flock /tmp/l bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "nor is a launcher this rule does not know by name, which is why the exemption is the set",
+    ),
+    (
+        "xargs bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "and the same for one that reads its arguments from a pipe",
+    ),
+    (
+        "while true; do env -i sleep 30; done",
+        "deny",
+        "a launcher's own options sit between it and the sleep it runs",
+    ),
+    (
+        "yes | while read line; do sleep 30; done",
+        "deny",
+        "a pipe's producer is unknown from the command text, so a read on one is no bound",
+    ),
+    (
+        "while read l; do sleep 30; done < <(yes)",
+        "deny",
+        "and a process substitution is that same producer behind a redirect",
+    ),
+    (
+        "while read l; do sleep 30; done < f",
+        "allow",
+        "while a redirect from a file names a source that ends",
+    ),
+    (
+        "while true; do grep -i sleep f; done",
+        "allow",
+        "while a command that merely names sleep runs none",
+    ),
+    (
+        "sudo -u ci bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "while a prefix runs what follows it, whatever options sit between",
+    ),
+    (
+        "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
+        "deny",
+        "whether a wrapper runs is a separate question from whether it is bounded",
+    ),
+    (
+        "end=$((SECONDS + 600))\nwhile (( SECONDS < end )) && ! [ -f x ]; do sleep 30; done\nif (( SECONDS < end )); then echo MET; else echo 'NOT MET after 600s'; fi",
+        "allow",
+        "the arithmetic guard the denial itself names, which must not deny in turn",
+    ),
+    (
+        "if timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'; then echo MET; else echo 'NOT MET'; fi\n",
+        "allow",
+        "the timeout wrapper stays accepted wherever a single-command wait fits it",
+    ),
+    (
+        'while read -r line; do echo "$line"; done < f',
+        "allow",
+        "a loop that does not sleep is no wait",
+    ),
+    (
+        "for i in $(seq 1 60); do sleep 5; done",
+        "allow",
+        "a for loop is bounded by its own word list",
+    ),
+    ("sleep 30", "allow", "a sleep outside a loop ends on its own"),
+    (
+        'echo "while true; do sleep 1; done"',
+        "allow",
+        "the shape named inside a quoted value is text, not a loop",
+    ),
+    (
+        "cat > d.md <<'EOF'\nuntil [ -f x ]; do sleep 5; done\nEOF",
+        "allow",
+        "a heredoc body written to a file is data, which is how this rule gets documented at all",
+    ),
+]
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -3172,6 +3992,19 @@ def _selftest():
     # Every existing loop below pins primary_checkout_lookup to a constant False (never a primary checkout), so rule 6 stays inert for every case that predates it.
     # Without this, a mutating subcommand incidental to a case testing a different rule (git commit, in a few of them) would fall through to the real _is_primary_checkout and resolve against wherever the self-test process actually runs, which is a primary checkout in CI, silently changing what those cases test.
     for cmd, want, label in _CASES:
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+            primary_checkout_lookup=lambda d: False,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, want, label in _WAIT_CASES:
         got, _ = classify(
             cmd,
             origin=origin,

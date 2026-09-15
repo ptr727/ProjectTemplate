@@ -1,4 +1,4 @@
-# Codex Write-Safety Gap
+# Codex Host-Safety Gap
 
 No hook implements [`../README.md`][spec]'s requirements for Codex yet. Tracked at
 [issue #781][issue-781].
@@ -15,21 +15,25 @@ unblocked in a Codex session.
 
 [`../README.md`][spec] states each requirement as an agent-agnostic decision rule, not tied to any
 one hook API. [`../claude/gh-write-guard.py`][claude-hook] is a worked reference implementation of
-all six requirements against Claude Code's `PreToolUse` hook, including its tokenizer, its
+requirements 1 to 7 against Claude Code's `PreToolUse` hook, including its tokenizer, its
 self-test matrix (`--selftest`), and its documented fail-open/fail-closed choices per requirement
 -- useful as a model for argv parsing and edge cases, not as something to port line for line, since
 Codex's own approval/sandbox extension points differ from Claude Code's hook shape. Whatever
 mechanism Codex offers for intercepting or gating a command before it runs is the place to
-implement requirements 1-6. If Codex offers no such extension point at all, that finding belongs on
+implement requirements 1 to 7. Requirement 8 is not one of them: it reports the processes a session
+leaves behind, so it belongs wherever Codex signals that a session has ended, and
+[`../claude/stray-process-sweep.py`][claude-sweep] is the worked reference for that one. If Codex
+offers neither extension point, that finding belongs on
 [issue #781][issue-781], not silently worked around.
 
 ## Auditing
 
 Once a Codex-side implementation exists, audit it the way [`../README.md`][spec] "Auditing an
 Implementation Against This Spec" describes: run its own self-test and check every case against the
-six requirements, not against `gh-write-guard.py`'s source.
+eight requirements, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md
 [claude-hook]: ../claude/gh-write-guard.py
+[claude-sweep]: ../claude/stray-process-sweep.py
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
