@@ -843,11 +843,11 @@
     },
     {
       "unit": ".markdownlint-cli2.jsonc",
-      "digest": "sha256:826753ef2717b77ccc1fef5cd20ee7f2437a8b5c9218cd25f9a66fbfa8390509",
+      "digest": "sha256:7a7cd77c93dbddcc5ba2c44d3c5d8b00c2f430b9c7bc42888d755bb57e4e3a88",
       "reviewer": "agent-skill",
       "findings": 3,
-      "hubCommit": "e7cb1cf763bf445d8535f23307ac68836a51ce16",
-      "stamp": "2026-09-09T21:02:31Z"
+      "hubCommit": "e1559c98c5fbcf9ae0dd3b3344247d012e7a4e44",
+      "stamp": "2026-09-15T14:32:02Z"
     },
     {
       "unit": "AGENTS.md > Context and Delegation Discipline",
