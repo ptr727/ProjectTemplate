@@ -415,6 +415,54 @@ class TestRegistration(StampCase):
         problems = install.registration_problems(self.home)
         self.assertEqual(len([p for p in problems if "`hooks` as str" in p]), 1, problems)
 
+    def test_a_decoy_command_naming_the_sweep_is_not_a_registration(self):
+        """Matching any command containing the sweep's name let a decoy report a machine current."""
+        self.install()
+        good = self._settings()["hooks"]["SessionEnd"][0]["hooks"][0]
+        for label, entry in (
+            ("decoy", {"type": "command", "command": "echo stray-process-sweep"}),
+            ("timeout", dict(good, timeout=1)),
+            ("type", dict(good, type="prompt")),
+        ):
+            with self.subTest(shape=label):
+                data = self._settings()
+                data["hooks"]["SessionEnd"] = [{"hooks": [entry]}]
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                self.assertTrue(problems, f"{label} shape reported no problem")
+
+    def test_a_failed_self_test_leaves_the_live_hook_alone(self):
+        """Copying onto the live path and testing after left a broken hook installed and registered."""
+        self.install()
+        live = self.home / "hooks" / install.SWEEP_NAME
+        before = live.read_bytes()
+        broken = pathlib.Path(tempfile.mkdtemp()) / "claude"
+        shutil.copytree(HERE, broken, ignore=shutil.ignore_patterns("__pycache__"))
+        sweep = broken / install.SWEEP_NAME
+        sweep.write_text(
+            sweep.read_text(encoding="utf-8").replace(
+                'print("SELFTEST PASS" if ok else "SELFTEST FAIL")',
+                'ok = False; print("SELFTEST FAIL")',
+            ),
+            encoding="utf-8",
+        )
+        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        r = subprocess.run(
+            [sys.executable, str(broken / "install.py")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(live.read_bytes(), before, "the live hook was replaced by a failing one")
+        self.assertEqual(
+            sorted(f.name for f in (self.home / "hooks").iterdir()),
+            sorted(install.DEPLOYED_HOOKS),
+            "a staged file was left behind",
+        )
+
     def test_a_sweep_under_a_matcher_reports_stale(self):
         """A matcher filters SessionEnd by exit reason, so the sweep would miss every other exit."""
         self.install()

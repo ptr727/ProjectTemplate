@@ -1666,6 +1666,23 @@ _COMMAND_POSITION_WORDS = {
 _BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
 
 
+def _redirects_stdin(after_done):
+    """True if `after_done` redirects descriptor 0, which is the one a `read` consumes.
+
+    `2<errors` reaches here as `2`, `<`, `errors`, and accepting any `<` read it as a bound while
+    the `read` went on consuming the pipe on descriptor 0. Only an implicit redirect, or an
+    explicit `0<`, binds what the loop actually reads.
+    """
+    for i, tok in enumerate(after_done):
+        if not (_is_redir_op(tok) and "<" in tok):
+            continue
+        fd = after_done[i - 1] if i else ""
+        if fd.isdigit() and fd != "0":
+            continue  # a redirect on another descriptor leaves descriptor 0 where it was
+        return True
+    return False
+
+
 def _reads_its_input(cond, after_done):
     """True if the loop's condition is a `read`, which ends the loop when the input is exhausted.
 
@@ -1684,7 +1701,7 @@ def _reads_its_input(cond, after_done):
     # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
     if any(t.startswith(("<(", ">(")) for t in after_done):
         return False
-    if not any(_is_redir_op(t) and "<" in t for t in after_done):
+    if not _redirects_stdin(after_done):
         return False
     for tok in cond:
         if _ENV_ASSIGN_RE.match(tok):
@@ -1926,7 +1943,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
         # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
         if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
-            args, _ = _collect_arglist(toks, i + 1)
+            args, after = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
             ci = next(
                 (
@@ -1937,7 +1954,13 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 None,
             )
             if ci is not None and ci + 1 < len(args):
-                bounded = inherited_timeout or _timeout_bounds_wrapper(toks, i)
+                # A `&` after this wrapper backgrounds it, so an outer `timeout` no longer reaches what it runs.
+                # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
+                local = _timeout_bounds_wrapper(toks, i)
+                # The `&` follows this invocation's whole argument list, where `_collect_arglist` stopped.
+                # It does not follow the wrapper token itself.
+                backgrounded = _backgrounded_after(toks, after - 1)
+                bounded = (inherited_timeout and not backgrounded) or local
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
                 if inner is not None:
                     return inner
@@ -3929,6 +3952,21 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < <(yes)",
         "deny",
         "and a process substitution is that same producer behind a redirect",
+    ),
+    (
+        "yes | while read line; do sleep 30; done 2<errors",
+        "deny",
+        "a redirect on another descriptor leaves the read consuming the pipe on descriptor 0",
+    ),
+    (
+        "while read l; do sleep 1; done 0< f",
+        "allow",
+        "while an explicit descriptor 0 is the one a read consumes",
+    ),
+    (
+        "timeout 600 bash -c \"bash -c 'while true; do sleep 30; done' &\"",
+        "deny",
+        "an inherited timeout does not survive a wrapper the payload backgrounds",
     ),
     (
         "while read l; do sleep 30; done < f",

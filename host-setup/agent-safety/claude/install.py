@@ -71,6 +71,16 @@ PAYLOAD_FILES = DEPLOYED_HOOKS + tuple(filename for _, filename in CLAUDE_MD_BLO
 MISSING = object()
 
 
+def hook_command(launcher, path):
+    """The `command` string a registered hook carries, spelled once for writer and reader alike.
+
+    The registration check matched any command merely containing the sweep's name, so an unrelated
+    `echo stray-process-sweep` counted as registered and `--report` called such a machine current
+    with no sweep installed at all.
+    """
+    return f'"{launcher}" "{path}"'
+
+
 def owns(entry, prefix):
     """Whether an allow rule names the script the prefix identifies, rather than a longer path.
 
@@ -401,16 +411,31 @@ def registration_problems(claude_home):
     for group in ends or []:
         if not isinstance(group, dict):
             continue
+        expected = hook_command(hook_launcher(), claude_home / "hooks" / SWEEP_NAME)
         for hook in group.get("hooks") or []:
-            if isinstance(hook, dict) and SWEEP_STEM in str(hook.get("command", "")):
-                swept += 1
-                # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
-                # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
-                if "matcher" in group:
-                    out.append(
-                        f"the SessionEnd sweep is registered under a matcher "
-                        f"({group['matcher']!r}), so it runs on that exit reason alone"
-                    )
+            if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
+                continue
+            if hook.get("command") != expected or hook.get("type") != "command":
+                out.append(
+                    "a SessionEnd entry names the sweep but is not the registration this installer "
+                    f"writes ({hook.get('type')!r} running {hook.get('command')!r}), so it may run "
+                    "nothing"
+                )
+                continue
+            if hook.get("timeout") != SWEEP_TIMEOUT_SECONDS:
+                out.append(
+                    f"the SessionEnd sweep carries timeout {hook.get('timeout')!r} where this "
+                    f"installer writes {SWEEP_TIMEOUT_SECONDS}, and the event's own budget is 1.5s"
+                )
+                continue
+            swept += 1
+            # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
+            # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
+            if "matcher" in group:
+                out.append(
+                    f"the SessionEnd sweep is registered under a matcher "
+                    f"({group['matcher']!r}), so it runs on that exit reason alone"
+                )
     if ends is None:
         pass  # likewise reported as a shape error above
     elif swept == 0:
@@ -567,35 +592,43 @@ def main():
     print(f"Installing agent host-safety kit into: {claude_home}")
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Deploy each hook, then self-test it before wiring anything up.
+    # 1. Stage every hook beside its live path, self-test each staged copy, and only then replace.
+    # Copying onto the live path first and testing afterwards left a failed self-test's broken copy installed.
+    # The existing registration still pointed at it, so an install that refused to register disabled the guard.
+    staged = []
     for src_name in DEPLOYED_HOOKS:
-        dst = hooks_dir / src_name
-        shutil.copyfile(HERE / src_name, dst)
+        tmp = hooks_dir / f"{src_name}.staged"
+        shutil.copyfile(HERE / src_name, tmp)
         try:
-            os.chmod(dst, 0o755)
+            os.chmod(tmp, 0o755)
         except OSError:
             pass
-        print(f"  hook -> {dst}")
+        staged.append((src_name, tmp))
         r = subprocess.run(
-            [sys.executable, str(dst), "--selftest"],
+            [sys.executable, str(tmp), "--selftest"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             check=False,
         )
         if r.returncode != 0:
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
             sys.stderr.write(
-                f"{src_name} self-test FAILED; aborting before registration.\n"
-                + r.stdout
-                + r.stderr
+                f"{src_name} self-test FAILED; nothing was replaced.\n" + r.stdout + r.stderr
             )
             return 1
         print(f"  {src_name} self-test: PASS")
+    for src_name, tmp in staged:
+        dst = hooks_dir / src_name
+        # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
+        os.replace(tmp, dst)
+        print(f"  hook -> {dst}")
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
     launcher = hook_launcher()
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
-    hook_cmd = f'"{launcher}" "{hook_dst}"'
+    hook_cmd = hook_command(launcher, hook_dst)
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
     # Two reads can also disagree, since another process may write between them.
     data = {}
@@ -692,7 +725,7 @@ def main():
     end_group.setdefault("hooks", []).append(
         {
             "type": "command",
-            "command": f'"{launcher}" "{sweep_dst}"',
+            "command": hook_command(launcher, sweep_dst),
             "timeout": SWEEP_TIMEOUT_SECONDS,
         }
     )
