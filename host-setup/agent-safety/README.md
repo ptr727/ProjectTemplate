@@ -254,7 +254,7 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> iswait{"A while/until loop\nthat sleeps, with no\ntimeout and no\narithmetic guard?"}
+    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\ntimeout, no arithmetic\nguard and no read\nof an input redirect?"}
     iswait -- yes --> deny7["DENY - requirement 7"]
     iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]

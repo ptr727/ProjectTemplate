@@ -41,7 +41,7 @@ _AGENT_EXE = ("claude", "claude.exe")
 
 # The agent named as a path component or a bare word, for the second pass.
 # A `.claude` configuration directory is deliberately not this, since every tool shell mentions one.
-_AGENT_IN_ARGS = re.compile(r"(?:^|[/\s])claude(?:-code)?(?:[/\s]|\.(?:js|exe)|$)")
+_AGENT_IN_ARGS = re.compile(r"(?:^|[/\\\s])claude(?:-code)?(?:[/\\\s]|\.(?:js|exe)|$)")
 
 
 def _read_process_table(runner=None):
@@ -108,7 +108,7 @@ def _agent_pid(pid, table):
     chain = _ancestors(pid, table)
     for candidate in chain:
         argv0 = table[candidate][3].split()[0] if table[candidate][3].split() else ""
-        base = argv0.rsplit("/", 1)[-1].lower()
+        base = argv0.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
         if base in _AGENT_EXE:
             return candidate
     # The outermost match, and never a shell.
@@ -128,7 +128,7 @@ def _agent_pid(pid, table):
 
 def _is_shell(argv0):
     """True if argv0 invokes a shell, which is never the agent process however its arguments read."""
-    base = argv0.rsplit("/", 1)[-1].lower().removesuffix(".exe").lstrip("-")
+    base = argv0.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe").lstrip("-")
     return base in ("sh", "bash", "zsh", "ksh", "dash", "fish")
 
 
