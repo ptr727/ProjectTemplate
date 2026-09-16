@@ -3,8 +3,7 @@ name: Sweep canonical review coverage action
 # The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule, which no push and no pull request is gated on any more.
 # This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units owing one and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
-# A scheduled run checks out the default branch, which is the promoted text a carrier actually receives, where develop holds text no repository has been handed yet.
-# The issue's label comes from the fleet label set in repo-config/labels.json, so this run fails loudly on a repository where repo-config/configure.sh has not applied that set yet, rather than filing an unlabelled issue no later run would find.
+# The issue's label comes from the fleet label set in repo-config/labels.json, so this run fails loudly on a repository where repo-config/configure.sh has not applied that set yet, rather than filing an unlabeled issue no later run would find.
 
 on:
   schedule:
@@ -27,8 +26,18 @@ jobs:
       issues: write
     steps:
 
+      # The ref is named rather than left to the default a scheduled run checks out, which is the default branch.
+      # The passes this issue asks for are worked on a develop-based branch, per the repo-worktree base rule, so measuring main would name units against text that branch does not hold, refuse each record on a digest the tree has moved past, and re-file the same list every week until a promotion carried the fix.
       - name: Checkout repository step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+
+      # The engine imports datetime.UTC at module level, so the interpreter is pinned to the floor spec/host-tools.json declares rather than left as whatever the runner image ships.
+      - name: Setup python step
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
 
       - name: Render the sweep work list step
         id: sweep
@@ -55,11 +64,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           # Every number a write below targets is read here, in this run, rather than constructed.
-          mapfile -t open_issues < <(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --limit 20 --json number --jq '.[].number')
+          # Redirected to a file rather than read through a process substitution, which mapfile reports success for whatever the producer did, so a failed listing would read as no open issue and file a second one beside the first.
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --json number,title > "$RUNNER_TEMP/issues.json"
+          # Matched on the title this workflow files under as well as on the label, so an issue a human labeled keeps its body instead of being overwritten with the work list.
+          mapfile -t open_issues < <(jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' "$RUNNER_TEMP/issues.json")
+          mapfile -t other_issues < <(jq -r --arg t "$TITLE" '.[] | select(.title != $t) | .number' "$RUNNER_TEMP/issues.json")
+          if [ -n "${other_issues[0]-}" ]; then
+            echo "::warning::open $LABEL issue(s) this workflow did not file, left untouched: ${other_issues[*]}"
+          fi
           # One open issue per repository is the invariant the label carries, and picking one of several would report a sweep that read a list nobody wrote.
-          # A second element rather than a count, since a ${#name[@]} inside this block reads as a comment to the fleet prose gate.
-          if [ -n "${open_issues[1]-}" ]; then
-            echo "::error::more than one open $LABEL issue (${open_issues[*]}), so which one this sweep owns is undecided, and closing the stale ones by hand is what settles it."
+          if [ "${#open_issues[@]}" -gt 1 ]; then
+            echo "::error::open $LABEL issues (${open_issues[*]}) leave which one this sweep owns undecided, and closing the stale ones by hand is what settles it"
             exit 1
           fi
           number="${open_issues[0]-}"
@@ -71,7 +86,8 @@ jobs:
             fi
           elif [ -n "$number" ]; then
             # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit is covered by a recorded pass at its current text, read at $GITHUB_SHA. Reopened by the next sweep that finds one moved past its pass."
+            # A unit that moves again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit is covered by a recorded pass at its current text, read on develop at $GITHUB_SHA. A unit that moves past its pass again is filed as a new sweep issue."
             gh issue close "$number" --repo "$GITHUB_REPOSITORY"
           else
             echo "No unit has moved past its pass, and no open $LABEL issue to close."

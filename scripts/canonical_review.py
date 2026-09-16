@@ -238,25 +238,19 @@ def parse_manifest(rel: str, data: bytes) -> dict[str, Any]:
     return payload
 
 
-def tracked_files(root: Path, commit: str | None = None) -> set[str]:
-    """Every path git tracks, in this working tree or at `commit`.
+def tracked_files(root: Path) -> set[str]:
+    """Every path git tracks in this working tree.
 
-    Git's view rather than the filesystem's, on both sides, because they disagree in ways that
-    matter here. A filesystem walk of a carried tree picks up whatever happens to be sitting in it,
-    so a gitignored `.DS_Store` or an editor backup becomes canonical content: the first fails the
-    UTF-8 decode and takes every subcommand to exit 2, blocking every push from that clone, and the
-    second becomes a unit the gate demands a review pass for and `record` writes into the ledger
-    forever. Neither is content any repository carries. Reading the base side from git's tree while
-    reading this side from disk also compares two different notions of membership, which is the
-    kind of asymmetry that reports a change nobody made.
+    Git's view rather than the filesystem's, because they disagree in ways that matter here. A
+    filesystem walk of a carried tree picks up whatever happens to be sitting in it, so a
+    gitignored `.DS_Store` or an editor backup becomes canonical content: the first fails the
+    UTF-8 decode and takes every subcommand to exit 2, and the second becomes a unit `sweep` names
+    and `record` writes into the ledger forever. Neither is content any repository carries.
     """
-    if commit is None:
-        # Tracked plus untracked-and-not-ignored, rather than tracked alone.
-        # A carried file this branch has created but not staged is content a carrier will receive, and dropping it would narrow the gate exactly where a new canonical is added.
-        # Ignored paths stay out, which is what keeps a stray .DS_Store or build artifact from becoming canonical content.
-        listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", root=root)
-    else:
-        listing = git("ls-tree", "-r", "--name-only", "-z", commit, root=root)
+    # Tracked plus untracked-and-not-ignored, rather than tracked alone.
+    # A carried file this branch has created but not staged is content a carrier will receive, and dropping it would narrow the unit set exactly where a new canonical is added.
+    # Ignored paths stay out, which is what keeps a stray .DS_Store or build artifact from becoming canonical content.
+    listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", root=root)
     return {path for path in listing.split("\0") if path}
 
 
@@ -265,11 +259,9 @@ def select_carried(
 ) -> tuple[dict[str, list[str] | None], list[str]]:
     """What a manifest declares carried over `tracked`, and what it declares that is not there.
 
-    Parameterized on the path set rather than reading one tree directly, because the base side of a
-    comparison has to be resolved against the base commit's own manifest and its own tree. Reading
-    one manifest against two trees is the defect this shape exists to prevent: a branch that adds an
-    already-present file to the manifest makes content newly carried without changing a byte of it,
-    and a single-manifest comparison scores that as no change at all.
+    Parameterized on the path set rather than reading the tree itself, so the membership question
+    and the manifest question stay separable and a caller answering one of them differently does
+    not have to reimplement the other.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
     carries. A declared path the tree does not hold is reported rather than skipped quietly, being
@@ -334,10 +326,10 @@ def build_units(
 ) -> tuple[dict[str, str], list[str]]:
     """Unit key -> text for the carried paths `read` can supply, plus declared sections it lacks.
 
-    A path the reader has nothing for contributes no units, which is what makes one function serve
-    both the working tree and a base commit: at the base, a file this branch adds is simply absent.
-    A declared section the file does not hold is a different thing entirely, a manifest naming a
-    heading that is not there, so it is reported rather than passed over.
+    A path the reader has nothing for contributes no units, a manifest entry scoped to a project
+    type this repository is not being the ordinary case. A declared section the file does not hold
+    is a different thing entirely, a manifest naming a heading that is not there, so it is reported
+    rather than passed over.
     """
     units: dict[str, str] = {}
     missing: list[str] = []
@@ -455,11 +447,11 @@ def state_of(unit: str, current: str, ledger: dict[str, dict[str, Any]]) -> str:
 
 
 def resolve_base(target: str | None, root: Path) -> tuple[str, str]:
-    """The target name and the merge-base commit this branch's changes are measured from.
+    """The target name and the merge-base commit a recorded pass is stamped with.
 
-    A merge-base rather than the target's tip, for `scripts/local_review.py`'s reason: the two
-    differ the moment the target moves, and measuring against the tip would report every unit the
-    target gained since this branch forked as one this branch changed.
+    A merge-base rather than this branch's own tip, since a squash merge discards that tip and an
+    amend moves it, so a stamp anchored there resolves nowhere once the branch is gone. The
+    merge-base is ordinarily a commit the target's remote-tracking ref already holds.
     """
     name = local_review.resolve_target(target)
     return name, local_review.merge_base(name, root)
@@ -525,6 +517,7 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
         "",
     ]
     # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
+    # A digest the tree has moved past since refuses the record, which is the content having moved rather than a fault in the list, and the answer is a read at the unit's current text.
     lines.extend(f"- `{unit}={current[unit]}`" for unit in stale)
     lines.extend(
         [

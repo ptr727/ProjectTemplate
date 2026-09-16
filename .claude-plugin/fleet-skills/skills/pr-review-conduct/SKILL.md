@@ -50,14 +50,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    specifically, not "no review of any kind covers this head": an advisory reviewer carrying the
    exact head under `other_reviewed`, with an empty review body and no new threads, is its own
    ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
-   A refusal is not that coverage, and a refusal nothing clears is the one shape this item cannot
-   be met head-on, since re-requesting the same head only repeats it. `pr_review.py` exit `46`
-   names that state exactly, an account-quota refusal carrying the current head, and there the
-   item is met instead by the coverage the other reviewers give that head, read rather than
-   counted and named in the request for the permission item 5 already requires. Exit `41` is the
-   wider refusal and its own body decides: a file-count refusal is cleared by splitting the pull
-   request, so it is answered rather than routed around, while one holding across several heads
-   with no cause its body names takes `46`'s route rather than another wait.
+   A refusal is not that coverage, so this item stays unsatisfied under one, exactly as
+   "Which Reviewers a Repository Actually Has" below says, and the loop clears it where it can. A
+   file-count refusal is cleared by splitting the pull request and a refusal naming a time is
+   cleared by waiting for it. `pr_review.py` exit `46` is the one nothing the loop does clears, an
+   account-quota refusal carrying the current head, and exit `41` holding across several heads
+   with no cause its body names is the same state reached the slower way. That is where the
+   unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head
+   read rather than counted and named to them, and their permission under item 5 is what allows
+   the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
