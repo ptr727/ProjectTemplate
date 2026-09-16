@@ -94,7 +94,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md) un
 | Writing a commit message or pull request title | `Pull Request Title and Commit Message Conventions`, packaged as the `comment-and-doc-style` Skill |
 | Any prose, comment, doc, or line-ending change | `Documentation Style Conventions`, packaged as the `comment-and-doc-style` Skill |
 | Proving work actually happened | `Verification Discipline`, surfaced at its decision moment by the `agent-conduct` Skill, and the section keeps the full rules |
-| Editing rule text, a Skill, or any other content other repos carry | `Verification Discipline`'s carried-content rule, whose passes the `local-strict-review` Skill runs when a periodic sweep files them and whose record the hub-hosted `scripts/canonical_review.py` keeps |
+| Editing rule text, a Skill, or any other content other repos carry | `Verification Discipline`'s carried-content rule, which asks nothing of the change itself, its passes being run by the `local-strict-review` Skill against the units a periodic sweep names and recorded by the hub-hosted `scripts/canonical_review.py` |
 | Opening a pull request, or requesting, monitoring, answering, or closing a review | `PR Review Etiquette`, packaged as the `pr-review-conduct` Skill |
 | Reviewing a pull request, patch, or change set | No section of its own: the `code-review` Skill, which routes to the applicable general, language, documentation, and workflow skills |
 | Reporting progress or asking the user something | `Communicating with the User`, surfaced at its decision moments by the `agent-conduct` and `session-handoff` Skills, and the section keeps the full rules |

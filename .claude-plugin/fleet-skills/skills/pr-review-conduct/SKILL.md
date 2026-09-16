@@ -52,11 +52,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
-   only cause on record that the loop can clear. `pr_review.py` exit `46` is the one nothing the
-   loop does clears, an account-quota refusal carrying the current head, which is the case
+   only cause on record that the loop can clear. `pr_review.py wait` exit `46` is the one nothing
+   the loop does clears, an account-quota refusal carrying the current head, which is the case
    "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account state
    read from the reviewer's activity elsewhere when this head carries none of its own, and exit
-   `41` holding across several heads with no cause its body names reaches it the slower way. That is where the
+   `41` holding across several heads with no cause its body names reaches it the slower way.
+   Those three are `wait`'s alone: `status` exits 0 over a refusal, carrying it as `refusal=` in
+   the digest line instead, so reading that exit code as the absence of one satisfies this item
+   on the exact state it exists to catch. That is where the
    unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head
    read rather than counted and named to them, and their permission under item 5 is what allows
    the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
