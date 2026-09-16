@@ -69,6 +69,13 @@ jobs:
           set -Eeuo pipefail
           # The commit this run measured, read from the checkout rather than from GITHUB_SHA, which on a scheduled event names the default branch's head and not the develop tip checked out above.
           head_sha="$(git rev-parse HEAD)"
+          # A renamed or removed section leaves its pass naming a unit the tree no longer holds, and its text under a key nothing has read.
+          # Neither is stale, so the work list below is empty and the run would otherwise say nothing at all, which is the one way a rename leaves the sweep's scope in silence.
+          # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
+          orphans="$(python3 scripts/canonical_review.py status | jq '.orphanedPasses | length')"
+          if [ "$orphans" -gt 0 ]; then
+            echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed and its text is in the never-read backlog under the new key"
+          fi
           # Every number a write below targets is read here, in this run, rather than constructed.
           # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did, so a failed listing or filter would read as no open issue and file a second one beside the first.
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --json number,title > "$RUNNER_TEMP/issues.json"
@@ -92,7 +99,7 @@ jobs:
           elif [ -n "$number" ]; then
             # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
             # A unit that moves again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit is covered by a recorded pass at its current text, read on develop at $head_sha. A unit that moves past its pass again is filed as a new sweep issue."
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "No carried canonical unit has moved past the pass that read it, read on develop at $head_sha. The never-read backlog is a separate count this says nothing about, rendered by \`python3 scripts/canonical_review.py report\`. A unit that moves past its pass again is filed as a new sweep issue."
             gh issue close "$number" --repo "$GITHUB_REPOSITORY"
           else
             echo "No unit has moved past its pass, and no open $LABEL issue to close."
