@@ -113,6 +113,7 @@ Bounds: read-only. Report a rule that looks incomplete rather than guessing at w
 
 ```sh
 python3 scripts/canonical_review.py sweep     # every unit whose text moved past its pass, with its digest
+# exit 1 where it named one, which is the sweep working rather than the command failing
 # run the pass above over each unit it named, then, per unit:
 python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
 ```

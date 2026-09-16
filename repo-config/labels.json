@@ -2,7 +2,7 @@
     { "name": "agents", "color": "f86915", "description": "Agents instructions" },
     { "name": "blocked", "color": "d93f0b", "description": "Blocked on an issue in another repository, named in the body" },
     { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
-    { "name": "canonical-sweep", "color": "0e8a16", "description": "The periodic canonical content review sweep, one open issue while a unit is owed a read" },
+    { "name": "canonical-sweep", "color": "0e8a16", "description": "The periodic canonical content review sweep, one open issue while a unit has moved past its pass" },
     { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
     { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },
     { "name": "decision", "color": "b60205", "description": "A question waiting on the maintainer, alone or beside whatever else the issue carries" },

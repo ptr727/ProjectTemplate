@@ -488,7 +488,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
-    # Reports rather than gates, so a caller under `set -e` can run it whatever the answer is.
+    # Reports rather than gates, so a caller under `set -e` can run it whatever the coverage is.
+    # A boundary still exits 2 from `main`, which is what puts this in a local gate block at all.
     return EXIT_COVERED
 
 
@@ -547,8 +548,8 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
                 "",
                 (
                     "Recorded against a unit this tree no longer holds, so the section was renamed"
-                    " or removed after the pass. A renamed one is read again under its new key,"
-                    " which the burn-down above carries rather than this list."
+                    " or removed after the pass. A renamed one is read again under its new key, which"
+                    " the never-read count above carries and `report` renders, rather than this list."
                 ),
                 "",
             ]
@@ -812,7 +813,8 @@ def main(argv: list[str] | None = None) -> int:
         return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict, and a capture point folding that reports an execution boundary as a gate finding.
-    # No call here is known to reach it, every git call going through local_review.git, which reports an OSError or a timeout as CannotRun above.
+    # A last resort rather than a path with a known caller, since every git call goes through local_review.git and reports an OSError or a timeout as CannotRun above.
+    # Reached in the tests by raising through `units`, because a handler nothing exercises is one nobody knows still folds the code it promises.
     except Exception as exc:  # noqa: BLE001
         emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)
         return EXIT_CANNOT_RUN

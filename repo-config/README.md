@@ -43,9 +43,9 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`handoff`**: a link in the session handoff chain, one open issue per track.
 
-`canonical-sweep` is a surface marker too, carried by the one open issue the periodic canonical content review sweep files while any carried unit has moved past the pass that read it, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline]. Only the repository that authors carried content files one, so in this fleet that is the hub alone, and the label is declared here rather than there because one payload reaching every repository is what keeps the set auditable.
+`canonical-sweep` is a surface marker too, carried by the one open issue the periodic canonical content review sweep files while any carried unit has moved past the pass that read it, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline]. It covers text that has moved rather than the never-read backlog, which no sweep files. Only the repository that authors carried content files one, so in this fleet that is the hub alone, and the label is declared here rather than there because one payload reaching every repository is what keeps the set auditable. A sweep issue carries no triage label, like a handoff and for the same reason stated there: the workflow files it, rewrites it, and closes it, so ranking or counting it as backlog work counts something no pull request closes.
 
-- **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while a unit is owed a read.
+- **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while a unit has moved past its pass.
 
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
