@@ -515,7 +515,7 @@ class SweepCase(RepoCase):
         _, output = self.loud(["sweep"])
         line = (
             "python3 scripts/canonical_review.py record --reviewer agent-skill"
-            " --unit '<key>=<digest>'"
+            " --target develop --unit '<key>=<digest>'"
         )
         self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
 

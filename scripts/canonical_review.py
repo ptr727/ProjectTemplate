@@ -319,7 +319,7 @@ def select_carried(
 
 
 def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
-    """What this working tree's own manifest declares carried, over what git tracks here."""
+    """What this working tree's own manifest declares carried, over what `tracked_files` collects."""
     reader = disk_reader(root)
     data = reader(MANIFEST)
     if data is None:
@@ -511,10 +511,10 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     so widening the manifest on its own lifts nothing, while declaring a section in the commit that
     writes it lifts that unit like any other.
 
-    Three answers rather than two. A commit dates the path. A path git tracks that no commit holds
-    is a file this branch has created and not committed, which `tracked_files` deliberately counts
-    as a unit, and it is the newest content there is rather than an undatable one, so it sorts
-    first. Anything else sorts last, which is a git failure in the ordinary case and every path in
+    Three answers rather than two. A commit dates the path. A path no commit holds, staged or
+    merely unignored, is a file this branch has created and not committed, which `tracked_files`
+    deliberately counts as a unit, and it is the newest content there is rather than an undatable
+    one, so it sorts first. Anything else sorts last, which is a git failure in the ordinary case and every path in
     a repository with no commits at all, where git exits 128 rather than answering. The order is a
     priority rather than a claim about the content, so a uniform last is harmless there.
     """
@@ -620,7 +620,7 @@ def render_sweep(
                 "Record each pass at the digest above, which is the text that was read:",
                 "",
                 "```sh",
-                "python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'",
+                "python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'",
                 "```",
             ]
         )
