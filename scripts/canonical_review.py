@@ -45,7 +45,7 @@ itself not having run.
 Usage:
     python3 scripts/canonical_review.py list                 every unit and its digest, as JSON
     python3 scripts/canonical_review.py status               what is covered, stale, or never read
-    python3 scripts/canonical_review.py sweep                every unit owed a read, and how many
+    python3 scripts/canonical_review.py sweep                the units it asks for this round
     python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
     python3 scripts/canonical_review.py report               render the burn-down to standard output
 """
@@ -544,13 +544,17 @@ def backlog_slice(root: Path, never: list[str]) -> list[str]:
 
 
 def code_span(text: str) -> str:
-    """`text` as a Markdown code span, whatever backticks it holds.
+    """A non-empty `text` as a Markdown code span, whatever backticks it holds.
 
     A unit key is a heading, and a heading may name a command, so a key holding a backtick is
     ordinary rather than exotic: one in this tree does. Wrapped in single backticks it splits into
     two spans with the middle rendered as prose, which puts the path and the digest in different
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
+
+    Non-empty because empty text would render as two literal backticks rather than a span, and the
+    pad reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
+    a heading or a tracked path, both single-line and stripped, so neither shape reaches here.
     """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     fence = "`" * (longest + 1)
