@@ -340,22 +340,21 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 <!-- Internal -->
 
 [agent-safety-install]: ../host-setup/agent-safety/claude/install.py
-[agents-skills]: ../.agents/skills/README.md
 [agents]: ../AGENTS.md
+[agents-skills]: ../.agents/skills/README.md
 [audit]: ../spec/audit.py
 [burndown-claim-issue]: https://github.com/ptr727/ProjectTemplate/issues/1290
-[canonical-sweep-workflow]: ../.github/workflows/canonical-review-sweep.yml
-[review-cost-issue]: https://github.com/ptr727/ProjectTemplate/issues/1631
 [canonical-review-issue]: https://github.com/ptr727/ProjectTemplate/issues/1138
 [canonical-review-ledger]: ../reports/canonical-review.json
+[canonical-sweep-workflow]: ../.github/workflows/canonical-review-sweep.yml
 [copilot-instructions]: ../.github/copilot-instructions.md
 [divergences]: ../spec/divergences.json
 [editorconfig]: ../.editorconfig
 [fidelity-model]: ../spec/fidelity-model.md
 [files]: ../spec/files.json
 [fleet-skills-dist]: ../.claude-plugin/fleet-skills/
-[github-skills-dist]: ../.github/skills/
 [gitattributes]: ../.gitattributes
+[github-skills-dist]: ../.github/skills/
 [governance]: ../GOVERNANCE.md
 [host-setup]: ../docs/host-setup.md
 [host-tools]: ../spec/host-tools.json
@@ -369,6 +368,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [record-lock-issue]: https://github.com/ptr727/ProjectTemplate/issues/1151
 [repos]: ../registry/repos.json
 [resync]: ../RESYNC.md
+[review-cost-issue]: https://github.com/ptr727/ProjectTemplate/issues/1631
 [section-model]: ../spec/section-model.md
 [tests]: ./tests/
 [validate-hook]: ../.github/actions/validate/action.yml

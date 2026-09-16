@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record and check full-content reviews of the canonical content this hub authors and other repos carry.
+"""Record and report full-content reviews of the canonical content this hub authors and other repos carry.
 
 The problem this exists for is an ordering one. Hub-owned content under `.agents/skills/`,
 `GOVERNANCE.md`, `WORKFLOW.md`, `AGENTS.md` and `AUDIT.md` is written, reviewed and merged here

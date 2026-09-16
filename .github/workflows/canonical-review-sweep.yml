@@ -4,6 +4,7 @@ name: Sweep canonical review coverage action
 # This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units owing one and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
 # A scheduled run checks out the default branch, which is the promoted text a carrier actually receives, where develop holds text no repository has been handed yet.
+# The issue's label comes from the fleet label set in repo-config/labels.json, so this run fails loudly on a repository where repo-config/configure.sh has not applied that set yet, rather than filing an unlabelled issue no later run would find.
 
 on:
   schedule:
