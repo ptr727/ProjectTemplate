@@ -27,8 +27,10 @@ no longer the text a carrier will receive. Editing a neighbouring section does n
 reviewer's read of this one is still a read of these bytes.
 
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
-measured the per-push gate costing more in local review passes than the findings it returned were
-worth (ptr727/ProjectTemplate#1631), so nothing here refuses a push or a pull request any more.
+measured the local passes a push owed as a large share of what a pull request spent, and what they
+returned was not recoverable from the record, so the maintainer's call on that evidence
+(ptr727/ProjectTemplate#1631) was to sweep the read rather than gate it. Nothing here refuses a
+push or a pull request any more.
 `sweep` names the units whose text has moved past the pass that read them, which is the work one
 scheduled run files and an agent session performs, and `report` renders the never-read backlog
 #1138 records beside it, to standard output rather than into the tree, for the reason
