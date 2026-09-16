@@ -27,7 +27,6 @@ uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/age
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
 python3 scripts/build_dist.py --check
-python3 scripts/canonical_review.py check
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path
 python3 scripts/prose_lint.py . --check charset-unknown --summary
@@ -36,9 +35,7 @@ python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
-`python3 scripts/canonical_review.py report` renders the burn-down from the ledger to standard output, and CI writes the same rendering to the run's job summary. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
-
-The canonical-review check sits in CI's own list only for a pull request, since a canonical unit's change is measured against the branch it is proposed into and a push carrying no pull request names none. The local run above takes the default target, `develop`, which is the same measurement for an ordinary feature branch and the wrong one for a branch based on `main`, where it needs `--target main` to mean anything.
+`python3 scripts/canonical_review.py report` renders the coverage burn-down from the ledger to standard output, and CI writes the same rendering to the run's job summary. Neither gates anything, and no command above measures canonical units, since that read is swept on a schedule rather than owed by a change, per [`GOVERNANCE.md`](./GOVERNANCE.md) "Verification Discipline". The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
 
 The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request, Docker socket access, or third-party image access to the repository. Record that denial as an execution boundary, then rerun the required command with scoped approval. Persist repository-exposure approval only when the executor constrains the read-only mount, disabled networking, and digest together. Only the rerun's tool output is a lint or test verdict. Provider-specific host configuration lives in [`docs/host-setup.md`](./docs/host-setup.md) "Agent Worktree Access".
 

@@ -43,6 +43,10 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`handoff`**: a link in the session handoff chain, one open issue per track.
 
+`canonical-sweep` is a surface marker too, carried by the one open issue the periodic canonical content review sweep files while any carried unit has moved past the pass that read it, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline]. Only the repository that authors carried content files one, so in this fleet that is the hub alone, and the label is declared here rather than there because one payload reaching every repository is what keeps the set auditable.
+
+- **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while a unit is owed a read.
+
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
@@ -73,6 +77,7 @@ A repository linked to a project of its own is left alone, like a label the payl
 [governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[governance-verification-discipline]: ../GOVERNANCE.md#verification-discipline
 [project-json]: ./project.json
 [repo-config-doc]: ../docs/repo-config.md
 [settings-json]: ./settings.json

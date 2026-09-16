@@ -50,6 +50,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    specifically, not "no review of any kind covers this head": an advisory reviewer carrying the
    exact head under `other_reviewed`, with an empty review body and no new threads, is its own
    ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
+   A refusal is not that coverage, and a refusal nothing clears is the one shape this item cannot
+   be met head-on, since re-requesting the same head only repeats it. `pr_review.py` exit `46`
+   names that state exactly, an account-quota refusal carrying the current head, and there the
+   item is met instead by the coverage the other reviewers give that head, read rather than
+   counted and named in the request for the permission item 5 already requires. Exit `41` is the
+   wider refusal and its own body decides: a file-count refusal is cleared by splitting the pull
+   request, so it is answered rather than routed around, while one holding across several heads
+   with no cause its body names takes `46`'s route rather than another wait.
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
@@ -131,7 +139,7 @@ that says only "open a PR" is not such an instruction.
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.
 
-Run `local-strict-review` against the branch's current diff before step 1's push, and again before any fix push under outcome 1 below. Follow that skill's own ordering and record each pass, which is what a capture point reads, the hub's own `pre-push` hook being one and a repository having none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around, and that skill's refusal table says what each refusal means and what clears it.
+Run `local-strict-review` against the branch's current diff before every push this loop makes, the one that opens the pull request in step 1 and each one after it, whatever finding it answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about, so a re-push of a tree a recorded pass already covers, after a rebase that changed no content, needs no second pass: the receipt is keyed on the branch's net content rather than on its commits. Follow that skill's own ordering and record each pass, which is what a capture point reads, the hub's own `pre-push` hook being one and a repository having none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around, and that skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
@@ -147,7 +155,8 @@ Run `local-strict-review` against the branch's current diff before step 1's push
    head only repeats the decline.
 5. Triage findings (see below).
 6. Apply fixes or write a rationale for declines.
-7. Reply to each thread and resolve what was addressed.
+7. Reply to each thread, and resolve what was addressed and what was declined on evidence the
+   reviewer could check for itself, per outcome 2 below.
 8. Re-run the loop after every fix push until the checks are green and no finding remains open.
 
 The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `effort=lite`, `effort=balanced`, or `effort=max` when the completed review exposes that metadata, lowercased, and names an inherited setting apart from a chosen one in a separate `effort_source=default|explicit` field, both reading `unknown` when no effort line parses. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives. After a timeout with `requested=yes`, rerun `wait` for another bounded interval by default because the request may still be active. If the maintainer directs a retry, remove Copilot in the pull request UI, add it again, and rerun `wait`. This recovery replaces only the review request and never changes the effort setting.
@@ -163,9 +172,13 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in one of five outcomes
 
-1. **Real, so fix it.** Take the fix through `local-strict-review` the same way the push that
-   opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply with
-   the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
+1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
+   than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
+   in a file the diff already touches or that this change itself made wrong, filing the rest, per
+   `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
+   raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
+   that opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply
+   with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
    is the round the `local-strict-review` pass gets dropped on and the churn `local-strict-review`
    exists to stop. For a finding on platform-specific code (PowerShell, a macOS- or WSL-only
    path), "fixed" means executed on that platform, per
@@ -176,8 +189,12 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    impossible, or the rule that governs it. A finding that is factually correct but not this
    repo's to fix (a verbatim-fidelity manifest entry byte-locking the section, ownership that
    sits elsewhere) declines the same way: name the boundary and cite what proves it. Either shape
-   closes the thread on its own evidence. An assertion ("this is fine") does not close a finding,
-   a decline needs evidence the reviewer itself could check.
+   closes the thread on its own evidence, and the agent resolves such a thread itself rather than
+   leaving it for the maintainer. What makes that safe is the evidence being checkable by anyone,
+   a command and its output, the code path, the quoted rule, a byte-identical diff, so a decline
+   resting on anything weaker is not one of these. An assertion ("this is fine") does not close a
+   finding, and outcome 3's value call is the maintainer's, so that thread stays open until they
+   answer it.
 3. **Real, fixable here, but deliberately left as is, a value call rather than a scope
    boundary, so it is the maintainer's, not the agent's.** Reach for this only once outcome 2 is
    ruled out, since a scope boundary declines on its own evidence and never needs this outcome at
@@ -186,11 +203,16 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
 4. **Real and worth doing later, so file the issue first, then reply with its link.** A deferral
-   noted only in a thread is lost the moment the PR merges.
-5. **Keeps recurring, so fix the class, not the instance.** A finding raised repeatedly against
-   correct code means the code is not communicating something: add the comment, sharpen the name,
-   narrow the interface, or fix the rule if the rule is wrong. Bouncing the same point across
-   rounds is the signal to escalate the rule itself, not to keep re-arguing it.
+   noted only in a thread is lost the moment the PR merges. File it in the repository where the
+   fix has to land, which for a finding against carried content is the repository that authors
+   that content rather than the one carrying it, since an issue filed where nobody may make the
+   fix is a deferral nobody can close.
+5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
+   raised repeatedly against correct code means the code is not communicating something: add the
+   comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
+   Bouncing the same point across rounds is the signal to escalate the rule itself, not to keep
+   re-arguing it. This is not where the class sweep lives, outcome 1 already owing that on the
+   first instance, and reaching here means the sweep ran and the finding came back anyway.
 
 **A disposition decided on one PR does not carry to the next.** The same finding shape recurring
 on a sibling repo or PR, even within one batch or one session, gets its own outcome: its own

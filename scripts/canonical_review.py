@@ -26,21 +26,22 @@ its current digest. Editing the unit invalidates the pass, because the text the 
 no longer the text a carrier will receive. Editing a neighbouring section does not, because that
 reviewer's read of this one is still a read of these bytes.
 
-**The gate is on what a branch changes, and the backlog is reported rather than gated.** Most
-units have never had a full read here, which is the defect #1138 records rather than a reason to
-block every push until it is worked off. `check` refuses only the units this branch's own diff
-moved, so the ordering is fixed going forward, and `report` renders what is left as a burn-down,
-to standard output rather than into the tree, for the reason `scripts/README.md` gives
-(ptr727/ProjectTemplate#1268).
+**The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
+measured the per-push gate costing more in local review passes than the findings it returned were
+worth (ptr727/ProjectTemplate#1631), so nothing here refuses a push or a pull request any more.
+`sweep` names the units whose text has moved past the pass that read them, which is the work one
+scheduled run files and an agent session performs, and `report` renders the never-read backlog
+#1138 records beside it, to standard output rather than into the tree, for the reason
+`scripts/README.md` gives (ptr727/ProjectTemplate#1268).
 
-The verdict vocabulary is `scripts/local_review.py`'s, because both gates run from the same
-pre-push hook and a caller reading an exit code must not have to know which one answered: 0 is
-covered, 1 is a finding, and 2 is the check itself not having run.
+The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an exit code from
+either engine need not know which one answered: 0 is covered, 1 is a finding, and 2 is the check
+itself not having run.
 
 Usage:
     python3 scripts/canonical_review.py list                 every unit and its digest, as JSON
     python3 scripts/canonical_review.py status               what is covered, stale, or never read
-    python3 scripts/canonical_review.py check                gate this branch's changed units
+    python3 scripts/canonical_review.py sweep                the units whose text moved past their pass
     python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
     python3 scripts/canonical_review.py report               render the burn-down to standard output
 """
@@ -50,8 +51,6 @@ import hashlib
 import json
 import os
 import pathlib
-import shlex
-import subprocess
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -69,7 +68,7 @@ import carry
 import local_review
 
 # Reused rather than restated.
-# Two gates in one pre-push hook that disagree about which branch "develop" means, or about what an exit code says, are a defect in the pair rather than in either.
+# Two engines under one rule that disagree about which branch "develop" means, or about what an exit code says, are a defect in the pair rather than in either.
 CannotRun = local_review.CannotRun
 DEFAULT_TARGET = local_review.DEFAULT_TARGET
 EXIT_COVERED = local_review.EXIT_COVERED
@@ -329,21 +328,6 @@ def carried_paths(root: Path) -> tuple[dict[str, list[str] | None], list[str]]:
     return select_carried(parse_manifest(MANIFEST, data), tracked_files(root))
 
 
-def carried_at(root: Path, commit: str) -> dict[str, list[str] | None]:
-    """What the manifest at `commit` declared carried, read against that commit's own tree.
-
-    A commit holding no manifest carried nothing, which is the honest answer for a base that
-    predates the manifest and makes every unit on this branch a first read.
-    """
-    blobs = blobs_at(root, commit, [MANIFEST])
-    if MANIFEST not in blobs:
-        return {}
-    carried, _ = select_carried(
-        parse_manifest(MANIFEST, blobs[MANIFEST]), tracked_files(root, commit)
-    )
-    return carried
-
-
 def build_units(
     carried: dict[str, list[str] | None],
     read: Callable[[str], bytes | None],
@@ -409,91 +393,6 @@ def units(root: Path) -> tuple[dict[str, str], list[str]]:
     carried, absent = carried_paths(root)
     found, missing = build_units(carried, disk_reader(root))
     return {key: digest(text) for key, text in found.items()}, sorted(absent + missing)
-
-
-def blobs_at(root: Path, commit: str, rels: list[str]) -> dict[str, bytes]:
-    """The same files' bytes at `commit`, for the ones that exist there.
-
-    One `git cat-file --batch` rather than a `git show` per file, because the carried set runs to
-    dozens of paths and a process each is the difference between a hook a caller waits on and one
-    they skip. The commit is verified to resolve before this runs, since every path of an
-    unresolvable ref reports `missing`, which would read as a branch that introduced the entire
-    canonical set rather than as a check that could not run.
-    """
-    if not rels:
-        return {}
-    # The batch protocol is one request per line, so a path holding a newline shifts every answer after it onto the wrong request.
-    # That misreads as content rather than failing, which is the silent narrowing this refuses instead.
-    # `--batch -z` would carry such a path, and it is not used because spec/host-tools.json declares no git floor that guarantees it.
-    newlined = [rel for rel in rels if "\n" in rel or "\r" in rel]
-    if newlined:
-        raise CannotRun(
-            f"a carried path holds a line ending in its name, which git cat-file --batch cannot be asked for: {newlined[0]!r}"
-        )
-    # Encoded with surrogateescape, matching how local_review.git decodes a path, so a name holding a non-UTF-8 byte round-trips instead of raising on the way back out.
-    request = "".join(f"{commit}:{rel}\n" for rel in rels).encode("utf-8", "surrogateescape")
-    # The same redirects local_review.git strips from every call it makes.
-    # Inherited, GIT_OBJECT_DIRECTORY points this read at a store that does not hold the base commit's blobs, which reads as a base that carried nothing and refuses the push naming every unit in the tree as newly carried.
-    env = {k: v for k, v in os.environ.items() if k not in local_review.INHERITED_REDIRECTS}
-    proc = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "cat-file", "--batch"],
-        cwd=str(root),
-        env=env,
-        input=request,
-        capture_output=True,
-        check=False,
-        timeout=local_review.GIT_TIMEOUT,
-    )
-    if proc.returncode != 0:
-        detail = proc.stderr.decode("utf-8", "replace").strip() or "no error text"
-        raise CannotRun(f"git cat-file --batch failed: {detail}")
-    out: dict[str, bytes] = {}
-    buffer = proc.stdout
-    position = 0
-    for rel in rels:
-        end = buffer.find(b"\n", position)
-        if end < 0:
-            raise CannotRun(
-                f"git cat-file --batch stopped before answering for {rel},"
-                " so the base content is unknown rather than absent"
-            )
-        header = buffer[position:end].decode("utf-8", "replace")
-        position = end + 1
-        fields = header.split(" ")
-        # An answer is either `<oid> <type> <size>` or the request echoed back with a status word.
-        # Keyed on the last field rather than the third, because git echoes the request verbatim and a path holding a space pushes a digit into third place.
-        # `HEAD:a b 12 c.md missing` parsed as a 12-byte object and took the next answer's header as this path's content.
-        if fields[-1] in ("missing", "ambiguous", "dangling"):
-            continue
-        if len(fields) != 3 or not fields[2].isdigit():
-            raise CannotRun(
-                f"git cat-file --batch answered for {rel!r} with a header this cannot read: {header!r}"
-            )
-        size = int(fields[2])
-        out[rel] = buffer[position : position + size]
-        # The payload is followed by a newline the header's size does not count.
-        position += size + 1
-    return out
-
-
-def units_at(root: Path, commit: str) -> dict[str, str]:
-    """The units the tree at `commit` carried, by that commit's own manifest.
-
-    Its own manifest rather than this branch's, because the question is what this branch changed
-    about what a carrier receives, and adding an already-present file or section to the manifest
-    changes exactly that while changing no byte of the file. Measured against one manifest, such a
-    branch reports no changed unit and makes content nothing has read available to every carrier,
-    which is the first-read case this whole gate exists for.
-    """
-    try:
-        carried = carried_at(root, commit)
-        blobs = blobs_at(root, commit, sorted(carried))
-        found, _ = build_units(carried, blobs.get)
-    except CannotRun as exc:
-        # Named, because every message underneath carries only a path and the working tree's copy of that path is usually fine.
-        # A duplicate heading a later commit removed reads as a defect in the file the reader is about to open, which does not hold one.
-        raise CannotRun(f"reading the base commit {commit[:12]}: {exc}") from exc
-    return {key: digest(text) for key, text in found.items()}
 
 
 def read_ledger(root: Path) -> dict[str, dict[str, Any]]:
@@ -566,20 +465,6 @@ def resolve_base(target: str | None, root: Path) -> tuple[str, str]:
     return name, local_review.merge_base(name, root)
 
 
-def changed_units(root: Path, base: str) -> tuple[dict[str, str], list[str], list[str]]:
-    """This branch's units, the ones a carrier would read differently than at `base`, and the absentees.
-
-    A unit counts as changed when its text moved and when it is newly carried, since a carrier
-    reads both for the first time and neither has been read here.
-    """
-    carried, absent = carried_paths(root)
-    found, missing = build_units(carried, disk_reader(root))
-    current = {key: digest(text) for key, text in found.items()}
-    before = units_at(root, base)
-    changed = sorted(unit for unit, value in current.items() if before.get(unit) != value)
-    return current, changed, sorted(absent + missing)
-
-
 def cmd_list(args: argparse.Namespace) -> int:
     root = local_review.repo_root()
     current, absent = units(root)
@@ -615,38 +500,60 @@ def cmd_status(args: argparse.Namespace) -> int:
     return EXIT_COVERED
 
 
-def cmd_check(args: argparse.Namespace) -> int:
+def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> tuple[str, int]:
+    """The sweep's work list and how many units are on it, as Markdown for an issue body.
+
+    Stale units alone, never the never-read ones. A stale unit is text a carrier is receiving now
+    that no pass here has read, where a never-read one is the backlog ptr727/ProjectTemplate#1138
+    records, and folding the two together would file 179 units of history as this week's work.
+    """
+    states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}
+    stale = sorted(unit for unit, state in states.items() if state == "stale")
+    never = sum(1 for state in states.values() if state == "never")
+    lines = [
+        "# Canonical content review sweep",
+        "",
+        (
+            "Filed by `.github/workflows/canonical-review-sweep.yml` from"
+            " `python3 scripts/canonical_review.py sweep`. The units below have moved past the pass"
+            " that read them, so a repository carrying this content is receiving text nothing has"
+            ' read whole here. The `local-strict-review` Skill\'s "The Carried-Content Sweep" says'
+            " how each pass is run and what its findings are owed."
+        ),
+        "",
+        f"## {len(stale)} unit(s) to read",
+        "",
+    ]
+    # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
+    lines.extend(f"- `{unit}={current[unit]}`" for unit in stale)
+    lines.extend(
+        [
+            "",
+            "Record each pass at the digest above, which is the text that was read:",
+            "",
+            "```sh",
+            "python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'",
+            "```",
+            "",
+            (
+                f"{len(current)} units carried, {never} of them never read here, which is the"
+                " burn-down `python3 scripts/canonical_review.py report` renders rather than this"
+                " sweep's work."
+            ),
+            "",
+        ]
+    )
+    return "\n".join(lines), len(stale)
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    """Render the work list, and report in the exit code whether it holds anything."""
     root = local_review.repo_root()
-    target, base = resolve_base(args.target, root)
-    current, changed, _ = changed_units(root, base)
-    # Read before the empty-change answer, so an unreadable ledger still reports the boundary rather than being skipped into a verdict.
-    ledger = read_ledger(root)
-    if not changed:
-        emit(f"No carried canonical unit changed against {target}, so there is nothing to cover.")
-        return EXIT_COVERED
-    uncovered = [unit for unit in changed if state_of(unit, current[unit], ledger) != "covered"]
-    if not uncovered:
-        emit(f"All {len(changed)} changed carried unit(s) are covered by a recorded pass.")
-        return EXIT_COVERED
-    emit(
-        f"This branch changes {len(uncovered)} carried canonical unit(s)"
-        " that no recorded pass covers at their current text:",
-        sys.stderr,
-    )
-    # The key and the whole digest, in the shape `record` takes them, so closing the refusal is a copy rather than a second lookup against `list` over every unit in the tree.
-    for unit in uncovered:
-        emit(f"  {state_of(unit, current[unit], ledger):<7}  {unit}={current[unit]}", sys.stderr)
-    emit(
-        "\nA repository carrying this content reads each of these whole, as a new file, and cannot"
-        "\nfix what it finds. Read each unit's whole current text, then record the pass, handing"
-        "\nback the key and digest exactly as printed above:"
-        f"\n  python3 scripts/canonical_review.py record --reviewer agent-skill"
-        f" --target {shlex.quote(target)} --unit '<key>=<digest>'"
-        '\nThe local-strict-review skill\'s "The Carried-Content Pass" says how the pass is run,'
-        "\nand its refusal table what this refusal means where the units named look wrong.",
-        sys.stderr,
-    )
-    return EXIT_NOT_COVERED
+    current, _ = units(root)
+    body, count = render_sweep(current, read_ledger(root))
+    emit(body)
+    # 1 rather than 0 where a unit is stale, which is how the workflow tells a sweep with work from one without under `set -Eeuo pipefail`.
+    return EXIT_NOT_COVERED if count else EXIT_COVERED
 
 
 def parse_pairs(values: list[str]) -> dict[str, str]:
@@ -843,10 +750,10 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="what is covered, stale, or never read here, as JSON")
     p_status.set_defaults(handler=cmd_status)
 
-    p_check = sub.add_parser(
-        "check", help="exit 0 covered, 1 a changed unit is uncovered, 2 could not run"
+    p_sweep = sub.add_parser(
+        "sweep", help="exit 0 nothing stale, 1 a unit moved past its pass, 2 could not run"
     )
-    p_check.set_defaults(handler=cmd_check)
+    p_sweep.set_defaults(handler=cmd_sweep)
 
     p_record = sub.add_parser("record", help="record a full-content pass over one or more units")
     p_record.add_argument(
@@ -875,12 +782,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_report.set_defaults(handler=cmd_report)
 
-    p_check.add_argument(
-        "--target",
-        default=None,
-        help=f"target branch (default {DEFAULT_TARGET}), resolved as origin/<value> first",
-    )
-
     args = parser.parse_args(argv)
     code = EXIT_CANNOT_RUN
     try:
@@ -899,7 +800,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict, and a capture point folding that reports an execution boundary as a gate finding.
-    # `blobs_at` is the reachable case: it runs git with a timeout and catches neither OSError nor TimeoutExpired, both of which a loaded host can produce.
+    # No call here is known to reach it, every git call going through local_review.git, which reports an OSError or a timeout as CannotRun above.
     except Exception as exc:  # noqa: BLE001
         emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)
         return EXIT_CANNOT_RUN
