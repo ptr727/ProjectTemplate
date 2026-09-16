@@ -506,8 +506,9 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
 
     Newest first rather than oldest, because a unit this repository has just authored is the one a
     carrier is about to receive unread, and that is the case the whole rule is written about. A unit
-    unread for months can wait. A unit newly carried by widening the manifest is not reached this
-    way, since the date read is the unit's own file rather than `spec/files.json`.
+    unread for months can wait. The date read is the unit's own file rather than `spec/files.json`,
+    so widening the manifest on its own lifts nothing, while declaring a section in the commit that
+    writes it lifts that unit like any other.
 
     Three answers rather than two. A commit dates the path. A path git tracks that no commit holds
     is a file this branch has created and not committed, which `tracked_files` deliberately counts
@@ -572,23 +573,25 @@ def render_sweep(
     # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
     # A digest the tree has moved past since refuses the record, which is the content having moved rather than a fault in the list, and the answer is a read at the unit's current text.
     lines.extend(f"- `{unit}={current[unit]}`" for unit in stale)
-    lines.extend(
-        [
-            "",
-            f"## {len(fresh)} unit(s) from the never-read backlog",
-            "",
-            (
-                f"No pass here has ever read these. A sweep takes {BACKLOG_SLICE} of them, ordered"
-                " by how recently the file each one sits in was last committed, so recently authored"
-                " content comes ahead of text that has sat unread for months and the backlog shrinks"
-                " by that many a round rather than waiting on a reader who volunteers. A carried file"
-                " no commit holds yet leads, being newer than any of them. The key is the file"
-                " rather than the unit, so committing to a file lifts every unread unit in it,"
-                " including the sections that commit never touched."
-            ),
-            "",
-        ]
-    )
+    lines.extend(["", f"## {len(fresh)} unit(s) from the never-read backlog", ""])
+    # The paragraph describes how a slice is chosen, so it is emitted only where there is one.
+    # Rendered unconditionally it outlives its own subject: once the backlog is worked off, every issue and every job summary would carry a description of units the document does not hold.
+    if fresh:
+        lines.extend(
+            [
+                (
+                    f"No pass here has ever read these. A sweep takes up to {BACKLOG_SLICE},"
+                    " ordered by how recently the file each one sits in was last committed, so"
+                    " recently authored content comes ahead of text that has sat unread for months"
+                    " and the backlog shrinks by that many a round rather than waiting on a reader"
+                    " who volunteers. A carried file no commit holds yet leads, being newer than any"
+                    " of them. The key is the file rather than the unit, so committing to a file"
+                    " lifts every unread unit in it, including the sections that commit never"
+                    " touched."
+                ),
+                "",
+            ]
+        )
     lines.extend(f"- `{unit}={current[unit]}`" for unit in fresh)
     lines.extend(
         [

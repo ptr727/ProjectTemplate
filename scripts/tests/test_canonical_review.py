@@ -385,6 +385,24 @@ class SweepCase(RepoCase):
             f"an uncommitted carried unit did not lead the slice, {first} did",
         )
 
+    def test_a_repository_with_no_commits_dates_nothing_and_still_sweeps(self) -> None:
+        """The third answer `newest_commit_times` documents. With no commit at all `git log` exits
+        128 rather than answering, so every path is undatable, and the order has to degrade to the
+        tie-break rather than raising out of a sweep that can otherwise run."""
+        fresh = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        run(fresh, "init", "--initial-branch=develop", ".")
+        (fresh / "spec").mkdir()
+        (fresh / "spec/files.json").write_bytes(
+            json.dumps(
+                {"baseline": [{"path": "DOC.md", "fidelity": "verbatim", "whole": True}]}
+            ).encode()
+        )
+        (fresh / "DOC.md").write_bytes(b"## Alpha\n\nbody\n")
+        run(fresh, "add", "-A")
+        times = cr.newest_commit_times(fresh, ["DOC.md"])
+        self.assertEqual(times, {"DOC.md": 0.0}, "an unborn HEAD must not raise out of the sweep")
+        self.assertEqual(cr.backlog_slice(fresh, ["DOC.md > Alpha"]), ["DOC.md > Alpha"])
+
     def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
         that a pass here has been retired from, so none of it waits for a later round.
