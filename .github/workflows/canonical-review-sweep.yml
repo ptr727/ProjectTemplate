@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 # Workflow-only group, with no -${{ github.ref }} and cancel-in-progress false, per GOVERNANCE.md "Workflow YAML Conventions".
-# The one thing a run writes is a single repository-scoped issue, so a ref-scoped group would put a dispatch and the weekly schedule in different groups, let each read no open issue, and let each file one.
+# The one thing a run writes is a single repository-scoped issue, so a ref-scoped group would separate a dispatch made from any branch other than the default from the weekly schedule, which always runs on the default, and let each read no open issue and file one.
 # Cancelling is worse than queueing here for the same reason: the closing path comments and then closes, and a cancel between the two leaves the comment posted on an issue that stays open.
 concurrency:
   group: ${{ github.workflow }}
