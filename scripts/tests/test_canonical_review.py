@@ -377,7 +377,13 @@ class SweepCase(RepoCase):
         run(self.tmp, "add", "BRAND.md")
         _, output = self.loud(["sweep"])
         body = output.split("never-read backlog")[1]
-        self.assertIn("BRAND.md > Brand=", body, "an uncommitted carried unit was not in the slice")
+        # The first bullet rather than membership, since the case is named for the position.
+        # A value merely above the fixture's own commit time would satisfy a membership assertion.
+        first = next(line for line in body.splitlines() if line.startswith("- `"))
+        self.assertTrue(
+            first.startswith("- `BRAND.md > Brand="),
+            f"an uncommitted carried unit did not lead the slice, {first} did",
+        )
 
     def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now

@@ -504,15 +504,17 @@ def cmd_status(args: argparse.Namespace) -> int:
 def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     """Each path's last commit time, which is what orders the never-read backlog.
 
-    Newest first rather than oldest, because a unit this repository has just authored, or has just
-    put under a carrier by widening the manifest, is the one a carrier is about to receive unread,
-    and that is the case the whole rule is written about. A unit unread for months can wait.
+    Newest first rather than oldest, because a unit this repository has just authored is the one a
+    carrier is about to receive unread, and that is the case the whole rule is written about. A unit
+    unread for months can wait. A unit newly carried by widening the manifest is not reached this
+    way, since the date read is the unit's own file rather than `spec/files.json`.
 
     Three answers rather than two. A commit dates the path. A path git tracks that no commit holds
     is a file this branch has created and not committed, which `tracked_files` deliberately counts
     as a unit, and it is the newest content there is rather than an undatable one, so it sorts
-    first. Only a git failure is undatable, and that sorts last rather than raising, since the
-    order is a priority rather than a claim about the content.
+    first. Anything else sorts last, which is a git failure in the ordinary case and every path in
+    a repository with no commits at all, where git exits 128 rather than answering. The order is a
+    priority rather than a claim about the content, so a uniform last is harmless there.
     """
     times: dict[str, float] = {}
     for rel in rels:
@@ -576,11 +578,13 @@ def render_sweep(
             f"## {len(fresh)} unit(s) from the never-read backlog",
             "",
             (
-                f"No pass here has ever read these. A sweep takes the {BACKLOG_SLICE} most recently"
-                " committed of them, so recently authored and newly carried content comes ahead of"
-                " text that has sat unread for months, and the backlog shrinks by that many a round"
-                " rather than waiting on a reader who volunteers. The order is by the file a unit"
-                " sits in, so a file committed since takes the slice first."
+                f"No pass here has ever read these. A sweep takes {BACKLOG_SLICE} of them, ordered"
+                " by how recently the file each one sits in was last committed, so recently authored"
+                " content comes ahead of text that has sat unread for months and the backlog shrinks"
+                " by that many a round rather than waiting on a reader who volunteers. A carried file"
+                " no commit holds yet leads, being newer than any of them. The key is the file"
+                " rather than the unit, so committing to a file lifts every unread unit in it,"
+                " including the sections that commit never touched."
             ),
             "",
         ]
