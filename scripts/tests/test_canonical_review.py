@@ -514,8 +514,8 @@ class SweepCase(RepoCase):
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         _, output = self.loud(["sweep"])
         line = (
-            "python3 scripts/canonical_review.py record --reviewer agent-skill"
-            " --target develop --unit '<key>=<digest>'"
+            "python3 scripts/canonical_review.py record --reviewer agent-skill --target develop"
+            " --findings <count> --unit '<key>=<digest>'"
         )
         self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
 

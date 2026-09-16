@@ -352,7 +352,7 @@ def build_units(
             units.update(found)
             continue
         # Case-folded, matching spec/audit.py's own heading match, so one re-cased declaration cannot make a section silently stop being a unit while the fidelity check still hashes it.
-        # The key is the document's heading rather than the manifest's spelling, so what `check` prints is what the file holds.
+        # The key is the document's heading rather than the manifest's spelling, so what `sweep` prints is what the file holds.
         by_heading = {
             key.split(SECTION_DELIM, 1)[1].strip().lower(): key
             for key in found
@@ -620,7 +620,10 @@ def render_sweep(
                 "Record each pass at the digest above, which is the text that was read:",
                 "",
                 "```sh",
-                "python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'",
+                (
+                    "python3 scripts/canonical_review.py record --reviewer agent-skill"
+                    " --target develop --findings <count> --unit '<key>=<digest>'"
+                ),
                 "```",
             ]
         )

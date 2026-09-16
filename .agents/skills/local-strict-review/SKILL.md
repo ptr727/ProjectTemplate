@@ -115,7 +115,7 @@ Bounds: read-only. Report a rule that looks incomplete rather than guessing at w
 python3 scripts/canonical_review.py sweep     # the units it asks for this round, with their digests
 # exit 1 where it named any, which is the sweep working rather than the command failing
 # run the pass above over each unit it named, then, per unit:
-python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'
+python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings <count> --unit '<key>=<digest>'
 ```
 
 These run in the authoring repository itself, which is the only repository this pass ever runs in, so the engine path is the plain one and there is no downstream side needing the `<hub-checkout>/` form the pass above shows for its own reach. Both resolve the repository from the working directory rather than from where the script sits, so the directory a command runs in is what decides which tree it measures, while the unit model and the manifest reader come from the checkout the script itself lives in. Running one checkout's copy against another's tree therefore measures the second tree by the first's rules, so run them in the tree being measured. `record` additionally stamps each pass with the merge-base against `--target`, which is provenance rather than coverage. The line above names it rather than leaning on the default, since a sweep's own branch is based on `develop`, and a `main`-based branch passes `--target main` instead.
