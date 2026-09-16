@@ -248,7 +248,7 @@ def parse_manifest(rel: str, data: bytes) -> dict[str, Any]:
 
 
 def tracked_files(root: Path) -> set[str]:
-    """Every path git tracks in this working tree.
+    """Every path git tracks in this working tree, plus every untracked one it does not ignore.
 
     Git's view rather than the filesystem's, because they disagree in ways that matter here. A
     filesystem walk of a carried tree picks up whatever happens to be sitting in it, so a
