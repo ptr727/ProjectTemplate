@@ -103,8 +103,8 @@ jobs:
           elif [ -n "$number" ]; then
             # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
             # A unit that moves again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "No carried canonical unit has moved past the pass that read it, read on develop at $head_sha. The never-read backlog is a separate count this says nothing about, rendered by \`python3 scripts/canonical_review.py report\`. A unit that moves past its pass again is filed as a new sweep issue."
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit has been read at its current text, measured on develop at $head_sha. A unit that moves past its pass is filed as a new sweep issue."
             gh issue close "$number" --repo "$GITHUB_REPOSITORY"
           else
-            echo "No unit has moved past its pass, and no open $LABEL issue to close."
+            echo "No carried canonical unit owes a read, and no open $LABEL issue to close."
           fi

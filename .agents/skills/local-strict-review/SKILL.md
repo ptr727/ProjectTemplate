@@ -13,8 +13,8 @@ description: >-
   local, pre-PR moment. Once a pull request exists, `pr-review-conduct` and `drive-pr` own
   triaging and disposing of what a PR-hosted reviewer finds. Also triggers whenever the periodic
   canonical sweep is worked, which names the carried units whose text has moved past the pass
-  that read them, because that content reaches a reviewer whole only when a repository carries
-  it for the first time, and a pass reading each named unit's whole text is what moves that read
+  that read them together with a bounded slice of those nothing has read at all, because that
+  content reaches a reviewer whole only when a repository carries it for the first time, and a pass reading each named unit's whole text is what moves that read
   into the repository that can act on what it finds. Editing such content owes no pass of its
   own, so a change that moves a unit pushes and merges like any other.
 ---
@@ -124,7 +124,7 @@ The digest is bound to the read for the same reason `--expect-digest` is above: 
 
 **The ledger this writes is tracked content, so the commit has to carry it**, where the receipt the pass above writes never can be. Record each unit, commit the ledger together with whatever the passes had you fix, then read the digest, run the diff pass over that commit, record its receipt, and push. That is why the two records sit on opposite sides of the one commit.
 
-**A unit nothing has read here yet is not on the sweep's list.** `sweep` names the units whose text has moved past a pass, and everything never read here is a burn-down entry `canonical_review.py report` renders instead. Working one of those off is worthwhile, and it is its own change rather than something the sweep asked for.
+**A unit nothing has read here yet reaches the list a slice at a time.** `sweep` names every unit whose text has moved past a pass, and beside them a bounded number of the never-read ones, newest-committed first, so a unit this repository has just authored or newly carried is read within a round or two rather than waiting behind the whole backlog. `canonical_review.py report` renders that backlog in full, and working more of it off than the sweep asked for is worthwhile and is its own change.
 
 ## Disposing of Findings
 

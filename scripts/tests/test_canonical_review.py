@@ -271,8 +271,8 @@ class ManifestCase(RepoCase):
 
     def test_an_ignored_file_in_a_carried_tree_is_not_canonical_content(self) -> None:
         """A filesystem walk took whatever sat in the tree. The undecodable case is the loud one:
-        it takes every subcommand to exit 2, which blocks every push from that clone until someone
-        finds the file, and no repository carries it."""
+        it takes every subcommand to exit 2, so the local block, CI, and the sweep all stop until
+        someone finds the file, and no repository carries it."""
         for tree in (cr.GENERATED_SKILLS, cr.AUTHORED_SKILLS):
             (self.tmp / tree / "demo" / ".DS_Store").write_bytes(b"\xff\xfe\x00rubbish")
         units = self.units()
@@ -280,8 +280,8 @@ class ManifestCase(RepoCase):
         self.assertIn(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md > Use It", units)
 
     def test_a_new_unstaged_carried_file_is_still_a_unit(self) -> None:
-        """It is content a carrier will receive, so dropping it would narrow the gate exactly where
-        a new canonical is added."""
+        """It is content a carrier will receive, so dropping it would narrow the unit set exactly
+        where a new canonical is added."""
         self.write(f"{cr.GENERATED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n")
         self.write(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md", "# F\n\n## One\n\na\n")
         self.assertIn(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md > One", self.units())
@@ -324,24 +324,68 @@ class ManifestCase(RepoCase):
 
 
 class SweepCase(RepoCase):
-    """The weekly sweep's work list, which is every unit whose text moved past the pass that read it."""
+    """The weekly sweep's work list: every stale unit, plus a bounded slice of the never-read backlog."""
 
-    def test_a_never_read_unit_is_not_this_sweep_s_work(self) -> None:
-        """No unit here has ever been read, and the sweep is over text that moved past a pass rather
-        than over that backlog, which is the whole difference from the per-push gate it replaced."""
+    def cover_all(self) -> None:
+        """Record a pass over every unit, so a case can start from a tree the sweep asks nothing of."""
+        for unit in self.units():
+            self.record(unit)
+
+    def test_a_tree_with_every_unit_covered_asks_for_nothing(self) -> None:
+        """Which is what closes the sweep's issue, and what makes the exit code worth reading."""
+        self.cover_all()
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_COVERED)
-        self.assertIn("0 unit(s) to read", output)
-        self.assertNotIn("DOC.md > Alpha=", output)
-        self.assertIn("never read here", output)
+        self.assertIn("0 unit(s) whose text moved past its pass", output)
+        self.assertIn("0 unit(s) from the never-read backlog", output)
+
+    def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
+        """The case the retired gate refused: a unit nothing here has read is one a carrier receives
+        unread, so leaving the whole backlog out left newly authored content with no reader at all."""
+        code, output = self.loud(["sweep"])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn(f"{cr.BACKLOG_SLICE} unit(s) from the never-read backlog", output)
+        listed = [u for u in self.units() if f"- `{u}=" in output]
+        self.assertEqual(len(listed), cr.BACKLOG_SLICE, "the slice is bounded by BACKLOG_SLICE")
+
+    def test_the_backlog_slice_takes_the_newest_committed_first(self) -> None:
+        """A unit just authored here is the one a carrier is about to receive unread, so it comes
+        ahead of a unit that has been unread for months."""
+        self.write("LATE.md", "## Late\n\nbody\n")
+        spec = self.manifest()
+        spec["baseline"].append({"path": "LATE.md", "fidelity": "verbatim", "whole": True})
+        self.write("spec/files.json", json.dumps(spec, indent=2) + "\n")
+        run(self.tmp, "add", "-A")
+        # An explicit committer date, since `git log --format=%ct` resolves to the second.
+        # The fixture's own commit lands in that same second, so the tie-break would decide this case instead of the order under test.
+        prev = os.environ.get("GIT_COMMITTER_DATE")
+        os.environ["GIT_COMMITTER_DATE"] = "2099-01-01T00:00:00+00:00"
+        self.addCleanup(self.restore_env, "GIT_COMMITTER_DATE", prev)
+        run(self.tmp, "commit", "-m", "carry a new canonical")
+        _, output = self.loud(["sweep"])
+        body = output.split("never-read backlog")[1]
+        self.assertIn("LATE.md > Late=", body, "the newest carried unit was not in the slice")
+
+    def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
+        """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
+        that a pass here has been retired from, so none of it waits for a later round."""
+        self.cover_all()
+        for unit, body in (("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nedited\n"),):
+            self.write(unit, body)
+        self.write(
+            "SECT.md", "intro\n\n## Carried\n\nx\n\n## Also Carried\n\ny\n\n## Hub Only\n\nc\n"
+        )
+        code, output = self.loud(["sweep"])
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
+        self.assertIn("4 unit(s) whose text moved past its pass", output)
 
     def test_editing_a_unit_past_its_pass_puts_it_on_the_list(self) -> None:
         """The sweep watched working: this is the case the whole mechanism exists to produce."""
-        self.record("DOC.md > Alpha")
+        self.cover_all()
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
-        self.assertIn("1 unit(s) to read", output)
+        self.assertIn("1 unit(s) whose text moved past its pass", output)
         self.assertIn(
             f"DOC.md > Alpha={self.units()['DOC.md > Alpha']}",
             output,
@@ -350,8 +394,7 @@ class SweepCase(RepoCase):
 
     def test_editing_a_neighbour_leaves_a_covered_unit_off_the_list(self) -> None:
         """The read of this section is still a read of these bytes, which is what keeps it usable."""
-        self.record("DOC.md > Alpha")
-        self.record("DOC.md > Beta")
+        self.cover_all()
         self.write("DOC.md", "intro\n\n## Alpha\n\na body\n\n## Beta\n\nb body, edited\n")
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
@@ -359,24 +402,22 @@ class SweepCase(RepoCase):
         self.assertNotIn("DOC.md > Alpha=", output)
 
     def test_a_fresh_pass_takes_the_unit_off_the_list(self) -> None:
-        """Which is what closes the sweep's issue, and what makes the exit code worth reading."""
-        self.record("DOC.md > Alpha")
+        self.cover_all()
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         self.assertEqual(self.quiet(["sweep"]), cr.EXIT_NOT_COVERED)
         self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
         self.assertEqual(self.quiet(["sweep"]), cr.EXIT_COVERED)
 
     def test_a_renamed_section_is_reported_as_a_pass_with_no_unit(self) -> None:
-        """A rename moves the text under a key nothing has read, so the old key holds a pass with no
-        unit and the new key joins the never-read backlog. Neither is stale, so the sweep would list
-        nothing at all and the rename would leave its scope without saying so."""
-        self.record("DOC.md > Alpha")
+        """A rename leaves the old key holding a pass with no unit. The new key joins the backlog,
+        so the slice picks it up, and the orphan is reported without being counted as work."""
+        self.cover_all()
         self.write("DOC.md", "intro\n\n## Renamed\n\na body\n\n## Beta\n\nb body\n")
         code, output = self.loud(["sweep"])
-        self.assertEqual(code, cr.EXIT_COVERED, "a rename is not work the sweep gates on")
-        self.assertIn("0 unit(s) to read", output)
+        self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn("1 pass(es) with no unit", output)
         self.assertIn("DOC.md > Alpha", output)
+        self.assertIn("DOC.md > Renamed=", output, "the renamed section is read under its new key")
 
     def test_a_tree_holding_every_recorded_unit_reports_no_orphan(self) -> None:
         """The heading is absent rather than reading zero, so a reader never scans a list that is
@@ -670,12 +711,12 @@ class ReportCase(RepoCase):
         self.assertEqual(untracked, [f"?? {cr.LEDGER}"])
 
     def test_the_report_describes_the_tree_it_is_rendered_from(self) -> None:
-        """A deleted unit changes no recorded pass, so the sweep stays clean, and a rendering
-        made after the deletion no longer counts the unit that is gone."""
+        """A deleted unit changes no recorded pass, and a rendering made after the deletion no
+        longer counts the unit that is gone."""
         _, before = self.loud(["report"])
         self.assertIn("**Beta** -", before)
         self.write("DOC.md", "intro\n\n## Alpha\n\na body\n")
-        self.assertEqual(self.quiet(["sweep"]), cr.EXIT_COVERED, "the premise moved")
+        self.assertEqual(cr.read_ledger(self.tmp), {}, "the premise moved: a pass was recorded")
         _, after = self.loud(["report"])
         self.assertNotIn("**Beta** -", after)
 

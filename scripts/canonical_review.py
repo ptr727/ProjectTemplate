@@ -27,13 +27,15 @@ no longer the text a carrier will receive. Editing a neighbouring section does n
 reviewer's read of this one is still a read of these bytes.
 
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
-measured the local passes a push owed as a large share of what a pull request spent, and what they
-returned was not recoverable from the record, so the maintainer's call on that evidence
+measured the local passes a push owed as a large share of what a pull request spent, while what they
+returned went unclassified, so the two were never weighed against each other and the call on that
+evidence
 (ptr727/ProjectTemplate#1631) was to sweep the read rather than gate it. Nothing here refuses a
 push or a pull request any more.
-`sweep` names the units whose text has moved past the pass that read them, which is the work one
-scheduled run files and an agent session performs, and `report` renders the never-read backlog
-#1138 records beside it, to standard output rather than into the tree, for the reason
+`sweep` names the units whose text has moved past the pass that read them, and beside them a
+bounded slice of the backlog #1138 records, newest-committed first so a unit just authored here is
+read without waiting behind every older one. That is the work one scheduled run files and an agent
+session performs, and `report` renders the whole backlog, to standard output rather than into the tree, for the reason
 `scripts/README.md` gives (ptr727/ProjectTemplate#1268).
 
 The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an exit code from
@@ -110,6 +112,10 @@ PREAMBLE = "(preamble)"
 # Keying the unit on the generated path would name a file no fix may edit.
 GENERATED_SKILLS = build_dist.GITHUB_SKILLS.relative_to(build_dist.ROOT).as_posix()
 AUTHORED_SKILLS = build_dist.SKILLS_SRC.relative_to(build_dist.ROOT).as_posix()
+
+# How many never-read units one sweep asks for beside the stale ones.
+# A bound rather than the whole backlog, since filing every unread unit as one week's work files a list nobody starts, and nothing at all leaves a newly authored unit with no reader, which is the case the rule is written about.
+BACKLOG_SLICE = 5
 
 # What `record` accepts as a reviewer, which is `local_review.py`'s vocabulary for the same reason the exit codes are: a pass over a unit is performed by the same kinds of reviewer as a pass over a branch diff, and two spellings of one reviewer make the two records impossible to read together.
 REVIEWERS = local_review.BACKENDS
@@ -393,7 +399,7 @@ def read_ledger(root: Path) -> dict[str, dict[str, Any]]:
     """The recorded passes, keyed by unit.
 
     An absent ledger is an empty record rather than a boundary, since the first repository to run
-    this has nothing recorded yet and refusing there would make the gate impossible to adopt. An
+    this has nothing recorded yet and refusing there would make the record impossible to adopt. An
     unreadable or malformed one is a boundary, because it is a record that exists and cannot be
     read, and treating that as empty would report every unit as never reviewed.
     """
@@ -495,33 +501,81 @@ def cmd_status(args: argparse.Namespace) -> int:
     return EXIT_COVERED
 
 
-def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> tuple[str, int]:
+def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
+    """Each path's last commit time, which is what orders the never-read backlog.
+
+    Newest first rather than oldest, because a unit this repository has just authored, or has just
+    put under a carrier by widening the manifest, is the one a carrier is about to receive unread,
+    and that is the case the whole rule is written about. A unit unread for months can wait another
+    week. A path git cannot date sorts last rather than raising, since an undatable file is still a
+    unit and this order is a priority rather than a claim about the content.
+    """
+    times: dict[str, float] = {}
+    for rel in rels:
+        try:
+            stamp = git("log", "-1", "--format=%ct", "--", rel, root=root).strip()
+        except CannotRun:
+            stamp = ""
+        times[rel] = float(stamp) if stamp else 0.0
+    return times
+
+
+def backlog_slice(root: Path, never: list[str]) -> list[str]:
+    """The never-read units this sweep asks for, newest-committed first and bounded."""
+    if not never:
+        return []
+    times = newest_commit_times(root, sorted({unit.split(SECTION_DELIM, 1)[0] for unit in never}))
+    # The key breaks a tie, so two units in one file come out in a stable order and a run repeats the previous run's list until the passes land.
+    ordered = sorted(never, key=lambda unit: (-times[unit.split(SECTION_DELIM, 1)[0]], unit))
+    return ordered[:BACKLOG_SLICE]
+
+
+def render_sweep(
+    root: Path, current: dict[str, str], ledger: dict[str, dict[str, Any]]
+) -> tuple[str, int]:
     """The sweep's work list and how many units are on it, as Markdown for an issue body.
 
-    Stale units alone, never the never-read ones. A stale unit is text a carrier is receiving now
-    that no pass here has read, where a never-read one is the backlog ptr727/ProjectTemplate#1138
-    records, and folding the two together would file the whole of that history as this week's work.
+    Two lists rather than one. A stale unit is text a carrier is receiving now that no pass here
+    has read, and every one of those is asked for. A never-read unit is the backlog
+    ptr727/ProjectTemplate#1138 records, and a bounded slice of it is asked for as well, because
+    a unit nothing has ever read here includes the one this repository authored last week.
     """
     states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}
     stale = sorted(unit for unit, state in states.items() if state == "stale")
-    never = sum(1 for state in states.values() if state == "never")
+    never = sorted(unit for unit, state in states.items() if state == "never")
+    fresh = backlog_slice(root, never)
     lines = [
         "# Canonical content review sweep",
         "",
         (
             "Filed by `.github/workflows/canonical-review-sweep.yml` from"
-            " `python3 scripts/canonical_review.py sweep`. The units below have moved past the pass"
-            " that read them, so a repository carrying this content is receiving text nothing has"
-            ' read whole here. The `local-strict-review` Skill\'s "The Carried-Content Sweep" says'
-            " how each pass is run and what its findings are owed."
+            " `python3 scripts/canonical_review.py sweep`. Every unit below is text a repository"
+            " carrying this content receives without a pass here having read it whole. The"
+            ' `local-strict-review` Skill\'s "The Carried-Content Sweep" says how each pass is run'
+            " and what its findings are owed."
         ),
         "",
-        f"## {len(stale)} unit(s) to read",
+        f"## {len(stale)} unit(s) whose text moved past its pass",
         "",
     ]
     # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
     # A digest the tree has moved past since refuses the record, which is the content having moved rather than a fault in the list, and the answer is a read at the unit's current text.
     lines.extend(f"- `{unit}={current[unit]}`" for unit in stale)
+    lines.extend(
+        [
+            "",
+            f"## {len(fresh)} unit(s) from the never-read backlog",
+            "",
+            (
+                f"No pass here has ever read these. A sweep takes the {BACKLOG_SLICE} most recently"
+                " committed of them, so a unit this repository has just authored or newly carried is"
+                " read within a round or two of landing, and the backlog shrinks by that many a"
+                " round rather than waiting on a reader who volunteers."
+            ),
+            "",
+        ]
+    )
+    lines.extend(f"- `{unit}={current[unit]}`" for unit in fresh)
     lines.extend(
         [
             "",
@@ -532,9 +586,8 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
             "```",
             "",
             (
-                f"{len(current)} units carried, {never} of them never read here, which is the"
-                " burn-down `python3 scripts/canonical_review.py report` renders rather than this"
-                " sweep's work."
+                f"{len(current)} units carried, {len(never)} of them never read here, which"
+                " `python3 scripts/canonical_review.py report` renders in full."
             ),
             "",
         ]
@@ -550,24 +603,24 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
                 "",
                 (
                     "Recorded against a unit this tree no longer holds, so the section was renamed"
-                    " or removed after the pass. A renamed one is read again under its new key, which"
-                    " the never-read count above carries and `report` renders, rather than this list."
+                    " or removed after the pass. A renamed one is read again under its new key,"
+                    " which joins the never-read backlog above rather than this list."
                 ),
                 "",
             ]
         )
         lines.extend(f"- `{unit}`" for unit in orphans)
         lines.append("")
-    return "\n".join(lines), len(stale)
+    return "\n".join(lines), len(stale) + len(fresh)
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Render the work list, and report in the exit code whether it holds anything."""
     root = local_review.repo_root()
     current, _ = units(root)
-    body, count = render_sweep(current, read_ledger(root))
+    body, count = render_sweep(root, current, read_ledger(root))
     emit(body)
-    # 1 rather than 0 where a unit is stale, which is how the workflow tells a sweep with work from one without under `set -Eeuo pipefail`.
+    # 1 rather than 0 where the list holds anything, which is how the workflow tells a sweep with work from one without under `set -Eeuo pipefail`.
     return EXIT_NOT_COVERED if count else EXIT_COVERED
 
 
