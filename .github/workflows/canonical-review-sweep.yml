@@ -37,6 +37,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
+          # Full history, because the backlog slice orders never-read units by their file's last commit and a shallow clone dates every path to the tip commit, which would collapse that order to the unit key and file the alphabet's first units every week.
+          fetch-depth: 0
           # The job holds issues: write, and checkout persists that token in .git/config by default, where nothing here needs git authentication: every git call here reads local state, in the step below and inside the engines alike, and every gh call takes GH_TOKEN.
           persist-credentials: false
 
@@ -51,29 +53,29 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          # The engine's three-valued exit is read rather than folded: 0 is nothing stale, 1 is work to file, and 2 is the sweep never having run, which is not a verdict either way.
+          # The engine's three-valued exit is read rather than folded: 0 is no unit owing a read, 1 is work to file, and 2 is the sweep never having run, which is not a verdict either way.
           status=0
           python3 scripts/canonical_review.py sweep > "$RUNNER_TEMP/sweep.md" || status=$?
           if [ "$status" -gt 1 ]; then
             echo "::error::canonical_review.py sweep could not run, so this run says nothing about coverage"
             exit 1
           fi
-          echo "stale=$status" >> "$GITHUB_OUTPUT"
+          echo "owed=$status" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/sweep.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: File or close the sweep issue step
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          STALE: ${{ steps.sweep.outputs.stale }}
+          OWED: ${{ steps.sweep.outputs.owed }}
           LABEL: canonical-sweep
           TITLE: Canonical content review sweep
         run: |
           set -Eeuo pipefail
           # The commit this run measured, read from the checkout rather than from GITHUB_SHA, which on a scheduled event names the default branch's head and not the develop tip checked out above.
           head_sha="$(git rev-parse HEAD)"
-          # A renamed or removed section leaves its pass naming a unit the tree no longer holds, and its text under a key nothing has read.
-          # Neither is stale, so the work list below is empty and the run would otherwise say nothing at all, which is the one way a rename leaves the sweep's scope in silence.
+          # A renamed or removed section leaves its pass naming a unit the tree no longer holds.
+          # The renamed text is read again under its new key, which the work list reaches, where the stranded pass is not.
           # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
           # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted: a renamed one has to stop the step rather than stop the warning.
           orphans="$(python3 scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
@@ -94,7 +96,7 @@ jobs:
             exit 1
           fi
           number="${titled[0]-}"
-          if [ "$STALE" = 1 ]; then
+          if [ "$OWED" = 1 ]; then
             if [ -n "$number" ]; then
               gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/sweep.md"
             else

@@ -81,7 +81,7 @@ Every subcommand here, `run --backend <name>` included, runs with the repository
 
 `--expect-digest` is required rather than optional, and binding it to the earlier read is the whole point. A format-on-save or a hook autofix between the review and the record would otherwise be stamped as reviewed by a pass that never saw it. A refusal there is the content having moved, so the answer is another pass over the current content rather than another read of the digest.
 
-Record the pass whatever it found, including nothing. The key covers the net content the branch introduces against its target rather than the commit series, so an interactive rebase that leaves the tree alone keeps the receipt valid, and changing one byte invalidates it.
+Record the pass whatever it found, including nothing. The key covers the net content the branch introduces against its target rather than the commit series, so a rebase that leaves the tree alone keeps the receipt valid while the fork point holds, and changing one byte invalidates it. The key holds that fork point too, so rebasing onto a target that has moved retires the receipt although no file changed.
 
 **Why the commit comes first**, rather than being an ordering that could equally run the other way. A push delivers the commit, and the hook's tree check refuses a push whose tracked content differs from HEAD, so the record has to describe what HEAD holds. A commit that leaves the tree alone usually does not move the receipt's key, so diligence done before it still describes the same content, and a commit putting a path back to its base state drops it from the change set and does move it. Two reasons make the order matter anyway: staging a modified tracked file moves the key even though its content did not change, and a commit made after the record can carry content the pass never read. Reviewing earlier than this is still worth doing as ordinary diligence, and it does not substitute for the recorded pass: the digest read and the record bracket a window in which the tree holds still, and a commit inside that window ends it.
 
@@ -91,7 +91,7 @@ The engine is hub-hosted per `GOVERNANCE.md` "Hub-Hosted Tooling", so a downstre
 
 A second pass under the same rule, run in the repository that authors canonical content other repositories carry, which in this fleet is the hub. `GOVERNANCE.md` "Verification Discipline" states the rule and why the ordering it corrects is a defect, and is not restated here. What it requires of a run is below.
 
-**No change owes this pass.** Editing a carried unit refuses no push and fails no pull request. The passes are worked instead from the sweep's own issue, which a scheduled workflow in the authoring repository files with every unit whose text has moved past the pass that read it, and working that issue is the moment this section is for. What it produces is an ordinary pull request, carrying the ledger and whatever the passes had you fix, driven the ordinary way.
+**No change owes this pass.** Editing a carried unit refuses no push and fails no pull request. The passes are worked instead from the sweep's own issue, which a scheduled workflow in the authoring repository files with every unit that owes a read, and working that issue is the moment this section is for. What it produces is an ordinary pull request, carrying the ledger and whatever the passes had you fix, driven the ordinary way.
 
 **The unit is what a reviewer reads whole**, and `spec/files.json` rather than the document decides which, down to which files carry units at all. `canonical_review.py list` names the whole set and is the authority on it, so the rules are not paraphrased here, where a paraphrase can only drift from them. In the ordinary case a unit is one level-two section of a carried Markdown canonical, and `sweep` names each one it wants exactly as `record` takes it. The pass reads that unit's whole current text rather than the diff that moved it, because reproducing the carrier's read is the entire point, and a diff with surrounding context is a different read the pass above has already done.
 
@@ -112,8 +112,8 @@ Bounds: read-only. Report a rule that looks incomplete rather than guessing at w
 ```
 
 ```sh
-python3 scripts/canonical_review.py sweep     # every unit whose text moved past its pass, with its digest
-# exit 1 where it named one, which is the sweep working rather than the command failing
+python3 scripts/canonical_review.py sweep     # every unit owed a read, with its digest
+# exit 1 where it named any, which is the sweep working rather than the command failing
 # run the pass above over each unit it named, then, per unit:
 python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
 ```

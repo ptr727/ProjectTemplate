@@ -289,7 +289,7 @@ Records and verifies that a full-content review pass covered each unit of the ca
 ```shell
 python3 scripts/canonical_review.py list      # every unit key and its digest. 0 either way
 python3 scripts/canonical_review.py status    # covered, stale, or never read here, as JSON. 0 either way
-python3 scripts/canonical_review.py sweep     # 0 nothing stale, 1 a unit moved past its pass
+python3 scripts/canonical_review.py sweep     # 0 nothing owed, 1 a unit owes a read
 python3 scripts/canonical_review.py record --reviewer agent-skill --findings 2 --unit '<key>=<digest>'
 python3 scripts/canonical_review.py report    # renders the burn-down from the ledger to standard output
 ```

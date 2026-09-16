@@ -45,7 +45,7 @@ itself not having run.
 Usage:
     python3 scripts/canonical_review.py list                 every unit and its digest, as JSON
     python3 scripts/canonical_review.py status               what is covered, stale, or never read
-    python3 scripts/canonical_review.py sweep                the units whose text moved past their pass
+    python3 scripts/canonical_review.py sweep                every unit owed a read, and how many
     python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'
     python3 scripts/canonical_review.py report               render the burn-down to standard output
 """
@@ -513,7 +513,10 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     times: dict[str, float] = {}
     for rel in rels:
         try:
-            stamp = git("log", "-1", "--format=%ct", "--", rel, root=root).strip()
+            # --literal-pathspecs, since a path holding a glob character would otherwise be matched as a pattern and dated from another file, and one opening with a colon would parse as pathspec magic.
+            stamp = git(
+                "--literal-pathspecs", "log", "-1", "--format=%ct", "--", rel, root=root
+            ).strip()
         except CannotRun:
             stamp = ""
         times[rel] = float(stamp) if stamp else 0.0
@@ -525,7 +528,7 @@ def backlog_slice(root: Path, never: list[str]) -> list[str]:
     if not never:
         return []
     times = newest_commit_times(root, sorted({unit.split(SECTION_DELIM, 1)[0] for unit in never}))
-    # The key breaks a tie, so two units in one file come out in a stable order and a run repeats the previous run's list until the passes land.
+    # The key breaks a tie, so two units in one file come out in a stable order and one tree state always renders one list.
     ordered = sorted(never, key=lambda unit: (-times[unit.split(SECTION_DELIM, 1)[0]], unit))
     return ordered[:BACKLOG_SLICE]
 
@@ -593,7 +596,7 @@ def render_sweep(
         ]
     )
     # A pass recorded against a unit the tree no longer holds, which a renamed or deleted section produces.
-    # Reported here rather than left to `status` alone, because a rename moves the text under a key nothing has read, so it leaves this list silently: the old key is a pass with no unit and the new one joins the never-read backlog.
+    # Reported here rather than left to `status` alone, because no pass closes an orphan: the new key is read under the backlog above, and the old one stays recorded against a unit the tree no longer holds.
     # Not counted as work, since deciding that a section is gone rather than moved is a reader's call and no pass closes it.
     orphans = sorted(set(ledger) - set(current))
     if orphans:
@@ -819,7 +822,7 @@ def main(argv: list[str] | None = None) -> int:
     p_status.set_defaults(handler=cmd_status)
 
     p_sweep = sub.add_parser(
-        "sweep", help="exit 0 nothing stale, 1 a unit moved past its pass, 2 could not run"
+        "sweep", help="exit 0 nothing owed, 1 a unit owes a read, 2 could not run"
     )
     p_sweep.set_defaults(handler=cmd_sweep)
 

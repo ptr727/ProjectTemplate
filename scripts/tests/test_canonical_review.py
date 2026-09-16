@@ -368,16 +368,31 @@ class SweepCase(RepoCase):
 
     def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
-        that a pass here has been retired from, so none of it waits for a later round."""
+        that a pass here has been retired from, so none of it waits for a later round.
+
+        More stale units than `BACKLOG_SLICE`, deliberately: with fewer, applying the bound to this
+        list as well would leave the case green and the property it is named for unbound.
+        """
         self.cover_all()
-        for unit, body in (("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nedited\n"),):
-            self.write(unit, body)
+        self.write("DOC.md", "edited\n\n## Alpha\n\nedited\n\n## Beta\n\nedited\n")
         self.write(
-            "SECT.md", "intro\n\n## Carried\n\nx\n\n## Also Carried\n\ny\n\n## Hub Only\n\nc\n"
+            "SECT.md", "edited\n\n## Carried\n\nx\n\n## Also Carried\n\ny\n\n## Hub Only\n\nc\n"
+        )
+        self.write("CONF.json", '{"a": 2}\n')
+        self.write(f"{cr.GENERATED_SKILLS}/demo/SKILL.md", "# Demo\n\n## Use It\n\nedited\n")
+        self.write(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md", "# Demo\n\n## Use It\n\nedited\n")
+        ledger = cr.read_ledger(self.tmp)
+        stale = sum(
+            1
+            for unit, digest in self.units().items()
+            if cr.state_of(unit, digest, ledger) == "stale"
+        )
+        self.assertGreater(
+            stale, cr.BACKLOG_SLICE, "the case needs more stale units than the bound"
         )
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
-        self.assertIn("4 unit(s) whose text moved past its pass", output)
+        self.assertIn(f"{stale} unit(s) whose text moved past its pass", output)
 
     def test_editing_a_unit_past_its_pass_puts_it_on_the_list(self) -> None:
         """The sweep watched working: this is the case the whole mechanism exists to produce."""
