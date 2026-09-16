@@ -3,16 +3,20 @@ name: Sweep canonical review coverage action
 # The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule, which no push and no pull request is gated on any more.
 # This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units owing one and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
-# The issue's label comes from the fleet label set in repo-config/labels.json, so this run fails loudly on a repository where repo-config/configure.sh has not applied that set yet, rather than filing an unlabeled issue no later run would find.
+# The issue's label comes from the fleet label set in repo-config/labels.json, so on a repository where repo-config/configure.sh has not applied that set the first run that finds work fails at gh issue create rather than filing an unlabeled issue no later run would find.
+# A run that finds no work says nothing about the label either way, since the listing below returns an empty set for a label that does not exist.
 
 on:
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
 
+# Workflow-only group, with no -${{ github.ref }} and cancel-in-progress false, per GOVERNANCE.md "Workflow YAML Conventions".
+# The one thing a run writes is a single repository-scoped issue, so a ref-scoped group would put a dispatch and the weekly schedule in different groups, let each read no open issue, and let each file one.
+# Cancelling is worse than queueing here for the same reason: the closing path comments and then closes, and a cancel between the two leaves the comment posted on an issue that stays open.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -63,21 +67,22 @@ jobs:
           TITLE: Canonical content review sweep
         run: |
           set -Eeuo pipefail
+          # The commit this run measured, read from the checkout rather than from GITHUB_SHA, which on a scheduled event names the default branch's head and not the develop tip checked out above.
+          head_sha="$(git rev-parse HEAD)"
           # Every number a write below targets is read here, in this run, rather than constructed.
-          # Redirected to a file rather than read through a process substitution, which mapfile reports success for whatever the producer did, so a failed listing would read as no open issue and file a second one beside the first.
+          # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did, so a failed listing or filter would read as no open issue and file a second one beside the first.
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --json number,title > "$RUNNER_TEMP/issues.json"
-          # Matched on the title this workflow files under as well as on the label, so an issue a human labeled keeps its body instead of being overwritten with the work list.
-          mapfile -t open_issues < <(jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' "$RUNNER_TEMP/issues.json")
-          mapfile -t other_issues < <(jq -r --arg t "$TITLE" '.[] | select(.title != $t) | .number' "$RUNNER_TEMP/issues.json")
-          if [ -n "${other_issues[0]-}" ]; then
-            echo "::warning::open $LABEL issue(s) this workflow did not file, left untouched: ${other_issues[*]}"
-          fi
-          # One open issue per repository is the invariant the label carries, and picking one of several would report a sweep that read a list nobody wrote.
-          if [ "${#open_issues[@]}" -gt 1 ]; then
-            echo "::error::open $LABEL issues (${open_issues[*]}) leave which one this sweep owns undecided, and closing the stale ones by hand is what settles it"
+          jq -r '.[].number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/labeled.txt"
+          jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/titled.txt"
+          mapfile -t labeled < "$RUNNER_TEMP/labeled.txt"
+          mapfile -t titled < "$RUNNER_TEMP/titled.txt"
+          # The label carries one open issue per repository, so a second one, or a single one carrying a title this workflow never files under, is a state to report rather than one to pick from.
+          # Refusing on the second shape is what keeps an issue a human labeled from having its body replaced with the work list.
+          if [ "${#labeled[@]}" -gt 1 ] || [ "${#labeled[@]}" -ne "${#titled[@]}" ]; then
+            echo "::error::open $LABEL issue(s) ${labeled[*]} are not the single issue titled '$TITLE' that this workflow files, so which one it owns is undecided and a hand edit is what settles it"
             exit 1
           fi
-          number="${open_issues[0]-}"
+          number="${titled[0]-}"
           if [ "$STALE" = 1 ]; then
             if [ -n "$number" ]; then
               gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/sweep.md"
@@ -87,7 +92,7 @@ jobs:
           elif [ -n "$number" ]; then
             # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
             # A unit that moves again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit is covered by a recorded pass at its current text, read on develop at $GITHUB_SHA. A unit that moves past its pass again is filed as a new sweep issue."
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit is covered by a recorded pass at its current text, read on develop at $head_sha. A unit that moves past its pass again is filed as a new sweep issue."
             gh issue close "$number" --repo "$GITHUB_REPOSITORY"
           else
             echo "No unit has moved past its pass, and no open $LABEL issue to close."

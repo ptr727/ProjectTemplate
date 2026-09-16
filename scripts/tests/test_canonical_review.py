@@ -366,6 +366,25 @@ class SweepCase(RepoCase):
         self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
         self.assertEqual(self.quiet(["sweep"]), cr.EXIT_COVERED)
 
+    def test_a_renamed_section_is_reported_as_a_pass_with_no_unit(self) -> None:
+        """A rename moves the text under a key nothing has read, so the old key holds a pass with no
+        unit and the new key joins the never-read backlog. Neither is stale, so the sweep would list
+        nothing at all and the rename would leave its scope without saying so."""
+        self.record("DOC.md > Alpha")
+        self.write("DOC.md", "intro\n\n## Renamed\n\na body\n\n## Beta\n\nb body\n")
+        code, output = self.loud(["sweep"])
+        self.assertEqual(code, cr.EXIT_COVERED, "a rename is not work the sweep gates on")
+        self.assertIn("0 unit(s) to read", output)
+        self.assertIn("1 pass(es) with no unit", output)
+        self.assertIn("DOC.md > Alpha", output)
+
+    def test_a_tree_holding_every_recorded_unit_reports_no_orphan(self) -> None:
+        """The heading is absent rather than reading zero, so a reader never scans a list that is
+        always there."""
+        self.record("DOC.md > Alpha")
+        _, output = self.loud(["sweep"])
+        self.assertNotIn("pass(es) with no unit", output)
+
     def test_the_printed_record_command_pastes_as_one_line(self) -> None:
         """The issue body invites copying it, and a wrapped line with no continuation runs `record`
         with no `--unit` at all."""

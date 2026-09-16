@@ -497,7 +497,7 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
 
     Stale units alone, never the never-read ones. A stale unit is text a carrier is receiving now
     that no pass here has read, where a never-read one is the backlog ptr727/ProjectTemplate#1138
-    records, and folding the two together would file 179 units of history as this week's work.
+    records, and folding the two together would file the whole of that history as this week's work.
     """
     states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}
     stale = sorted(unit for unit, state in states.items() if state == "stale")
@@ -536,6 +536,25 @@ def render_sweep(current: dict[str, str], ledger: dict[str, dict[str, Any]]) -> 
             "",
         ]
     )
+    # A pass recorded against a unit the tree no longer holds, which a renamed or deleted section produces.
+    # Reported here rather than left to `status` alone, because a rename moves the text under a key nothing has read, so it leaves this list silently: the old key is a pass with no unit and the new one joins the never-read backlog.
+    # Not counted as work, since deciding that a section is gone rather than moved is a reader's call and no pass closes it.
+    orphans = sorted(set(ledger) - set(current))
+    if orphans:
+        lines.extend(
+            [
+                f"## {len(orphans)} pass(es) with no unit",
+                "",
+                (
+                    "Recorded against a unit this tree no longer holds, so the section was renamed"
+                    " or removed after the pass. A renamed one is read again under its new key,"
+                    " which the burn-down above carries rather than this list."
+                ),
+                "",
+            ]
+        )
+        lines.extend(f"- `{unit}`" for unit in orphans)
+        lines.append("")
     return "\n".join(lines), len(stale)
 
 

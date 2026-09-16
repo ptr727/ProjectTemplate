@@ -52,8 +52,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
    A refusal is not that coverage, so this item stays unsatisfied under one, exactly as
    "Which Reviewers a Repository Actually Has" below says, and the loop clears it where it can. A
-   file-count refusal is cleared by splitting the pull request and a refusal naming a time is
-   cleared by waiting for it. `pr_review.py` exit `46` is the one nothing the loop does clears, an
+   file-count refusal is cleared by splitting the pull request, which is the only cause on record
+   that the loop can clear. `pr_review.py` exit `46` is the one nothing the loop does clears, an
    account-quota refusal carrying the current head, and exit `41` holding across several heads
    with no cause its body names is the same state reached the slower way. That is where the
    unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head

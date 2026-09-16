@@ -44,8 +44,8 @@ runs:
 
     # The burn-down goes to the run's job summary rather than into the tree, per scripts/README.md, on every event since it describes the commit rather than a comparison against a base.
     # No pull request is refused over a canonical unit's coverage, which the weekly canonical-review-sweep.yml files as its own work instead, per GOVERNANCE.md "Verification Discipline".
-    # The step still fails where the engine could not read the manifest or the ledger at all, a duplicate level-two heading or an unparseable ledger being the cases, since that is a boundary rather than a verdict about coverage.
-    # Read-only and informational, so `!cancelled()` renders it after an earlier step failed.
+    # The step still fails on the engine's boundary exit, meaning it could not read what it needs rather than having read it and found a unit uncovered, since a boundary is not a verdict about coverage.
+    # Read-only, and `!cancelled()` so it renders after an earlier step failed.
     - name: Render the canonical review burn-down step
       if: ${{ !cancelled() }}
       shell: bash
