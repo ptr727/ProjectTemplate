@@ -37,6 +37,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
+          # The job holds issues: write, and checkout persists that token in .git/config by default, where nothing here needs git authentication: the one git call reads local state and every gh call takes GH_TOKEN.
+          persist-credentials: false
 
       # The engine imports datetime.UTC at module level, so the interpreter is pinned to the floor spec/host-tools.json declares rather than left as whatever the runner image ships.
       - name: Setup python step
