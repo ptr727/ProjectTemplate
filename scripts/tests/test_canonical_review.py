@@ -323,6 +323,27 @@ class ManifestCase(RepoCase):
         self.assertIn("GONE.md", absent)
 
 
+class CodeSpanCase(unittest.TestCase):
+    """A unit key is a heading, and a heading may name a command, so a key can hold a backtick."""
+
+    def test_a_key_holding_a_backtick_stays_one_span(self) -> None:
+        """Single backticks split such a key into two spans with the middle rendered as prose, which
+        puts the path and the digest in different spans and makes the record argument uncopyable."""
+        key = "doc.md > Executing a `develop -> main` promotion safely=sha256:beef"
+        span = cr.code_span(key)
+        self.assertTrue(span.startswith("``") and span.endswith("``"))
+        self.assertEqual(span[2:-2], key, "the key must survive the fence unchanged")
+
+    def test_a_key_touching_a_backtick_is_padded(self) -> None:
+        """CommonMark strips one leading and trailing space, so the pad is what keeps the fence from
+        running into the content and closing early."""
+        self.assertEqual(cr.code_span("`x"), "`` `x ``")
+        self.assertEqual(cr.code_span("x`"), "`` x` ``")
+
+    def test_a_key_with_no_backtick_takes_the_plain_fence(self) -> None:
+        self.assertEqual(cr.code_span("plain.md > Section"), "`plain.md > Section`")
+
+
 class SweepCase(RepoCase):
     """The weekly sweep's work list: every stale unit, plus a bounded slice of the never-read backlog."""
 

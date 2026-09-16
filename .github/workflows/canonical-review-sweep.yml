@@ -1,7 +1,7 @@
 name: Sweep canonical review coverage action
 
 # The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule, which no push and no pull request is gated on any more.
-# This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units owing one and hand them to a session that can run it.
+# This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units it asks for and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
 # A schedule fires from this file as the default branch holds it, and a dispatch is offered only once it is there, so the first run comes at the promotion that carries this file to main rather than at the merge into develop that removes the gate it replaces.
 # The issue's label comes from the fleet label set in repo-config/labels.json, so on a repository where repo-config/configure.sh has not applied that set the first run that finds work fails at gh issue create rather than filing an unlabeled issue no later run would find.

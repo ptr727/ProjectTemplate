@@ -55,6 +55,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -542,6 +543,21 @@ def backlog_slice(root: Path, never: list[str]) -> list[str]:
     return ordered[:BACKLOG_SLICE]
 
 
+def code_span(text: str) -> str:
+    """`text` as a Markdown code span, whatever backticks it holds.
+
+    A unit key is a heading, and a heading may name a command, so a key holding a backtick is
+    ordinary rather than exotic: one in this tree does. Wrapped in single backticks it splits into
+    two spans with the middle rendered as prose, which puts the path and the digest in different
+    spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
+    longer than any run inside, padded with a space where the content touches a backtick.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
 def render_sweep(
     root: Path, current: dict[str, str], ledger: dict[str, dict[str, Any]]
 ) -> tuple[str, int]:
@@ -572,7 +588,7 @@ def render_sweep(
     ]
     # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
     # A digest the tree has moved past since refuses the record, which is the content having moved rather than a fault in the list, and the answer is a read at the unit's current text.
-    lines.extend(f"- `{unit}={current[unit]}`" for unit in stale)
+    lines.extend("- " + code_span(f"{unit}={current[unit]}") for unit in stale)
     lines.extend(["", f"## {len(fresh)} unit(s) from the never-read backlog", ""])
     # The paragraph describes how a slice is chosen, so it is emitted only where there is one.
     # Rendered unconditionally it outlives its own subject: once the backlog is worked off, every issue and every job summary would carry a description of units the document does not hold.
@@ -592,15 +608,20 @@ def render_sweep(
                 "",
             ]
         )
-    lines.extend(f"- `{unit}={current[unit]}`" for unit in fresh)
+    lines.extend("- " + code_span(f"{unit}={current[unit]}") for unit in fresh)
+    if stale or fresh:
+        lines.extend(
+            [
+                "",
+                "Record each pass at the digest above, which is the text that was read:",
+                "",
+                "```sh",
+                "python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'",
+                "```",
+            ]
+        )
     lines.extend(
         [
-            "",
-            "Record each pass at the digest above, which is the text that was read:",
-            "",
-            "```sh",
-            "python3 scripts/canonical_review.py record --reviewer agent-skill --unit '<key>=<digest>'",
-            "```",
             "",
             (
                 f"{len(current)} units carried, {len(never)} of them never read here, which"
@@ -626,7 +647,7 @@ def render_sweep(
                 "",
             ]
         )
-        lines.extend(f"- `{unit}`" for unit in orphans)
+        lines.extend("- " + code_span(unit) for unit in orphans)
         lines.append("")
     return "\n".join(lines), len(stale) + len(fresh)
 
