@@ -506,9 +506,13 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
 
     Newest first rather than oldest, because a unit this repository has just authored, or has just
     put under a carrier by widening the manifest, is the one a carrier is about to receive unread,
-    and that is the case the whole rule is written about. A unit unread for months can wait another
-    week. A path git cannot date sorts last rather than raising, since an undatable file is still a
-    unit and this order is a priority rather than a claim about the content.
+    and that is the case the whole rule is written about. A unit unread for months can wait.
+
+    Three answers rather than two. A commit dates the path. A path git tracks that no commit holds
+    is a file this branch has created and not committed, which `tracked_files` deliberately counts
+    as a unit, and it is the newest content there is rather than an undatable one, so it sorts
+    first. Only a git failure is undatable, and that sorts last rather than raising, since the
+    order is a priority rather than a claim about the content.
     """
     times: dict[str, float] = {}
     for rel in rels:
@@ -518,8 +522,10 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
                 "--literal-pathspecs", "log", "-1", "--format=%ct", "--", rel, root=root
             ).strip()
         except CannotRun:
-            stamp = ""
-        times[rel] = float(stamp) if stamp else 0.0
+            times[rel] = 0.0
+            continue
+        # Empty stdout on a zero exit is the uncommitted case, since git found the path and no commit naming it.
+        times[rel] = float(stamp) if stamp else float("inf")
     return times
 
 
@@ -571,9 +577,10 @@ def render_sweep(
             "",
             (
                 f"No pass here has ever read these. A sweep takes the {BACKLOG_SLICE} most recently"
-                " committed of them, so a unit this repository has just authored or newly carried is"
-                " read within a round or two of landing, and the backlog shrinks by that many a"
-                " round rather than waiting on a reader who volunteers."
+                " committed of them, so recently authored and newly carried content comes ahead of"
+                " text that has sat unread for months, and the backlog shrinks by that many a round"
+                " rather than waiting on a reader who volunteers. The order is by the file a unit"
+                " sits in, so a file committed since takes the slice first."
             ),
             "",
         ]

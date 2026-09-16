@@ -366,6 +366,19 @@ class SweepCase(RepoCase):
         body = output.split("never-read backlog")[1]
         self.assertIn("LATE.md > Late=", body, "the newest carried unit was not in the slice")
 
+    def test_a_carried_file_no_commit_holds_leads_the_slice(self) -> None:
+        """`tracked_files` counts a carried file this branch created and has not committed, and it is
+        the newest content there is. `git log` answers for it with a zero exit and no output, which
+        read as the undatable case would sort it last, the exact inverse of the documented order."""
+        self.write("BRAND.md", "## Brand\n\nbody\n")
+        spec = self.manifest()
+        spec["baseline"].append({"path": "BRAND.md", "fidelity": "verbatim", "whole": True})
+        self.write("spec/files.json", json.dumps(spec, indent=2) + "\n")
+        run(self.tmp, "add", "BRAND.md")
+        _, output = self.loud(["sweep"])
+        body = output.split("never-read backlog")[1]
+        self.assertIn("BRAND.md > Brand=", body, "an uncommitted carried unit was not in the slice")
+
     def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
         that a pass here has been retired from, so none of it waits for a later round.
@@ -393,6 +406,11 @@ class SweepCase(RepoCase):
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn(f"{stale} unit(s) whose text moved past its pass", output)
+        # The listing rather than the heading, since a bound applied at emission leaves the count right and the list short.
+        current = self.units()
+        for unit, digest in current.items():
+            if cr.state_of(unit, digest, ledger) == "stale":
+                self.assertIn(f"- `{unit}={digest}`", output, f"{unit} waited for a later round")
 
     def test_editing_a_unit_past_its_pass_puts_it_on_the_list(self) -> None:
         """The sweep watched working: this is the case the whole mechanism exists to produce."""

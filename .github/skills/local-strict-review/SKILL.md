@@ -124,7 +124,7 @@ The digest is bound to the read for the same reason `--expect-digest` is above: 
 
 **The ledger this writes is tracked content, so the commit has to carry it**, where the receipt the pass above writes never can be. Record each unit, commit the ledger together with whatever the passes had you fix, then read the digest, run the diff pass over that commit, record its receipt, and push. That is why the two records sit on opposite sides of the one commit.
 
-**A unit nothing has read here yet reaches the list a slice at a time.** `sweep` names every unit whose text has moved past a pass, and beside them a bounded number of the never-read ones, newest-committed first, so a unit this repository has just authored or newly carried is read within a round or two rather than waiting behind the whole backlog. `canonical_review.py report` renders that backlog in full, and working more of it off than the sweep asked for is worthwhile and is its own change.
+**A unit nothing has read here yet reaches the list a slice at a time.** `sweep` names every unit whose text has moved past a pass, and beside them a bounded number of the never-read ones, newest-committed first, so recently authored and newly carried content comes ahead of text that has sat unread for months rather than waiting behind the whole backlog. The order is by the file a unit sits in, so a file committed since takes the slice first. `canonical_review.py report` renders that backlog in full, and working more of it off than the sweep asked for is worthwhile and is its own change.
 
 ## Disposing of Findings
 
