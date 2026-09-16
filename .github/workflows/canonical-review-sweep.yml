@@ -72,9 +72,10 @@ jobs:
           # A renamed or removed section leaves its pass naming a unit the tree no longer holds, and its text under a key nothing has read.
           # Neither is stale, so the work list below is empty and the run would otherwise say nothing at all, which is the one way a rename leaves the sweep's scope in silence.
           # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
-          orphans="$(python3 scripts/canonical_review.py status | jq '.orphanedPasses | length')"
+          # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted: a renamed one has to stop the step rather than stop the warning.
+          orphans="$(python3 scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
           if [ "$orphans" -gt 0 ]; then
-            echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed and its text is in the never-read backlog under the new key"
+            echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed, and a renamed one is read again under its new key in the never-read backlog"
           fi
           # Every number a write below targets is read here, in this run, rather than constructed.
           # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did, so a failed listing or filter would read as no open issue and file a second one beside the first.
