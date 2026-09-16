@@ -361,7 +361,7 @@ class SweepCase(RepoCase):
         self.assertIn("0 unit(s) from the never-read backlog", output)
         # The instruction and its fence describe digests, so a body holding none must not carry them.
         self.assertNotIn("Record each pass at the digest above", output)
-        self.assertNotIn("--reviewer agent-skill --unit", output)
+        self.assertNotIn("canonical_review.py record", output)
 
     def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
         """The case the retired gate refused: a unit nothing here has read is one a carrier receives

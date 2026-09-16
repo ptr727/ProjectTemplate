@@ -78,8 +78,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 1. Isolate into a worktree per repo-worktree, based on the branch that skill's base rule names, develop unless the task is explicitly about main-only content, before the first edit.
 2. Commit the work, then run `local-strict-review` and record its pass in the order that skill
-   gives, its diff receipt following the commit. Where the work is the canonical sweep's own, that
-   skill's carried-content records instead precede the commit, because that ledger is tracked.
+   gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
+   that skill's carried-content records instead precede the commit, because that ledger is tracked.
    Then push the branch and open the feature -> develop PR if it does not exist yet. A push refused by a `.husky/pre-push` hook, which the hub carries and a
    repository has only if it adds one, is that gate working rather than an
    obstacle to route around, and that
