@@ -1,0 +1,112 @@
+name: Sweep canonical review coverage action
+
+# The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule, which no push and no pull request is gated on any more.
+# This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units it asks for and hand them to a session that can run it.
+# Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
+# A schedule fires from this file as the default branch holds it, and a dispatch is offered only once it is there, so the first run comes at the promotion that carries this file to main rather than at the merge into develop that removes the gate it replaces.
+# The issue's label comes from the fleet label set in repo-config/labels.json, so on a repository where repo-config/configure.sh has not applied that set the first run that finds work fails at gh issue create rather than filing an unlabeled issue no later run would find.
+# A run that finds no work says nothing about the label either way, since the listing below returns an empty set for a label that does not exist.
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+# Workflow-only group, with no -${{ github.ref }} and cancel-in-progress false, per GOVERNANCE.md "Workflow YAML Conventions".
+# The one thing a run writes is a single repository-scoped issue, so a ref-scoped group would separate a dispatch made from any branch other than the default from the weekly schedule, which always runs on the default, and let each read no open issue and file one.
+# Cancelling is worse than queueing here for the same reason: the closing path comments and then closes, and a cancel between the two leaves the comment posted on an issue that stays open.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+
+  sweep:
+    name: Sweep canonical review coverage job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+
+      # The ref is named rather than left to the default a scheduled run checks out, which is the default branch.
+      # The passes this issue asks for are worked on a develop-based branch, per the repo-worktree base rule, so measuring main would name units against text that branch does not hold, refuse each record on a digest the tree has moved past, and re-file the same list every week until a promotion carried the fix.
+      - name: Checkout repository step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          # Full history, because the backlog slice orders never-read units by their file's last commit and a shallow clone dates every path to the tip commit, which would collapse that order to the unit key and file the alphabet's first units every week.
+          fetch-depth: 0
+          # The job holds issues: write, and checkout persists that token in .git/config by default, where nothing here needs git authentication: every git call here reads local state, in the step below and inside the engines alike, and every gh call takes GH_TOKEN.
+          persist-credentials: false
+
+      # The engine imports datetime.UTC at module level, so the interpreter is pinned to the floor spec/host-tools.json declares rather than left as whatever the runner image ships.
+      - name: Setup python step
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Render the sweep work list step
+        id: sweep
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # The engine's three-valued exit is read rather than folded: 0 is no unit owing a read, 1 is work to file, and 2 is the sweep never having run, which is not a verdict either way.
+          status=0
+          python3 scripts/canonical_review.py sweep > "$RUNNER_TEMP/sweep.md" || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "::error::canonical_review.py sweep could not run, so this run says nothing about coverage"
+            exit 1
+          fi
+          echo "owed=$status" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/sweep.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File or close the sweep issue step
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWED: ${{ steps.sweep.outputs.owed }}
+          LABEL: canonical-sweep
+          TITLE: Canonical content review sweep
+        run: |
+          set -Eeuo pipefail
+          # The commit this run measured, read from the checkout rather than from GITHUB_SHA, which on a scheduled event names the default branch's head and not the develop tip checked out above.
+          head_sha="$(git rev-parse HEAD)"
+          # A renamed or removed section leaves its pass naming a unit the tree no longer holds.
+          # The renamed text is read again under its new key, which the work list reaches, where the stranded pass is not.
+          # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
+          # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted: a renamed one has to stop the step rather than stop the warning.
+          orphans="$(python3 scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
+          if [ "$orphans" -gt 0 ]; then
+            echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed, and a renamed one is read again under its new key in the never-read backlog"
+          fi
+          # Every number a write below targets is read here, in this run, rather than constructed.
+          # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did, so a failed listing or filter would read as no open issue and file a second one beside the first.
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --json number,title > "$RUNNER_TEMP/issues.json"
+          jq -r '.[].number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/labeled.txt"
+          jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/titled.txt"
+          mapfile -t labeled < "$RUNNER_TEMP/labeled.txt"
+          mapfile -t titled < "$RUNNER_TEMP/titled.txt"
+          # The label carries one open issue per repository, so a second one, or a single one carrying a title this workflow never files under, is a state to report rather than one to pick from.
+          # Refusing on the second shape is what keeps an issue a human labeled from having its body replaced with the work list.
+          if [ "${#labeled[@]}" -gt 1 ] || [ "${#labeled[@]}" -ne "${#titled[@]}" ]; then
+            echo "::error::open $LABEL issue(s) ${labeled[*]} are not the single issue titled '$TITLE' that this workflow files, so which one it owns is undecided and a hand edit is what settles it"
+            exit 1
+          fi
+          number="${titled[0]-}"
+          if [ "$OWED" = 1 ]; then
+            if [ -n "$number" ]; then
+              gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/sweep.md"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --label "$LABEL" --title "$TITLE" --body-file "$RUNNER_TEMP/sweep.md"
+            fi
+          elif [ -n "$number" ]; then
+            # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
+            # A unit that owes a read again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit has been read at its current text, measured on develop at $head_sha. A unit that moves past its pass, and one newly authored or newly carried, is filed as a new sweep issue."
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY"
+          else
+            echo "No carried canonical unit owes a read, and no open $LABEL issue to close."
+          fi
