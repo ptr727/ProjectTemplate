@@ -1455,8 +1455,8 @@ TOOL_DIRECTIVE = re.compile(
     r"|codespell:|doctest:)"
 )
 
-# The pull request label that stands `comment-added` down, named once rather than in each place.
-# The finding's own message and the composite action's input cannot then drift from the declared label.
+# The pull request label that stands `comment-added` down.
+# The workflow and `repo-config/labels.json` spell it out separately, which a case asserts.
 COMMENT_LABEL_NAME = "comments"
 
 # The environment form of the same override, read here rather than passed by each caller.
@@ -1882,8 +1882,8 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
 
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
     comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
-    of scope for the same reason a C# `///` comment is, that being documentation CODESTYLE owns.
-    It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
+    of scope the way a C# `///` comment is, both being the language's documentation form rather
+    than a remark on code. It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
     than a scan of this rule's own. Two such scans were written and each missed a marker inside a
     string, one standing the rule down to end of file and one to the next block's terminator.
 
