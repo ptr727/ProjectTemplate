@@ -177,20 +177,20 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 ```
 
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
-gate. It reports every comment line in the diff's scope, and a diff counts a modified line as an added
-one, so rewording a comment, correcting one, and editing the code on a line that carries one each
-report that comment. That is the rule's cost and the label is its answer, since a comment worth
+gate. It reports every prose comment line in the diff's scope, and a diff counts a modified line as an
+added one, so rewording a comment, correcting one, and editing the code on a line that carries one
+each report that comment. That is the rule's cost and the label is its answer, since a comment worth
 keeping takes the same label as a comment worth writing. A docstring is not a comment line, an
 instruction to a tool is not a comment the rule reads, and Markdown is out of scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
 pull request carries the `comments` label and the gate stands down for that change. Locally a
-non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set. The two are separate
-deliberately, so a variable left exported reaches the commit and never the merge gate.
+non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set, and `--allow-comments`
+does it for one run by hand. The label and the variable are separate deliberately, so a variable
+left exported reaches the commit and never the merge gate.
 
-Three facts about reaching those escapes, each of which reads as a broken gate rather than as
-a sequence. The label is read off the event that started the run, so a label added after a run fails
+Three things about reaching those escapes read as a broken gate until they are known. The label is read off the event that started the run, so a label added after a run fails
 applies to the next push rather than to a re-run of that one, and labeling the pull request when it
 is opened is what avoids the round trip. The label reaches a repository only when the fleet label
 set is applied to it, so a repository that has not had that applied since the label was declared

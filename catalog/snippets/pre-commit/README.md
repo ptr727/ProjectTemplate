@@ -15,7 +15,7 @@ carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending
 are what every repo owes regardless of language. The prose gate's `--diff HEAD` sees the staged
 state under this runner rather than the working tree, since `pre-commit` stashes unstaged changes
 before it runs a hook, so a partially staged file is judged on its staged edits alone here where
-the Husky.Net shape judges all of them. The pull request gate reads every line the branch changes against its base, so it covers a commit no hook run saw. A repo with no Python drops the `ruff-format`,
+the Husky.Net shape judges all of them. The pull request gate reads every line the branch changes against its base. A repo with no Python drops the `ruff-format`,
 `ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
 docs repo wires.
 

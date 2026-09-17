@@ -1803,6 +1803,30 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+def powershell_help_lines(raw: str) -> set[int]:
+    """Line numbers inside a PowerShell `<# ... #>` block, which is comment-based help.
+
+    PowerShell writes help as its one block form and an ordinary remark as `#`, so a block is
+    documentation the way a C# `///` comment is, and `.SYNOPSIS` is a keyword no author may delete.
+    Skipped for `comment-added` alone rather than declared as the syntax's doc marker, since
+    `comment-wrap` reads these blocks today and two of its cases assert that it does.
+
+    The scan is deliberately crude, matching the markers anywhere on a line. A `<#` inside a string
+    costs an exemption rather than a false finding, which is the safe direction for a rule that
+    refuses, and the alternative is a second PowerShell parser beside the one `extracted_comments`
+    already carries.
+    """
+    out: set[int] = set()
+    depth = 0
+    for n, line in enumerate(raw.split("\n"), 1):
+        opens = line.count("<#")
+        closes = line.count("#>")
+        if depth or opens:
+            out.add(n)
+        depth = max(0, depth + opens - closes)
+    return out
+
+
 def is_tool_directive(body: str) -> bool:
     """Whether a comment body is an instruction to a tool rather than a sentence.
 
@@ -1866,7 +1890,8 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     need, since the remedy for a wanted comment is the same label either way.
 
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
-    comments are structural markers a tool matches verbatim.
+    comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
+    of scope for the same reason a C# `///` comment is, that being documentation CODESTYLE owns.
 
     A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
     since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
@@ -1879,6 +1904,9 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     bodies = comment_bodies(path, raw)
     if bodies is None:
         return []
+    if path.suffix.lower() in {".ps1", ".psm1"}:
+        help_lines = powershell_help_lines(raw)
+        bodies = [(n, body) for n, body in bodies if n not in help_lines]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()

@@ -4039,6 +4039,36 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_a_powershell_help_block_is_a_documentation_comment(self) -> None:
+        """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
+
+        PowerShell writes comment-based help as its one block form and an ordinary remark as `#`,
+        so the block opener is its documentation marker the way `///` is C#'s. Missing from the
+        syntax table, a help block read as four comment lines whose only remedy was the label.
+        """
+        # Written so `comment-wrap` has something to find here.
+        # That is what makes the second assertion prove the skip is this rule's own.
+        block = (
+            "<#\n"
+            ".SYNOPSIS\n"
+            "Returns the thing the caller asked for\n"
+            "once the store has answered.\n"
+            "#>\n"
+            "param()\n"
+        )
+        self.assertEqual([], self.kinds(block, {"comment-added"}, name="Tool.ps1"))
+        self.assertEqual(["comment-wrap"], self.kinds(block, {"comment-wrap"}, name="Tool.ps1"))
+        # An ordinary remark is not documentation, so the rule still reads it, after a block too.
+        for name, text in (
+            ("alone", "# The store is read once, since a second read can disagree.\nparam()\n"),
+            ("after a block", "<#\n.SYNOPSIS\nDoc.\n#>\n# The store is read once here.\n"),
+            ("after a one-line block", "<# .SYNOPSIS Doc. #>\n# The store is read once here.\n"),
+        ):
+            with self.subTest(case=name):
+                self.assertEqual(
+                    ["comment-added"], self.kinds(text, {"comment-added"}, name="Tool.ps1")
+                )
+
     def test_markdown_is_out_of_scope(self) -> None:
         """Markdown prose is the document, and its HTML comments are markers a tool matches."""
         text = "<!-- The section below is generated. -->\n\nOrdinary prose.\n"
