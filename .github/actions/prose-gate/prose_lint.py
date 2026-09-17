@@ -1127,6 +1127,11 @@ POWERSHELL: Syntax = {
     "escape_out": True,
     "carry": frozenset({"quote", "here"}),
 }
+# PowerShell writes comment-based help as `<# .SYNOPSIS ... #>` and an ordinary remark as `#`.
+# `comment-added` reads a block as documentation, the way C# declares `///`.
+# `.SYNOPSIS` is a keyword no author may delete, so the label would be the only remedy for one.
+# The other two comment rules keep the plain spelling, where a block comment is a comment they read.
+POWERSHELL_DOC: Syntax = {**POWERSHELL, "doc": ("<#",)}
 INI: Syntax = {**PLAIN, "line": ("#", ";")}
 LISP_LIKE: Syntax = {**PLAIN, "line": ("#",), "quotes": '"'}
 # CSS has block comments only, so a `//` in it is the scheme separator of a URL.
@@ -1594,14 +1599,20 @@ def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
     return out
 
 
-def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, bool]]:
+def extracted_comments(
+    path: Path, lines: list[str], spec: Syntax | None = None
+) -> list[tuple[int, str, bool]]:
     """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
 
     A marker inside a string literal is not a comment, so each line is scanned with quoted spans
     blanked first. A documentation comment is skipped: CODESTYLE governs those and permits the
     paragraphs this rule forbids.
+
+    `spec` overrides what the path resolves to, which is how one rule reads a file's comments by a
+    definition of its own without changing what every other rule sees.
     """
-    spec = syntax_for(path)
+    if spec is None:
+        spec = syntax_for(path)
     if spec is None:
         return []
     out: list[tuple[int, str, bool]] = []
@@ -1803,42 +1814,6 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
-def powershell_help_lines(raw: str) -> set[int]:
-    """Line numbers inside a PowerShell `<# ... #>` block, which is comment-based help.
-
-    PowerShell writes help as its one block form and an ordinary remark as `#`, so a block is
-    documentation the way a C# `///` comment is, and `.SYNOPSIS` is a keyword no author may delete.
-    Skipped for `comment-added` alone rather than declared as the syntax's doc marker, since
-    `comment-wrap` reads these blocks today and two of its cases assert that it does.
-
-    Only a block that closes is exempt. An opener with no closer exempts nothing, so a `<#` inside a
-    string costs at most a finding the label answers, where treating it as an opener stood the rule
-    down for every line after it in that file and said nothing. A gate that quietly stops gating is
-    the one failure mode this rule may not have.
-
-    A block comment does not nest in PowerShell, so a second `<#` inside one is text. The scan reads
-    it that way rather than counting depth, which is what a nested-looking opener broke.
-
-    The markers are matched anywhere on a line rather than parsed, the alternative being a second
-    PowerShell parser beside the one `extracted_comments` already carries.
-    """
-    out: set[int] = set()
-    opened_at: int | None = None
-    for n, line in enumerate(raw.split("\n"), 1):
-        if opened_at is None:
-            at = line.find("<#")
-            if at < 0:
-                continue
-            if line.find("#>", at + 2) >= 0:
-                out.add(n)
-                continue
-            opened_at = n
-        elif "#>" in line:
-            out.update(range(opened_at, n + 1))
-            opened_at = None
-    return out
-
-
 def is_tool_directive(body: str) -> bool:
     """Whether a comment body is an instruction to a tool rather than a sentence.
 
@@ -1871,7 +1846,9 @@ def is_comment_prose(body: str) -> bool:
     )
 
 
-def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
+def comment_bodies(
+    path: Path, raw: str, spec: Syntax | None = None
+) -> list[tuple[int, str]] | None:
     """The file's comment lines as (line number, body), or None where none can be read.
 
     A `.py` whose source does not tokenize returns None rather than falling back to the
@@ -1883,7 +1860,7 @@ def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
         if comments is None:
             return None
     else:
-        comments = extracted_comments(path, raw.split("\n"))
+        comments = extracted_comments(path, raw.split("\n"), spec)
     return [(n, body) for n, body, _leading in comments]
 
 
@@ -1904,6 +1881,9 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
     comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
     of scope for the same reason a C# `///` comment is, that being documentation CODESTYLE owns.
+    It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
+    than a scan of this rule's own. Two such scans were written and each missed a marker inside a
+    string, one standing the rule down to end of file and one to the next block's terminator.
 
     A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
     since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
@@ -1913,12 +1893,10 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
-    bodies = comment_bodies(path, raw)
+    spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
+    bodies = comment_bodies(path, raw, spec)
     if bodies is None:
         return []
-    if path.suffix.lower() in {".ps1", ".psm1"}:
-        help_lines = powershell_help_lines(raw)
-        bodies = [(n, body) for n, body in bodies if n not in help_lines]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()
