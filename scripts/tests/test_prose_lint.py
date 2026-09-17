@@ -4035,20 +4035,6 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
-    def test_a_version_pin_comment_is_not_prose(self) -> None:
-        """The fleet writes a hub pin bare, so the `v`-prefixed form was the only one exempt.
-
-        Bumping one is a routine resync edit in every fleet repository, and a Dependabot pull
-        request cannot label itself, so reporting it blocked the merge-bot path outright.
-        """
-        for line in (
-            "jobs: {}  # 2.0.338\n",
-            "jobs: {}  # v7.0.1\n",
-            "jobs: {}  # v7.0.1-beta.2\n",
-        ):
-            with self.subTest(line=line.strip()):
-                self.assertEqual([], self.kinds(line, {"comment-added"}, name="w.yml"))
-
     def test_a_directive_name_opening_a_sentence_is_still_prose(self) -> None:
         """Anchoring the name alone let a directive open a sentence and exempt the whole comment."""
         for line, expected in (
@@ -4059,6 +4045,16 @@ class TestTheCommentAddedRule(BaitCase):
                 ["comment-added"],
             ),
             ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
+            # Unpunctuated, so the sentence half cannot be what reports these.
+            # The name has to open the body, and `search` in place of `match` exempts them.
+            (
+                "# The pyright: ignore form is written per line rather than per file\n",
+                ["comment-added"],
+            ),
+            (
+                "# A nosec marker would silence the whole call rather than this one\n",
+                ["comment-added"],
+            ),
             # A reason written as an argument is exempt.
             # The same reason punctuated as a sentence is not, which is one test reading one body.
             ("# nosec B608 - the query is parameterized\n", []),

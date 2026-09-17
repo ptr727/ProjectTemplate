@@ -1405,7 +1405,7 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 NOT_PROSE = re.compile(
     r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
     r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
-    r"|^v?\d+(\.\d+)*(?:[-+][\w.]+)?$"
+    r"|^v\d+(\.\d+)*$"
 )
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
