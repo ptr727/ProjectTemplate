@@ -4042,9 +4042,10 @@ class TestTheCommentAddedRule(BaitCase):
     def test_a_powershell_help_block_is_a_documentation_comment(self) -> None:
         """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
 
-        PowerShell writes comment-based help as its one block form and an ordinary remark as `#`,
-        so the block opener is its documentation marker the way `///` is C#'s. Missing from the
-        syntax table, a help block read as four comment lines whose only remedy was the label.
+        PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
+        the way `///` is in C#, since it is the form the fleet's own scripts use. The `#` form is
+        read as the ordinary comment lines it is written as, which the last case pins, because
+        telling it from a remark needs a second grammar in a rule that holds none.
         """
         # Written so `comment-wrap` has something to find here.
         # That is what makes the second assertion prove the skip is this rule's own.
@@ -4089,6 +4090,13 @@ class TestTheCommentAddedRule(BaitCase):
         # PowerShell itself reads there, so the rule follows the parser rather than guessing.
         self.assertEqual(
             [], self.kinds("<#\n# The store is read once here.\n", {"comment-added"}, name="T.ps1")
+        )
+        # The `#` help form is reported, deliberately rather than by oversight.
+        # It is a run of comment lines, and the label is what a change writing one carries.
+        hash_help = "# .SYNOPSIS\n# Returns the thing the caller asked for.\nfunction G {}\n"
+        self.assertEqual(
+            ["comment-added", "comment-added"],
+            self.kinds(hash_help, {"comment-added"}, name="T.ps1"),
         )
 
     def test_markdown_is_out_of_scope(self) -> None:

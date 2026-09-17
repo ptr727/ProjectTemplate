@@ -1127,9 +1127,12 @@ POWERSHELL: Syntax = {
     "escape_out": True,
     "carry": frozenset({"quote", "here"}),
 }
-# PowerShell writes comment-based help as `<# .SYNOPSIS ... #>` and an ordinary remark as `#`.
-# `comment-added` reads a block as documentation, the way C# declares `///`.
-# `.SYNOPSIS` is a keyword no author may delete, so the label would be the only remedy for one.
+# PowerShell documents two comment-based help forms, a `<# ... #>` block and a run of `#` lines.
+# `comment-added` reads the block form as documentation, the way C# declares `///`.
+# The `#` form is a run of ordinary comment lines and is read as the comments it is written as.
+# So a change writing one carries the label, `.SYNOPSIS` being a keyword no author may delete.
+# Telling the two apart needs the `.`-keyword shape, a second grammar in a rule that holds none.
+# The block form is the one the fleet's own scripts use.
 # The other two comment rules keep the plain spelling, where a block comment is a comment they read.
 POWERSHELL_DOC: Syntax = {**POWERSHELL, "doc": ("<#",)}
 INI: Syntax = {**PLAIN, "line": ("#", ";")}
