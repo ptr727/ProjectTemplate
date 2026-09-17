@@ -4055,6 +4055,11 @@ class TestTheCommentAddedRule(BaitCase):
             "# nosec B404\n",
             "# yaml-language-server: $schema=https://example.invalid/s.json\n",
             "# renovate: datasource=github-releases depName=owner/name\n",
+            "value = read()  # fmt: skip\n",
+            "value = read()  # pyright: ignore[reportUnknownMemberType]\n",
+            "# isort: skip_file\n",
+            "# codespell:ignore fo\n",
+            "value = read()  # doctest: +SKIP\n",
         ):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
@@ -4196,6 +4201,78 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         (self.root / "tool.py").write_text(held + held + "value = 1\n", encoding="utf-8")
         result = run_prose_gate_action(self.root)
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_the_held_side_counts_prose_and_not_every_comment(self) -> None:
+        """A file's own directives bought free prose, since only the head side was filtered.
+
+        Measured on this repository's `validate-task.yml` while that held: 85 comments at base of
+        which 72 were prose, against 74 prose at head, so two new comment lines reported as nothing.
+        """
+        (self.root / "tool.py").write_text(
+            "import os  # noqa: F401\n"
+            "# The retry budget is spent before the timeout fires.\n"
+            "value = 1\n",
+            encoding="utf-8",
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "tool.py").write_text(
+            "import os  # noqa: F401\n"
+            "# The retry budget is spent before the timeout fires.\n"
+            "# The second read can disagree with the first.\n"
+            "value = 1\n",
+            encoding="utf-8",
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:3: comment-added", result.stdout)
+
+    def test_a_renamed_file_is_read_at_the_path_its_content_had(self) -> None:
+        """Reading the head path reported a rename as a new file, comments and all."""
+        # Long enough for git to score the rename, which is what it keys its detection on.
+        body = "".join(f"value_{n} = {n}\n" for n in range(20))
+        (self.root / "before.py").write_text(
+            body + "LIMIT = 1  # The upper limit is fixed by the protocol.\n", encoding="utf-8"
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        self.git("mv", "before.py", "after.py")
+        (self.root / "after.py").write_text(
+            body + "LIMIT = 2  # The upper limit is fixed by the protocol.\n", encoding="utf-8"
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_a_copy_inserted_above_the_held_one_is_reported(self) -> None:
+        """Attributing the surplus to the last occurrence put the finding on an untouched line.
+
+        `main` then dropped it, since that line is not in the diff, so the gate reported nothing
+        about a copy it had in fact found.
+        """
+        held = "# The retry budget is spent before the timeout fires.\n"
+        (self.root / "tool.py").write_text("value = 1\n" + held, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "tool.py").write_text(held + "value = 1\n" + held, encoding="utf-8")
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
+
+    def test_removing_more_comment_prose_than_it_writes_is_silent(self) -> None:
+        """The rule measures growth, so this is the shape it deliberately does not report."""
+        (self.root / "tool.py").write_text(
+            "# The retry budget is spent before the timeout fires.\n"
+            "# The upper limit is fixed by the protocol.\n"
+            "value = 1\n",
+            encoding="utf-8",
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "tool.py").write_text(
+            "# The second read can disagree with the first.\nvalue = 1\n", encoding="utf-8"
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_a_base_whose_comments_cannot_be_read_reports_nothing(self) -> None:
         """A branch repairing a `.py` that did not tokenize reported every comment it already held."""

@@ -179,8 +179,9 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
 gate. It reads the file at the diff's base and reports only where the file's comment prose grew, since
 a diff reports a modified line as an added one and cannot tell growth from churn on its own. So
-rewording a comment, correcting one, and editing the code around one are all silent, while a
-comment whose text is new is a finding, and so is a second copy of one the file already holds. A
+rewording a comment, correcting one, and editing the code around one are all silent, and so is a
+change that removes more comment prose than it writes. What is a finding is a comment whose text is
+new in a file whose comment prose grew, a second copy of one the file already holds included. A
 docstring is not a comment line, and Markdown is out of scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to

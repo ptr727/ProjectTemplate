@@ -1444,8 +1444,9 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # Widening that pattern stopped those two reporting any comment naming a word in it.
 # That is a gate narrowing where the intent was an exemption in a third rule.
 TOOL_DIRECTIVE = re.compile(
-    r"^(?:syntax=|escape=|fmt:\s*(?:on|off)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=])"
+    r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|nopep8\b"
+    r"|codespell:|doctest:)"
 )
 
 # The pull request label that stands `comment-added` down, named once rather than in each place.
@@ -1803,6 +1804,40 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+@functools.cache
+def renamed_from(base: str, root: str) -> dict[str, str]:
+    """Head path -> the path that content had at `base`, for each rename git detected.
+
+    Reading the base text at the head path reports a renamed file as one the base did not hold, so
+    every comment on a line the change also touched came back as added. Git already answers this,
+    and `-z` is what makes the answer readable: a rename record carries two names, and the default
+    format quotes a name holding a space or a high byte while this one never does.
+
+    An empty map wherever git cannot answer, which leaves the caller reading the head path, its
+    behavior before this existed.
+    """
+    try:
+        raw = subprocess.run(
+            ["git", "-C", root, "diff", "--name-status", "--find-renames", "-z", base],
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", "surrogateescape")
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    fields = [f for f in raw.split("\0") if f]
+    out: dict[str, str] = {}
+    i = 0
+    while i < len(fields):
+        status = fields[i]
+        # A rename or a copy carries the old name and the new one, and every other status one name.
+        if status[:1] in {"R", "C"} and i + 2 < len(fields):
+            out[fields[i + 2]] = fields[i + 1]
+            i += 3
+        else:
+            i += 2
+    return out
+
+
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
@@ -1842,23 +1877,35 @@ def held_comment_counts(path: Path, root: Path | None, base: str | None) -> Coun
     added. Reading the base text is what tells the two apart, and it is read per file rather than
     diffed, so the answer covers the whole file rather than the hunks.
 
-    An empty counter where the base did not hold the file at all, since every comment in a new file
-    is one the change brings. None where the base held the file and its comments could not be read,
-    which is a different answer: a branch repairing a `.py` that did not tokenize would otherwise
-    have every comment in it reported as added.
+    Counted over the prose comments alone, the same test the head side is filtered by. Counted over
+    every comment instead, a file's own directives and version pins bought free prose at head: this
+    repository's `validate-task.yml` held 85 comments of which 72 were prose, so 13 new prose lines
+    could arrive under a comparison against 85 and be reported as nothing.
+
+    An empty counter where the base did not hold the file, since every comment in a new file is one
+    the change brings. None where the file cannot be read rather than is absent, which is a
+    different answer: a branch repairing a `.py` that did not tokenize would otherwise have every
+    comment in it reported as added, and a run where git itself cannot be executed would report
+    every comment in every file it reads.
     """
     if base is None or root is None:
         return Counter()
+    key = repo_key(path, root)
+    key = renamed_from(base, str(root)).get(key, key)
     try:
         raw = subprocess.run(
-            ["git", "-C", str(root), "show", f"{base}:{repo_key(path, root)}"],
+            ["git", "-C", str(root), "show", f"{base}:{key}"],
             capture_output=True,
             check=True,
         ).stdout.decode("utf-8", "surrogateescape")
-    except (OSError, subprocess.SubprocessError):
+    except subprocess.CalledProcessError:
+        # Git ran and refused the path, which is the path not being in the base tree.
         return Counter()
+    except OSError:
+        # Git could not be run at all, so what the base held is unknown rather than nothing.
+        return None
     bodies = comment_bodies(path, raw)
-    return None if bodies is None else Counter(body for _, body in bodies)
+    return None if bodies is None else Counter(body for _, body in bodies if is_comment_prose(body))
 
 
 def comment_added_findings(
@@ -1897,11 +1944,17 @@ def comment_added_findings(
     held = held_comment_counts(path, root, base)
     if held is None or len(candidates) <= sum(held.values()):
         return []
-    found: Counter[str] = Counter()
+    # A body the file carries more often than the base did is reported at every line holding it.
+    # `main`'s scope filter then keeps the lines the diff actually touched.
+    # Choosing one line here cannot work.
+    # Attributing the surplus to the body's last line loses a copy inserted above the held one.
+    # Attributing it to the first loses a copy inserted below.
+    # Each time the chosen line is the one the diff did not touch, so the filter drops the finding.
+    surplus = Counter(body for _, body in candidates)
+    surplus.subtract(held)
     out: list[tuple[int, str, str]] = []
     for n, body in candidates:
-        found[body] += 1
-        if found[body] <= held[body]:
+        if surplus[body] <= 0:
             continue
         out.append(
             (
