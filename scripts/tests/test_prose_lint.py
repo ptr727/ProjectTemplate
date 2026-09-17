@@ -4024,9 +4024,9 @@ class TestTheCommentAddedRule(BaitCase):
                 ["comment-added"],
             ),
             ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
-            # The two families whose own form carries a written reason after the rule id.
-            ("# nosec B608 - the query is parameterized.\n", []),
-            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", []),
+            # A directive carrying a written reason closes as a sentence, so it is reported.
+            # The label is its remedy, since recognizing the form means encoding a tool's grammar.
+            ("# nosec B608 - the query is parameterized.\n", ["comment-added"]),
         ):
             with self.subTest(line=line.strip()):
                 self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
@@ -4301,9 +4301,14 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         )
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
+        # The whole expression rather than a fragment of it.
+        # Flipping its `||` to `&&` refuses every labeled pull request and left a fragment green.
         self.assertIn(
+            "allow-comments: ${{ contains(github.event.pull_request.labels.*.name, "
+            f"'{prose_lint.COMMENT_LABEL_NAME}') || "
+            "(github.event.pull_request.head.repo.full_name == github.repository && "
             "github.head_ref == 'develop' && "
-            "github.base_ref == github.event.repository.default_branch",
+            "github.base_ref == github.event.repository.default_branch) }}",
             workflow,
         )
 

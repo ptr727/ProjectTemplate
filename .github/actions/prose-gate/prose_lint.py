@@ -9,7 +9,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
-  comment-added  No comment line added to code or config, unless the change is labeled.
+  comment-added  No comment line added or edited in code or config, unless the change says so.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
   sentence-length A Markdown prose sentence must not exceed the word cap.
@@ -49,7 +49,7 @@ RULES = {
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
-    "comment-added": "a comment line this change adds to code or config",
+    "comment-added": "a comment line this change adds or edits in code or config",
     "dupword": "a duplicated consecutive word",
     "sentence-split": "a sentence wrapping across lines",
     "sentence-length": "a sentence over the word cap",
@@ -1448,13 +1448,6 @@ TOOL_DIRECTIVE = re.compile(
     r"|codespell:|doctest:)"
 )
 
-# The two directive families whose own form carries a human-readable reason after the rule id.
-# `# checkov:skip=CKV_DOCKER_2:Healthcheck is handled by the orchestrator.` is one directive.
-# The rule id is what tells these from a sentence opening on the same word, so it is required here.
-TOOL_DIRECTIVE_WITH_REASON = re.compile(
-    r"^(?:checkov:skip=CKV\w+|nosec\s+[A-Z]\w*\d\w*(?:\s*,\s*[A-Z]\w*\d\w*)*)\b"
-)
-
 # The pull request label that stands `comment-added` down, named once rather than in each place.
 # The finding's own message and the composite action's input cannot then drift from the declared label.
 COMMENT_LABEL_NAME = "comments"
@@ -1819,13 +1812,12 @@ def is_tool_directive(body: str) -> bool:
     once.` is prose whose first word happens to be a directive name. What follows a real directive
     is an argument, and an argument does not end in a full stop.
 
-    Two families are the exception, because their own form carries a written reason after the rule
-    id, so the sentence test would report exactly the directives it exists to exempt. Their rule id
-    is required rather than assumed, which is what still tells `# nosec B608 - parameterized.` from
-    the sentence opening on the same word.
+    A directive carrying a written reason, which `checkov:skip=` and `nosec` both allow, closes as a
+    sentence and is reported. That is the rule's cost landing on a real case rather than a defect,
+    and the label is its remedy. Recognizing the reason-carrying forms instead means encoding two
+    tools' grammars here, which was tried and got four of them wrong in one commit: an id that is
+    not `CKV`-prefixed, a space after `skip=`, bandit's `nosec:` spelling, and its test-name form.
     """
-    if TOOL_DIRECTIVE_WITH_REASON.match(body):
-        return True
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
@@ -1875,8 +1867,9 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
 
     A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
     since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
-    `TOOL_DIRECTIVE` are the forms that are known, so one neither names is reported and belongs on
-    whichever of them fits.
+    `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
+    label is the remedy, since a directive that carries a written reason closes as a sentence and
+    `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
@@ -2086,9 +2079,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--allow-comments",
         action="store_true",
-        help="stand `comment-added` down, for a change whose added comments are wanted "
-        f"and which carries the {COMMENT_LABEL_NAME!r} label to say so. "
-        f"A non-empty {COMMENT_ENV_NAME} does the same, for a caller with nowhere to pass a flag",
+        help="stand `comment-added` down, for a change whose added comments are wanted. "
+        f"A non-empty {COMMENT_ENV_NAME} does the same, for a caller with nowhere to pass a "
+        "flag. What makes a CI run pass it is the calling workflow's own condition",
     )
     ap.add_argument(
         "--provenance",
@@ -2156,8 +2149,8 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"note: comment-added stood down by {named}. In CI the composite action passes "
                 "that flag from its own input instead, which the fleet's caller computes from the "
-                f"{COMMENT_LABEL_NAME!r} label and from a pull request targeting the default "
-                f"branch, and it clears {COMMENT_ENV_NAME} so a runner cannot decide one.",
+                f"{COMMENT_LABEL_NAME!r} label and from the run being a promotion, and it clears "
+                f"{COMMENT_ENV_NAME} so a runner cannot decide one.",
                 file=sys.stderr,
             )
         elif a.diff is None:
