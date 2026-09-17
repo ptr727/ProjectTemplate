@@ -4438,6 +4438,20 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
 
+    def test_the_action_delivers_its_input_to_the_script(self) -> None:
+        """The harness feeds the variable, so nothing else reads the action's own wiring.
+
+        Two mutations survived the whole suite before this: deleting the `env:` mapping, after
+        which the label and the promotion stand-down never reach the gate and a labeled pull
+        request is still refused, and flipping the input's default to `'true'`, after which any
+        caller that omits the input has the rule stood down on every run and says nothing.
+        """
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        self.assertIn("ALLOW_COMMENTS: ${{ inputs.allow-comments }}", action)
+        # The default has to be the off value, since a caller that passes nothing gets it.
+        declared = action.split("runs:", 1)[0].split("  allow-comments:", 1)[1]
+        self.assertIn("default: 'false'", declared)
+
     def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
         """Asserted whole, since a fragment of it left two disarming mutations green.
 
