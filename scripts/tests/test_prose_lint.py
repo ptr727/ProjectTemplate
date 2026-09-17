@@ -4059,10 +4059,19 @@ class TestTheCommentAddedRule(BaitCase):
         self.assertEqual([], self.kinds(block, {"comment-added"}, name="Tool.ps1"))
         self.assertEqual(["comment-wrap"], self.kinds(block, {"comment-wrap"}, name="Tool.ps1"))
         # An ordinary remark is not documentation, so the rule still reads it, after a block too.
+        # Only a block that closes is exempt.
+        # An opener treated as one stood the rule down for the rest of the file and said nothing.
         for name, text in (
             ("alone", "# The store is read once, since a second read can disagree.\nparam()\n"),
             ("after a block", "<#\n.SYNOPSIS\nDoc.\n#>\n# The store is read once here.\n"),
             ("after a one-line block", "<# .SYNOPSIS Doc. #>\n# The store is read once here.\n"),
+            ("under an opener in a string", "$p = '<#'\n# The store is read once here.\n"),
+            ("under an unterminated opener", "<#\n# The store is read once here.\n"),
+            ("after a stray closer", "# The store is read once here.\n#>\nparam()\n"),
+            (
+                "past an opener inside a block",
+                "<#\n.SYNOPSIS\nUse <# to open.\n#>\n# The store is read once here.\n",
+            ),
         ):
             with self.subTest(case=name):
                 self.assertEqual(

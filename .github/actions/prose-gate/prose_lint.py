@@ -1811,19 +1811,31 @@ def powershell_help_lines(raw: str) -> set[int]:
     Skipped for `comment-added` alone rather than declared as the syntax's doc marker, since
     `comment-wrap` reads these blocks today and two of its cases assert that it does.
 
-    The scan is deliberately crude, matching the markers anywhere on a line. A `<#` inside a string
-    costs an exemption rather than a false finding, which is the safe direction for a rule that
-    refuses, and the alternative is a second PowerShell parser beside the one `extracted_comments`
-    already carries.
+    Only a block that closes is exempt. An opener with no closer exempts nothing, so a `<#` inside a
+    string costs at most a finding the label answers, where treating it as an opener stood the rule
+    down for every line after it in that file and said nothing. A gate that quietly stops gating is
+    the one failure mode this rule may not have.
+
+    A block comment does not nest in PowerShell, so a second `<#` inside one is text. The scan reads
+    it that way rather than counting depth, which is what a nested-looking opener broke.
+
+    The markers are matched anywhere on a line rather than parsed, the alternative being a second
+    PowerShell parser beside the one `extracted_comments` already carries.
     """
     out: set[int] = set()
-    depth = 0
+    opened_at: int | None = None
     for n, line in enumerate(raw.split("\n"), 1):
-        opens = line.count("<#")
-        closes = line.count("#>")
-        if depth or opens:
-            out.add(n)
-        depth = max(0, depth + opens - closes)
+        if opened_at is None:
+            at = line.find("<#")
+            if at < 0:
+                continue
+            if line.find("#>", at + 2) >= 0:
+                out.add(n)
+                continue
+            opened_at = n
+        elif "#>" in line:
+            out.update(range(opened_at, n + 1))
+            opened_at = None
     return out
 
 

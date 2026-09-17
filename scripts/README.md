@@ -41,7 +41,7 @@ Enforces the [`GOVERNANCE.md`][governance] "Documentation Style Conventions" rul
 
 The tiers decide by context rather than by a flat ban. Tier 1 carries no meaning its ASCII form loses and always flags. Tier 2 is an operator, kept next to a figure or another operator and replaced between words, so a threshold table reads as the range it is. Tier 3 is a unit or scientific symbol whose ASCII form would be a lie and never flags. Developer-typed characters such as emoji are preserved regardless of tier, and an un-tiered one is still reported as `charset-unknown` until it is classified.
 
-A character in no tier is a `charset-unknown` finding rather than a silent pass, since a gate that allows whatever it does not recognize stops gating as the character set grows. Classifying one is a fleet-law edit, so CI surfaces it without blocking on it.
+A character in no tier is a `charset-unknown` finding rather than a silent pass, since a gate that allows whatever it does not recognize stops gating as the character set grows. Classifying one is a fleet-law edit, so the whole-tree step that reports the backlog is warn-only, while the pull request gate blocks on one the change itself introduces.
 
 Run it scoped to changed lines, matching the standing rule that existing prose is corrected as each file is next edited rather than swept:
 
@@ -99,7 +99,7 @@ A comment sentence also has to start with a capital, which `comment-case` checks
 
 **A comment whose whole body is a URI is a reference rather than a sentence**, and neither rule applies to it. It cannot be capitalized or restructured without corrupting the address it exists to carry, so before the exemption every repo carrying a reference block inherited a finding no edit could answer. Consecutive reference lines are separate addresses rather than one sentence wrapping, which is why the exemption also stops the line below a URI from reading as its continuation. A URI inside a sentence is still prose, so the exemption requires the whole body to be the address and nothing else.
 
-Every rule in the default set is clean tree-wide except `comment-added`, which reads a diff and so has no tree-wide reading at all. That is what lets a local sweep here mean something, rather than what the CI gate does, since the gate scopes to the lines a change touches. `charset-unknown` is the one that reports instead of blocking, for the reason the tier discussion above gives.
+Every rule in the default set is clean tree-wide except `comment-added`, which reads a diff and so has no tree-wide reading at all. That is what lets a local sweep here mean something, rather than what the CI gate does, since the gate scopes to the lines a change touches. `charset-unknown` blocks there like any other default rule, and it is the warn-only one in [`.github/actions/validate`][validate-hook]'s separate whole-tree step, for the reason the tier discussion above gives.
 
 ## `repo_gate.py`
 
