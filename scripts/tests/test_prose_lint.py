@@ -4000,6 +4000,34 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_a_version_pin_comment_is_not_prose(self) -> None:
+        """The fleet writes a hub pin bare, so the `v`-prefixed form was the only one exempt.
+
+        Bumping one is a routine resync edit in every fleet repository, and a Dependabot pull
+        request cannot label itself, so reporting it blocked the merge-bot path outright.
+        """
+        for line in (
+            "jobs: {}  # 2.0.338\n",
+            "jobs: {}  # v7.0.1\n",
+            "jobs: {}  # v7.0.1-beta.2\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="w.yml"))
+
+    def test_a_directive_name_opening_a_sentence_is_still_prose(self) -> None:
+        """Anchoring the name alone let a directive open a sentence and exempt the whole comment."""
+        for line, expected in (
+            ("# nosec B404\n", []),
+            ("# hadolint ignore=DL3008\n", []),
+            (
+                "# nosec The value is read once, since the second read can disagree.\n",
+                ["comment-added"],
+            ),
+            ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
+
     def test_a_reference_and_a_key_are_not_prose(self) -> None:
         for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
             with self.subTest(line=line.strip()):
@@ -4246,7 +4274,8 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn(prose_lint.COMMENT_ENV_NAME, result.stderr)
+        # The naming clause, since the variable is also named in the note's closing sentence.
+        self.assertIn(f"stood down by {prose_lint.COMMENT_ENV_NAME}", result.stderr)
 
     def test_the_action_clears_the_environment_override(self) -> None:
         """Otherwise a runner's own environment decides a pull request the label was meant to.
@@ -4265,6 +4294,12 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             f"contains(github.event.pull_request.labels.*.name, '{prose_lint.COMMENT_LABEL_NAME}')",
+            workflow,
+        )
+        # A promotion diffs against the default branch's tip.
+        # Its scope is a whole release of lines that were reviewed where they landed.
+        self.assertIn(
+            "github.base_ref == github.event.repository.default_branch",
             workflow,
         )
 

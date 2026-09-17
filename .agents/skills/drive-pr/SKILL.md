@@ -80,7 +80,11 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 2. Commit the work, then run `local-strict-review` and record its pass in the order that skill
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
-   Then push the branch and open the feature -> develop PR if it does not exist yet. A push refused by a `.husky/pre-push` hook, which the hub carries and a
+   Then push the branch and open the feature -> develop PR if it does not exist yet. Open it
+   carrying the `comments` label where the change adds a comment line in code or config, since the
+   prose gate refuses one otherwise and reads the label off the event that started the run, so
+   adding it after a failing check applies to the next push rather than to a re-run of that one.
+   A push refused by a `.husky/pre-push` hook, which the hub carries and a
    repository has only if it adds one, is that gate working rather than an
    obstacle to route around, and that
    skill's refusal table says what each refusal means and what clears it.

@@ -1390,7 +1390,7 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 NOT_PROSE = re.compile(
     r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
     r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
-    r"|^v\d+(\.\d+)*$"
+    r"|^v?\d+(\.\d+)*(?:[-+][\w.]+)?$"
 )
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
@@ -1803,12 +1803,24 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+def is_tool_directive(body: str) -> bool:
+    """Whether a comment body is an instruction to a tool rather than a sentence.
+
+    The name has to open the body, since a comment naming a tool mid-sentence is prose about it.
+    And the body must not close as a sentence does, since anchoring the opening alone let a
+    directive's own name open one and exempt the whole comment with it: `# nosec The value is read
+    once.` is prose whose first word happens to be a directive name. What follows a real directive
+    is an argument, and an argument does not end in a full stop.
+    """
+    return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
+
+
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
         body
         and not NOT_PROSE.search(body)
-        and not TOOL_DIRECTIVE.match(body)
+        and not is_tool_directive(body)
         and not BARE_URI.match(body)
         and not KEY_ONLY.match(body)
     )
@@ -1871,8 +1883,8 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
                 "comment-added",
                 (
                     "a comment line this change adds or edits -> delete it, carry the "
-                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
-                    "for a commit whose comments are wanted"
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or, at a commit rather "
+                    f"than in CI, set {COMMENT_ENV_NAME}"
                 ),
             )
         )

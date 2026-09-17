@@ -256,7 +256,10 @@ jobs:
           base: ${{ github.event.pull_request.base.sha }}
           # The label is read off the pull request rather than passed as an input a caller sets.
           # A repository cannot then leave the override on, since it is reapplied per change by hand.
-          allow-comments: ${{ contains(github.event.pull_request.labels.*.name, 'comments') }}
+          # A pull request targeting the default branch is a promotion, and it diffs against that branch's tip.
+          # Its scope is therefore every line promoted since the last one, all of it already reviewed where it landed.
+          # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
+          allow-comments: ${{ contains(github.event.pull_request.labels.*.name, 'comments') || github.base_ref == github.event.repository.default_branch }}
 
       # An empty repo-gate-exclude-globs leaves the action's own input at its default, so the default caller excludes nothing.
       - name: Check repo gates step
