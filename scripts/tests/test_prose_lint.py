@@ -4043,9 +4043,9 @@ class TestTheCommentAddedRule(BaitCase):
         """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
 
         PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
-        the way `///` is in C#, since it is the form the fleet's own scripts use. The `#` form is
-        read as the ordinary comment lines it is written as, which the last case pins, because
-        telling it from a remark needs a second grammar in a rule that holds none.
+        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written
+        as, which the last case pins, because telling it from a remark needs a second grammar in a
+        rule that holds none.
         """
         # Written so `comment-wrap` has something to find here.
         # That is what makes the second assertion prove the skip is this rule's own.

@@ -1132,7 +1132,6 @@ POWERSHELL: Syntax = {
 # The `#` form is a run of ordinary comment lines and is read as the comments it is written as.
 # So a change writing one carries the label, `.SYNOPSIS` being a keyword no author may delete.
 # Telling the two apart needs the `.`-keyword shape, a second grammar in a rule that holds none.
-# The block form is the one the fleet's own scripts use.
 # The other two comment rules keep the plain spelling, where a block comment is a comment they read.
 POWERSHELL_DOC: Syntax = {**POWERSHELL, "doc": ("<#",)}
 INI: Syntax = {**PLAIN, "line": ("#", ";")}
