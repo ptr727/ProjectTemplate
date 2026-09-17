@@ -3975,10 +3975,41 @@ class TestTheCommentAddedRule(BaitCase):
             ["comment-added"], self.kinds(self.PROSE, {"comment-added"}, name="tool.py")
         )
 
-    def test_a_trailing_comment_is_reported_too(self) -> None:
-        """A comment is prose wherever it sits, and exempting the trailing form invites it."""
-        text = "value = read()  # The second read can disagree with the first.\n"
-        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.py"))
+    def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
+        """A trailing comment is out of scope, and the languages below are why.
+
+        Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
+        HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
+        all, PowerShell opens one after almost anything, and shell after its metacharacters. Six
+        attempts at deciding it from the marker's neighbourhood each got a language wrong, and each
+        wrong answer either reported a line holding no comment or silenced one that held several.
+        A marker opening its line is unambiguous in every language.
+        """
+        for text, name in (
+            ("value = read()  # The second read can disagree.\n", "tool.py"),
+            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
+            ("- name: Check C# formatting step\n", "t.yml"),
+            ("note: See (#1234) for the discussion of this change.\n", "a.yml"),
+            ('description = """\nReference owner/repo#1234 when it lands.\n"""\n', "a.toml"),
+            ("build/ # The output tree is ignored.\n", ".gitignore"),
+            ("run_gate;# The gate is run once here.\n", "t.sh"),
+        ):
+            with self.subTest(name=name, text=text.strip().splitlines()[0]):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_comment_opening_its_line_is_read_in_every_syntax(self) -> None:
+        """The other half, so the narrowing cannot pass by reporting nothing at all."""
+        for text, name in (
+            ("# The store is read once here.\n", "t.sh"),
+            ("# The store is read once here.\n", "t.yml"),
+            ("// The store is read once here.\nlet x = 1;\n", "a.ts"),
+            ("/* The store is read once here. */\n", "a.css"),
+            ("<!-- The store is read once here. -->\n", "a.xml"),
+            ("; The store is read once here.\n", "x.ini"),
+            ("# The store is read once here.\n", "a.ps1"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
 
     def test_config_carries_the_rule_as_code_does(self) -> None:
         for name, text in (
@@ -3991,119 +4022,6 @@ class TestTheCommentAddedRule(BaitCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_a_hash_inside_a_token_is_not_a_comment(self) -> None:
-        """Shell and YAML need whitespace before a `#`, and this read every one as a marker.
-
-        Measured on the tree at the time: three tracked files reporting 43, 79 and 33 findings whose
-        bodies were fragments of code, each carrying "delete it" as its remedy and no comment to
-        delete. The rules that read these comments before this one all needed a leading marker or a
-        misspelling inside the body, so none of them ever surfaced it.
-        """
-        for text, name in (
-            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
-            ('echo "${#arr[@]}"\n', "t.sh"),
-            ("curl http://example.invalid/page#anchor\n", "t.sh"),
-            ('        echo "${file##*/}"\n', "t.yml"),
-            ("- name: Check C# formatting step\n", "t.yml"),
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
-        # A marker that opens a comment reads as one, leading, trailing, or after a metacharacter.
-        # TOML and HCL also take one against a bare value, `key = 1# note`, which this misses.
-        # No tracked file carries that, and it loses a finding rather than inventing one.
-        for text, name in (
-            ("# The store is read once here.\n", "t.sh"),
-            ("echo hi  # The store is read once here.\n", "t.sh"),
-            ("run_gate;# The gate is run once here.\n", "t.sh"),
-            ("key: value  # The store is read once here.\n", "t.yml"),
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_a_quoted_marker_does_not_vouch_for_an_operator(self) -> None:
-        """Asking the line whether any `#` is anchored let an unrelated one answer for an operator.
-
-        The parser records what sat before the marker it actually chose, so a quoted ` #` elsewhere
-        on the line no longer vouches for the `#` of `$#`.
-        """
-        for text in (
-            "test $# -eq 1 && echo ' #'\n",
-            "sed 's/ #.*//' ${f##*/}\n",
-            "echo 'a # b' ${x##*/}\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, {"comment-added"}, name="t.sh"))
-
-    def test_a_semicolon_comment_is_read_in_an_ini_family_file(self) -> None:
-        """The test judged only `#`, so a `;` comment reported only when the prose held a `#`."""
-        for name in ("x.ini", "x.editorconfig", "x.conf"):
-            with self.subTest(name=name):
-                self.assertEqual(
-                    ["comment-added"],
-                    self.kinds("; The store is read once here.\n", {"comment-added"}, name=name),
-                )
-
-    def test_a_marker_that_is_not_a_hash_is_never_judged_by_position(self) -> None:
-        """Forcing every marker to `#` passed the whole suite while these stopped reporting.
-
-        Each opener below sits against a character no `#` set carries, so the escape for a marker
-        that is not a `#` is the only thing reporting them.
-        """
-        for text, name in (
-            ("key = v; The store is read once here.\n", "x.ini"),
-            ("body{ }/* The store is read once here. */\n", "a.css"),
-            ('{"a":1}// The store is read once here.\n', "a.jsonc"),
-            ("<a><!-- The store is read once here. --></a>\n", "a.xml"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_each_language_decides_what_its_hash_may_follow(self) -> None:
-        """One set for every language was shell's, which reads a YAML `(#1234)` as a comment.
-
-        An issue reference in parentheses is a shape this fleet writes constantly, and the same set
-        lost a PowerShell `{#` and every TOML or HCL comment written against a bare value.
-        """
-        for text, name, expected in (
-            ("note: See (#1234) for the discussion of this change.\n", "a.yml", []),
-            ("description: Copyright &#169; the owner of this file.\n", "a.yml", []),
-            ("key: value  # The store is read once here.\n", "a.yml", ["comment-added"]),
-            ("run_gate;# The gate is run once here.\n", "t.sh", ["comment-added"]),
-            ("if ($a) {# The store is read once here.\n", "a.ps1", ["comment-added"]),
-            ("key = 1# The cap is fixed by the house style.\n", "a.toml", ["comment-added"]),
-            ("count = 1# The single instance is deliberate.\n", "b.tf", ["comment-added"]),
-        ):
-            with self.subTest(name=name, text=text.strip()):
-                self.assertEqual(expected, self.kinds(text, {"comment-added"}, name=name))
-
-    def test_python_keeps_a_comment_against_a_token(self) -> None:
-        """`tokenize` cannot be wrong about which `#` opens one, and Python opens one anywhere."""
-        for text in (
-            'v = "s"# The store is read once here.\n',
-            "v = t[0]# The store is read once here.\n",
-            "x = 1# The store is read once here.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(
-                    ["comment-added"], self.kinds(text, {"comment-added"}, name="t.py")
-                )
-
-    def test_the_marker_test_reads_the_line_rather_than_the_scan(self) -> None:
-        """Steering the scan past a marker handed the rest of the line to the string reader.
-
-        One apostrophe after the skipped marker then opened a quote that carried to end of file,
-        silencing every comment rule in it, which is a worse fault than the operators it fixed.
-        """
-        text = (
-            "echo C# won't build\n"
-            "echo done  # The result is printed once here.\n"
-            "echo more  # The second line is printed here.\n"
-        )
-        self.assertEqual(
-            ["comment-added", "comment-added"],
-            self.kinds(text, {"comment-added"}, name="t.sh"),
-        )
 
     def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
         """Deleting one of these changes what the file does, which is not what the rule asks for."""
@@ -4279,16 +4197,6 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
-    def test_a_line_carrying_two_comments_is_one_finding(self) -> None:
-        """The rule is about the line, so counting it twice reports one line as two violations."""
-        text = "/* The first read can disagree. */ let x = 1; /* And so can the second. */\n"
-        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
-
-    def test_a_directive_sharing_a_line_does_not_claim_it(self) -> None:
-        """Deduplicating before the prose test let the first comment take the line and silence it."""
-        text = "/* fmt: off */ let x = 1; /* The second read can disagree with the first. */\n"
-        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
-
     def test_the_rule_list_says_what_the_rule_does(self) -> None:
         """`--summary` and `--help` print this line, and it said the rule fires on an addition.
 
@@ -4450,20 +4358,22 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
     def test_a_code_edit_beside_a_comment_reports_that_comment(self) -> None:
         """The rule's stated cost, asserted rather than left to be discovered.
 
-        `git diff --unified=0` counts a modified line as an added one, so a comment on a line whose
-        code changed is in scope. The label is the remedy, the same one a wanted comment takes.
+        `git diff --unified=0` counts a modified line as an added one, so re-indenting a comment
+        that opens its line puts it in scope. The label is the remedy, the same one a wanted
+        comment takes. A trailing comment is out of scope for a different reason, which
+        `test_only_a_comment_that_opens_its_line_is_read` carries.
         """
-        (self.root / "held.py").write_text(
-            "LIMIT = 1  # The upper limit is fixed by the protocol.\n", encoding="utf-8"
-        )
+        held = "# The upper limit is fixed by the protocol.\nLIMIT = 1\n"
+        (self.root / "held.py").write_text(held, encoding="utf-8")
         self.git("add", "-A")
         self.git("commit", "-qm", "held")
         (self.root / "held.py").write_text(
-            "LIMIT = 2  # The upper limit is fixed by the protocol.\n", encoding="utf-8"
+            "if True:\n    # The upper limit is fixed by the protocol.\n    LIMIT = 1\n",
+            encoding="utf-8",
         )
         result = run_prose_gate_action(self.root)
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("held.py:1: comment-added", result.stdout)
+        self.assertIn("held.py:2: comment-added", result.stdout)
 
     def test_a_comment_the_change_does_not_touch_is_not_reported(self) -> None:
         """The diff scope is the whole of what narrows this rule, so it is asserted directly."""

@@ -177,11 +177,13 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 ```
 
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
-gate. It reports every prose comment line in the diff's scope, and a diff counts a modified line as an
-added one, so rewording a comment, correcting one, and editing the code on a line that carries one
-each report that comment. That is the rule's cost and the label is its answer, since a comment worth
-keeping takes the same label as a comment worth writing. A docstring is not a comment line, an
-instruction to a tool is not a comment the rule reads, and Markdown is out of scope.
+gate. It reports a prose comment that opens its own line, in the diff's scope, and a diff counts a
+modified line as an added one, so rewording one and re-indenting one each report it. That is the
+rule's cost and the label is its answer, since a comment worth keeping takes the same label as a
+comment worth writing. A trailing comment is out of scope, since which mid-line marker opens a
+comment differs by language in ways a gate cannot settle from the marker alone. A docstring is not
+a comment line, an instruction to a tool is not a comment the rule reads, and Markdown is out of
+scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the

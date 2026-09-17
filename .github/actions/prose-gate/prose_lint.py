@@ -9,7 +9,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
-  comment-added  No comment line added or edited in code or config, unless the change says so.
+  comment-added  No comment line opening its own line added or edited, unless the change says so.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
   sentence-length A Markdown prose sentence must not exceed the word cap.
@@ -49,7 +49,7 @@ RULES = {
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
-    "comment-added": "a comment line this change adds or edits in code or config",
+    "comment-added": "a comment line this change adds or edits, opening its own line",
     "dupword": "a duplicated consecutive word",
     "sentence-split": "a sentence wrapping across lines",
     "sentence-length": "a sentence over the word cap",
@@ -1071,7 +1071,6 @@ class Syntax(TypedDict):
     escape_in: str
     escape_out: bool
     carry: frozenset[str]
-    hash_after: str | None
 
 
 PLAIN: Syntax = {
@@ -1086,15 +1085,8 @@ PLAIN: Syntax = {
     "escape_in": "\"'",
     "escape_out": False,
     "carry": frozenset(),
-    # What may sit before a `#` that opens a comment, beyond the start of the line.
-    # Whitespace alone is YAML's rule and the safe default.
-    # A `#` inside a token is an operator: `$#`, `${x##*/}`, `C#`, and `(#1234)` in a scalar.
-    # A language that opens one more widely says so, and `None` means it opens one anywhere.
-    "hash_after": " \t",
 }
 HASH: Syntax = {**PLAIN, "line": ("#",)}
-# HCL opens a comment against a bare value, so nothing has to precede the marker.
-HCL: Syntax = {**HASH, "hash_after": None}
 # A shell single-quoted string takes no escape and cannot embed its own delimiter.
 # It is neither doubling nor escaped, so `'a''b'` is two adjacent strings rather than one.
 # Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
@@ -1104,8 +1096,6 @@ SHELL: Syntax = {
     "escape_in": '"',
     "escape_out": True,
     "carry": frozenset({"quote", "label"}),
-    # The shell word-splits on these, so a `#` against one opens a comment.
-    "hash_after": " \t;&|()",
 }
 # A YAML block scalar is the multi-line form.
 # A quote delimits a scalar only at the start of a value, so a plain scalar's apostrophe is text.
@@ -1119,8 +1109,7 @@ YAML: Syntax = {
     "carry": frozenset({"block"}),
 }
 # A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
-# TOML opens one against a bare value too, `key = 1# note` being a comment.
-TOML: Syntax = {**HASH, "raw": "'", "escape_in": '"', "hash_after": None}
+TOML: Syntax = {**HASH, "raw": "'", "escape_in": '"'}
 C_LIKE: Syntax = {**PLAIN, "line": ("//",), "block": (("/*", "*/"),), "doc": ("///", "/**")}
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
 CSHARP: Syntax = {**C_LIKE, "verbatim": True, "carry": frozenset({"verbatim"})}
@@ -1137,8 +1126,6 @@ POWERSHELL: Syntax = {
     "escape_in": '"',
     "escape_out": True,
     "carry": frozenset({"quote", "here"}),
-    # The shell set plus the delimiters PowerShell also ends a token on.
-    "hash_after": " \t;&|(){},=",
 }
 # PowerShell documents two comment-based help forms, a `<# ... #>` block and a run of `#` lines.
 # `comment-added` reads the block form as documentation, the way C# declares `///`.
@@ -1160,7 +1147,7 @@ SYNTAX: dict[str, Syntax] = {
     ".yml": YAML,
     ".yaml": YAML,
     ".toml": TOML,
-    ".tf": HCL,
+    ".tf": HASH,
     ".gitattributes": HASH,
     ".gitignore": HASH,
     # C#, C, and C++
@@ -1233,19 +1220,11 @@ def syntax_for(path: Path) -> Syntax | None:
 
 
 class Comment(NamedTuple):
-    """A comment the parser found, and what sat immediately before its marker.
-
-    `before` is the empty string where the marker opens the line, and `marker` is the opener the
-    parser took. Both are recorded rather than re-derived, because a reader asking the line instead
-    cannot tell which of several markers was chosen, and a reader steering the parser past one hands
-    the rest of that line to the string reader. Both were tried and each silenced whole files.
-    """
+    """A comment the parser found, and whether its marker opens the line."""
 
     line: int
     body: str
     leading: bool
-    before: str
-    marker: str
 
 
 class Carried(NamedTuple):
@@ -1631,8 +1610,7 @@ def python_comments(raw: str) -> list[Comment] | None:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()
                 body = tok.string.lstrip("#").strip()
-                before = tok.line[col - 1] if col else ""
-                out.append(Comment(tok.start[0], body, leading, before, "#"))
+                out.append(Comment(tok.start[0], body, leading))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return out
@@ -1681,8 +1659,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                # A carried line has no marker of its own, so it reports the block's opener.
-                out.append(Comment(n, body, True, "", closing))
+                out.append(Comment(n, body, True))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -1744,13 +1721,13 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if isinstance(found, str):  # a line comment runs to end of line
                 body = line[at + len(found) :].strip()
                 if body:
-                    out.append(Comment(n, body, leading, line[at - 1] if at else "", found))
+                    out.append(Comment(n, body, leading))
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
             body = (line[at + len(opener) : end if end >= 0 else None]).strip()
             if body:
-                out.append(Comment(n, body, leading, line[at - 1] if at else "", opener))
+                out.append(Comment(n, body, leading))
             if end < 0:
                 closing = closer
                 break
@@ -1795,7 +1772,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, body, leading, _before, _marker in comments:
+    for n, body, leading in comments:
         if (
             not body
             or NOT_PROSE.search(body)
@@ -1873,26 +1850,6 @@ def is_tool_directive(body: str) -> bool:
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
-def hash_marker_opens_a_comment(comment: Comment, after: str | None) -> bool:
-    """Whether the marker this comment was found at is one that opens a comment.
-
-    Only a `#` is judged. The parser records what sat before the marker it chose, so this reads that
-    rather than the line, which cannot say which of several markers was taken: a quoted ` #` on a
-    line whose other `#` is inside `$#` vouched for the operator and reported a line holding no
-    comment. A marker that is not a `#` is left alone, since a C-like `//`, an INI `;` and an XML
-    `<!--` each open a comment wherever they sit outside a string.
-
-    `after` is the language's own set, from its `Syntax`, because which characters a `#` may follow
-    differs by language and one set for all of them is wrong for most: shell's metacharacters read
-    a YAML `(#1234)` as a comment, and YAML's whitespace loses a PowerShell `{#`.
-    """
-    if not comment.marker.startswith("#"):
-        return True
-    if after is None:
-        return True
-    return comment.before == "" or comment.before in after
-
-
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
@@ -1953,11 +1910,16 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     bodies = comment_bodies(path, raw, spec)
     if bodies is None:
         return []
-    # Python is read by `tokenize`, which cannot be wrong about which `#` opens a comment, and
-    # Python opens one after any character outside a string, so the test below does not apply.
-    if path.suffix.lower() != ".py":
-        after = (spec or syntax_for(path) or PLAIN)["hash_after"]
-        bodies = [c for c in bodies if hash_marker_opens_a_comment(c, after)]
+    # A comment whose marker opens the line, and no other.
+    # Which mid-line marker opens a comment is a parser fact that differs by language.
+    # TOML and HCL carry a `#` inside a multi-line string.
+    # A git pattern file holds no trailing comment at all.
+    # PowerShell opens one after almost anything, and shell after its metacharacters.
+    # Six attempts at deciding it from the marker's neighbourhood each got a language wrong.
+    # A marker at the start of its line is unambiguous in every one of them.
+    # `comment-wrap` and `comment-case` have judged only leading comments for years.
+    # That is why neither ever met any of those defects.
+    bodies = [c for c in bodies if c.leading]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()
@@ -2005,7 +1967,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
-        for ln, text, _leading, _before, _marker in extracted_comments(path, lines):
+        for ln, text, _leading in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ""
