@@ -11,8 +11,8 @@ inputs:
     default: .
   allow-comments:
     description: >-
-      'true' stands the comment-added rule down, for a change whose added comment lines are
-      wanted. Anything else runs the rule. A caller that computes this per pull request gets an
+      'true' stands the comment-added rule down, for a change whose comment lines are wanted.
+      Anything else runs the rule. A caller that computes this per pull request gets an
       override reapplied per change, which is what a hard-coded 'true' would give up. The fleet's
       own caller computes it from the pull request's own labels and from whether the pull request
       is a promotion.
@@ -99,7 +99,7 @@ runs:
           allow_args=(--allow-comments)
           echo "The comment-added rule stands down: the allow-comments input is true."
         fi
-        # Cleared so the label decides in CI and a runner's own environment cannot.
+        # Cleared so the caller's own input decides in CI and a runner's environment cannot.
         # The gate reads this variable for the hooks that have nowhere to pass a flag.
         unset PROSE_ALLOW_COMMENTS
         provenance_args=()

@@ -1812,11 +1812,14 @@ def is_tool_directive(body: str) -> bool:
     once.` is prose whose first word happens to be a directive name. What follows a real directive
     is an argument, and an argument does not end in a full stop.
 
-    A directive carrying a written reason, which `checkov:skip=` and `nosec` both allow, closes as a
-    sentence and is reported. That is the rule's cost landing on a real case rather than a defect,
-    and the label is its remedy. Recognizing the reason-carrying forms instead means encoding two
-    tools' grammars here, which was tried and got four of them wrong in one commit: an id that is
-    not `CKV`-prefixed, a space after `skip=`, bandit's `nosec:` spelling, and its test-name form.
+    A directive carrying a written reason, which `checkov:skip=` and `nosec` both allow, is exempt
+    while that reason is written as an argument and reported once it is punctuated as a sentence,
+    which is the same test applied to the same body. So `# nosec B608 - the query is parameterized`
+    is exempt and the period-terminated spelling of it is not. That is the rule's cost landing on a
+    real case rather than a defect, and the label is its remedy. Recognizing the reason-carrying
+    forms instead means encoding two tools' grammars here, which was tried and got four of them
+    wrong in one commit: an id that is not `CKV`-prefixed, a space after `skip=`, bandit's `nosec:`
+    spelling, and its test-name form.
     """
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
@@ -1868,8 +1871,8 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
     since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
     `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
-    label is the remedy, since a directive that carries a written reason closes as a sentence and
-    `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
+    label is the remedy, since a directive whose written reason is punctuated as a sentence reads
+    as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
@@ -1889,9 +1892,9 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
                 n,
                 "comment-added",
                 (
-                    "a comment line this change adds or edits -> delete it, carry the "
-                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or, at a commit rather "
-                    f"than in CI, set {COMMENT_ENV_NAME}"
+                    "a comment line this change adds or edits -> delete it, or allow it: the "
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request, {COMMENT_ENV_NAME} at a "
+                    "commit, --allow-comments on a run by hand"
                 ),
             )
         )
@@ -2079,7 +2082,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--allow-comments",
         action="store_true",
-        help="stand `comment-added` down, for a change whose added comments are wanted. "
+        help="stand `comment-added` down, for a change whose comment lines are wanted. "
         f"A non-empty {COMMENT_ENV_NAME} does the same, for a caller with nowhere to pass a "
         "flag. What makes a CI run pass it is the calling workflow's own condition",
     )

@@ -4024,9 +4024,12 @@ class TestTheCommentAddedRule(BaitCase):
                 ["comment-added"],
             ),
             ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
-            # A directive carrying a written reason closes as a sentence, so it is reported.
-            # The label is its remedy, since recognizing the form means encoding a tool's grammar.
+            # A reason written as an argument is exempt.
+            # The same reason punctuated as a sentence is not, which is one test reading one body.
+            ("# nosec B608 - the query is parameterized\n", []),
             ("# nosec B608 - the query is parameterized.\n", ["comment-added"]),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it\n", []),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", ["comment-added"]),
         ):
             with self.subTest(line=line.strip()):
                 self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
@@ -4104,6 +4107,18 @@ class TestTheCommentAddedRule(BaitCase):
         text = "/* The first read can disagree. */ let x = 1; /* And so can the second. */\n"
         self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
 
+    def test_the_rule_list_says_what_the_rule_does(self) -> None:
+        """`--summary` and `--help` print this line, and it said the rule fires on an addition.
+
+        A diff counts a modified line as an added one, so a reworded comment is reported, and a
+        reader told otherwise by the rule list meets the finding without expecting it.
+        """
+        self.assertIn("adds or edits", prose_lint.RULES["comment-added"])
+        findings = prose_lint.check_file(
+            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
+        )
+        self.assertIn("adds or edits", findings[0][2])
+
     def test_the_rule_runs_by_default(self) -> None:
         """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
         self.assertIn("comment-added", prose_lint.DEFAULT_RULES)
@@ -4120,6 +4135,9 @@ class TestTheCommentAddedRule(BaitCase):
         )
         self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), findings[0][2])
         self.assertIn(prose_lint.COMMENT_ENV_NAME, findings[0][2])
+        # The flag belongs beside them, since the message prints on a run by hand too.
+        # There no pull request carries a label, and a variable is the clumsier way to pass one.
+        self.assertIn("--allow-comments", findings[0][2])
 
     def _write(self, text: str, name: str) -> Path:
         path = self.tmp / name
@@ -4301,8 +4319,15 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         )
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
-        # The whole expression rather than a fragment of it.
-        # Flipping its `||` to `&&` refuses every labeled pull request and left a fragment green.
+
+    def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
+        """Asserted whole, since a fragment of it left two disarming mutations green.
+
+        Flipping the `||` to `&&` refuses every labeled pull request, and dropping the head
+        repository term stands the rule down for a fork branch named `develop`. Both passed while
+        this read one fragment, and both fail against the whole expression.
+        """
+        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             "allow-comments: ${{ contains(github.event.pull_request.labels.*.name, "
             f"'{prose_lint.COMMENT_LABEL_NAME}') || "
