@@ -4044,6 +4044,39 @@ class TestTheCommentAddedRule(BaitCase):
                     self.kinds("; The store is read once here.\n", {"comment-added"}, name=name),
                 )
 
+    def test_a_marker_that_is_not_a_hash_is_never_judged_by_position(self) -> None:
+        """Forcing every marker to `#` passed the whole suite while these stopped reporting.
+
+        Each opener below sits against a character no `#` set carries, so the escape for a marker
+        that is not a `#` is the only thing reporting them.
+        """
+        for text, name in (
+            ("key = v; The store is read once here.\n", "x.ini"),
+            ("body{ }/* The store is read once here. */\n", "a.css"),
+            ('{"a":1}// The store is read once here.\n', "a.jsonc"),
+            ("<a><!-- The store is read once here. --></a>\n", "a.xml"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_each_language_decides_what_its_hash_may_follow(self) -> None:
+        """One set for every language was shell's, which reads a YAML `(#1234)` as a comment.
+
+        An issue reference in parentheses is a shape this fleet writes constantly, and the same set
+        lost a PowerShell `{#` and every TOML or HCL comment written against a bare value.
+        """
+        for text, name, expected in (
+            ("note: See (#1234) for the discussion of this change.\n", "a.yml", []),
+            ("description: Copyright &#169; the owner of this file.\n", "a.yml", []),
+            ("key: value  # The store is read once here.\n", "a.yml", ["comment-added"]),
+            ("run_gate;# The gate is run once here.\n", "t.sh", ["comment-added"]),
+            ("if ($a) {# The store is read once here.\n", "a.ps1", ["comment-added"]),
+            ("key = 1# The cap is fixed by the house style.\n", "a.toml", ["comment-added"]),
+            ("count = 1# The single instance is deliberate.\n", "b.tf", ["comment-added"]),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, {"comment-added"}, name=name))
+
     def test_python_keeps_a_comment_against_a_token(self) -> None:
         """`tokenize` cannot be wrong about which `#` opens one, and Python opens one anywhere."""
         for text in (

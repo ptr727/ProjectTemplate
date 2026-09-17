@@ -1071,6 +1071,7 @@ class Syntax(TypedDict):
     escape_in: str
     escape_out: bool
     carry: frozenset[str]
+    hash_after: str | None
 
 
 PLAIN: Syntax = {
@@ -1085,8 +1086,15 @@ PLAIN: Syntax = {
     "escape_in": "\"'",
     "escape_out": False,
     "carry": frozenset(),
+    # What may sit before a `#` that opens a comment, beyond the start of the line.
+    # Whitespace alone is YAML's rule and the safe default.
+    # A `#` inside a token is an operator: `$#`, `${x##*/}`, `C#`, and `(#1234)` in a scalar.
+    # A language that opens one more widely says so, and `None` means it opens one anywhere.
+    "hash_after": " \t",
 }
 HASH: Syntax = {**PLAIN, "line": ("#",)}
+# HCL opens a comment against a bare value, so nothing has to precede the marker.
+HCL: Syntax = {**HASH, "hash_after": None}
 # A shell single-quoted string takes no escape and cannot embed its own delimiter.
 # It is neither doubling nor escaped, so `'a''b'` is two adjacent strings rather than one.
 # Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
@@ -1096,6 +1104,8 @@ SHELL: Syntax = {
     "escape_in": '"',
     "escape_out": True,
     "carry": frozenset({"quote", "label"}),
+    # The shell word-splits on these, so a `#` against one opens a comment.
+    "hash_after": " \t;&|()",
 }
 # A YAML block scalar is the multi-line form.
 # A quote delimits a scalar only at the start of a value, so a plain scalar's apostrophe is text.
@@ -1109,7 +1119,8 @@ YAML: Syntax = {
     "carry": frozenset({"block"}),
 }
 # A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
-TOML: Syntax = {**HASH, "raw": "'", "escape_in": '"'}
+# TOML opens one against a bare value too, `key = 1# note` being a comment.
+TOML: Syntax = {**HASH, "raw": "'", "escape_in": '"', "hash_after": None}
 C_LIKE: Syntax = {**PLAIN, "line": ("//",), "block": (("/*", "*/"),), "doc": ("///", "/**")}
 # C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
 CSHARP: Syntax = {**C_LIKE, "verbatim": True, "carry": frozenset({"verbatim"})}
@@ -1126,6 +1137,8 @@ POWERSHELL: Syntax = {
     "escape_in": '"',
     "escape_out": True,
     "carry": frozenset({"quote", "here"}),
+    # The shell set plus the delimiters PowerShell also ends a token on.
+    "hash_after": " \t;&|(){},=",
 }
 # PowerShell documents two comment-based help forms, a `<# ... #>` block and a run of `#` lines.
 # `comment-added` reads the block form as documentation, the way C# declares `///`.
@@ -1147,7 +1160,7 @@ SYNTAX: dict[str, Syntax] = {
     ".yml": YAML,
     ".yaml": YAML,
     ".toml": TOML,
-    ".tf": HASH,
+    ".tf": HCL,
     ".gitattributes": HASH,
     ".gitignore": HASH,
     # C#, C, and C++
@@ -1860,14 +1873,7 @@ def is_tool_directive(body: str) -> bool:
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
-# What may sit before a `#` that opens a comment, beyond the start of the line.
-# Shell takes one after a metacharacter and YAML wants whitespace.
-# A `#` inside a token is an operator in both: `$#`, `${x##*/}`, `C#`, and a URL fragment.
-# TOML and HCL also take one against a bare value, which this misses and no tracked file carries.
-HASH_OPENS_AFTER = " \t;&|()"
-
-
-def hash_marker_opens_a_comment(comment: Comment) -> bool:
+def hash_marker_opens_a_comment(comment: Comment, after: str | None) -> bool:
     """Whether the marker this comment was found at is one that opens a comment.
 
     Only a `#` is judged. The parser records what sat before the marker it chose, so this reads that
@@ -1875,10 +1881,16 @@ def hash_marker_opens_a_comment(comment: Comment) -> bool:
     line whose other `#` is inside `$#` vouched for the operator and reported a line holding no
     comment. A marker that is not a `#` is left alone, since a C-like `//`, an INI `;` and an XML
     `<!--` each open a comment wherever they sit outside a string.
+
+    `after` is the language's own set, from its `Syntax`, because which characters a `#` may follow
+    differs by language and one set for all of them is wrong for most: shell's metacharacters read
+    a YAML `(#1234)` as a comment, and YAML's whitespace loses a PowerShell `{#`.
     """
     if not comment.marker.startswith("#"):
         return True
-    return comment.before == "" or comment.before in HASH_OPENS_AFTER
+    if after is None:
+        return True
+    return comment.before == "" or comment.before in after
 
 
 def is_comment_prose(body: str) -> bool:
@@ -1944,7 +1956,8 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     # Python is read by `tokenize`, which cannot be wrong about which `#` opens a comment, and
     # Python opens one after any character outside a string, so the test below does not apply.
     if path.suffix.lower() != ".py":
-        bodies = [c for c in bodies if hash_marker_opens_a_comment(c)]
+        after = (spec or syntax_for(path) or PLAIN)["hash_after"]
+        bodies = [c for c in bodies if hash_marker_opens_a_comment(c, after)]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()
