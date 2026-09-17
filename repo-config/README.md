@@ -47,7 +47,7 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while any carried unit owes a read.
 
-The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
+The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `comments` is the one label that changes a gate's verdict rather than describing the work: a pull request carrying it stands the prose gate's `comment-added` rule down for that change, per the `comment-and-doc-style` Skill. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
 

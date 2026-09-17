@@ -41,7 +41,8 @@ fi
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.13.
 # The scope is the working tree rather than the index.
 # A partially staged file is therefore judged on all of its edits, not only the staged ones.
-# The pull request gate reads the lines a change touches, which is narrower than this scope.
+# The pull request gate reads every line the branch changes against its base.
+# It therefore covers a commit this hook never ran on, and this scope is the wider one per commit.
 run_py scripts/prose_lint.py . --diff HEAD
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.

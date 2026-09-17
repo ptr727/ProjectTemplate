@@ -4040,8 +4040,12 @@ class TestTheCommentAddedRule(BaitCase):
             [], self.kinds("x = (1\n" + self.DOCSTRING, {"comment-added"}, name="bad.py")
         )
 
-    def test_the_suffix_tests_agree_on_case(self) -> None:
-        """A case-insensitive filesystem hands the same file back under either spelling."""
+    def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
+        """A case-insensitive filesystem hands the same file back under either spelling.
+
+        This rule alone. `comment_wrap_findings` still matches the suffix case-sensitively, which
+        is filed rather than fixed here, so the two rules read such a file differently.
+        """
         for name in ("mixed.py", "mixed.PY"):
             with self.subTest(name=name):
                 self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))
@@ -4064,17 +4068,27 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_a_line_carrying_two_comments_is_one_finding(self) -> None:
+        """The rule is about the line, so counting it twice reports one line as two violations."""
+        text = "/* The first read can disagree. */ let x = 1; /* And so can the second. */\n"
+        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
+
     def test_the_rule_runs_by_default(self) -> None:
         """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
         self.assertIn("comment-added", prose_lint.DEFAULT_RULES)
         self.assertIn("comment-added", prose_lint.RULES)
 
     def test_the_message_names_the_label_that_stands_it_down(self) -> None:
-        """A finding a reader cannot act on is a finding that gets worked around."""
+        """A finding a reader cannot act on is a finding that gets worked around.
+
+        The label is looked for as the quoted name the message builds from the constant, since the
+        bare word also appears in the message's closing clause and matched there instead.
+        """
         findings = prose_lint.check_file(
             self._write(self.PROSE, "tool.py"), {"comment-added"}, None
         )
-        self.assertIn(prose_lint.COMMENT_LABEL_NAME, findings[0][2])
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), findings[0][2])
+        self.assertIn(prose_lint.COMMENT_ENV_NAME, findings[0][2])
 
     def _write(self, text: str, name: str) -> Path:
         path = self.tmp / name
@@ -4118,8 +4132,10 @@ class TestTheCommentAddedStandDowns(unittest.TestCase):
             )
         self.assertEqual(0, code)
         note = self.err.getvalue()
-        self.assertIn("--allow-comments", note)
-        self.assertIn(prose_lint.COMMENT_LABEL_NAME, note)
+        self.assertIn("stood down by --allow-comments", note)
+        # The quoted name, since the bare word is a substring of the flag named on the same line.
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), note)
+        self.assertIn(f"clears {prose_lint.COMMENT_ENV_NAME}", note)
 
 
 class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
@@ -4205,6 +4221,42 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         )
         result = run_prose_gate_action(self.root)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_the_environment_override_reaches_a_caller_with_no_flag_to_pass(self) -> None:
+        """A hook entry is one command string, and a downstream one runs this file from the hub.
+
+        Deleting the whole environment stand-down passed the suite before this case existed, and it
+        is the only local escape there is.
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PROSE_GATE_ACTION.parent / "prose_lint.py"),
+                ".",
+                "--diff",
+                "HEAD",
+                "--check",
+                "comment-added",
+            ],
+            cwd=self.root,
+            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn(prose_lint.COMMENT_ENV_NAME, result.stderr)
+
+    def test_the_action_clears_the_environment_override(self) -> None:
+        """Otherwise a runner's own environment decides a pull request the label was meant to.
+
+        Deleting the action's `unset` passed the suite before this case existed, and an org-level
+        `env:` would then disarm the gate on every pull request while the run still exits 0.
+        """
+        result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
 
     def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
         """Three surfaces name this label, and a rename that misses one silently disarms it."""

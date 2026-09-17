@@ -1857,19 +1857,26 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     bodies = comment_bodies(path, raw)
     if bodies is None:
         return []
-    return [
-        (
-            n,
-            "comment-added",
+    # One finding per line rather than one per comment, since the rule is about the line.
+    # A line can carry two comments, and reporting it twice counts one line as two violations.
+    seen: set[int] = set()
+    out: list[tuple[int, str, str]] = []
+    for n, body in bodies:
+        if n in seen or not is_comment_prose(body):
+            continue
+        seen.add(n)
+        out.append(
             (
-                "a comment line this change adds or edits -> delete it, carry the "
-                f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
-                "for a commit whose comments are wanted"
-            ),
+                n,
+                "comment-added",
+                (
+                    "a comment line this change adds or edits -> delete it, carry the "
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
+                    "for a commit whose comments are wanted"
+                ),
+            )
         )
-        for n, body in bodies
-        if is_comment_prose(body)
-    ]
+    return out
 
 
 def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
