@@ -1465,6 +1465,11 @@ COMMENT_LABEL_NAME = "comments"
 # So a caller-side escape would reach only the hooks somebody edited to carry one.
 COMMENT_ENV_NAME = "PROSE_ALLOW_COMMENTS"
 
+# The spellings that read as off.
+# The composite action's own input spells its off value `false`.
+# A value mirroring that here stood the rule down at every commit while it was exported.
+COMMENT_ENV_OFF = frozenset({"", "0", "false", "no", "off"})
+
 # Both are correct English. `the the` is always a typo, so it is not here.
 DUP_ALLOW = frozenset({"that that", "had had"})
 
@@ -1601,6 +1606,28 @@ def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
     return out
 
 
+def line_marker_at(masked: str, marker: str, pos: int) -> int:
+    """Where `marker` opens a line comment at or after `pos`, or -1.
+
+    A `#` has to open the line or follow whitespace, which is what shell and YAML require of it, so
+    `$#`, `${x##*/}`, `C#` and a URL fragment are code rather than a comment. Only `#` is judged this
+    way: a C-like `//` legally follows a token, and `x = 1;//c` is a comment in every language that
+    spells one that way.
+
+    Python does permit `#` against a token, and reaches this only through the spelling and duplicate
+    word rules, `python_comments` answering for it everywhere else. A line written that way loses
+    those two rules and is the price of the three languages above not reporting their own operators.
+    """
+    where = masked.find(marker, pos)
+    if not marker.startswith("#"):
+        return where
+    while where > 0 and not masked[where - 1].isspace():
+        where = masked.find(marker, where + len(marker))
+        if where < 0:
+            break
+    return where
+
+
 def extracted_comments(
     path: Path, lines: list[str], spec: Syntax | None = None
 ) -> list[tuple[int, str, bool]]:
@@ -1670,7 +1697,7 @@ def extracted_comments(
             found: str | tuple[str, str] | None = None
             at = len(line)
             for marker in spec["line"]:
-                where = masked.find(marker, pos)
+                where = line_marker_at(masked, marker, pos)
                 if 0 <= where < at:
                     at, found = where, marker
             for opener, closer in spec["block"]:
@@ -2103,8 +2130,9 @@ def main(argv: list[str] | None = None) -> int:
         "--allow-comments",
         action="store_true",
         help="stand `comment-added` down, for a change whose comment lines are wanted. "
-        f"A non-empty {COMMENT_ENV_NAME} does the same, for a caller with nowhere to pass a "
-        "flag. What makes a CI run pass it is the calling workflow's own condition",
+        f"{COMMENT_ENV_NAME} set to anything but a false spelling does the same, for a caller "
+        "with nowhere to pass a flag. What makes a CI run pass it is the calling "
+        "workflow's own condition",
     )
     ap.add_argument(
         "--provenance",
@@ -2165,7 +2193,7 @@ def main(argv: list[str] | None = None) -> int:
     # Both stand-downs are announced, since a rule that quietly stops running reads as a pass.
     # The override is a deliberate act on one change, so the run says which act it honored.
     if "comment-added" in rules:
-        by_env = bool(os.environ.get(COMMENT_ENV_NAME))
+        by_env = os.environ.get(COMMENT_ENV_NAME, "").strip().lower() not in COMMENT_ENV_OFF
         if a.allow_comments or by_env:
             rules.discard("comment-added")
             named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"

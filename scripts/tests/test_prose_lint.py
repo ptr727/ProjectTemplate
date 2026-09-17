@@ -3988,6 +3988,32 @@ class TestTheCommentAddedRule(BaitCase):
             with self.subTest(name=name):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
 
+    def test_a_hash_inside_a_token_is_not_a_comment(self) -> None:
+        """Shell and YAML need whitespace before a `#`, and this read every one as a marker.
+
+        Measured on the tree at the time: three tracked files reporting 43, 79 and 33 findings whose
+        bodies were fragments of code, each carrying "delete it" as its remedy and no comment to
+        delete. The rules that read these comments before this one all needed a leading marker or a
+        misspelling inside the body, so none of them ever surfaced it.
+        """
+        for text, name in (
+            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
+            ('echo "${#arr[@]}"\n', "t.sh"),
+            ("curl http://example.invalid/page#anchor\n", "t.sh"),
+            ('        echo "${file##*/}"\n', "t.yml"),
+            ("- name: Check C# formatting step\n", "t.yml"),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+        # A marker that does open a comment still reads as one, leading or trailing.
+        for text, name in (
+            ("# The store is read once here.\n", "t.sh"),
+            ("echo hi  # The store is read once here.\n", "t.sh"),
+            ("key: value  # The store is read once here.\n", "t.yml"),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
     def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
         """Deleting one of these changes what the file does, which is not what the rule asks for."""
         for line in (
@@ -4167,6 +4193,11 @@ class TestTheCommentAddedRule(BaitCase):
         text = "/* The first read can disagree. */ let x = 1; /* And so can the second. */\n"
         self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
 
+    def test_a_directive_sharing_a_line_does_not_claim_it(self) -> None:
+        """Deduplicating before the prose test let the first comment take the line and silence it."""
+        text = "/* fmt: off */ let x = 1; /* The second read can disagree with the first. */\n"
+        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="a.ts"))
+
     def test_the_rule_list_says_what_the_rule_does(self) -> None:
         """`--summary` and `--help` print this line, and it said the rule fires on an addition.
 
@@ -4229,6 +4260,21 @@ class TestTheCommentAddedStandDowns(unittest.TestCase):
         with mock.patch.object(prose_lint, "discover", return_value=[self.bait]):
             self.assertEqual(0, prose_lint.main(["--check", "comment-added", str(self.tmp)]))
         self.assertIn("comment-added is not checked without --diff", self.err.getvalue())
+
+    def test_a_value_spelled_false_does_not_stand_the_rule_down(self) -> None:
+        """The composite action's input reads `true`, so mirroring it here turned the rule off."""
+        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
+        for value, expected in (("false", 1), ("0", 1), ("off", 1), ("1", 0), ("yes", 0)):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": value}),
+                mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
+                mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
+            ):
+                code = prose_lint.main(
+                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
+                )
+                self.assertEqual(expected, code)
 
     def test_the_override_stands_it_down_and_names_the_label(self) -> None:
         """The local escape is not the one CI honors, so the note says which is which."""

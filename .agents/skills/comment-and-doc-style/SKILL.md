@@ -186,8 +186,8 @@ instruction to a tool is not a comment the rule reads, and Markdown is out of sc
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
 pull request carries the `comments` label and the gate stands down for that change. Locally a
-non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set, and `--allow-comments`
-does it for one run by hand. The label and the variable are separate deliberately, so a variable
+`PROSE_ALLOW_COMMENTS` does the same, for as long as it is set to anything but a false spelling,
+and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
 
 Three things about reaching those escapes read as a broken gate until they are known. The label is read off the event that started the run, so a label added after a run fails
