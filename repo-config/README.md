@@ -43,6 +43,10 @@ The triage labels classify an issue by the kind of work it needs, so a backlog s
 
 - **`handoff`**: a link in the session handoff chain, one open issue per track.
 
+`canonical-sweep` is a surface marker too, carried by the one open issue the periodic canonical content review sweep files while any carried unit owes a read, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline]. That is every unit whose text has moved past its pass, and a bounded slice of those nothing has read at all, so the issue stands until the backlog is worked off rather than only between one edit and its pass. Only the repository that authors carried content files one, so in this fleet that is the hub alone, and the label is declared here rather than there because one payload reaching every repository is what keeps the set auditable. A sweep issue carries no triage label either, for a reason of its own rather than the handoff's: it does record work, and the workflow files it, rewrites its body each week, and closes it, so ranking or counting it as backlog counts work no pull request closes and no round can retire.
+
+- **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while any carried unit owes a read.
+
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is declined rather than filed, so it has no label. `agents`, `skills`, and `codegen` mark the surface, and the rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
@@ -73,6 +77,7 @@ A repository linked to a project of its own is left alone, like a label the payl
 [governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[governance-verification-discipline]: ../GOVERNANCE.md#verification-discipline
 [project-json]: ./project.json
 [repo-config-doc]: ../docs/repo-config.md
 [settings-json]: ./settings.json
