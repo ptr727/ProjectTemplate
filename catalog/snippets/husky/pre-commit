@@ -40,6 +40,7 @@ fi
 
 # The prose gate scopes to the working tree against HEAD, not only the staged index.
 # A partially staged file is judged on all of its edits, not only the staged ones.
-# CI re-checks the whole tree regardless, which is what makes that scope affordable in a hook.
+# The pull request gate reads every line the branch changes against its base.
+# It therefore covers a commit this hook never ran on, and this scope is the wider one per commit.
 run_py "$hub_fetch_run" .github/actions/prose-gate/prose_lint.py . --diff HEAD || exit 1
 run_py "$hub_fetch_run" .github/actions/repo-gate/repo_gate.py --check eol || exit 1

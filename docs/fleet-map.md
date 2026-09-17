@@ -114,7 +114,7 @@ flowchart TD
   review --> merge["merge per registry workflowModel"]
 ```
 
-Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. The gates node is the [`OPERATIONS.md`][operations] "Run the gates the way CI runs them" section, the local review node is the `local-strict-review` skill recorded through `scripts/local_review.py`, and the review node runs through [`scripts/pr_review.py`][pr-review]. The push node's gate is the hub's own `.husky/pre-push`, so on a downstream repo that edge is prose alone until a catalog snippet carries the hook. One open gap sits on this path: G13, the local review gate reaching the hub only, which is why the push node's own edge reads as prose on every other repository. G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
+Owned by the per-language sections of [`CODESTYLE.md`][codestyle] and the conduct skills. The gates node is the [`OPERATIONS.md`][operations] "Run the gates locally, which is wider than CI" section, the local review node is the `local-strict-review` skill recorded through `scripts/local_review.py`, and the review node runs through [`scripts/pr_review.py`][pr-review]. The push node's gate is the hub's own `.husky/pre-push`, so on a downstream repo that edge is prose alone until a catalog snippet carries the hook. One open gap sits on this path: G13, the local review gate reaching the hub only, which is why the push node's own edge reads as prose on every other repository. G6, the unwired staleness check, and G7, the operational direct-commit allowance, are closed and their rows record the resolutions.
 
 ### Hub-Side Operations
 
@@ -133,7 +133,7 @@ flowchart LR
   end
 ```
 
-Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. The runnable form of this door is [`OPERATIONS.md`][operations]: its "Audit the fleet" and "Apply or verify repository configuration" runbooks drive [`spec/audit.py`][audit-py] and the `repo-config/` apply, and its "Run the gates the way CI runs them" section runs [`scripts/repo_gate.py`][repo-gate] beside the prose gates. The gaps this path carried (G9, G10, G12) are closed: the four skills below cover the topics, the lifecycle, and the conduct rules, and the register rows record the resolutions.
+Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][governance-hub-hosted-tooling], and [`.agents/skills/README.md`][skills-readme]. The runnable form of this door is [`OPERATIONS.md`][operations]: its "Audit the fleet" and "Apply or verify repository configuration" runbooks drive [`spec/audit.py`][audit-py] and the `repo-config/` apply, and its "Run the gates locally, which is wider than CI" section runs [`scripts/repo_gate.py`][repo-gate] beside the prose gates. The gaps this path carried (G9, G10, G12) are closed: the four skills below cover the topics, the lifecycle, and the conduct rules, and the register rows record the resolutions.
 
 ## Skills Install Model
 

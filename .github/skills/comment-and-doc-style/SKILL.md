@@ -189,7 +189,7 @@ pull request carries the `comments` label and the gate stands down for that chan
 non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set. The two are separate
 deliberately, so a variable left exported reaches the commit and never the merge gate.
 
-Three facts about reaching those two escapes, each of which reads as a broken gate rather than as
+Three facts about reaching those escapes, each of which reads as a broken gate rather than as
 a sequence. The label is read off the event that started the run, so a label added after a run fails
 applies to the next push rather than to a re-run of that one, and labeling the pull request when it
 is opened is what avoids the round trip. The label reaches a repository only when the fleet label

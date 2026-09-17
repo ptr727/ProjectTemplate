@@ -12,9 +12,10 @@ inputs:
   allow-comments:
     description: >-
       'true' stands the comment-added rule down, for a change whose added comment lines are
-      wanted. Anything else runs the rule. A caller that reads this off the pull request's own
-      labels gets an override that is reapplied per change, which is what the fleet's own caller
-      does and what a hard-coded 'true' would give up.
+      wanted. Anything else runs the rule. A caller that computes this per pull request gets an
+      override reapplied per change, which is what a hard-coded 'true' would give up. The fleet's
+      own caller computes it from the pull request's own labels and from whether it targets the
+      default branch.
     required: false
     default: 'false'
 runs:

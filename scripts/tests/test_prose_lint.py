@@ -4024,6 +4024,9 @@ class TestTheCommentAddedRule(BaitCase):
                 ["comment-added"],
             ),
             ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
+            # The two families whose own form carries a written reason after the rule id.
+            ("# nosec B608 - the query is parameterized.\n", []),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", []),
         ):
             with self.subTest(line=line.strip()):
                 self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
@@ -4299,6 +4302,7 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
         self.assertIn(
+            "github.head_ref == 'develop' && "
             "github.base_ref == github.event.repository.default_branch",
             workflow,
         )

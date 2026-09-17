@@ -1448,6 +1448,13 @@ TOOL_DIRECTIVE = re.compile(
     r"|codespell:|doctest:)"
 )
 
+# The two directive families whose own form carries a human-readable reason after the rule id.
+# `# checkov:skip=CKV_DOCKER_2:Healthcheck is handled by the orchestrator.` is one directive.
+# The rule id is what tells these from a sentence opening on the same word, so it is required here.
+TOOL_DIRECTIVE_WITH_REASON = re.compile(
+    r"^(?:checkov:skip=CKV\w+|nosec\s+[A-Z]\w*\d\w*(?:\s*,\s*[A-Z]\w*\d\w*)*)\b"
+)
+
 # The pull request label that stands `comment-added` down, named once rather than in each place.
 # The finding's own message and the composite action's input cannot then drift from the declared label.
 COMMENT_LABEL_NAME = "comments"
@@ -1811,7 +1818,14 @@ def is_tool_directive(body: str) -> bool:
     directive's own name open one and exempt the whole comment with it: `# nosec The value is read
     once.` is prose whose first word happens to be a directive name. What follows a real directive
     is an argument, and an argument does not end in a full stop.
+
+    Two families are the exception, because their own form carries a written reason after the rule
+    id, so the sentence test would report exactly the directives it exists to exempt. Their rule id
+    is required rather than assumed, which is what still tells `# nosec B608 - parameterized.` from
+    the sentence opening on the same word.
     """
+    if TOOL_DIRECTIVE_WITH_REASON.match(body):
+        return True
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
@@ -2140,9 +2154,10 @@ def main(argv: list[str] | None = None) -> int:
             rules.discard("comment-added")
             named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"
             print(
-                f"note: comment-added stood down by {named}. In CI the stand-down comes from the "
-                f"{COMMENT_LABEL_NAME!r} label on the pull request instead, and the composite "
-                f"action clears {COMMENT_ENV_NAME} so a runner's environment cannot decide it.",
+                f"note: comment-added stood down by {named}. In CI the composite action passes "
+                "that flag from its own input instead, which the fleet's caller computes from the "
+                f"{COMMENT_LABEL_NAME!r} label and from a pull request targeting the default "
+                f"branch, and it clears {COMMENT_ENV_NAME} so a runner cannot decide one.",
                 file=sys.stderr,
             )
         elif a.diff is None:
