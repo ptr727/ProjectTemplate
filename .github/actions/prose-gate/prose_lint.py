@@ -1606,28 +1606,6 @@ def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
     return out
 
 
-def line_marker_at(masked: str, marker: str, pos: int) -> int:
-    """Where `marker` opens a line comment at or after `pos`, or -1.
-
-    A `#` has to open the line or follow whitespace, which is what shell and YAML require of it, so
-    `$#`, `${x##*/}`, `C#` and a URL fragment are code rather than a comment. Only `#` is judged this
-    way: a C-like `//` legally follows a token, and `x = 1;//c` is a comment in every language that
-    spells one that way.
-
-    Python does permit `#` against a token, and reaches this only through the spelling and duplicate
-    word rules, `python_comments` answering for it everywhere else. A line written that way loses
-    those two rules and is the price of the three languages above not reporting their own operators.
-    """
-    where = masked.find(marker, pos)
-    if not marker.startswith("#"):
-        return where
-    while where > 0 and not masked[where - 1].isspace():
-        where = masked.find(marker, where + len(marker))
-        if where < 0:
-            break
-    return where
-
-
 def extracted_comments(
     path: Path, lines: list[str], spec: Syntax | None = None
 ) -> list[tuple[int, str, bool]]:
@@ -1697,7 +1675,7 @@ def extracted_comments(
             found: str | tuple[str, str] | None = None
             at = len(line)
             for marker in spec["line"]:
-                where = line_marker_at(masked, marker, pos)
+                where = masked.find(marker, pos)
                 if 0 <= where < at:
                     at, found = where, marker
             for opener, closer in spec["block"]:
@@ -1864,6 +1842,36 @@ def is_tool_directive(body: str) -> bool:
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
+# What may sit before a `#` that opens a comment, beyond the start of the line.
+# Shell takes one after a metacharacter and YAML wants whitespace.
+# A `#` inside a token is an operator in both: `$#`, `${x##*/}`, `C#`, and a URL fragment.
+# TOML and HCL also take one against a bare value, which this misses and no tracked file carries.
+HASH_OPENS_AFTER = " \t;&|()"
+
+
+def hash_marker_opens_a_comment(line: str, markers: tuple[str, ...]) -> bool:
+    """Whether any `#` marker on this line sits where one opens a comment.
+
+    Read off the source line rather than steered into the scan. Skipping a marker mid-scan hands the
+    rest of the line to the string reader, and one apostrophe after it then opened a quote that
+    carried to end of file and silenced every comment rule, which is a worse fault than the one it
+    was fixing.
+
+    Conservative by construction: a line holding no such marker cannot hold a comment, so dropping
+    it removes a finding rather than adding one. A line holding one keeps whatever the scan made of
+    it, so a marker the scan found inside a string is the scan's answer rather than this test's.
+    """
+    for marker in markers:
+        if not marker.startswith("#"):
+            continue
+        at = line.find(marker)
+        while at >= 0:
+            if at == 0 or line[at - 1] in HASH_OPENS_AFTER:
+                return True
+            at = line.find(marker, at + len(marker))
+    return False
+
+
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
@@ -1926,6 +1934,14 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     bodies = comment_bodies(path, raw, spec)
     if bodies is None:
         return []
+    markers = (spec or syntax_for(path) or PLAIN)["line"]
+    if any(m.startswith("#") for m in markers):
+        lines = raw.split("\n")
+        bodies = [
+            (n, body)
+            for n, body in bodies
+            if n <= len(lines) and hash_marker_opens_a_comment(lines[n - 1], markers)
+        ]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()

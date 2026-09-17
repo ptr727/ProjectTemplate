@@ -4005,14 +4005,33 @@ class TestTheCommentAddedRule(BaitCase):
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
-        # A marker that does open a comment still reads as one, leading or trailing.
+        # A marker that opens a comment reads as one, leading, trailing, or after a metacharacter.
+        # TOML and HCL also take one against a bare value, `key = 1# note`, which this misses.
+        # No tracked file carries that, and it loses a finding rather than inventing one.
         for text, name in (
             ("# The store is read once here.\n", "t.sh"),
             ("echo hi  # The store is read once here.\n", "t.sh"),
+            ("run_gate;# The gate is run once here.\n", "t.sh"),
             ("key: value  # The store is read once here.\n", "t.yml"),
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_the_marker_test_reads_the_line_rather_than_the_scan(self) -> None:
+        """Steering the scan past a marker handed the rest of the line to the string reader.
+
+        One apostrophe after the skipped marker then opened a quote that carried to end of file,
+        silencing every comment rule in it, which is a worse fault than the operators it fixed.
+        """
+        text = (
+            "echo C# won't build\n"
+            "echo done  # The result is printed once here.\n"
+            "echo more  # The second line is printed here.\n"
+        )
+        self.assertEqual(
+            ["comment-added", "comment-added"],
+            self.kinds(text, {"comment-added"}, name="t.sh"),
+        )
 
     def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
         """Deleting one of these changes what the file does, which is not what the rule asks for."""
@@ -4264,7 +4283,17 @@ class TestTheCommentAddedStandDowns(unittest.TestCase):
     def test_a_value_spelled_false_does_not_stand_the_rule_down(self) -> None:
         """The composite action's input reads `true`, so mirroring it here turned the rule off."""
         self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
-        for value, expected in (("false", 1), ("0", 1), ("off", 1), ("1", 0), ("yes", 0)):
+        for value, expected in (
+            ("false", 1),
+            ("0", 1),
+            ("off", 1),
+            ("no", 1),
+            (" false ", 1),
+            ("False", 1),
+            ("1", 0),
+            ("yes", 0),
+            ("true", 0),
+        ):
             with (
                 self.subTest(value=value),
                 mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": value}),
