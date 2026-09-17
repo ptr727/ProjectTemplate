@@ -38,7 +38,6 @@ import subprocess
 import sys
 import tokenize
 import unicodedata
-from collections import Counter
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
@@ -1804,40 +1803,6 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
-@functools.cache
-def renamed_from(base: str, root: str) -> dict[str, str]:
-    """Head path -> the path that content had at `base`, for each rename git detected.
-
-    Reading the base text at the head path reports a renamed file as one the base did not hold, so
-    every comment on a line the change also touched came back as added. Git already answers this,
-    and `-z` is what makes the answer readable: a rename record carries two names, and the default
-    format quotes a name holding a space or a high byte while this one never does.
-
-    An empty map wherever git cannot answer, which leaves the caller reading the head path, its
-    behavior before this existed.
-    """
-    try:
-        raw = subprocess.run(
-            ["git", "-C", root, "diff", "--name-status", "--find-renames", "-z", base],
-            capture_output=True,
-            check=True,
-        ).stdout.decode("utf-8", "surrogateescape")
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    fields = [f for f in raw.split("\0") if f]
-    out: dict[str, str] = {}
-    i = 0
-    while i < len(fields):
-        status = fields[i]
-        # A rename or a copy carries the old name and the new one, and every other status one name.
-        if status[:1] in {"R", "C"} and i + 2 < len(fields):
-            out[fields[i + 2]] = fields[i + 1]
-            i += 3
-        else:
-            i += 2
-    return out
-
-
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
@@ -1850,14 +1815,11 @@ def is_comment_prose(body: str) -> bool:
 
 
 def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
-    """The file's comment lines as (line number, normalized body), or None where none can be read.
+    """The file's comment lines as (line number, body), or None where none can be read.
 
-    Whitespace is collapsed so a body compares equal across a re-indent, which is what lets an
-    unchanged comment on a line the diff touches be recognized as one the file already held.
-
-    A `.py` whose source does not tokenize returns None rather than falling back to the hash-anchored
-    scan. That scan carries an open single-line string across the line, and a triple-quoted one it
-    does not, so it reads a `#` inside a docstring as a comment.
+    A `.py` whose source does not tokenize returns None rather than falling back to the
+    hash-anchored scan. That scan carries an open single-line string across the line, and a
+    triple-quoted one it does not, so it reads a `#` inside a docstring as a comment.
     """
     if path.suffix.lower() == ".py":
         comments = python_comments(raw)
@@ -1865,62 +1827,22 @@ def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
             return None
     else:
         comments = extracted_comments(path, raw.split("\n"))
-    return [(n, " ".join(body.split())) for n, body, _leading in comments]
+    return [(n, body) for n, body, _leading in comments]
 
 
-def held_comment_counts(path: Path, root: Path | None, base: str | None) -> Counter[str] | None:
-    """How many times this file carried each comment body at `base`, or None where that is unknown.
-
-    `git diff --unified=0` reports a modified line as an added one, so the added lines alone cannot
-    tell a comment this change wrote from one it merely sat beside. Editing the code on a line that
-    carries a trailing comment, and re-indenting a commented block, each report the comment as
-    added. Reading the base text is what tells the two apart, and it is read per file rather than
-    diffed, so the answer covers the whole file rather than the hunks.
-
-    Counted over the prose comments alone, the same test the head side is filtered by. Counted over
-    every comment instead, a file's own directives and version pins bought free prose at head: this
-    repository's `validate-task.yml` held 85 comments of which 72 were prose, so 13 new prose lines
-    could arrive under a comparison against 85 and be reported as nothing.
-
-    An empty counter where the base did not hold the file, since every comment in a new file is one
-    the change brings. None where the file cannot be read rather than is absent, which is a
-    different answer: a branch repairing a `.py` that did not tokenize would otherwise have every
-    comment in it reported as added, and a run where git itself cannot be executed would report
-    every comment in every file it reads.
-    """
-    if base is None or root is None:
-        return Counter()
-    key = repo_key(path, root)
-    key = renamed_from(base, str(root)).get(key, key)
-    try:
-        raw = subprocess.run(
-            ["git", "-C", str(root), "show", f"{base}:{key}"],
-            capture_output=True,
-            check=True,
-        ).stdout.decode("utf-8", "surrogateescape")
-    except subprocess.CalledProcessError:
-        # Git ran and refused the path, which is the path not being in the base tree.
-        return Counter()
-    except OSError:
-        # Git could not be run at all, so what the base held is unknown rather than nothing.
-        return None
-    bodies = comment_bodies(path, raw)
-    return None if bodies is None else Counter(body for _, body in bodies if is_comment_prose(body))
-
-
-def comment_added_findings(
-    path: Path, raw: str, root: Path | None = None, base: str | None = None
-) -> list[tuple[int, str, str]]:
-    """Comment lines this change adds, which is growth in the file's comment prose rather than churn.
-
-    Two conditions, and both are needed. The file's prose comment lines have to outnumber the ones
-    it carried at `base`, which is what a change that rewords one, corrects one, or moves the code
-    around one does not do. And the reported line's own text has to appear more often than the base
-    carried it, which is what stops a copy of a comment the file already holds arriving for free.
+def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
+    """Every prose comment line the file holds, which the diff scope narrows to the ones in a change.
 
     The whole file is read and `main` keeps only the lines the diff touches, which is the path every
-    other rule already takes. Read without a diff there is no base to compare against, so `main`
-    stands the rule down there instead.
+    other rule already takes. Read without a diff the rule would report the tree's every comment, so
+    `main` stands it down there instead.
+
+    `git diff --unified=0` counts a modified line as an added one, so a change that edits the code on
+    a line carrying a trailing comment, re-indents a commented block, or rewords a comment reports
+    that comment. That is the rule's cost rather than a defect in it, and the label is the answer: an
+    earlier shape read the file at the diff's base to tell those apart, and four review passes spent
+    on the rename, duplicate, and prose-filter cases it opened bought precision this rule does not
+    need, since the remedy for a wanted comment is the same label either way.
 
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
     comments are structural markers a tool matches verbatim.
@@ -1929,50 +1851,28 @@ def comment_added_findings(
     since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
     `TOOL_DIRECTIVE` are the forms that are known, so one neither names is reported and belongs on
     whichever of them fits.
-
-    A file the base did not hold has all of its comments reported, which covers a new file and also
-    a move git could not detect as a rename, where the text is not new but the file is.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
     bodies = comment_bodies(path, raw)
     if bodies is None:
         return []
-    candidates = [(n, body) for n, body in bodies if is_comment_prose(body)]
-    if not candidates:
-        return []
-    held = held_comment_counts(path, root, base)
-    if held is None or len(candidates) <= sum(held.values()):
-        return []
-    # A body the file carries more often than the base did is reported at every line holding it.
-    # `main`'s scope filter then keeps the lines the diff actually touched.
-    # Choosing one line here cannot work.
-    # Attributing the surplus to the body's last line loses a copy inserted above the held one.
-    # Attributing it to the first loses a copy inserted below.
-    # Each time the chosen line is the one the diff did not touch, so the filter drops the finding.
-    surplus = Counter(body for _, body in candidates)
-    surplus.subtract(held)
-    out: list[tuple[int, str, str]] = []
-    for n, body in candidates:
-        if surplus[body] <= 0:
-            continue
-        out.append(
+    return [
+        (
+            n,
+            "comment-added",
             (
-                n,
-                "comment-added",
-                (
-                    "a comment line this change adds -> delete it, carry the "
-                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
-                    "for a commit whose comments are wanted"
-                ),
-            )
+                "a comment line this change adds or edits -> delete it, carry the "
+                f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
+                "for a commit whose comments are wanted"
+            ),
         )
-    return out
+        for n, body in bodies
+        if is_comment_prose(body)
+    ]
 
 
-def check_file(
-    path: Path, rules: set[str], root: Path | None = None, base: str | None = None
-) -> list[tuple[int, str, str]]:
+def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode("utf-8")
@@ -1990,7 +1890,7 @@ def check_file(
     if {"comment-wrap", "comment-case"} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     if "comment-added" in rules:
-        out.extend(comment_added_findings(path, raw, root, base))
+        out.extend(comment_added_findings(path, raw))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -2308,7 +2208,7 @@ def main(argv: list[str] | None = None) -> int:
     byfile: dict[str, int] = {}
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root, a.diff):
+        for ln, kind, msg in check_file(f, rules, scan_root):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1

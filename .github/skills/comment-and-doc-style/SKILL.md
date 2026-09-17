@@ -177,12 +177,11 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 ```
 
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
-gate. It reads the file at the diff's base and reports only where the file's comment prose grew, since
-a diff reports a modified line as an added one and cannot tell growth from churn on its own. So
-rewording a comment, correcting one, and editing the code around one are all silent, and so is a
-change that removes more comment prose than it writes. What is a finding is a comment whose text is
-new in a file whose comment prose grew, a second copy of one the file already holds included. A
-docstring is not a comment line, and Markdown is out of scope.
+gate. It reports every comment line in the diff's scope, and a diff counts a modified line as an added
+one, so rewording a comment, correcting one, and editing the code on a line that carries one each
+report that comment. That is the rule's cost and the label is its answer, since a comment worth
+keeping takes the same label as a comment worth writing. A docstring is not a comment line, an
+instruction to a tool is not a comment the rule reads, and Markdown is out of scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
@@ -190,12 +189,14 @@ pull request carries the `comments` label and the gate stands down for that chan
 non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set. The two are separate
 deliberately, so a variable left exported reaches the commit and never the merge gate.
 
-Two ordering facts, each of which reads as a broken gate rather than as a sequence. CI reads the
-label off the event that started the run, so a label added after a run fails applies to the next
-push rather than to a re-run of that one, and labeling the pull request when it is opened is what
-avoids the round trip. And the label reaches a repository only when the fleet label set is applied
-to it, so a repository that has not had that applied since the label was declared cannot carry it,
-and there the finding names a remedy that is not yet available.
+Three facts about reaching those two escapes, each of which reads as a broken gate rather than as
+a sequence. The label is read off the event that started the run, so a label added after a run fails
+applies to the next push rather than to a re-run of that one, and labeling the pull request when it
+is opened is what avoids the round trip. The label reaches a repository only when the fleet label
+set is applied to it, so a repository that has not had that applied since the label was declared
+cannot carry it, and there the finding names a remedy that is not yet available. And the local
+escape reaches a commit before any of that, which is where a repository meets this rule first, since
+a hook runs on every commit while the label decides a pull request.
 
 ## Character set
 
