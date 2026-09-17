@@ -4154,14 +4154,19 @@ class TestTheCommentAddedRule(BaitCase):
 
     # A triple-quoted string the fallback scan does not carry across lines.
     # That is what makes the two extraction paths disagree.
-    # A single-line one is modeled by both, so it proves nothing.
-    DOCSTRING = 'def f():\n    """Sharp usage:\n\n    pass # to the parser and it stops.\n    """\n'
+    # The marker opens its line, so the `leading` filter cannot be what drops it.
+    # Written mid-line it was, and the cases below then passed with their guard removed.
+    DOCSTRING = 'def f():\n    """Sharp usage:\n\n# to the parser and it stops.\n    """\n'
 
     def test_the_fallback_scan_reads_a_docstring_as_a_comment(self) -> None:
         """The premise the two cases below rest on, asserted rather than assumed."""
         path = self._write(self.DOCSTRING, "shape.py")
         found = prose_lint.extracted_comments(path, self.DOCSTRING.split("\n"))
-        self.assertTrue(found, "the fallback scan must read the docstring line for these to bite")
+        # Leading, since a comment the `leading` filter drops anyway proves nothing here.
+        self.assertTrue(
+            any(c.leading for c in found),
+            "the fallback scan must read the docstring line as a leading comment",
+        )
 
     def test_a_python_file_that_does_not_tokenize_is_left_alone(self) -> None:
         """Falling back would read the `#` inside the docstring as a comment and report it."""
