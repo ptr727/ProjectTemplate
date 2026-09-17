@@ -1219,6 +1219,22 @@ def syntax_for(path: Path) -> Syntax | None:
     return HASH if not suffix else None
 
 
+class Comment(NamedTuple):
+    """A comment the parser found, and what sat immediately before its marker.
+
+    `before` is the empty string where the marker opens the line, and `marker` is the opener the
+    parser took. Both are recorded rather than re-derived, because a reader asking the line instead
+    cannot tell which of several markers was chosen, and a reader steering the parser past one hands
+    the rest of that line to the string reader. Both were tried and each silenced whole files.
+    """
+
+    line: int
+    body: str
+    leading: bool
+    before: str
+    marker: str
+
+
 class Carried(NamedTuple):
     """A string left open at the end of a line, and what it takes to close it.
 
@@ -1589,26 +1605,27 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     return out
 
 
-def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
-    """Every comment in Python source as (line, text, starts-the-line), or None if it will not parse.
+def python_comments(raw: str) -> list[Comment] | None:
+    """Every comment in Python source, or None if it will not parse.
 
     `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
     trailing comment is one a line-anchored pattern never sees.
     """
-    out: list[tuple[int, str, bool]] = []
+    out: list[Comment] = []
     try:
         for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
             if tok.type == tokenize.COMMENT:
-                leading = not tok.line[: tok.start[1]].strip()
-                out.append((tok.start[0], tok.string.lstrip("#").strip(), leading))
+                col = tok.start[1]
+                leading = not tok.line[:col].strip()
+                body = tok.string.lstrip("#").strip()
+                before = tok.line[col - 1] if col else ""
+                out.append(Comment(tok.start[0], body, leading, before, "#"))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return out
 
 
-def extracted_comments(
-    path: Path, lines: list[str], spec: Syntax | None = None
-) -> list[tuple[int, str, bool]]:
+def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None) -> list[Comment]:
     """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
 
     A marker inside a string literal is not a comment, so each line is scanned with quoted spans
@@ -1622,7 +1639,7 @@ def extracted_comments(
         spec = syntax_for(path)
     if spec is None:
         return []
-    out: list[tuple[int, str, bool]] = []
+    out: list[Comment] = []
     closing = ""
     doc_closing = ""
     carry = CLEAR
@@ -1651,7 +1668,8 @@ def extracted_comments(
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                out.append((n, body, True))
+                # A carried line has no marker of its own, so it reports the block's opener.
+                out.append(Comment(n, body, True, "", closing))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -1713,13 +1731,13 @@ def extracted_comments(
             if isinstance(found, str):  # a line comment runs to end of line
                 body = line[at + len(found) :].strip()
                 if body:
-                    out.append((n, body, leading))
+                    out.append(Comment(n, body, leading, line[at - 1] if at else "", found))
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
             body = (line[at + len(opener) : end if end >= 0 else None]).strip()
             if body:
-                out.append((n, body, leading))
+                out.append(Comment(n, body, leading, line[at - 1] if at else "", opener))
             if end < 0:
                 closing = closer
                 break
@@ -1764,7 +1782,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, body, leading in comments:
+    for n, body, leading, _before, _marker in comments:
         if (
             not body
             or NOT_PROSE.search(body)
@@ -1849,27 +1867,18 @@ def is_tool_directive(body: str) -> bool:
 HASH_OPENS_AFTER = " \t;&|()"
 
 
-def hash_marker_opens_a_comment(line: str, markers: tuple[str, ...]) -> bool:
-    """Whether any `#` marker on this line sits where one opens a comment.
+def hash_marker_opens_a_comment(comment: Comment) -> bool:
+    """Whether the marker this comment was found at is one that opens a comment.
 
-    Read off the source line rather than steered into the scan. Skipping a marker mid-scan hands the
-    rest of the line to the string reader, and one apostrophe after it then opened a quote that
-    carried to end of file and silenced every comment rule, which is a worse fault than the one it
-    was fixing.
-
-    Conservative by construction: a line holding no such marker cannot hold a comment, so dropping
-    it removes a finding rather than adding one. A line holding one keeps whatever the scan made of
-    it, so a marker the scan found inside a string is the scan's answer rather than this test's.
+    Only a `#` is judged. The parser records what sat before the marker it chose, so this reads that
+    rather than the line, which cannot say which of several markers was taken: a quoted ` #` on a
+    line whose other `#` is inside `$#` vouched for the operator and reported a line holding no
+    comment. A marker that is not a `#` is left alone, since a C-like `//`, an INI `;` and an XML
+    `<!--` each open a comment wherever they sit outside a string.
     """
-    for marker in markers:
-        if not marker.startswith("#"):
-            continue
-        at = line.find(marker)
-        while at >= 0:
-            if at == 0 or line[at - 1] in HASH_OPENS_AFTER:
-                return True
-            at = line.find(marker, at + len(marker))
-    return False
+    if not comment.marker.startswith("#"):
+        return True
+    return comment.before == "" or comment.before in HASH_OPENS_AFTER
 
 
 def is_comment_prose(body: str) -> bool:
@@ -1883,10 +1892,8 @@ def is_comment_prose(body: str) -> bool:
     )
 
 
-def comment_bodies(
-    path: Path, raw: str, spec: Syntax | None = None
-) -> list[tuple[int, str]] | None:
-    """The file's comment lines as (line number, body), or None where none can be read.
+def comment_bodies(path: Path, raw: str, spec: Syntax | None = None) -> list[Comment] | None:
+    """The file's comments, or None where none can be read.
 
     A `.py` whose source does not tokenize returns None rather than falling back to the
     hash-anchored scan. That scan carries an open single-line string across the line, and a
@@ -1898,7 +1905,7 @@ def comment_bodies(
             return None
     else:
         comments = extracted_comments(path, raw.split("\n"), spec)
-    return [(n, body) for n, body, _leading in comments]
+    return comments
 
 
 def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
@@ -1934,20 +1941,17 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     bodies = comment_bodies(path, raw, spec)
     if bodies is None:
         return []
-    markers = (spec or syntax_for(path) or PLAIN)["line"]
-    if any(m.startswith("#") for m in markers):
-        lines = raw.split("\n")
-        bodies = [
-            (n, body)
-            for n, body in bodies
-            if n <= len(lines) and hash_marker_opens_a_comment(lines[n - 1], markers)
-        ]
+    # Python is read by `tokenize`, which cannot be wrong about which `#` opens a comment, and
+    # Python opens one after any character outside a string, so the test below does not apply.
+    if path.suffix.lower() != ".py":
+        bodies = [c for c in bodies if hash_marker_opens_a_comment(c)]
     # One finding per line rather than one per comment, since the rule is about the line.
     # A line can carry two comments, and reporting it twice counts one line as two violations.
     seen: set[int] = set()
     out: list[tuple[int, str, str]] = []
-    for n, body in bodies:
-        if n in seen or not is_comment_prose(body):
+    for comment in bodies:
+        n = comment.line
+        if n in seen or not is_comment_prose(comment.body):
             continue
         seen.add(n)
         out.append(
@@ -1988,7 +1992,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
-        for ln, text, _ in extracted_comments(path, lines):
+        for ln, text, _leading, _before, _marker in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ""

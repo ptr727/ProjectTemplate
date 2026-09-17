@@ -756,9 +756,12 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name):
                 self.assertEqual([], self.flag(name, text))
         # The convention still holds on the lines it was written for.
+        found = prose_lint.extracted_comments(
+            Path("a.cs"), ["/* Start here.", " * Still going. */"]
+        )
         self.assertEqual(
             [(1, "Start here.", True), (2, "Still going.", True)],
-            prose_lint.extracted_comments(Path("a.cs"), ["/* Start here.", " * Still going. */"]),
+            [(c.line, c.body, c.leading) for c in found],
         )
         # The marker is one `*` against whitespace, so a continuation keeps its own emphasis.
         for text, body in (
@@ -767,9 +770,10 @@ class TestCommentWrap(BaitCase):
             (" *emphasis* here */", "*emphasis* here"),
         ):
             with self.subTest(line=text):
+                found = prose_lint.extracted_comments(Path("a.cs"), ["/* Start.", text])
                 self.assertEqual(
                     [(1, "Start.", True), (2, body, True)],
-                    prose_lint.extracted_comments(Path("a.cs"), ["/* Start.", text]),
+                    [(c.line, c.body, c.leading) for c in found],
                 )
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
@@ -4016,6 +4020,41 @@ class TestTheCommentAddedRule(BaitCase):
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_quoted_marker_does_not_vouch_for_an_operator(self) -> None:
+        """Asking the line whether any `#` is anchored let an unrelated one answer for an operator.
+
+        The parser records what sat before the marker it actually chose, so a quoted ` #` elsewhere
+        on the line no longer vouches for the `#` of `$#`.
+        """
+        for text in (
+            "test $# -eq 1 && echo ' #'\n",
+            "sed 's/ #.*//' ${f##*/}\n",
+            "echo 'a # b' ${x##*/}\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name="t.sh"))
+
+    def test_a_semicolon_comment_is_read_in_an_ini_family_file(self) -> None:
+        """The test judged only `#`, so a `;` comment reported only when the prose held a `#`."""
+        for name in ("x.ini", "x.editorconfig", "x.conf"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    ["comment-added"],
+                    self.kinds("; The store is read once here.\n", {"comment-added"}, name=name),
+                )
+
+    def test_python_keeps_a_comment_against_a_token(self) -> None:
+        """`tokenize` cannot be wrong about which `#` opens one, and Python opens one anywhere."""
+        for text in (
+            'v = "s"# The store is read once here.\n',
+            "v = t[0]# The store is read once here.\n",
+            "x = 1# The store is read once here.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(
+                    ["comment-added"], self.kinds(text, {"comment-added"}, name="t.py")
+                )
 
     def test_the_marker_test_reads_the_line_rather_than_the_scan(self) -> None:
         """Steering the scan past a marker handed the rest of the line to the string reader.
