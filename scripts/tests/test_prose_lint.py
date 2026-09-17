@@ -4023,17 +4023,28 @@ class TestTheCommentAddedRule(BaitCase):
         text = "cat <<EOF\n```\nEOF\n" + self.PROSE
         self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.sh"))
 
+    # A triple-quoted string the fallback scan does not carry across lines.
+    # That is what makes the two extraction paths disagree.
+    # A single-line one is modeled by both, so it proves nothing.
+    DOCSTRING = 'def f():\n    """Sharp usage:\n\n    pass # to the parser and it stops.\n    """\n'
+
+    def test_the_fallback_scan_reads_a_docstring_as_a_comment(self) -> None:
+        """The premise the two cases below rest on, asserted rather than assumed."""
+        path = self._write(self.DOCSTRING, "shape.py")
+        found = prose_lint.extracted_comments(path, self.DOCSTRING.split("\n"))
+        self.assertTrue(found, "the fallback scan must read the docstring line for these to bite")
+
     def test_a_python_file_that_does_not_tokenize_is_left_alone(self) -> None:
-        """The hash-anchored fallback has no string model, so it reads a `#` in a docstring."""
-        text = 'x = (1\ndef f():\n    """Sharp usage: pass # to the parser."""\n'
-        self.assertEqual([], self.kinds(text, {"comment-added"}, name="bad.py"))
+        """Falling back would read the `#` inside the docstring as a comment and report it."""
+        self.assertEqual(
+            [], self.kinds("x = (1\n" + self.DOCSTRING, {"comment-added"}, name="bad.py")
+        )
 
     def test_the_suffix_tests_agree_on_case(self) -> None:
         """A case-insensitive filesystem hands the same file back under either spelling."""
-        text = 'x = 1\ndef f():\n    """Sharp usage: pass # to the parser."""\n'
         for name in ("mixed.py", "mixed.PY"):
             with self.subTest(name=name):
-                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+                self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))
 
     def test_a_known_tool_directive_is_not_prose(self) -> None:
         """Deleting one changes what the file does, which the rule's first remedy would have done."""
@@ -4081,7 +4092,12 @@ class TestTheCommentAddedStandDowns(unittest.TestCase):
         self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
 
     def test_without_a_diff_the_rule_stands_down_and_says_so(self) -> None:
-        """Read over a whole tree it would report every comment the repository already holds."""
+        """Read over a whole tree it would report every comment the repository already holds.
+
+        The environment override is cleared for this case, since the note it prints is the other
+        stand-down's, and the docs tell a developer to export that variable.
+        """
+        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
         with mock.patch.object(prose_lint, "discover", return_value=[self.bait]):
             self.assertEqual(0, prose_lint.main(["--check", "comment-added", str(self.tmp)]))
         self.assertIn("comment-added is not checked without --diff", self.err.getvalue())
@@ -4153,6 +4169,47 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             with self.subTest(value=value):
                 result = run_prose_gate_action(self.root, ALLOW_COMMENTS=value)
                 self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_a_reworded_comment_is_not_one_this_change_adds(self) -> None:
+        """Correcting a stale comment left the count unchanged, and the remedy offered was deletion.
+
+        The rule that a comment states what is true would otherwise be unfollowable without the
+        label, since every correction of one reads as an addition to a text comparison.
+        """
+        (self.root / "tool.py").write_text(
+            "# The retry budget is spent before the timeout fires.\nvalue = 1\n", encoding="utf-8"
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "tool.py").write_text(
+            "# The retry budget is spent after the timeout fires.\nvalue = 1\n", encoding="utf-8"
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_a_copy_of_a_comment_the_file_holds_is_not_free(self) -> None:
+        """Matching on membership alone let any number of copies of a held comment arrive unreported."""
+        held = "# The retry budget is spent before the timeout fires.\n"
+        (self.root / "tool.py").write_text(held + "value = 1\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "tool.py").write_text(held + held + "value = 1\n", encoding="utf-8")
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_a_base_whose_comments_cannot_be_read_reports_nothing(self) -> None:
+        """A branch repairing a `.py` that did not tokenize reported every comment it already held."""
+        (self.root / "tool.py").write_text(
+            "def f(:\n    # The retry budget is spent before the timeout fires.\n", encoding="utf-8"
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "broken")
+        (self.root / "tool.py").write_text(
+            "def f():\n    # The retry budget is spent before the timeout fires.\n",
+            encoding="utf-8",
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_a_comment_the_file_already_held_is_not_one_this_change_adds(self) -> None:
         """`--unified=0` reports a modified line as an added one, so the diff cannot tell these apart.

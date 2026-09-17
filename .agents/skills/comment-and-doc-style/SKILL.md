@@ -177,10 +177,11 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 ```
 
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
-gate. It reads the comment text a change writes rather than the text a file already carried, which
-it answers by reading the file at the diff's base, since a diff reports a modified line as an added
-one and cannot tell the two apart on its own. A docstring is not a comment line, and Markdown is
-out of scope.
+gate. It reads the file at the diff's base and reports only where the file's comment prose grew, since
+a diff reports a modified line as an added one and cannot tell growth from churn on its own. So
+rewording a comment, correcting one, and editing the code around one are all silent, while a
+comment whose text is new is a finding, and so is a second copy of one the file already holds. A
+docstring is not a comment line, and Markdown is out of scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the

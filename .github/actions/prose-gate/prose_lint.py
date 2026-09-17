@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tokenize
 import unicodedata
+from collections import Counter
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
@@ -1390,8 +1391,6 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 NOT_PROSE = re.compile(
     r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
     r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
-    r"|syntax=|escape=|fmt:\s*(on|off)|pragma:|nosec|coding[:=]|yaml-language-server"
-    r"|renovate:|hadolint|checkov:"
     r"|^v\d+(\.\d+)*$"
 )
 
@@ -1438,6 +1437,16 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # Both live instances in the tree are continuations, which is what scoped this to the case branch.
 COMMENT_LABEL = re.compile(r"^[A-Za-z_][\w.-]*\s+-\s+")
 CODE_FENCE = re.compile(r"^\s*(```|~~~)")
+
+# A directive a tool reads, exempt because deleting one changes what the file does.
+# Anchored at the body's start, since a comment that merely names one of these is prose.
+# Read by `comment-added` alone rather than added to `NOT_PROSE`, which two gating rules share.
+# Widening that pattern stopped those two reporting any comment naming a word in it.
+# That is a gate narrowing where the intent was an exemption in a third rule.
+TOOL_DIRECTIVE = re.compile(
+    r"^(?:syntax=|escape=|fmt:\s*(?:on|off)\b|pragma:|nosec\b|checkov:|hadolint\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=])"
+)
 
 # The pull request label that stands `comment-added` down, named once rather than in each place.
 # The finding's own message and the composite action's input cannot then drift from the declared label.
@@ -1794,6 +1803,17 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+def is_comment_prose(body: str) -> bool:
+    """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
+    return bool(
+        body
+        and not NOT_PROSE.search(body)
+        and not TOOL_DIRECTIVE.match(body)
+        and not BARE_URI.match(body)
+        and not KEY_ONLY.match(body)
+    )
+
+
 def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
     """The file's comment lines as (line number, normalized body), or None where none can be read.
 
@@ -1801,7 +1821,8 @@ def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
     unchanged comment on a line the diff touches be recognized as one the file already held.
 
     A `.py` whose source does not tokenize returns None rather than falling back to the hash-anchored
-    scan, which has no docstring or string-carry model and would read a `#` inside one as a comment.
+    scan. That scan carries an open single-line string across the line, and a triple-quoted one it
+    does not, so it reads a `#` inside a docstring as a comment.
     """
     if path.suffix.lower() == ".py":
         comments = python_comments(raw)
@@ -1812,20 +1833,22 @@ def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
     return [(n, " ".join(body.split())) for n, body, _leading in comments]
 
 
-def held_comment_bodies(path: Path, root: Path | None, base: str | None) -> frozenset[str]:
-    """The comment bodies this file already carried at `base`.
+def held_comment_counts(path: Path, root: Path | None, base: str | None) -> Counter[str] | None:
+    """How many times this file carried each comment body at `base`, or None where that is unknown.
 
     `git diff --unified=0` reports a modified line as an added one, so the added lines alone cannot
     tell a comment this change wrote from one it merely sat beside. Editing the code on a line that
-    carries a trailing comment, re-indenting a commented block, and moving one both report the
-    comment as added. Reading the base text is what tells the two apart, and it is read per file
-    rather than diffed, so the answer covers the whole file rather than the hunks.
+    carries a trailing comment, and re-indenting a commented block, each report the comment as
+    added. Reading the base text is what tells the two apart, and it is read per file rather than
+    diffed, so the answer covers the whole file rather than the hunks.
 
-    An empty set wherever the base text cannot be read, which is a file the base did not hold. Every
-    comment in it is then new, since the file itself is.
+    An empty counter where the base did not hold the file at all, since every comment in a new file
+    is one the change brings. None where the base held the file and its comments could not be read,
+    which is a different answer: a branch repairing a `.py` that did not tokenize would otherwise
+    have every comment in it reported as added.
     """
     if base is None or root is None:
-        return frozenset()
+        return Counter()
     try:
         raw = subprocess.run(
             ["git", "-C", str(root), "show", f"{base}:{repo_key(path, root)}"],
@@ -1833,58 +1856,65 @@ def held_comment_bodies(path: Path, root: Path | None, base: str | None) -> froz
             check=True,
         ).stdout.decode("utf-8", "surrogateescape")
     except (OSError, subprocess.SubprocessError):
-        return frozenset()
+        return Counter()
     bodies = comment_bodies(path, raw)
-    return frozenset(body for _, body in bodies) if bodies else frozenset()
+    return None if bodies is None else Counter(body for _, body in bodies)
 
 
 def comment_added_findings(
     path: Path, raw: str, root: Path | None = None, base: str | None = None
 ) -> list[tuple[int, str, str]]:
-    """Comment lines carrying text this file did not hold at `base`.
+    """Comment lines this change adds, which is growth in the file's comment prose rather than churn.
+
+    Two conditions, and both are needed. The file's prose comment lines have to outnumber the ones
+    it carried at `base`, which is what a change that rewords one, corrects one, or moves the code
+    around one does not do. And the reported line's own text has to appear more often than the base
+    carried it, which is what stops a copy of a comment the file already holds arriving for free.
 
     The whole file is read and `main` keeps only the lines the diff touches, which is the path every
-    other rule already takes. What the diff cannot say is whether a touched comment is one the change
-    wrote, so `held_comment_bodies` answers that from the base text. Read without a diff the rule
-    would report the tree's every comment, so `main` stands it down there instead.
+    other rule already takes. Read without a diff there is no base to compare against, so `main`
+    stands the rule down there instead.
 
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
     comments are structural markers a tool matches verbatim.
 
-    A directive, a bare URI, and a key are not prose, so the same filters `comment_wrap_findings`
-    applies exempt them here. Deleting a `# noqa` or a `# syntax=` line changes what the file does,
-    which is the opposite of what this rule asks for. `NOT_PROSE` is the list of the forms that are
-    known, so a directive it does not name is reported and belongs on it.
+    A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
+    since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
+    `TOOL_DIRECTIVE` are the forms that are known, so one neither names is reported and belongs on
+    whichever of them fits.
+
+    A file the base did not hold has all of its comments reported, which covers a new file and also
+    a move git could not detect as a rename, where the text is not new but the file is.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
     bodies = comment_bodies(path, raw)
     if bodies is None:
         return []
-    candidates = [
-        (n, body)
-        for n, body in bodies
-        if body
-        and not NOT_PROSE.search(body)
-        and not BARE_URI.match(body)
-        and not KEY_ONLY.match(body)
-    ]
+    candidates = [(n, body) for n, body in bodies if is_comment_prose(body)]
     if not candidates:
         return []
-    held = held_comment_bodies(path, root, base)
-    return [
-        (
-            n,
-            "comment-added",
+    held = held_comment_counts(path, root, base)
+    if held is None or len(candidates) <= sum(held.values()):
+        return []
+    found: Counter[str] = Counter()
+    out: list[tuple[int, str, str]] = []
+    for n, body in candidates:
+        found[body] += 1
+        if found[body] <= held[body]:
+            continue
+        out.append(
             (
-                "a comment line this change adds -> delete it, carry the "
-                f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
-                "for a commit whose comments are wanted"
-            ),
+                n,
+                "comment-added",
+                (
+                    "a comment line this change adds -> delete it, carry the "
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
+                    "for a commit whose comments are wanted"
+                ),
+            )
         )
-        for n, body in candidates
-        if body not in held
-    ]
+    return out
 
 
 def check_file(

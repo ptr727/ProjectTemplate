@@ -96,7 +96,7 @@ runs:
         allow_args=()
         if [ "${ALLOW_COMMENTS:-false}" = "true" ]; then
           allow_args=(--allow-comments)
-          echo "The comment-added rule stands down: this change carries the override label."
+          echo "The comment-added rule stands down: the allow-comments input is true."
         fi
         # Cleared so the label decides in CI and a runner's own environment cannot.
         # The gate reads this variable for the hooks that have nowhere to pass a flag.
