@@ -46,7 +46,7 @@ Usage:
     python3 scripts/canonical_review.py list                 every unit and its digest, as JSON
     python3 scripts/canonical_review.py status               what is covered, stale, or never read
     python3 scripts/canonical_review.py sweep                the units it asks for this round
-    python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'
+    python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
     python3 scripts/canonical_review.py report               render the burn-down to standard output
 """
 
@@ -622,7 +622,7 @@ def render_sweep(
                 "```sh",
                 (
                     "python3 scripts/canonical_review.py record --reviewer agent-skill"
-                    " --target develop --findings <count> --unit '<key>=<digest>'"
+                    " --target develop --findings '<count>' --unit '<key>=<digest>'"
                 ),
                 "```",
             ]

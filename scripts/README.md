@@ -267,7 +267,7 @@ It holds no review logic. It drives backends: `agent-skill` is the `local-strict
 
 ```shell
 python3 scripts/local_review.py status                                      # what covers the current content. 0 either way, 2 if it cannot run
-python3 scripts/local_review.py record --reviewer agent-skill --target develop --findings 3 --expect-digest <digest>
+python3 scripts/local_review.py record --reviewer agent-skill --target develop --findings 3 --expect-digest '<digest>'
 python3 scripts/local_review.py check                                       # 0 covered, 1 not, 2 could not run
 python3 scripts/local_review.py run --backend coderabbit-cli
 ```

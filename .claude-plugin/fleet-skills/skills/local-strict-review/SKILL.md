@@ -70,9 +70,9 @@ Commit first, then read the digest, then dispatch the subagent, then hand that s
 
 ```sh
 engine="<hub-checkout>/scripts/local_review.py"   # in the hub itself, scripts/local_review.py
-python3 "$engine" status --target <target>        # JSON, take contentDigest
+python3 "$engine" status --target '<target>'      # JSON, take contentDigest
 # run the pass above, then:
-python3 "$engine" record --reviewer agent-skill --target <target> --expect-digest <digest> [--findings N]
+python3 "$engine" record --reviewer agent-skill --target '<target>' --expect-digest '<digest>' [--findings N]
 ```
 
 Every subcommand here, `run --backend <name>` included, runs with the repository under review as the working directory, whichever repository that is. The engine takes no `--repo` and reads whichever repository it is run in, so the path names where the script lives and the working directory names what it measures.
@@ -115,7 +115,7 @@ Bounds: read-only. Report a rule that looks incomplete rather than guessing at w
 python3 scripts/canonical_review.py sweep     # the units it asks for this round, with their digests
 # exit 1 where it named any, which is the sweep working rather than the command failing
 # run the pass above over each unit it named, then, per unit:
-python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings <count> --unit '<key>=<digest>'
+python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
 ```
 
 These run in the authoring repository itself, which is the only repository this pass ever runs in, so the engine path is the plain one and there is no downstream side needing the `<hub-checkout>/` form the pass above shows for its own reach. Both resolve the repository from the working directory rather than from where the script sits, so the directory a command runs in is what decides which tree it measures, while the unit model and the manifest reader come from the checkout the script itself lives in. Running one checkout's copy against another's tree therefore measures the second tree by the first's rules, so run them in the tree being measured. `record` additionally stamps each pass with the merge-base against `--target`, which is provenance rather than coverage. The line above names it rather than leaning on the default, since a sweep's own branch is based on `develop`, and a `main`-based branch passes `--target main` instead.
