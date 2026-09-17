@@ -53,6 +53,8 @@ Whole-tree (`python3 scripts/prose_lint.py .`) reports zero, so a finding is a l
 
 The default rule set covers comment shape (`comment-wrap` and `comment-case`) alongside the prose rules. It did not, which meant a run nobody parameterized reported clean on a wrapped comment while the rule read as enforced, and comment shape is the most frequently regressed rule in agent-authored work. Reading the backlog it exposes needs no flag now, and gating it needed `--diff` while the tree carried several hundred of them. That backlog is cleared, so both comment rules gate whole-tree, and `--diff` is now about scoping a run rather than about surviving one.
 
+The default set also carries `comment-added`, which reports every prose comment line a change adds to code or config, because a comment is where a review round goes to argue rather than to fix: two weeks of fleet review rounds put 8% of every bot finding on agent-written comment text ([ptr727/ProjectTemplate#1631][review-cost-issue]). It is the one default rule a whole-tree run does not check, since without `--diff` there is nothing to tell an added comment from one the tree already held, and the run says so on stderr rather than standing down quietly. A docstring is out of scope, as is Markdown, whose prose is the document rather than a comment on one. Where the comment is wanted, `--allow-comments` stands the rule down and names the act on stderr, the composite action passes it when the pull request carries the `comments` label declared in [`repo-config/labels.json`][labels], and the pre-commit hook passes it when `PROSE_ALLOW_COMMENTS` is set. The two escapes are deliberately separate, so a local habit reaches the commit and never the merge gate.
+
 A wide scan skips the trees this repo generates rather than authors, currently `reports/`, which [`spec/audit.py`][audit] writes. A finding there is the audit engine's phrasing rather than an author's, so no edit to that tree can fix it, and leaving them in made the repo's own number mostly generated output. Naming such a path directly still reads it (`prose_lint.py reports`), so nothing becomes uncheckable.
 
 The reusable prose gate reads optional exclusions from `.github/prose-gate-excludes` in the repository it scans. Each non-empty line that does not start with `#` is one repository-relative path fragment passed to `--exclude`. Use the contract only for vendored paths whose upstream body the repository preserves. Repository-authored provenance files and patches stay outside the excluded path so the gate continues to read them.
@@ -361,6 +363,7 @@ Installs the fleet's Skills for the current machine, cross-platform and idempote
 [hubcommit-eight-issue]: https://github.com/ptr727/ProjectTemplate/issues/1210
 [hubcommit-issue]: https://github.com/ptr727/ProjectTemplate/issues/1222
 [ledger-merge-issue]: https://github.com/ptr727/ProjectTemplate/issues/1268
+[labels]: ../repo-config/labels.json
 [marketplace]: ../.claude-plugin/marketplace.json
 [operations]: ../OPERATIONS.md
 [pre-push]: ../.husky/pre-push

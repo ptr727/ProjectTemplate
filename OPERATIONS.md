@@ -8,7 +8,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates the way CI runs them
 
-CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists together. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
+CI passes explicit `--check` lists, and a bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`, which is those two lists plus `comment-added`. What differs is the exit code rather than the coverage. CI gates on nine of the ten and reports `charset-unknown` warn-only, where a bare run exits non-zero on any of the ten. `comment-added` is the eleventh, and it reads what a change adds rather than what a file holds, so a run with no `--diff` stands it down and says so on stderr. That is why no list below names it. It runs in the pre-commit hook against `HEAD` and in the pull request gate against the base, `PROSE_ALLOW_COMMENTS` stands it down for one commit locally, and the `comments` label stands it down for one pull request in CI. `sentence-split` and `sentence-length` are in neither, so nothing below runs them and a local run reaches them only by naming them. Run the CI invocations:
 
 ```bash
 set -Eeuo pipefail

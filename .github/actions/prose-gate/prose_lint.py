@@ -9,6 +9,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
+  comment-added  No comment line added to code or config, unless the change is labeled.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
   sentence-length A Markdown prose sentence must not exceed the word cap.
@@ -48,6 +49,7 @@ RULES = {
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
+    "comment-added": "a comment line this change adds to code or config",
     "dupword": "a duplicated consecutive word",
     "sentence-split": "a sentence wrapping across lines",
     "sentence-length": "a sentence over the word cap",
@@ -65,6 +67,7 @@ DEFAULT_RULES = frozenset(
         "spelling",
         "comment-wrap",
         "comment-case",
+        "comment-added",
         "home-path",
         "dead-path",
     }
@@ -1434,6 +1437,10 @@ KEY_ONLY = re.compile(r"^\S+:$")
 COMMENT_LABEL = re.compile(r"^[A-Za-z_][\w.-]*\s+-\s+")
 CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 
+# The pull request label that stands `comment-added` down, named once rather than in each place.
+# The finding's own message and the composite action's input cannot then drift from the declared label.
+COMMENT_LABEL_NAME = "comments"
+
 # Both are correct English. `the the` is always a typo, so it is not here.
 DUP_ALLOW = frozenset({"that that", "had had"})
 
@@ -1779,6 +1786,50 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+def comment_added_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
+    """Every prose comment line the file holds, so a diff-scoped run reports the ones it adds.
+
+    The rule reads the whole file and `main` keeps only the lines the diff adds, which is the path
+    every other rule already takes. Read without a diff it would report the tree's every comment,
+    so `main` stands the rule down there rather than letting it answer a question nobody asked.
+
+    Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
+    comments are structural markers a tool matches verbatim.
+
+    A directive, a bare URI, and a key are not prose, so the same filters `comment_wrap_findings`
+    applies exempt them here. A `# noqa` and a shebang are instructions to a tool, and deleting one
+    changes what the file does, which is the opposite of what this rule asks for.
+    """
+    if path.suffix.lower() == ".md" or syntax_for(path) is None:
+        return []
+    comments = python_comments(raw) if path.suffix == ".py" else None
+    if comments is None:
+        comments = extracted_comments(path, lines)
+    skip = fenced_lines(lines)
+    out: list[tuple[int, str, str]] = []
+    for n, body, _leading in comments:
+        if n in skip:
+            continue
+        if (
+            not body
+            or NOT_PROSE.search(body)
+            or BARE_URI.match(body.strip())
+            or KEY_ONLY.match(body)
+        ):
+            continue
+        out.append(
+            (
+                n,
+                "comment-added",
+                (
+                    "a comment line this change adds -> delete it, or carry the "
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request"
+                ),
+            )
+        )
+    return out
+
+
 def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
@@ -1796,6 +1847,8 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
             dead_root = Path(found)
     if {"comment-wrap", "comment-case"} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
+    if "comment-added" in rules:
+        out.extend(comment_added_findings(path, raw, lines))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -1956,6 +2009,12 @@ def main(argv: list[str] | None = None) -> int:
         "(matches the repo policy: fix as each file is next edited, not swept)",
     )
     ap.add_argument(
+        "--allow-comments",
+        action="store_true",
+        help="stand `comment-added` down, for a change whose added comments are wanted "
+        f"and which carries the {COMMENT_LABEL_NAME!r} label to say so",
+    )
+    ap.add_argument(
         "--provenance",
         metavar="REF",
         help="name this copy of the gate on the verdict, as the composite action's "
@@ -2010,6 +2069,24 @@ def main(argv: list[str] | None = None) -> int:
     else:
         first = Path(scan_paths[0])
         scan_root = first if first.is_dir() else first.parent
+
+    # Both stand-downs are announced, since a rule that quietly stops running reads as a pass.
+    # The override is a deliberate act on one change, so the run says which act it honored.
+    if "comment-added" in rules:
+        if a.allow_comments:
+            rules.discard("comment-added")
+            print(
+                f"note: comment-added stood down by --allow-comments. The {COMMENT_LABEL_NAME!r} "
+                "label on the pull request is what makes the same stand-down happen in CI.",
+                file=sys.stderr,
+            )
+        elif a.diff is None:
+            rules.discard("comment-added")
+            print(
+                "note: comment-added is not checked without --diff, which is what tells an added "
+                "comment apart from one the tree already held. Scope the run to a base to run it.",
+                file=sys.stderr,
+            )
 
     # Announced for the same reason the skip above is, a silent stand-down reads as a pass.
     if "dead-path" in rules and git_roots and shallow_checkout(scan_root):

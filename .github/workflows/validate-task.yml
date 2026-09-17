@@ -254,6 +254,9 @@ jobs:
         uses: $/.github/actions/prose-gate
         with:
           base: ${{ github.event.pull_request.base.sha }}
+          # The label is read off the pull request rather than passed as an input a caller sets.
+          # A repository cannot then leave the override on, since it is reapplied per change by hand.
+          allow-comments: ${{ contains(github.event.pull_request.labels.*.name, 'comments') }}
 
       # An empty repo-gate-exclude-globs leaves the action's own input at its default, so the default caller excludes nothing.
       - name: Check repo gates step

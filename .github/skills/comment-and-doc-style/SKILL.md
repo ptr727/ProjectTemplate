@@ -176,6 +176,14 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 # - template-compile-test builds one example device per template.
 ```
 
+A change that adds a comment line in code or config fails the `comment-added` rule in the prose
+gate. The rule is diff-scoped, so it reads the comments a change adds rather than the ones a file
+already holds, and a docstring is not a comment line. Deleting the comment is the ordinary answer,
+since the bullets above already say what one has to earn. Where a comment is genuinely owed, the
+pull request carries the `comments` label and the gate stands down on that change alone. The local
+escape is `PROSE_ALLOW_COMMENTS` set on the commit, which reaches the pre-commit hook and not the
+merge gate, so setting it by habit fails CI rather than passing quietly.
+
 ## Character set
 
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
