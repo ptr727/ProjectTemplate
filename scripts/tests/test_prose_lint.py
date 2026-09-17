@@ -4013,11 +4013,40 @@ class TestTheCommentAddedRule(BaitCase):
     def test_a_file_that_carries_no_comments_is_left_alone(self) -> None:
         self.assertEqual([], self.kinds("a,b\n1,2\n", {"comment-added"}, name="data.csv"))
 
-    def test_a_fenced_example_is_quoted_rather_than_authored(self) -> None:
-        """A comment inside a fence belongs to whatever is being shown, as every other rule reads it."""
-        text = "```\n# Shown to the reader, not written to the file.\n```\n" + self.PROSE
-        kinds = self.kinds(text, {"comment-added"}, name="tool.sh")
-        self.assertEqual(["comment-added"], kinds)
+    def test_a_line_that_looks_like_a_fence_does_not_silence_the_rule(self) -> None:
+        """One unbalanced fence line suppressed every comment after it, in a refusing gate.
+
+        A fence is a Markdown construct and Markdown is out of scope, so the rule reads a file's
+        comments as its own syntax defines them. Reached here through a heredoc, which is where a
+        code or config file holds such a line.
+        """
+        text = "cat <<EOF\n```\nEOF\n" + self.PROSE
+        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.sh"))
+
+    def test_a_python_file_that_does_not_tokenize_is_left_alone(self) -> None:
+        """The hash-anchored fallback has no string model, so it reads a `#` in a docstring."""
+        text = 'x = (1\ndef f():\n    """Sharp usage: pass # to the parser."""\n'
+        self.assertEqual([], self.kinds(text, {"comment-added"}, name="bad.py"))
+
+    def test_the_suffix_tests_agree_on_case(self) -> None:
+        """A case-insensitive filesystem hands the same file back under either spelling."""
+        text = 'x = 1\ndef f():\n    """Sharp usage: pass # to the parser."""\n'
+        for name in ("mixed.py", "mixed.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_known_tool_directive_is_not_prose(self) -> None:
+        """Deleting one changes what the file does, which the rule's first remedy would have done."""
+        for line in (
+            "# syntax=docker/dockerfile:1\n",
+            "# fmt: off\n",
+            "# pragma: no cover\n",
+            "# nosec B404\n",
+            "# yaml-language-server: $schema=https://example.invalid/s.json\n",
+            "# renovate: datasource=github-releases depName=owner/name\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
     def test_the_rule_runs_by_default(self) -> None:
         """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
@@ -4124,6 +4153,55 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             with self.subTest(value=value):
                 result = run_prose_gate_action(self.root, ALLOW_COMMENTS=value)
                 self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_a_comment_the_file_already_held_is_not_one_this_change_adds(self) -> None:
+        """`--unified=0` reports a modified line as an added one, so the diff cannot tell these apart.
+
+        Each case below reported the comment before the rule read the base text, and the remedy the
+        finding offered was deleting a comment the change had not written.
+        """
+        held = "LIMIT = 1  # The upper limit is fixed by the protocol.\n"
+        for label, after in (
+            (
+                "a code-only edit beside it",
+                "LIMIT = 2  # The upper limit is fixed by the protocol.\n",
+            ),
+            (
+                "a re-indent of it",
+                "if True:\n    LIMIT = 1  # The upper limit is fixed by the protocol.\n",
+            ),
+        ):
+            with self.subTest(case=label):
+                (self.root / "held.py").write_text(held, encoding="utf-8")
+                self.git("add", "-A")
+                self.git("commit", "-qm", "held")
+                (self.root / "held.py").write_text(after, encoding="utf-8")
+                result = run_prose_gate_action(self.root)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                (self.root / "held.py").unlink()
+                self.git("add", "-A")
+                self.git("commit", "-qm", "drop")
+
+    def test_the_environment_override_reaches_a_caller_with_no_flag_to_pass(self) -> None:
+        """A hook entry is one command string, and a downstream one runs this file straight from the hub."""
+        script = PROSE_GATE_ACTION.parent / "prose_lint.py"
+        result = subprocess.run(
+            [sys.executable, str(script), ".", "--diff", "HEAD", "--check", "comment-added"],
+            cwd=self.root,
+            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("PROSE_ALLOW_COMMENTS", result.stderr)
+
+    def test_the_action_clears_the_environment_override(self) -> None:
+        """Otherwise a runner's own environment decides a pull request the label was meant to."""
+        result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
 
     def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
         """Three surfaces name this label, and a rename that misses one silently disarms it."""

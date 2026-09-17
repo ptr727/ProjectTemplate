@@ -12,8 +12,9 @@ inputs:
   allow-comments:
     description: >-
       'true' stands the comment-added rule down, for a change whose added comment lines are
-      wanted. The caller reads it off the pull request's own labels, so the override is a
-      deliberate act on one change rather than a setting a repository leaves on.
+      wanted. Anything else runs the rule. A caller that reads this off the pull request's own
+      labels gets an override that is reapplied per change, which is what the fleet's own caller
+      does and what a hard-coded 'true' would give up.
     required: false
     default: 'false'
 runs:
@@ -97,6 +98,9 @@ runs:
           allow_args=(--allow-comments)
           echo "The comment-added rule stands down: this change carries the override label."
         fi
+        # Cleared so the label decides in CI and a runner's own environment cannot.
+        # The gate reads this variable for the hooks that have nowhere to pass a flag.
+        unset PROSE_ALLOW_COMMENTS
         provenance_args=()
         if [ -n "$action_repository" ] && [ -n "$action_ref" ]; then
           provenance_args=(--provenance "${action_repository}@${action_ref}")

@@ -1390,6 +1390,8 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 NOT_PROSE = re.compile(
     r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
     r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
+    r"|syntax=|escape=|fmt:\s*(on|off)|pragma:|nosec|coding[:=]|yaml-language-server"
+    r"|renovate:|hadolint|checkov:"
     r"|^v\d+(\.\d+)*$"
 )
 
@@ -1440,6 +1442,12 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # The pull request label that stands `comment-added` down, named once rather than in each place.
 # The finding's own message and the composite action's input cannot then drift from the declared label.
 COMMENT_LABEL_NAME = "comments"
+
+# The environment form of the same override, read here rather than passed by each caller.
+# A hook entry is often one command string with nowhere to put a conditional flag.
+# A downstream repository also runs this file straight from the hub, unedited.
+# So a caller-side escape would reach only the hooks somebody edited to carry one.
+COMMENT_ENV_NAME = "PROSE_ALLOW_COMMENTS"
 
 # Both are correct English. `the the` is always a typo, so it is not here.
 DUP_ALLOW = frozenset({"that that", "had had"})
@@ -1786,51 +1794,102 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
-def comment_added_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
-    """Every prose comment line the file holds, so a diff-scoped run reports the ones it adds.
+def comment_bodies(path: Path, raw: str) -> list[tuple[int, str]] | None:
+    """The file's comment lines as (line number, normalized body), or None where none can be read.
 
-    The rule reads the whole file and `main` keeps only the lines the diff adds, which is the path
-    every other rule already takes. Read without a diff it would report the tree's every comment,
-    so `main` stands the rule down there rather than letting it answer a question nobody asked.
+    Whitespace is collapsed so a body compares equal across a re-indent, which is what lets an
+    unchanged comment on a line the diff touches be recognized as one the file already held.
+
+    A `.py` whose source does not tokenize returns None rather than falling back to the hash-anchored
+    scan, which has no docstring or string-carry model and would read a `#` inside one as a comment.
+    """
+    if path.suffix.lower() == ".py":
+        comments = python_comments(raw)
+        if comments is None:
+            return None
+    else:
+        comments = extracted_comments(path, raw.split("\n"))
+    return [(n, " ".join(body.split())) for n, body, _leading in comments]
+
+
+def held_comment_bodies(path: Path, root: Path | None, base: str | None) -> frozenset[str]:
+    """The comment bodies this file already carried at `base`.
+
+    `git diff --unified=0` reports a modified line as an added one, so the added lines alone cannot
+    tell a comment this change wrote from one it merely sat beside. Editing the code on a line that
+    carries a trailing comment, re-indenting a commented block, and moving one both report the
+    comment as added. Reading the base text is what tells the two apart, and it is read per file
+    rather than diffed, so the answer covers the whole file rather than the hunks.
+
+    An empty set wherever the base text cannot be read, which is a file the base did not hold. Every
+    comment in it is then new, since the file itself is.
+    """
+    if base is None or root is None:
+        return frozenset()
+    try:
+        raw = subprocess.run(
+            ["git", "-C", str(root), "show", f"{base}:{repo_key(path, root)}"],
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", "surrogateescape")
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    bodies = comment_bodies(path, raw)
+    return frozenset(body for _, body in bodies) if bodies else frozenset()
+
+
+def comment_added_findings(
+    path: Path, raw: str, root: Path | None = None, base: str | None = None
+) -> list[tuple[int, str, str]]:
+    """Comment lines carrying text this file did not hold at `base`.
+
+    The whole file is read and `main` keeps only the lines the diff touches, which is the path every
+    other rule already takes. What the diff cannot say is whether a touched comment is one the change
+    wrote, so `held_comment_bodies` answers that from the base text. Read without a diff the rule
+    would report the tree's every comment, so `main` stands it down there instead.
 
     Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
     comments are structural markers a tool matches verbatim.
 
     A directive, a bare URI, and a key are not prose, so the same filters `comment_wrap_findings`
-    applies exempt them here. A `# noqa` and a shebang are instructions to a tool, and deleting one
-    changes what the file does, which is the opposite of what this rule asks for.
+    applies exempt them here. Deleting a `# noqa` or a `# syntax=` line changes what the file does,
+    which is the opposite of what this rule asks for. `NOT_PROSE` is the list of the forms that are
+    known, so a directive it does not name is reported and belongs on it.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
-    comments = python_comments(raw) if path.suffix == ".py" else None
-    if comments is None:
-        comments = extracted_comments(path, lines)
-    skip = fenced_lines(lines)
-    out: list[tuple[int, str, str]] = []
-    for n, body, _leading in comments:
-        if n in skip:
-            continue
-        if (
-            not body
-            or NOT_PROSE.search(body)
-            or BARE_URI.match(body.strip())
-            or KEY_ONLY.match(body)
-        ):
-            continue
-        out.append(
+    bodies = comment_bodies(path, raw)
+    if bodies is None:
+        return []
+    candidates = [
+        (n, body)
+        for n, body in bodies
+        if body
+        and not NOT_PROSE.search(body)
+        and not BARE_URI.match(body)
+        and not KEY_ONLY.match(body)
+    ]
+    if not candidates:
+        return []
+    held = held_comment_bodies(path, root, base)
+    return [
+        (
+            n,
+            "comment-added",
             (
-                n,
-                "comment-added",
-                (
-                    "a comment line this change adds -> delete it, or carry the "
-                    f"{COMMENT_LABEL_NAME!r} label on the pull request"
-                ),
-            )
+                "a comment line this change adds -> delete it, carry the "
+                f"{COMMENT_LABEL_NAME!r} label on the pull request, or set {COMMENT_ENV_NAME} "
+                "for a commit whose comments are wanted"
+            ),
         )
-    return out
+        for n, body in candidates
+        if body not in held
+    ]
 
 
-def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
+def check_file(
+    path: Path, rules: set[str], root: Path | None = None, base: str | None = None
+) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode("utf-8")
@@ -1848,7 +1907,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     if {"comment-wrap", "comment-case"} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     if "comment-added" in rules:
-        out.extend(comment_added_findings(path, raw, lines))
+        out.extend(comment_added_findings(path, raw, root, base))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -2012,7 +2071,8 @@ def main(argv: list[str] | None = None) -> int:
         "--allow-comments",
         action="store_true",
         help="stand `comment-added` down, for a change whose added comments are wanted "
-        f"and which carries the {COMMENT_LABEL_NAME!r} label to say so",
+        f"and which carries the {COMMENT_LABEL_NAME!r} label to say so. "
+        f"A non-empty {COMMENT_ENV_NAME} does the same, for a caller with nowhere to pass a flag",
     )
     ap.add_argument(
         "--provenance",
@@ -2073,11 +2133,14 @@ def main(argv: list[str] | None = None) -> int:
     # Both stand-downs are announced, since a rule that quietly stops running reads as a pass.
     # The override is a deliberate act on one change, so the run says which act it honored.
     if "comment-added" in rules:
-        if a.allow_comments:
+        by_env = bool(os.environ.get(COMMENT_ENV_NAME))
+        if a.allow_comments or by_env:
             rules.discard("comment-added")
+            named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"
             print(
-                f"note: comment-added stood down by --allow-comments. The {COMMENT_LABEL_NAME!r} "
-                "label on the pull request is what makes the same stand-down happen in CI.",
+                f"note: comment-added stood down by {named}. In CI the stand-down comes from the "
+                f"{COMMENT_LABEL_NAME!r} label on the pull request instead, and the composite "
+                f"action clears {COMMENT_ENV_NAME} so a runner's environment cannot decide it.",
                 file=sys.stderr,
             )
         elif a.diff is None:
@@ -2162,7 +2225,7 @@ def main(argv: list[str] | None = None) -> int:
     byfile: dict[str, int] = {}
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root):
+        for ln, kind, msg in check_file(f, rules, scan_root, a.diff):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1

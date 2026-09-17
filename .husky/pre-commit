@@ -41,15 +41,8 @@ fi
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.13.
 # The scope is the working tree rather than the index.
 # A partially staged file is therefore judged on all of its edits, not only the staged ones.
-# CI re-runs the same rules over the whole tree, which is what makes that affordable here.
-# The comment-added rule refuses a commit that adds a comment line, and this is its local escape.
-# It is deliberately not the same escape CI honors, which is the `comments` label on the pull request.
-# So exporting this reaches the commit and never the merge gate, and a habit of setting it fails CI.
-if [ -n "${PROSE_ALLOW_COMMENTS:-}" ]; then
-    run_py scripts/prose_lint.py . --diff HEAD --allow-comments
-else
-    run_py scripts/prose_lint.py . --diff HEAD
-fi
+# CI re-runs these rules against the pull request's base, which is what makes that affordable here.
+run_py scripts/prose_lint.py . --diff HEAD
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.

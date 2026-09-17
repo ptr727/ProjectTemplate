@@ -177,12 +177,23 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 ```
 
 A change that adds a comment line in code or config fails the `comment-added` rule in the prose
-gate. The rule is diff-scoped, so it reads the comments a change adds rather than the ones a file
-already holds, and a docstring is not a comment line. Deleting the comment is the ordinary answer,
-since the bullets above already say what one has to earn. Where a comment is genuinely owed, the
-pull request carries the `comments` label and the gate stands down on that change alone. The local
-escape is `PROSE_ALLOW_COMMENTS` set on the commit, which reaches the pre-commit hook and not the
-merge gate, so setting it by habit fails CI rather than passing quietly.
+gate. It reads the comment text a change writes rather than the text a file already carried, which
+it answers by reading the file at the diff's base, since a diff reports a modified line as an added
+one and cannot tell the two apart on its own. A docstring is not a comment line, and Markdown is
+out of scope.
+
+Deleting the comment is the ordinary answer, since the bullets above already say what one has to
+earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
+pull request carries the `comments` label and the gate stands down for that change. Locally a
+non-empty `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set. The two are separate
+deliberately, so a variable left exported reaches the commit and never the merge gate.
+
+Two ordering facts, each of which reads as a broken gate rather than as a sequence. CI reads the
+label off the event that started the run, so a label added after a run fails applies to the next
+push rather than to a re-run of that one, and labeling the pull request when it is opened is what
+avoids the round trip. And the label reaches a repository only when the fleet label set is applied
+to it, so a repository that has not had that applied since the label was declared cannot carry it,
+and there the finding names a remedy that is not yet available.
 
 ## Character set
 
