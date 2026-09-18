@@ -292,7 +292,7 @@ jobs:
 
   # One entry per target this repo builds, listing that target's own paths, so a touched target never falls through unfiltered (D1.1).
   # A negation such as '!.github/workflows/**' marks a docs-only pull request as a target change, which scenario S2 requires to skip.
-  # A repo carrying its own build hook lists .github/actions/** too, since that hook builds the target and actionlint does not reach it.
+  # A repo carrying its own build hook lists .github/actions/** too, since that hook builds the target.
   changes:
     name: Detect changed targets job
     runs-on: ubuntu-latest

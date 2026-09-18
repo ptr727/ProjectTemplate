@@ -12,6 +12,7 @@ inputs:
     description: Logical branch driving the moving tag. main gives latest, anything else develop.
     required: true
   semver2:
+    description: NBGV SemVer2 string, used as the immutable image tag beside the moving one.
     required: true
 
 outputs:
