@@ -5,6 +5,7 @@
     { "name": "canonical-sweep", "color": "0e8a16", "description": "The periodic canonical content review sweep, one open issue while any carried unit owes a read" },
     { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
     { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },
+    { "name": "comments", "color": "8a63d2", "description": "Permits the comment lines the pull request adds or edits, which the prose gate otherwise refuses" },
     { "name": "decision", "color": "b60205", "description": "A question waiting on the maintainer, alone or beside whatever else the issue carries" },
     { "name": "dependencies", "color": "0366d6", "description": "Pull requests that update a dependency file" },
     { "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation" },

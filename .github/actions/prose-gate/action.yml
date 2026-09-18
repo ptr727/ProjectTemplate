@@ -9,6 +9,15 @@ inputs:
     description: Paths to scan.
     required: false
     default: .
+  allow-comments:
+    description: >-
+      'true' stands the comment-added rule down, for a change whose comment lines are wanted.
+      Anything else runs the rule. A caller that computes this per pull request gets an
+      override reapplied per change, which is what a hard-coded 'true' would give up. The fleet's
+      own caller computes it from the pull request's own labels and from whether the pull request
+      is a promotion.
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -26,6 +35,7 @@ runs:
         # What each form populates is read off a real run rather than predicted here, since predicting it is what a verdict naming its own copy exists to stop anyone having to do.
         ACTION_REPOSITORY: ${{ github.action_repository }}
         ACTION_REF: ${{ github.action_ref }}
+        ALLOW_COMMENTS: ${{ inputs.allow-comments }}
       run: |
         set -Eeuo pipefail
         # Check the base resolves before scanning, so an empty or absent ref fails naming itself.
@@ -81,6 +91,17 @@ runs:
         # Defaulted rather than read bare, since `set -u` makes an unset variable fatal and a harness that runs this block outside Actions sets neither.
         action_repository="${ACTION_REPOSITORY:-${GITHUB_ACTION_REPOSITORY:-}}"
         action_ref="${ACTION_REF:-${GITHUB_ACTION_REF:-}}"
+        # Compared against the one value that stands the rule down, so anything else runs the gate.
+        # A misspelled input, an empty one, and a label expression that matched nothing all reach here.
+        # Each of them is a change nobody labeled, which is a change the gate reads.
+        allow_args=()
+        if [ "${ALLOW_COMMENTS:-false}" = "true" ]; then
+          allow_args=(--allow-comments)
+          echo "The comment-added rule stands down: the allow-comments input is true."
+        fi
+        # Cleared so the caller's own input decides in CI and a runner's environment cannot.
+        # The gate reads this variable for the hooks that have nowhere to pass a flag.
+        unset PROSE_ALLOW_COMMENTS
         provenance_args=()
         if [ -n "$action_repository" ] && [ -n "$action_ref" ]; then
           provenance_args=(--provenance "${action_repository}@${action_ref}")
@@ -88,4 +109,4 @@ runs:
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
+        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"

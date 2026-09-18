@@ -176,6 +176,30 @@ Sub-topics take a `-` after the comment marker, each elaborating a distinct item
 # - template-compile-test builds one example device per template.
 ```
 
+A change that adds a comment line in code or config fails the `comment-added` rule in the prose
+gate. It reports a prose comment that opens its own line, in the diff's scope, and a diff counts a
+modified line as an added one, so rewording one and re-indenting one each report it. That is the
+rule's cost and the label is its answer, since a comment worth keeping takes the same label as a
+comment worth writing. A trailing comment is out of scope, since which mid-line marker opens a
+comment differs by language in ways a gate cannot settle from the marker alone. A docstring is not
+a comment line, an instruction to a tool is not a comment the rule reads, and Markdown is out of
+scope.
+
+Deleting the comment is the ordinary answer, since the bullets above already say what one has to
+earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
+pull request carries the `comments` label and the gate stands down for that change. Locally a
+`PROSE_ALLOW_COMMENTS` does the same, for as long as it is set to anything but a false spelling,
+and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
+left exported reaches the commit and never the merge gate.
+
+Three things about reaching those escapes read as a broken gate until they are known. The label is read off the event that started the run, so a label added after a run fails
+applies to the next push rather than to a re-run of that one, and labeling the pull request when it
+is opened is what avoids the round trip. The label reaches a repository only when the fleet label
+set is applied to it, so a repository that has not had that applied since the label was declared
+cannot carry it, and there the finding names a remedy that is not yet available. And the local
+escape reaches a commit before any of that, which is where a repository meets this rule first, since
+a hook runs on every commit while the label decides a pull request.
+
 ## Character set
 
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
