@@ -329,7 +329,7 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 8 summaries and 3 labels.
+# The lists are small because the output is regular: 10 headings, 8 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
@@ -391,9 +391,9 @@ CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
 # The link is what makes an entry countable, the same body's change summary being bulleted too.
 # Deduplicated by the caller, since one finding can be linked more than once.
 CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
-# The collapsed section the enumeration lives in, normalized the way a vetted summary is.
-# Counting anchors body-wide instead counts a prose back-reference to an earlier round's thread.
-CCR_OPEN = "Open (N)"
+# An entry in that enumeration is a list item, which is what tells one from a prose mention.
+# Counting anchors body-wide instead counts a back-reference to an earlier round's thread.
+LIST_ITEM = re.compile(r"\s*[-*+]\s|\s*\d+[.)]\s")
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -1071,13 +1071,21 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     the markup this format states `Findings:` and `Changes:` on, matches no vetted list and is
     caught by the shortfall alone.
 
-    Each half is read from the region that owns it. The total is read outside the collapsed
-    sections, and the enumeration from the section labelled `Open (N)`, because a total inside a
-    section is that section's own and an anchor outside one is a back-reference to an earlier
-    round's thread rather than a finding this round raised. Reading either body-wide made a
-    number this round never stated decide the shortfall. The largest total wins where the
-    overview states more than one, so an ambiguous body overstates the shortfall rather than
-    suppressing it.
+    Each half is read from where that format puts it, and neither reading partitions the body
+    into collapsed sections first. The total is read from the overview preamble, the text ahead
+    of the first `<details`, because a total inside a collapsed section is that section's own.
+    The enumeration counts the findings listed as list items, because that is what an entry is,
+    and an anchor in a paragraph is a back-reference to an earlier round's thread rather than a
+    finding this round raised. Reading either body-wide made a number this round never stated
+    decide the shortfall.
+
+    Neither reading depends on the collapsed sections nesting or closing as expected, which a
+    partition does: an unclosed `<details>` moves a section's own total into the preamble, and a
+    nesting one level deeper hides the enumeration, and each produces a well-formed wrong number
+    with nothing reporting that the partition failed. A preamble carrying no total reads as no
+    total, printing `?` and no shortfall, so the reading that is missing suppresses the block
+    rather than fabricating one. The largest total wins where the preamble states more than one,
+    so an ambiguous body overstates the shortfall rather than suppressing it.
 
     The total is compared against the same body rather than against this pull request's threads,
     which accumulate over every round while a total describes one.
@@ -1088,12 +1096,14 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     if not CCR_OVERVIEW.search(plain):
         return None
-    regions, leftover = details_regions(plain)
-    totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(leftover)]
-    listed: set[str] = set()
-    for region in regions:
-        if not unvetted(normal(heading_of(region)), {CCR_OPEN}):
-            listed.update(CCR_ANCHOR.findall(region))
+    preamble = plain.partition("<details")[0]
+    totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
+    listed = {
+        anchor
+        for line in plain.splitlines()
+        if LIST_ITEM.match(line)
+        for anchor in CCR_ANCHOR.findall(line)
+    }
     return (max(totals) if totals else None, len(listed))
 
 
@@ -1105,17 +1115,17 @@ def head_overview(pr: dict) -> tuple[int | None, int] | None:
     stating its own. The suppressed count is not head-scoped because its blocks carry the finding
     text an answer is owed to, where a shortfall carries a number and nothing to answer.
 
-    Newest rather than first, since a re-request during the rollout can land a round in either
-    format on one commit, and the later round is the one describing the reviewer as it is now.
+    The newest round on the head is chosen first and its own body then answers, which is the
+    order `review_effort` already reads its own field in. Choosing the newest round that happens
+    to carry a manifest instead reports a superseded one as current: a re-request during the
+    rollout can land a round in either format on one commit, and where the later round is in the
+    first format the field has to be absent rather than read from the earlier one.
     """
-    carrying = [
-        (n, m)
-        for n in head_reviews(pr)
-        if (m := overview_manifest(n.get("body") or "")) is not None
-    ]
-    if not carrying:
+    reviews = head_reviews(pr)
+    if not reviews:
         return None
-    return max(carrying, key=lambda pair: pair[0].get("submittedAt") or "")[1]
+    newest = max(reviews, key=lambda n: n.get("submittedAt") or "")
+    return overview_manifest(newest.get("body") or "")
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:

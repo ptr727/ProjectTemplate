@@ -1978,11 +1978,11 @@ class TestSecondOverviewFormat(GqlCase):
 
     def test_a_manifest_that_accounts_for_every_finding_reports_the_pair_and_no_block(self) -> None:
         self.answer(payload([review(body=overview_v2())]))
-        out, code = pr_review.digest("o", "r", 7)
+        out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=2/2", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
         self.assertIn("shapes=ok", out)
-        self.assertEqual(0, code)
+        self.assertEqual(0, pr_review.report_verdict(payload([review(body=overview_v2())])))
 
     def test_a_body_stating_no_total_reads_as_unknown_rather_than_as_none_withheld(self) -> None:
         """A total absent and a total of zero are different readings, and one must not print the
@@ -2114,7 +2114,7 @@ class TestSecondOverviewFormat(GqlCase):
                 ),
             ),
         ):
-            with self.subTest(case=label):
+            with self.subTest(case=label), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual("", pr_review.refusal_of({"body": body}))
                 self.assertEqual(45, pr_review.report_verdict(payload([review(body=body)])))
 
@@ -2166,13 +2166,83 @@ class TestSecondOverviewFormat(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("coverage=unstated", out)
         self.assertIn("shapes=ok", out)
-        self.assertEqual(45, pr_review.report_verdict(pr))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(45, pr_review.report_verdict(pr))
+
+    def test_the_newest_round_on_the_head_answers_even_where_it_carries_no_manifest(self) -> None:
+        """The rollout can land either format on one commit, in either order.
+
+        Choosing the newest round that happens to carry a manifest reports a superseded one as
+        current, printing a shortfall from a round the head has moved past while `effort=` on the
+        same line is read from the newer round, so one digest line describes two rounds.
+        """
+        v2_first = [
+            review(at=EARLY, body=overview_v2(findings="**Findings:** 9", anchors=())),
+            review(at=LATE, body=nested()),
+        ]
+        self.assertIsNone(pr_review.head_overview(payload(v2_first)))
+        self.answer(payload(v2_first))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("overview=", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+        v2_last = [review(at=EARLY, body=nested()), review(at=LATE, body=overview_v2())]
+        self.assertEqual((2, 2), pr_review.head_overview(payload(v2_last)))
+
+    def test_neither_half_depends_on_the_collapsed_sections_nesting_as_expected(self) -> None:
+        """Partitioning the body into sections reads a well-formed wrong number when the markup
+        is not what it assumes, and nothing reports that the partition failed.
+
+        An unclosed section moves its own total into the preamble, and a section nested one level
+        deeper hides the enumeration. The first fabricates a shortfall and the second fabricates
+        the whole block, so both are read without partitioning at all.
+        """
+        stated_inside = overview_v2().replace(
+            "This pull request narrows one reader.", "**Findings:** 40\n\nNarrows one reader."
+        )
+        unclosed = "\n".join(stated_inside.rsplit("</details>", 1))
+        self.assertEqual((2, 2), pr_review.overview_manifest(unclosed))
+        deeper = stated_inside.replace(
+            "<details open>\n<summary><strong>Open (2)</strong></summary>",
+            "<details>\n<summary><strong>Wrapper</strong></summary>\n\n<details open>\n"
+            "<summary><strong>Open (2)</strong></summary>",
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(deeper))
+
+    def test_a_total_stated_only_after_the_first_section_reads_as_no_total(self) -> None:
+        """The reading that is missing prints `?` and no shortfall, so it suppresses the block
+        rather than fabricating one, which is the safe direction for a body shaped unexpectedly."""
+        body = overview_v2(findings="").replace(
+            "This pull request narrows one reader.", "**Findings:** 40\n\nNarrows one reader."
+        )
+        self.assertEqual((None, 2), pr_review.overview_manifest(body))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=?/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
+        """The comment states the sizes, and adding an entry without it is how it goes stale."""
+        source = Path(pr_review.__file__).read_text(encoding="utf-8")
+        stated = re.search(
+            r"the output is regular: (\d+) headings, (\d+) summaries and (\d+) labels", source
+        )
+        if stated is None:
+            self.fail("the comment stating the vetted list sizes is no longer in the source")
+        self.assertEqual(
+            (
+                len(pr_review.VETTED_HEADINGS),
+                len(pr_review.VETTED_SUMMARIES),
+                len(pr_review.VETTED_LABELS),
+            ),
+            tuple(int(g) for g in stated.groups()),
+        )
 
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
-        """The shortfall and the vetted lists cover each other rather than either standing alone.
+        """The vetted lists are the second net under the shortfall, for the sections they reach.
 
-        A section this format names for its withheld findings arrives as an unvetted `<summary>`,
-        which is the reading that survives the format inventing a section nothing has seen.
+        A withheld section introduced as a `<summary>` arrives unvetted and stops the loop. One
+        introduced as a bare bold line does not, the label reader requiring a bullet, and the
+        shortfall is what catches that one.
         """
         body = overview_v2().replace(
             "<summary><strong>What changed in this PR</strong></summary>",
