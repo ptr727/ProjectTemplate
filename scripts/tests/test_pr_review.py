@@ -2210,7 +2210,12 @@ class TestSecondOverviewFormat(GqlCase):
 
     def test_a_total_stated_only_after_the_first_section_reads_as_no_total(self) -> None:
         """The reading that is missing prints `?` and no shortfall, so it suppresses the block
-        rather than fabricating one, which is the safe direction for a body shaped unexpectedly."""
+        rather than fabricating one, which is the safe direction for a body shaped unexpectedly.
+
+        Both reader-facing surfaces say `?` covers this as well as a round stating no total, since
+        the two are indistinguishable from here and a reader trusting `?` to mean the first would
+        not go looking in the body.
+        """
         body = overview_v2(findings="").replace(
             "This pull request narrows one reader.", "**Findings:** 40\n\nNarrows one reader."
         )
@@ -2236,6 +2241,72 @@ class TestSecondOverviewFormat(GqlCase):
             ),
             tuple(int(g) for g in stated.groups()),
         )
+
+    def test_only_the_enumeration_s_own_list_items_count_as_findings(self) -> None:
+        """The change summary is a bulleted list too, so counting every list item in the body
+        counts its links as findings this round enumerated.
+
+        That cancels the shortfall, which is the false green this field exists to prevent, and it
+        is the direction that hides rather than the one that reports.
+        """
+        body = overview_v2(findings="**Findings:** 3", anchors=("4000000001",)).replace(
+            "- Narrow the reader.",
+            "- Narrow the reader, superseding [a note](#discussion_r900) and "
+            "[another](#discussion_r901).",
+        )
+        self.assertEqual((3, 1), pr_review.overview_manifest(body))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=3/1", out)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_an_anchor_in_an_indented_block_outside_the_enumeration_is_not_a_finding(self) -> None:
+        """An indented block is Markdown code that the fence guard does not strip, and a line in
+        one can open with a list marker without being an entry."""
+        body = overview_v2(findings="**Findings:** 3", anchors=("4000000001",)).replace(
+            "This pull request narrows one reader.",
+            "    - see [it](#discussion_r902)\n\nNarrows one reader.",
+        )
+        self.assertEqual((3, 1), pr_review.overview_manifest(body))
+
+    def test_a_body_naming_no_enumeration_reads_every_stated_finding_as_unaccounted(self) -> None:
+        """The loud direction, and the rename that causes it stops the loop in its own right, so
+        the shortfall and the vetted lists answer that one case together."""
+        renamed = overview_v2(findings="**Findings:** 2").replace("Open (2)", "Withheld (2)")
+        self.assertEqual((2, 0), pr_review.overview_manifest(renamed))
+        self.assertEqual(["summary: Withheld (N)"], pr_review.unrecognized_in(renamed))
+
+    def test_the_section_opener_is_read_whatever_case_it_is_spelled_in(self) -> None:
+        """Every other tag reader here folds case, and a body spelling it `<DETAILS>` otherwise
+        never splits, so a collapsed section's own total becomes the round's."""
+        body = overview_v2().replace(
+            "This pull request narrows one reader.", "**Findings:** 40\n\nNarrows one reader."
+        )
+        upper = body.replace("<details", "<DETAILS").replace("</details>", "</DETAILS>")
+        self.assertEqual((2, 2), pr_review.overview_manifest(upper))
+
+    def test_two_rounds_stamped_at_one_second_select_the_later_arrival(self) -> None:
+        """GitHub stamps two rounds on one commit with the same second, and `max` returns the
+        first maximal element while the connection arrives oldest first, so a tie selected the
+        oldest round. A round carrying no timestamp sorts oldest, not having been submitted."""
+        stale = overview_v2(findings="**Findings:** 9", anchors=())
+        tied = [review(at=EARLY, body=stale), review(at=EARLY, body=overview_v2())]
+        self.assertEqual((2, 2), pr_review.head_overview(payload(tied)))
+        untimed = [review(at=LATE, body=overview_v2()), review(at=EARLY, body=stale)]
+        self.assertEqual((2, 2), pr_review.head_overview(payload(untimed)))
+
+    def test_one_selection_idiom_keeps_two_fields_on_one_round(self) -> None:
+        """`effort=` and `overview=` are read from a round each, so a digest line whose fields
+        disagree about which round it describes is worse than either being wrong alone."""
+        tied = [
+            review(at=EARLY, body=nested(effort="Balanced")),
+            review(at=EARLY, body=overview_v2()),
+        ]
+        self.answer(payload(tied))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("effort=lite", out)
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("effort=balanced", out)
 
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists are the second net under the shortfall, for the sections they reach.

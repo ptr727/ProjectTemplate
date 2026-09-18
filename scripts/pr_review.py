@@ -83,9 +83,12 @@ Subcommands
            spot-verify against `gh pr diff` rather than trusting it outright.
            `overview=T/M` reads the second Copilot review-body format's own finding manifest,
            the total the round covering the head states beside the number of findings it
-           enumerates with a thread anchor, `T` reading `?` where that round states no total at
-           all. Present only where that round is written in that format, which reached this
-           repository after every round measured for the lists above. A total larger than the
+           enumerates with a thread anchor. `T` reads `?` where no total is found in the
+           overview preamble, which is a round stating none and equally a round stating one only
+           after its first collapsed section, the two being indistinguishable from here and
+           neither meaning the round withheld nothing. Present only where that round is written
+           in that format, which reached this repository after every round measured for the
+           lists above. A total larger than the
            enumeration is findings raised where polling threads cannot see them, and a `FINDINGS
            WITH NO THREAD` block follows naming the shortfall, owed the same triage a suppressed
            finding is. No exit code rides on it, the same as `suppressed=` and
@@ -394,6 +397,12 @@ CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
 # An entry in that enumeration is a list item, which is what tells one from a prose mention.
 # Counting anchors body-wide instead counts a back-reference to an earlier round's thread.
 LIST_ITEM = re.compile(r"\s*[-*+]\s|\s*\d+[.)]\s")
+# The enumeration's own label, matched on one line so a scan finds it wherever it sits.
+# The count is optional, and the word boundary is what keeps `Opened` from reading as `Open`.
+CCR_OPEN = re.compile(r"<summary>[^\n]*\bOpen\b", re.IGNORECASE)
+# The section opener, read case-insensitively as every other tag reader in this file is.
+# A body spelling it `<DETAILS>` otherwise never splits, making a section's own total the round's.
+DETAILS_OPEN = re.compile(r"<details", re.IGNORECASE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -924,7 +933,28 @@ def refusing_review(pr: dict) -> dict | None:
         for n in reviewer_nodes(pr, "reviews")
         if (n.get("commit") or {}).get("oid") == head and refusal_of(n)
     ]
-    return max(refusals, key=lambda n: n.get("submittedAt") or "") if refusals else None
+    return newest_of(refusals)
+
+
+def newest_of(nodes: list[dict]) -> dict | None:
+    """The newest of these nodes by submission time, the later arrival winning a tie.
+
+    `max` returns the first maximal element and `reviewer_nodes` returns these oldest first, so
+    a tie on `submittedAt` selected the oldest round rather than the newest. GitHub stamps two
+    rounds on one commit with the same second often enough for that to decide a digest, and the
+    position in the connection is the only later-arriving signal there is once the timestamps
+    agree.
+
+    A node carrying no timestamp sorts oldest, a round that has not been submitted not being the
+    one describing the head.
+
+    Shared rather than spelled per reader, because `effort=` and `overview=` are read from a
+    round each and a digest line whose fields disagree about which round it describes is worse
+    than either field being wrong on its own.
+    """
+    if not nodes:
+        return None
+    return max(enumerate(nodes), key=lambda pair: (pair[1].get("submittedAt") or "", pair[0]))[1]
 
 
 def head_reviews(pr: dict) -> list[dict]:
@@ -964,10 +994,9 @@ def review_effort(pr: dict) -> tuple[str, str]:
     `Default (Max)`. A bare level is explicit. The setting remains user-controlled, and this
     reader only reports metadata that the completed review body exposes.
     """
-    reviews = head_reviews(pr)
-    if not reviews:
+    newest = newest_of(head_reviews(pr))
+    if newest is None:
         return "unknown", "unknown"
-    newest = max(reviews, key=lambda n: n.get("submittedAt") or "")
     plain = FENCE.sub("", newest.get("body") or "")
     for line in plain.splitlines():
         match = EFFORT_LINE.fullmatch(line)
@@ -1071,21 +1100,29 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     the markup this format states `Findings:` and `Changes:` on, matches no vetted list and is
     caught by the shortfall alone.
 
-    Each half is read from where that format puts it, and neither reading partitions the body
-    into collapsed sections first. The total is read from the overview preamble, the text ahead
-    of the first `<details`, because a total inside a collapsed section is that section's own.
-    The enumeration counts the findings listed as list items, because that is what an entry is,
-    and an anchor in a paragraph is a back-reference to an earlier round's thread rather than a
-    finding this round raised. Reading either body-wide made a number this round never stated
-    decide the shortfall.
+    Each half is read from where that format puts it, by scanning lines rather than by
+    partitioning the body into collapsed sections. The total is read from the overview preamble,
+    the text ahead of the first section opener, because a total inside a section is that
+    section's own. The enumeration is read from the section labelled `Open`, walking the list
+    items that follow it and stopping at the first line that is neither blank nor a list item,
+    because an entry is a list item under that label and a link anywhere else is a
+    back-reference rather than a finding this round raised. Reading anchors on every list item in
+    the body counted the change summary's own links, which cancels the shortfall and is the false
+    green this field exists to prevent.
 
-    Neither reading depends on the collapsed sections nesting or closing as expected, which a
-    partition does: an unclosed `<details>` moves a section's own total into the preamble, and a
-    nesting one level deeper hides the enumeration, and each produces a well-formed wrong number
-    with nothing reporting that the partition failed. A preamble carrying no total reads as no
-    total, printing `?` and no shortfall, so the reading that is missing suppresses the block
-    rather than fabricating one. The largest total wins where the preamble states more than one,
-    so an ambiguous body overstates the shortfall rather than suppressing it.
+    Neither reading depends on the sections nesting or closing as expected, which a partition
+    does: an unclosed section moves its own total into the preamble and a nesting one level
+    deeper hides the enumeration, each producing a well-formed wrong number with nothing
+    reporting that the partition failed.
+
+    Both failure directions are loud rather than quiet. A preamble stating no total reads as none
+    stated, printing `?` and no shortfall, and that covers a total stated only after the first
+    section opener as well, which is a body shaped unlike the one read here rather than a round
+    withholding nothing. A body carrying no `Open` label enumerates nothing, so every finding it
+    states reads as unaccounted for, and the same rename that causes it arrives as an unvetted
+    `<summary>` and stops the loop in its own right. The largest total wins where the preamble
+    states more than one, so an ambiguous body overstates the shortfall rather than suppressing
+    it.
 
     The total is compared against the same body rather than against this pull request's threads,
     which accumulate over every round while a total describes one.
@@ -1096,15 +1133,37 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     if not CCR_OVERVIEW.search(plain):
         return None
-    preamble = plain.partition("<details")[0]
+    opener = DETAILS_OPEN.search(plain)
+    preamble = plain[: opener.start()] if opener else plain
     totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
-    listed = {
-        anchor
-        for line in plain.splitlines()
-        if LIST_ITEM.match(line)
-        for anchor in CCR_ANCHOR.findall(line)
-    }
-    return (max(totals) if totals else None, len(listed))
+    return (max(totals) if totals else None, len(enumerated_findings(plain)))
+
+
+def enumerated_findings(plain: str) -> set[str]:
+    """The thread anchors the `Open` section lists, read from the first such section only.
+
+    A line scan rather than a region slice, for the reason `overview_manifest` gives. The walk
+    ends at the first line that is neither blank nor a list item, which is the section's own
+    closing tag in the body read here and is whatever follows the list in a body shaped
+    otherwise, so no closing tag has to be found for the walk to end in the right place.
+
+    The first such section rather than every one, since a second is a shape nothing has seen and
+    counting both would raise the enumeration on a guess. Under-counting overstates the
+    shortfall, which is the direction that reports rather than the one that hides.
+    """
+    lines = plain.splitlines()
+    for i, line in enumerate(lines):
+        if not CCR_OPEN.search(line):
+            continue
+        listed: set[str] = set()
+        for entry in lines[i + 1 :]:
+            if not entry.strip():
+                continue
+            if not LIST_ITEM.match(entry):
+                break
+            listed.update(CCR_ANCHOR.findall(entry))
+        return listed
+    return set()
 
 
 def head_overview(pr: dict) -> tuple[int | None, int] | None:
@@ -1121,11 +1180,8 @@ def head_overview(pr: dict) -> tuple[int | None, int] | None:
     rollout can land a round in either format on one commit, and where the later round is in the
     first format the field has to be absent rather than read from the earlier one.
     """
-    reviews = head_reviews(pr)
-    if not reviews:
-        return None
-    newest = max(reviews, key=lambda n: n.get("submittedAt") or "")
-    return overview_manifest(newest.get("body") or "")
+    newest = newest_of(head_reviews(pr))
+    return None if newest is None else overview_manifest(newest.get("body") or "")
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
