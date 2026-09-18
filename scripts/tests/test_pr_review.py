@@ -2034,6 +2034,140 @@ class TestSecondOverviewFormat(GqlCase):
         # The first format's own markers carry no emphasis, so nothing about them moves.
         self.assertEqual("Review details", pr_review.normal("Review details"))
 
+    def test_the_marker_identifies_the_format_only_on_a_line_of_its_own(self) -> None:
+        """The marker is an HTML comment, so a writer naming one has no reason to quote it.
+
+        This change puts the bare marker into its own prose, and a fence guard alone reads a
+        first-format round describing it as a round written in it, taking a total out of that
+        prose and reporting a shortfall against a manifest that is not there.
+        """
+        prose = f"{OVERVIEW}\nThe reader keys on {CCR_MARKER} bodies.\n\n**Findings:** 3\n"
+        self.assertIsNone(pr_review.overview_manifest(prose))
+        quoted = f"{OVERVIEW}\n> {CCR_MARKER}\n\nQuoted from an earlier round.\n"
+        self.assertIsNone(pr_review.overview_manifest(quoted))
+        self.answer(payload([review(body=prose)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("overview=", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_anchor_outside_the_enumeration_is_not_a_finding_this_round_raised(self) -> None:
+        """A re-review body citing an earlier round's thread is exactly this shape.
+
+        Counting anchors body-wide inflates the enumeration and hides the shortfall, which is
+        the one reading the field exists for.
+        """
+        body = overview_v2(findings="**Findings:** 3", anchors=("4000000001",)).replace(
+            "The change is narrow.",
+            "Superseding the finding at https://github.com/o/r/pull/1#discussion_r999 .",
+        )
+        self.assertEqual((3, 1), pr_review.overview_manifest(body))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=3/1", out)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_a_total_inside_a_collapsed_section_is_that_section_s_own(self) -> None:
+        """The change summary carries its own counts, and reading one as the round's understates
+        the shortfall, which is the direction that suppresses the block entirely."""
+        body = overview_v2().replace(
+            "This pull request narrows one reader.", "**Findings:** 40\n\nNarrows one reader."
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+
+    def test_the_largest_stated_total_wins_where_the_overview_states_two(self) -> None:
+        """An ambiguous body overstates the shortfall rather than suppressing it, since the
+        first-wins reading let a lower total floor it at zero and print nothing."""
+        body = overview_v2(findings="**Findings:** 0\n\n**Findings:** 9")
+        self.assertEqual((9, 2), pr_review.overview_manifest(body))
+
+    def test_a_refusal_wearing_the_version_marker_is_still_a_refusal(self) -> None:
+        """The marker renders invisibly, so it is markup rather than the body's opening line.
+
+        Reading it as the opening reads a quota refusal as an ordinary review, which is the
+        clean-pass-byte-for-byte failure the refusal reader exists for.
+        """
+        node = {
+            "body": f"{CCR_MARKER}\n\nCopilot wasn't able to review this pull request because "
+            "the user who requested the review has reached their quota limit."
+        }
+        self.assertTrue(pr_review.refusal_of(node))
+        self.assertTrue(pr_review.quota_refusal(node))
+        self.answer(payload([review(body=node["body"])]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=QUOTA", out)
+        self.assertIn("review_on_head=NO", out)
+
+    def test_a_refusal_introduced_by_a_heading_is_missed_in_both_formats_alike(self) -> None:
+        """The known limit, pinned rather than left to be rediscovered.
+
+        The reader takes one opening line, so a refusal below a heading is missed, and that was
+        already true of the first format. It is not a false green: such a round states no
+        coverage, so it reaches the maintainer as an unproven diff rather than as a clean pass.
+        """
+        for label, body in (
+            ("first format", f"{OVERVIEW}\nCopilot was not able to review this pull request."),
+            (
+                "second format",
+                (
+                    f"{CCR_MARKER}\n\n## Copilot review overview\n\nCopilot was not able to "
+                    "review this pull request."
+                ),
+            ),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual("", pr_review.refusal_of({"body": body}))
+                self.assertEqual(45, pr_review.report_verdict(payload([review(body=body)])))
+
+    def test_the_short_effort_label_is_vetted_in_the_bullet_spelling_too(self) -> None:
+        """Dropping the bullet requirement and the word `level` together left one combination
+        that the effort reader parses and the shape reader blocks on."""
+        bullet = f"{OVERVIEW}\n- **Review effort:** Lite\n"
+        self.assertEqual([], pr_review.unrecognized_in(bullet))
+        self.assertEqual(
+            ("lite", "explicit"), pr_review.review_effort(payload([review(body=bullet)]))
+        )
+
+    def test_the_newest_round_on_one_head_decides_the_manifest(self) -> None:
+        """Two rounds in this format can cover one commit, and the later states the current
+        totals. Both rounds carry the head here, so the selection is what answers rather than
+        the head filter answering ahead of it."""
+        older = review(at=EARLY, body=overview_v2(findings="**Findings:** 9", anchors=()))
+        newer = review(at=LATE, body=overview_v2())
+        for label, nodes in (("older first", [older, newer]), ("newer first", [newer, older])):
+            with self.subTest(case=label):
+                self.answer(payload(nodes))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("overview=2/2", out)
+                self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_one_finding_linked_twice_is_one_finding(self) -> None:
+        """A body can link a finding from its own entry and again from its prose, and counting
+        the link rather than the finding overstates the enumeration."""
+        self.assertEqual(
+            (2, 1),
+            pr_review.overview_manifest(
+                overview_v2(findings="**Findings:** 2", anchors=("4000000001", "4000000001"))
+            ),
+        )
+
+    def test_a_single_withheld_finding_reads_as_one_finding(self) -> None:
+        """The reachable `stated=1, listed=0` case rendered `them` twice for one finding."""
+        self.answer(payload([review(body=overview_v2(findings="**Findings:** 1", anchors=()))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("states 1 finding and enumerates 0 of them with a thread", out)
+        self.assertIn("so 1 finding is raised", out)
+
+    def test_a_round_in_the_format_stating_no_coverage_blocks_on_coverage(self) -> None:
+        """The one body read here states its coverage only through the fleet marker, so a
+        repository not carrying the instructions that ask for it reads such a round as unproven
+        rather than as covered."""
+        pr = payload([review(body=overview_v2(covers=""))])
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("coverage=unstated", out)
+        self.assertIn("shapes=ok", out)
+        self.assertEqual(45, pr_review.report_verdict(pr))
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The shortfall and the vetted lists cover each other rather than either standing alone.
 

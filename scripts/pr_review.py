@@ -85,16 +85,20 @@ Subcommands
            the total the round covering the head states beside the number of findings it
            enumerates with a thread anchor, `T` reading `?` where that round states no total at
            all. Present only where that round is written in that format, which reached this
-           repository after every round measured for the lists above, and which carries the
-           first format's `Suppressed comments` heading nowhere, so `suppressed=` finds nothing
-           in it however many findings it withholds. A total larger than the enumeration is findings raised where polling
-           threads cannot see them, and a `FINDINGS WITH NO THREAD` block follows naming the
-           shortfall, owed the same triage a suppressed finding is. No exit code rides on it,
-           the same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says
-           is the reader's to judge. That format states its file coverage only through the
-           `fleet-review` marker the fleet's own carried `code-review` instructions ask the
-           reviewer for, so a repository not carrying those instructions reads a round in it as
-           exit 45, `COVERAGE_IS_UNSTATED`, which is the honest reading rather than a gap here.
+           repository after every round measured for the lists above. A total larger than the
+           enumeration is findings raised where polling threads cannot see them, and a `FINDINGS
+           WITH NO THREAD` block follows naming the shortfall, owed the same triage a suppressed
+           finding is. No exit code rides on it, the same as `suppressed=` and
+           `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
+           One body in that format has been read here, so what follows describes that body
+           rather than the format in general. It carried no `Suppressed comments` heading, which
+           is why the shortfall rather than `suppressed=` is what finds a withheld finding in
+           it, and it stated its file coverage only through the `fleet-review` marker the
+           fleet's own carried `code-review` instructions ask the reviewer for. On that reading
+           a repository not carrying those instructions reads such a round as exit 45,
+           `COVERAGE_IS_UNSTATED`, which is the honest answer rather than a gap here. A later
+           body contradicting either observation is an ordinary shape change, and the vetted
+           lists are what report it.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -353,7 +357,7 @@ VETTED_SUMMARIES = {
     "Suppressed comments (N)",
     "Comments suppressed due to low confidence (N)",
 }
-VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level"}
+VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
 # Inline emphasis around a marker is presentation rather than identity.
 # The second overview format wraps every `<summary>` in `<strong>` where the first wrapped none.
 # Vetting the tags along with the text blocks on markup changing under a section that has not.
@@ -376,7 +380,10 @@ EFFORT_LINE = re.compile(
 )
 # The second overview format states its own version in the marker its body opens with.
 # Keyed on that marker rather than on the heading wording, a version being what it states.
-CCR_OVERVIEW = re.compile(r"<!--\s*ccr-overview-v2\s*-->")
+# Anchored to a line of its own, since the marker is an HTML comment and renders invisibly.
+# Nobody writing about one has a reason to quote it, and this change's own prose carries it bare.
+# A body naming it mid-sentence is a body about the format rather than one written in it.
+CCR_OVERVIEW = re.compile(r"^\s*<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILINE)
 # That format's own finding total, which the first format states nowhere.
 # Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
 CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
@@ -384,6 +391,9 @@ CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
 # The link is what makes an entry countable, the same body's change summary being bulleted too.
 # Deduplicated by the caller, since one finding can be linked more than once.
 CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
+# The collapsed section the enumeration lives in, normalized the way a vetted summary is.
+# Counting anchors body-wide instead counts a prose back-reference to an earlier round's thread.
+CCR_OPEN = "Open (N)"
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -867,9 +877,18 @@ def refusal_of(node: dict) -> str:
     every case here except that one, which is the case that matters. A refusal introduced by a
     heading would sit below the opening and be missed, and answering that shape means telling it
     from an overview rather than reading one line further.
+
+    The second overview format's version marker is skipped rather than read as that opening,
+    since it is markup that renders invisibly and a refusal wearing it opens on the line below.
+    That leaves the heading-introduced refusal named above missing in both formats alike rather
+    than in one, which is where it was before this format arrived. Such a round states no
+    coverage either, so it reaches the maintainer as an unproven diff rather than as a clean
+    pass, which is a worse remedy than a refusal's own and not a false green.
     """
     body = node.get("body") or ""
-    opening = next((ln for ln in body.splitlines() if ln.strip()), "")
+    opening = next(
+        (ln for ln in body.splitlines() if ln.strip() and not CCR_OVERVIEW.fullmatch(ln)), ""
+    )
     return body if REFUSAL.search(opening) else ""
 
 
@@ -1037,16 +1056,28 @@ def head_coverage(pr: dict) -> tuple[str, str]:
 def overview_manifest(body: str) -> tuple[int | None, int] | None:
     """One round's own finding manifest: the total it states, and the count it enumerates.
 
-    None where the body carries no `ccr-overview-v2` marker, which every round in the first
-    format is. The stated total is None where that format's `Findings:` line is absent, since a
-    body stating no total reads identically to one stating zero and the two differ.
+    None where the body carries no `ccr-overview-v2` marker on a line of its own, which every
+    round in the first format is. The stated total is None where that format's `Findings:` line
+    is absent, since a body stating no total reads identically to one stating zero and the two
+    differ.
 
     The first format states no total at all, so a finding raised with no thread of its own is
     found there by its own `Suppressed comments` heading. The second format carries that heading
-    nowhere, and the shortfall between the total it states and the findings it enumerates finds
-    the same finding without anything here having to know what that format calls the section
-    holding it. A section it does name arrives as an unvetted `<summary>` and stops the loop on
-    its own, so the two readings cover each other rather than either being relied on alone.
+    nowhere, and the shortfall between the total it states and the findings it enumerates is what
+    finds the same finding, whatever that format calls the section holding it, since a withheld
+    finding the total counts is short however it is presented. The vetted lists are a second net
+    under that one rather than an equal half of it: a withheld section introduced as a heading or
+    a `<summary>` stops the loop as an unrecognized shape, and one introduced as a bare bold line,
+    the markup this format states `Findings:` and `Changes:` on, matches no vetted list and is
+    caught by the shortfall alone.
+
+    Each half is read from the region that owns it. The total is read outside the collapsed
+    sections, and the enumeration from the section labelled `Open (N)`, because a total inside a
+    section is that section's own and an anchor outside one is a back-reference to an earlier
+    round's thread rather than a finding this round raised. Reading either body-wide made a
+    number this round never stated decide the shortfall. The largest total wins where the
+    overview states more than one, so an ambiguous body overstates the shortfall rather than
+    suppressing it.
 
     The total is compared against the same body rather than against this pull request's threads,
     which accumulate over every round while a total describes one.
@@ -1057,8 +1088,13 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     if not CCR_OVERVIEW.search(plain):
         return None
-    stated = CCR_FINDINGS.search(plain)
-    return (int(stated.group(1)) if stated else None, len(set(CCR_ANCHOR.findall(plain))))
+    regions, leftover = details_regions(plain)
+    totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(leftover)]
+    listed: set[str] = set()
+    for region in regions:
+        if not unvetted(normal(heading_of(region)), {CCR_OPEN}):
+            listed.update(CCR_ANCHOR.findall(region))
+    return (max(totals) if totals else None, len(listed))
 
 
 def head_overview(pr: dict) -> tuple[int | None, int] | None:
@@ -1949,11 +1985,10 @@ def digest(
         # What the finding says is in the review body, which is where this sends the reader.
         lines.append(
             f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
-            f"{stated} finding{'' if stated == 1 else 's'} and enumerates {listed} with a thread "
-            f"to read {'it' if listed == 1 else 'them'} from, so {unlisted} of them "
-            f"{'is' if unlisted == 1 else 'are'} raised where polling threads cannot see "
-            "them. Read the review body itself and give each the triage a suppressed finding "
-            "gets, before closing the review loop"
+            f"{stated} finding{'' if stated == 1 else 's'} and enumerates {listed} of them with "
+            f"a thread, so {unlisted} {'finding is' if unlisted == 1 else 'findings are'} raised "
+            "where polling threads cannot see them. Read the review body itself and give each "
+            "the triage a suppressed finding gets, before closing the review loop"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
