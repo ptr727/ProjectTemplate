@@ -40,6 +40,45 @@ import prose_lint
 REPO = Path(__file__).resolve().parent.parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / ".agents" / "skills" / "comment-and-doc-style" / "SKILL.md"
 PROSE_GATE_ACTION = REPO / ".github" / "actions" / "prose-gate" / "action.yml"
+VALIDATE_TASK_WORKFLOW = REPO / ".github" / "workflows" / "validate-task.yml"
+FLEET_LABELS = REPO / "repo-config" / "labels.json"
+
+
+def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProcess[str]:
+    """Run the composite action's own script body against `root`, as a runner would.
+
+    The script is read out of the action rather than restated, so a case proves what the action
+    does rather than what this module believes it does.
+    """
+    action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+    _, block = action.split("      run: |\n", 1)
+    script_lines = []
+    for line in block.splitlines():
+        if line.startswith("        "):
+            script_lines.append(line.removeprefix("        "))
+        elif not line:
+            script_lines.append(line)
+        else:
+            break
+    env = (
+        os.environ
+        | {
+            "BASE": "HEAD",
+            "GITHUB_ACTION_PATH": str(PROSE_GATE_ACTION.parent),
+            "PATHS": ".",
+        }
+        | extra
+    )
+    return subprocess.run(
+        ["bash", "-c", "\n".join(script_lines)],
+        cwd=root,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+
 
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
@@ -717,9 +756,12 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name):
                 self.assertEqual([], self.flag(name, text))
         # The convention still holds on the lines it was written for.
+        found = prose_lint.extracted_comments(
+            Path("a.cs"), ["/* Start here.", " * Still going. */"]
+        )
         self.assertEqual(
             [(1, "Start here.", True), (2, "Still going.", True)],
-            prose_lint.extracted_comments(Path("a.cs"), ["/* Start here.", " * Still going. */"]),
+            [(c.line, c.body, c.leading) for c in found],
         )
         # The marker is one `*` against whitespace, so a continuation keeps its own emphasis.
         for text, body in (
@@ -728,9 +770,10 @@ class TestCommentWrap(BaitCase):
             (" *emphasis* here */", "*emphasis* here"),
         ):
             with self.subTest(line=text):
+                found = prose_lint.extracted_comments(Path("a.cs"), ["/* Start.", text])
                 self.assertEqual(
                     [(1, "Start.", True), (2, body, True)],
-                    prose_lint.extracted_comments(Path("a.cs"), ["/* Start.", text]),
+                    [(c.line, c.body, c.leading) for c in found],
                 )
 
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
@@ -2653,31 +2696,7 @@ class TestReusableGateExclusions(unittest.TestCase):
         )
 
     def run_action(self) -> subprocess.CompletedProcess[str]:
-        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-        _, block = action.split("      run: |\n", 1)
-        script_lines = []
-        for line in block.splitlines():
-            if line.startswith("        "):
-                script_lines.append(line.removeprefix("        "))
-            elif not line:
-                script_lines.append(line)
-            else:
-                break
-        script = "\n".join(script_lines)
-        env = os.environ | {
-            "BASE": "HEAD",
-            "GITHUB_ACTION_PATH": str(PROSE_GATE_ACTION.parent),
-            "PATHS": ".",
-        }
-        return subprocess.run(
-            ["bash", "-c", script],
-            cwd=self.root,
-            env=env,
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
-            check=False,
-        )
+        return run_prose_gate_action(self.root)
 
     def test_a_declared_vendored_path_does_not_block_the_gate(self) -> None:
         (self.root / "vendor" / "upstream.md").write_text(
@@ -3939,6 +3958,516 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         """
         self.assertIsNone(prose_lint.diff_header_path("/dev/null"))
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
+
+
+class TestTheCommentAddedRule(BaitCase):
+    """The rule that refuses a comment line a change adds to code or config.
+
+    Every case reads a whole file, because that is what `check_file` is given. What makes the rule
+    report an added comment rather than every comment is the diff scope `main` applies afterwards,
+    and the cases below that exercise `main` are where that half is proved.
+    """
+
+    PROSE = "# The value is read once, since the second read can disagree with the first.\n"
+
+    def test_a_comment_line_in_code_is_reported(self) -> None:
+        self.assertEqual(
+            ["comment-added"], self.kinds(self.PROSE, {"comment-added"}, name="tool.py")
+        )
+
+    def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
+        """A trailing comment is out of scope, and the languages below are why.
+
+        Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
+        HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
+        all, PowerShell opens one after almost anything, and shell after its metacharacters. Six
+        attempts at deciding it from the marker's neighbourhood each got a language wrong, and each
+        wrong answer either reported a line holding no comment or silenced one that held several.
+        A marker opening its line is unambiguous in every language.
+        """
+        for text, name in (
+            ("value = read()  # The second read can disagree.\n", "tool.py"),
+            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
+            ("- name: Check C# formatting step\n", "t.yml"),
+            ("note: See (#1234) for the discussion of this change.\n", "a.yml"),
+            ('description = """\nReference owner/repo#1234 when it lands.\n"""\n', "a.toml"),
+            ("build/ # The output tree is ignored.\n", ".gitignore"),
+            ("run_gate;# The gate is run once here.\n", "t.sh"),
+        ):
+            with self.subTest(name=name, text=text.strip().splitlines()[0]):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_comment_opening_its_line_is_read_in_every_syntax(self) -> None:
+        """The other half, so the narrowing cannot pass by reporting nothing at all."""
+        for text, name in (
+            ("# The store is read once here.\n", "t.sh"),
+            ("# The store is read once here.\n", "t.yml"),
+            ("// The store is read once here.\nlet x = 1;\n", "a.ts"),
+            ("/* The store is read once here. */\n", "a.css"),
+            ("<!-- The store is read once here. -->\n", "a.xml"),
+            ("; The store is read once here.\n", "x.ini"),
+            ("# The store is read once here.\n", "a.ps1"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_config_carries_the_rule_as_code_does(self) -> None:
+        for name, text in (
+            (
+                "workflow.yml",
+                "# The base is the pull request's own, not the branch tip.\njobs: {}\n",
+            ),
+            ("settings.json", "// The base is the pull request's own, not the branch tip.\n{}\n"),
+            ("deploy.sh", "# The base is the pull request's own, not the branch tip.\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
+        """Deleting one of these changes what the file does, which is not what the rule asks for."""
+        for line in (
+            "#!/usr/bin/env python3\n",
+            "value = read()  # noqa: E501\n",
+            "value = read()  # type: ignore[arg-type]\n",
+            "# ruff: noqa\n",
+            "# shellcheck disable=SC2086\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_directive_name_opening_a_sentence_is_still_prose(self) -> None:
+        """Anchoring the name alone let a directive open a sentence and exempt the whole comment."""
+        for line, expected in (
+            ("# nosec B404\n", []),
+            ("# hadolint ignore=DL3008\n", []),
+            (
+                "# nosec The value is read once, since the second read can disagree.\n",
+                ["comment-added"],
+            ),
+            ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
+            # Unpunctuated, so the sentence half cannot be what reports these.
+            # The name has to open the body, and `search` in place of `match` exempts them.
+            (
+                "# The pyright: ignore form is written per line rather than per file\n",
+                ["comment-added"],
+            ),
+            (
+                "# A nosec marker would silence the whole call rather than this one\n",
+                ["comment-added"],
+            ),
+            # A reason written as an argument is exempt.
+            # The same reason punctuated as a sentence is not, which is one test reading one body.
+            ("# nosec B608 - the query is parameterized\n", []),
+            ("# nosec B608 - the query is parameterized.\n", ["comment-added"]),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it\n", []),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", ["comment-added"]),
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_reference_and_a_key_are_not_prose(self) -> None:
+        for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_powershell_help_block_is_a_documentation_comment(self) -> None:
+        """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
+
+        PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
+        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written
+        as, which the last case pins, because telling it from a remark needs a second grammar in a
+        rule that holds none.
+        """
+        # Written so `comment-wrap` has something to find here.
+        # That is what makes the second assertion prove the skip is this rule's own.
+        block = (
+            "<#\n"
+            ".SYNOPSIS\n"
+            "Returns the thing the caller asked for\n"
+            "once the store has answered.\n"
+            "#>\n"
+            "param()\n"
+        )
+        self.assertEqual([], self.kinds(block, {"comment-added"}, name="Tool.ps1"))
+        self.assertEqual(["comment-wrap"], self.kinds(block, {"comment-wrap"}, name="Tool.ps1"))
+        # An ordinary remark is not documentation, so the rule still reads it, after a block too.
+        # A marker inside a string is not an opener, which two hand-written scans each missed.
+        # The first stood the rule down to end of file, the second to the next block's terminator.
+        for name, text in (
+            ("alone", "# The store is read once, since a second read can disagree.\nparam()\n"),
+            ("after a block", "<#\n.SYNOPSIS\nDoc.\n#>\n# The store is read once here.\n"),
+            ("after a one-line block", "<# .SYNOPSIS Doc. #>\n# The store is read once here.\n"),
+            ("under an opener in a string", "$p = '<#'\n# The store is read once here.\n"),
+            ("under an opener in a here-string", "$s = @'\n<#\n'@\n# The store is read once.\n"),
+            (
+                "between an opener in a string and a later block",
+                "$m = '<#'\n# The marker is written out here.\n<#\n.SYNOPSIS\nDoc.\n#>\n",
+            ),
+            ("after a stray closer", "# The store is read once here.\n#>\nparam()\n"),
+            (
+                "past an opener inside a block",
+                "<#\n.SYNOPSIS\nUse <# to open.\n#>\n# The store is read once here.\n",
+            ),
+            (
+                "on a line naming both markers",
+                "# A block is written <# like this #> above a function.\n",
+            ),
+        ):
+            with self.subTest(case=name):
+                self.assertEqual(
+                    ["comment-added"], self.kinds(text, {"comment-added"}, name="Tool.ps1")
+                )
+        # An opener that never closes puts the rest of the file inside a comment, which is what
+        # PowerShell itself reads there, so the rule follows the parser rather than guessing.
+        self.assertEqual(
+            [], self.kinds("<#\n# The store is read once here.\n", {"comment-added"}, name="T.ps1")
+        )
+        # The `#` help form is reported, deliberately rather than by oversight.
+        # It is a run of comment lines, and the label is what a change writing one carries.
+        hash_help = "# .SYNOPSIS\n# Returns the thing the caller asked for.\nfunction G {}\n"
+        self.assertEqual(
+            ["comment-added", "comment-added"],
+            self.kinds(hash_help, {"comment-added"}, name="T.ps1"),
+        )
+
+    def test_markdown_is_out_of_scope(self) -> None:
+        """Markdown prose is the document, and its HTML comments are markers a tool matches."""
+        text = "<!-- The section below is generated. -->\n\nOrdinary prose.\n"
+        self.assertEqual([], self.kinds(text, {"comment-added"}, name="doc.md"))
+
+    def test_a_file_that_carries_no_comments_is_left_alone(self) -> None:
+        self.assertEqual([], self.kinds("a,b\n1,2\n", {"comment-added"}, name="data.csv"))
+
+    def test_a_line_that_looks_like_a_fence_does_not_silence_the_rule(self) -> None:
+        """One unbalanced fence line suppressed every comment after it, in a refusing gate.
+
+        A fence is a Markdown construct and Markdown is out of scope, so the rule reads a file's
+        comments as its own syntax defines them. Reached here through a heredoc, which is where a
+        code or config file holds such a line.
+        """
+        text = "cat <<EOF\n```\nEOF\n" + self.PROSE
+        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.sh"))
+
+    # A triple-quoted string the fallback scan does not carry across lines.
+    # That is what makes the two extraction paths disagree.
+    # The marker opens its line, so the `leading` filter cannot be what drops it.
+    # Written mid-line it was, and the cases below then passed with their guard removed.
+    DOCSTRING = 'def f():\n    """Sharp usage:\n\n# to the parser and it stops.\n    """\n'
+
+    def test_the_fallback_scan_reads_a_docstring_as_a_comment(self) -> None:
+        """The premise the two cases below rest on, asserted rather than assumed."""
+        path = self._write(self.DOCSTRING, "shape.py")
+        found = prose_lint.extracted_comments(path, self.DOCSTRING.split("\n"))
+        # Leading, since a comment the `leading` filter drops anyway proves nothing here.
+        self.assertTrue(
+            any(c.leading for c in found),
+            "the fallback scan must read the docstring line as a leading comment",
+        )
+
+    def test_a_python_file_that_does_not_tokenize_is_left_alone(self) -> None:
+        """Falling back would read the `#` inside the docstring as a comment and report it."""
+        self.assertEqual(
+            [], self.kinds("x = (1\n" + self.DOCSTRING, {"comment-added"}, name="bad.py")
+        )
+
+    def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
+        """A case-insensitive filesystem hands the same file back under either spelling.
+
+        This rule alone. `comment_wrap_findings` still matches the suffix case-sensitively, which
+        is filed rather than fixed here, so the two rules read such a file differently.
+        """
+        for name in ("mixed.py", "mixed.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))
+
+    def test_a_known_tool_directive_is_not_prose(self) -> None:
+        """Deleting one changes what the file does, which the rule's first remedy would have done."""
+        for line in (
+            "# syntax=docker/dockerfile:1\n",
+            "# fmt: off\n",
+            "# pragma: no cover\n",
+            "# nosec B404\n",
+            "# yaml-language-server: $schema=https://example.invalid/s.json\n",
+            "# renovate: datasource=github-releases depName=owner/name\n",
+            "value = read()  # fmt: skip\n",
+            "value = read()  # pyright: ignore[reportUnknownMemberType]\n",
+            "# isort: skip_file\n",
+            "# codespell:ignore fo\n",
+            "value = read()  # doctest: +SKIP\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_the_rule_list_says_what_the_rule_does(self) -> None:
+        """`--summary` and `--help` print this line, and it said the rule fires on an addition.
+
+        A diff counts a modified line as an added one, so a reworded comment is reported, and a
+        reader told otherwise by the rule list meets the finding without expecting it.
+        """
+        self.assertIn("adds or edits", prose_lint.RULES["comment-added"])
+        findings = prose_lint.check_file(
+            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
+        )
+        self.assertIn("adds or edits", findings[0][2])
+
+    def test_the_rule_runs_by_default(self) -> None:
+        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
+        self.assertIn("comment-added", prose_lint.DEFAULT_RULES)
+        self.assertIn("comment-added", prose_lint.RULES)
+
+    def test_the_message_names_the_label_that_stands_it_down(self) -> None:
+        """A finding a reader cannot act on is a finding that gets worked around.
+
+        The label is looked for as the quoted name the message builds from the constant, since the
+        bare word also appears in the message's closing clause and matched there instead.
+        """
+        findings = prose_lint.check_file(
+            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
+        )
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), findings[0][2])
+        self.assertIn(prose_lint.COMMENT_ENV_NAME, findings[0][2])
+        # The flag belongs beside them, since the message prints on a run by hand too.
+        # There no pull request carries a label, and a variable is the clumsier way to pass one.
+        self.assertIn("--allow-comments", findings[0][2])
+
+    def _write(self, text: str, name: str) -> Path:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+
+class TestTheCommentAddedStandDowns(unittest.TestCase):
+    """Both ways the rule stops running, each announced rather than silent.
+
+    A gate that stands down without saying so reports the same clean run as a gate that found
+    nothing, which is the reading `GOVERNANCE.md` "Verification Discipline" refuses.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.bait = self.tmp / "tool.py"
+        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
+
+    def test_without_a_diff_the_rule_stands_down_and_says_so(self) -> None:
+        """Read over a whole tree it would report every comment the repository already holds.
+
+        The environment override is cleared for this case, since the note it prints is the other
+        stand-down's, and the docs tell a developer to export that variable.
+        """
+        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
+        with mock.patch.object(prose_lint, "discover", return_value=[self.bait]):
+            self.assertEqual(0, prose_lint.main(["--check", "comment-added", str(self.tmp)]))
+        self.assertIn("comment-added is not checked without --diff", self.err.getvalue())
+
+    def test_a_value_spelled_false_does_not_stand_the_rule_down(self) -> None:
+        """The composite action's input reads `true`, so mirroring it here turned the rule off."""
+        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
+        for value, expected in (
+            ("false", 1),
+            ("0", 1),
+            ("off", 1),
+            ("no", 1),
+            (" false ", 1),
+            ("False", 1),
+            ("1", 0),
+            ("yes", 0),
+            ("true", 0),
+        ):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": value}),
+                mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
+                mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
+            ):
+                code = prose_lint.main(
+                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
+                )
+                self.assertEqual(expected, code)
+
+    def test_the_override_stands_it_down_and_names_the_label(self) -> None:
+        """The local escape is not the one CI honors, so the note says which is which."""
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
+        ):
+            code = prose_lint.main(
+                ["--check", "comment-added", "--allow-comments", "--diff", "HEAD", str(self.tmp)]
+            )
+        self.assertEqual(0, code)
+        note = self.err.getvalue()
+        self.assertIn("stood down by --allow-comments", note)
+        # The quoted name, since the bare word is a substring of the flag named on the same line.
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), note)
+        self.assertIn(f"clears {prose_lint.COMMENT_ENV_NAME}", note)
+
+
+class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
+    """The label, the action input, and the flag are one path, driven end to end.
+
+    Each of the three was wired by hand, so a case that asserts only the flag proves nothing about
+    whether a labeled pull request actually reaches it.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / "tool.py").write_text("value = 1\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        (self.root / "tool.py").write_text(
+            "# The value is read once, since the second read can disagree.\nvalue = 1\n",
+            encoding="utf-8",
+        )
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.root),
+                "-c",
+                "user.email=gate@example.invalid",
+                "-c",
+                "user.name=gate test",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def test_an_unlabeled_change_fails_on_the_comment_it_adds(self) -> None:
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
+
+    def test_a_labeled_change_passes_and_the_run_says_it_stood_down(self) -> None:
+        result = run_prose_gate_action(self.root, ALLOW_COMMENTS="true")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("stands down", result.stdout)
+
+    def test_anything_other_than_true_runs_the_gate(self) -> None:
+        """A label expression that matched nothing renders false, and so does a misspelled input."""
+        for value in ("false", "", "True", "yes"):
+            with self.subTest(value=value):
+                result = run_prose_gate_action(self.root, ALLOW_COMMENTS=value)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_a_code_edit_beside_a_comment_reports_that_comment(self) -> None:
+        """The rule's stated cost, asserted rather than left to be discovered.
+
+        `git diff --unified=0` counts a modified line as an added one, so re-indenting a comment
+        that opens its line puts it in scope. The label is the remedy, the same one a wanted
+        comment takes. A trailing comment is out of scope for a different reason, which
+        `test_only_a_comment_that_opens_its_line_is_read` carries.
+        """
+        held = "# The upper limit is fixed by the protocol.\nLIMIT = 1\n"
+        (self.root / "held.py").write_text(held, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "held.py").write_text(
+            "if True:\n    # The upper limit is fixed by the protocol.\n    LIMIT = 1\n",
+            encoding="utf-8",
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("held.py:2: comment-added", result.stdout)
+
+    def test_a_comment_the_change_does_not_touch_is_not_reported(self) -> None:
+        """The diff scope is the whole of what narrows this rule, so it is asserted directly."""
+        (self.root / "held.py").write_text(
+            "# The upper limit is fixed by the protocol.\nLIMIT = 1\n", encoding="utf-8"
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "held")
+        (self.root / "held.py").write_text(
+            "# The upper limit is fixed by the protocol.\nLIMIT = 2\n", encoding="utf-8"
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_the_environment_override_reaches_a_caller_with_no_flag_to_pass(self) -> None:
+        """A hook entry is one command string, and a downstream one runs this file from the hub.
+
+        Deleting the whole environment stand-down passed the suite before this case existed, and it
+        is the only local escape there is.
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PROSE_GATE_ACTION.parent / "prose_lint.py"),
+                ".",
+                "--diff",
+                "HEAD",
+                "--check",
+                "comment-added",
+            ],
+            cwd=self.root,
+            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        # The naming clause, since the variable is also named in the note's closing sentence.
+        self.assertIn(f"stood down by {prose_lint.COMMENT_ENV_NAME}", result.stderr)
+
+    def test_the_action_clears_the_environment_override(self) -> None:
+        """Otherwise a runner's own environment decides a pull request the label was meant to.
+
+        Deleting the action's `unset` passed the suite before this case existed, and an org-level
+        `env:` would then disarm the gate on every pull request while the run still exits 0.
+        """
+        result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
+
+    def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
+        """Three surfaces name this label, and a rename that misses one silently disarms it."""
+        declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
+        self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
+        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            f"contains(github.event.pull_request.labels.*.name, '{prose_lint.COMMENT_LABEL_NAME}')",
+            workflow,
+        )
+        # A promotion diffs against the default branch's tip.
+        # Its scope is a whole release of lines that were reviewed where they landed.
+
+    def test_the_action_delivers_its_input_to_the_script(self) -> None:
+        """The harness feeds the variable, so nothing else reads the action's own wiring.
+
+        Two mutations survived the whole suite before this: deleting the `env:` mapping, after
+        which the label and the promotion stand-down never reach the gate and a labeled pull
+        request is still refused, and flipping the input's default to `'true'`, after which any
+        caller that omits the input has the rule stood down on every run and says nothing.
+        """
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        self.assertIn("ALLOW_COMMENTS: ${{ inputs.allow-comments }}", action)
+        # The default has to be the off value, since a caller that passes nothing gets it.
+        declared = action.split("runs:", 1)[0].split("  allow-comments:", 1)[1]
+        self.assertIn("default: 'false'", declared)
+
+    def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
+        """Asserted whole, since a fragment of it left two disarming mutations green.
+
+        Flipping the `||` to `&&` refuses every labeled pull request, and dropping the head
+        repository term stands the rule down for a fork branch named `develop`. Both passed while
+        this read one fragment, and both fail against the whole expression.
+        """
+        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "allow-comments: ${{ contains(github.event.pull_request.labels.*.name, "
+            f"'{prose_lint.COMMENT_LABEL_NAME}') || "
+            "(github.event.pull_request.head.repo.full_name == github.repository && "
+            "github.head_ref == 'develop' && "
+            "github.base_ref == github.event.repository.default_branch) }}",
+            workflow,
+        )
 
 
 class TestHarness(unittest.TestCase):

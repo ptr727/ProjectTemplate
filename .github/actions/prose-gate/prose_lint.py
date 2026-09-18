@@ -9,6 +9,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
+  comment-added  No comment line opening its own line added or edited, unless the change says so.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
   sentence-length A Markdown prose sentence must not exceed the word cap.
@@ -48,6 +49,7 @@ RULES = {
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
+    "comment-added": "a comment line this change adds or edits, opening its own line",
     "dupword": "a duplicated consecutive word",
     "sentence-split": "a sentence wrapping across lines",
     "sentence-length": "a sentence over the word cap",
@@ -65,6 +67,7 @@ DEFAULT_RULES = frozenset(
         "spelling",
         "comment-wrap",
         "comment-case",
+        "comment-added",
         "home-path",
         "dead-path",
     }
@@ -1124,6 +1127,13 @@ POWERSHELL: Syntax = {
     "escape_out": True,
     "carry": frozenset({"quote", "here"}),
 }
+# PowerShell documents two comment-based help forms, a `<# ... #>` block and a run of `#` lines.
+# `comment-added` reads the block form as documentation, the way C# declares `///`.
+# The `#` form is a run of ordinary comment lines and is read as the comments it is written as.
+# So a change writing one carries the label, `.SYNOPSIS` being a keyword no author may delete.
+# Telling the two apart needs the `.`-keyword shape, a second grammar in a rule that holds none.
+# The other two comment rules keep the plain spelling, where a block comment is a comment they read.
+POWERSHELL_DOC: Syntax = {**POWERSHELL, "doc": ("<#",)}
 INI: Syntax = {**PLAIN, "line": ("#", ";")}
 LISP_LIKE: Syntax = {**PLAIN, "line": ("#",), "quotes": '"'}
 # CSS has block comments only, so a `//` in it is the scheme separator of a URL.
@@ -1207,6 +1217,14 @@ def syntax_for(path: Path) -> Syntax | None:
     if suffix in SYNTAX:
         return SYNTAX[suffix]
     return HASH if not suffix else None
+
+
+class Comment(NamedTuple):
+    """A comment the parser found, and whether its marker opens the line."""
+
+    line: int
+    body: str
+    leading: bool
 
 
 class Carried(NamedTuple):
@@ -1434,6 +1452,32 @@ KEY_ONLY = re.compile(r"^\S+:$")
 COMMENT_LABEL = re.compile(r"^[A-Za-z_][\w.-]*\s+-\s+")
 CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 
+# A directive a tool reads, exempt because deleting one changes what the file does.
+# Anchored at the body's start, since a comment that merely names one of these is prose.
+# Read by `comment-added` alone rather than added to `NOT_PROSE`, which two gating rules share.
+# Widening that pattern stopped those two reporting any comment naming a word in it.
+# That is a gate narrowing where the intent was an exemption in a third rule.
+TOOL_DIRECTIVE = re.compile(
+    r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|nopep8\b"
+    r"|codespell:|doctest:)"
+)
+
+# The pull request label that stands `comment-added` down.
+# The workflow and `repo-config/labels.json` spell it out separately, which a case asserts.
+COMMENT_LABEL_NAME = "comments"
+
+# The environment form of the same override, read here rather than passed by each caller.
+# A hook entry is often one command string with nowhere to put a conditional flag.
+# A downstream repository also runs this file straight from the hub, unedited.
+# So a caller-side escape would reach only the hooks somebody edited to carry one.
+COMMENT_ENV_NAME = "PROSE_ALLOW_COMMENTS"
+
+# The spellings that read as off.
+# The composite action's own input spells its off value `false`.
+# A value mirroring that here stood the rule down at every commit while it was exported.
+COMMENT_ENV_OFF = frozenset({"", "0", "false", "no", "off"})
+
 # Both are correct English. `the the` is always a typo, so it is not here.
 DUP_ALLOW = frozenset({"that that", "had had"})
 
@@ -1553,34 +1597,40 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     return out
 
 
-def python_comments(raw: str) -> list[tuple[int, str, bool]] | None:
-    """Every comment in Python source as (line, text, starts-the-line), or None if it will not parse.
+def python_comments(raw: str) -> list[Comment] | None:
+    """Every comment in Python source, or None if it will not parse.
 
     `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
     trailing comment is one a line-anchored pattern never sees.
     """
-    out: list[tuple[int, str, bool]] = []
+    out: list[Comment] = []
     try:
         for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
             if tok.type == tokenize.COMMENT:
-                leading = not tok.line[: tok.start[1]].strip()
-                out.append((tok.start[0], tok.string.lstrip("#").strip(), leading))
+                col = tok.start[1]
+                leading = not tok.line[:col].strip()
+                body = tok.string.lstrip("#").strip()
+                out.append(Comment(tok.start[0], body, leading))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return out
 
 
-def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, bool]]:
+def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None) -> list[Comment]:
     """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
 
     A marker inside a string literal is not a comment, so each line is scanned with quoted spans
     blanked first. A documentation comment is skipped: CODESTYLE governs those and permits the
     paragraphs this rule forbids.
+
+    `spec` overrides what the path resolves to, which is how one rule reads a file's comments by a
+    definition of its own without changing what every other rule sees.
     """
-    spec = syntax_for(path)
+    if spec is None:
+        spec = syntax_for(path)
     if spec is None:
         return []
-    out: list[tuple[int, str, bool]] = []
+    out: list[Comment] = []
     closing = ""
     doc_closing = ""
     carry = CLEAR
@@ -1609,7 +1659,7 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                out.append((n, body, True))
+                out.append(Comment(n, body, True))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -1671,13 +1721,13 @@ def extracted_comments(path: Path, lines: list[str]) -> list[tuple[int, str, boo
             if isinstance(found, str):  # a line comment runs to end of line
                 body = line[at + len(found) :].strip()
                 if body:
-                    out.append((n, body, leading))
+                    out.append(Comment(n, body, leading))
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
             body = (line[at + len(opener) : end if end >= 0 else None]).strip()
             if body:
-                out.append((n, body, leading))
+                out.append(Comment(n, body, leading))
             if end < 0:
                 closing = closer
                 break
@@ -1779,6 +1829,120 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     return out
 
 
+def is_tool_directive(body: str) -> bool:
+    """Whether a comment body is an instruction to a tool rather than a sentence.
+
+    The name has to open the body, since a comment naming a tool mid-sentence is prose about it.
+    And the body must not close as a sentence does, since anchoring the opening alone let a
+    directive's own name open one and exempt the whole comment with it: `# nosec The value is read
+    once.` is prose whose first word happens to be a directive name. What follows a real directive
+    is an argument, and an argument does not end in a full stop.
+
+    A directive carrying a written reason, which `checkov:skip=` and `nosec` both allow, is exempt
+    while that reason is written as an argument and reported once it is punctuated as a sentence,
+    which is the same test applied to the same body. So `# nosec B608 - the query is parameterized`
+    is exempt and the period-terminated spelling of it is not. That is the rule's cost landing on a
+    real case rather than a defect, and the label is its remedy. Recognizing the reason-carrying
+    forms instead means encoding two tools' grammars here, which was tried and got four of them
+    wrong in one commit: an id that is not `CKV`-prefixed, a space after `skip=`, bandit's `nosec:`
+    spelling, and its test-name form.
+    """
+    return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
+
+
+def is_comment_prose(body: str) -> bool:
+    """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
+    return bool(
+        body
+        and not NOT_PROSE.search(body)
+        and not is_tool_directive(body)
+        and not BARE_URI.match(body)
+        and not KEY_ONLY.match(body)
+    )
+
+
+def comment_bodies(path: Path, raw: str, spec: Syntax | None = None) -> list[Comment] | None:
+    """The file's comments, or None where none can be read.
+
+    A `.py` whose source does not tokenize returns None rather than falling back to the
+    hash-anchored scan. That scan carries an open single-line string across the line, and a
+    triple-quoted one it does not, so it reads a `#` inside a docstring as a comment.
+    """
+    if path.suffix.lower() == ".py":
+        comments = python_comments(raw)
+        if comments is None:
+            return None
+    else:
+        comments = extracted_comments(path, raw.split("\n"), spec)
+    return comments
+
+
+def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
+    """Every prose comment line the file holds, which the diff scope narrows to the ones in a change.
+
+    The whole file is read and `main` keeps only the lines the diff touches, which is the path every
+    other rule already takes. Read without a diff the rule would report the tree's every comment, so
+    `main` stands it down there instead.
+
+    `git diff --unified=0` counts a modified line as an added one, so a change that edits the code on
+    a line carrying a trailing comment, re-indents a commented block, or rewords a comment reports
+    that comment. That is the rule's cost rather than a defect in it, and the label is the answer: an
+    earlier shape read the file at the diff's base to tell those apart, and four review passes spent
+    on the rename, duplicate, and prose-filter cases it opened bought precision this rule does not
+    need, since the remedy for a wanted comment is the same label either way.
+
+    Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
+    comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
+    of scope the way a C# `///` comment is, both being the language's documentation form rather
+    than a remark on code. It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
+    than a scan of this rule's own. Two such scans were written and each missed a marker inside a
+    string, one standing the rule down to end of file and one to the next block's terminator.
+
+    A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
+    since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
+    `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
+    label is the remedy, since a directive whose written reason is punctuated as a sentence reads
+    as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
+    """
+    if path.suffix.lower() == ".md" or syntax_for(path) is None:
+        return []
+    spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
+    bodies = comment_bodies(path, raw, spec)
+    if bodies is None:
+        return []
+    # A comment whose marker opens the line, and no other.
+    # Which mid-line marker opens a comment is a parser fact that differs by language.
+    # TOML and HCL carry a `#` inside a multi-line string.
+    # A git pattern file holds no trailing comment at all.
+    # PowerShell opens one after almost anything, and shell after its metacharacters.
+    # Six attempts at deciding it from the marker's neighbourhood each got a language wrong.
+    # A marker at the start of its line is unambiguous in every one of them.
+    # `comment-wrap` and `comment-case` have judged only leading comments for years.
+    # That is why neither ever met any of those defects.
+    bodies = [c for c in bodies if c.leading]
+    # One finding per line rather than one per comment, since the rule is about the line.
+    # A line can carry two comments, and reporting it twice counts one line as two violations.
+    seen: set[int] = set()
+    out: list[tuple[int, str, str]] = []
+    for comment in bodies:
+        n = comment.line
+        if n in seen or not is_comment_prose(comment.body):
+            continue
+        seen.add(n)
+        out.append(
+            (
+                n,
+                "comment-added",
+                (
+                    "a comment line this change adds or edits -> delete it, or allow it: the "
+                    f"{COMMENT_LABEL_NAME!r} label on the pull request, {COMMENT_ENV_NAME} at a "
+                    "commit, --allow-comments on a run by hand"
+                ),
+            )
+        )
+    return out
+
+
 def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
@@ -1796,12 +1960,14 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
             dead_root = Path(found)
     if {"comment-wrap", "comment-case"} & rules:
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
+    if "comment-added" in rules:
+        out.extend(comment_added_findings(path, raw))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
-        for ln, text, _ in extracted_comments(path, lines):
+        for ln, text, _leading in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ""
@@ -1956,6 +2122,14 @@ def main(argv: list[str] | None = None) -> int:
         "(matches the repo policy: fix as each file is next edited, not swept)",
     )
     ap.add_argument(
+        "--allow-comments",
+        action="store_true",
+        help="stand `comment-added` down, for a change whose comment lines are wanted. "
+        f"{COMMENT_ENV_NAME} set to anything but a false spelling does the same, for a caller "
+        "with nowhere to pass a flag. What makes a CI run pass it is the calling "
+        "workflow's own condition",
+    )
+    ap.add_argument(
         "--provenance",
         metavar="REF",
         help="name this copy of the gate on the verdict, as the composite action's "
@@ -2010,6 +2184,28 @@ def main(argv: list[str] | None = None) -> int:
     else:
         first = Path(scan_paths[0])
         scan_root = first if first.is_dir() else first.parent
+
+    # Both stand-downs are announced, since a rule that quietly stops running reads as a pass.
+    # The override is a deliberate act on one change, so the run says which act it honored.
+    if "comment-added" in rules:
+        by_env = os.environ.get(COMMENT_ENV_NAME, "").strip().lower() not in COMMENT_ENV_OFF
+        if a.allow_comments or by_env:
+            rules.discard("comment-added")
+            named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"
+            print(
+                f"note: comment-added stood down by {named}. In CI the composite action passes "
+                "that flag from its own input instead, which the fleet's caller computes from the "
+                f"{COMMENT_LABEL_NAME!r} label and from the run being a promotion, and it clears "
+                f"{COMMENT_ENV_NAME} so a runner cannot decide one.",
+                file=sys.stderr,
+            )
+        elif a.diff is None:
+            rules.discard("comment-added")
+            print(
+                "note: comment-added is not checked without --diff, which is what tells an added "
+                "comment apart from one the tree already held. Scope the run to a base to run it.",
+                file=sys.stderr,
+            )
 
     # Announced for the same reason the skip above is, a silent stand-down reads as a pass.
     if "dead-path" in rules and git_roots and shallow_checkout(scan_root):
