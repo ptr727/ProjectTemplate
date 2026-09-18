@@ -81,6 +81,20 @@ Subcommands
            never having commented, and absent only where it genuinely never has. Qodo's own
            badge is a fast pre-triage signal, not a substitute for reading the finding:
            spot-verify against `gh pr diff` rather than trusting it outright.
+           `overview=T/M` reads the second Copilot review-body format's own finding manifest,
+           the total the round covering the head states beside the number of findings it
+           enumerates with a thread anchor, `T` reading `?` where that round states no total at
+           all. Present only where that round is written in that format, which reached this
+           repository after every round measured for the lists above, and which carries the
+           first format's `Suppressed comments` heading nowhere, so `suppressed=` finds nothing
+           in it however many findings it withholds. A total larger than the enumeration is findings raised where polling
+           threads cannot see them, and a `FINDINGS WITH NO THREAD` block follows naming the
+           shortfall, owed the same triage a suppressed finding is. No exit code rides on it,
+           the same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says
+           is the reader's to judge. That format states its file coverage only through the
+           `fleet-review` marker the fleet's own carried `code-review` instructions ask the
+           reviewer for, so a repository not carrying those instructions reads a round in it as
+           exit 45, `COVERAGE_IS_UNSTATED`, which is the honest reading rather than a gap here.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -311,12 +325,15 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 9 headings, 6 summaries and 3 labels.
+# The lists are small because the output is regular: 10 headings, 8 summaries and 3 labels.
+# Two overview formats are carried rather than one, the second arriving after that measurement.
+# Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
 VETTED_HEADINGS = {
     "## Pull request overview",
+    "## Copilot review overview",
     "### Reviewed changes",
     "### Approval recommended",
     "### Ready to approve",
@@ -328,6 +345,8 @@ VETTED_HEADINGS = {
 }
 VETTED_SUMMARIES = {
     "Pull request overview",
+    "Open (N)",
+    "What changed in this PR",
     "Show a summary per file",
     "File summaries",
     "Review details",
@@ -335,14 +354,36 @@ VETTED_SUMMARIES = {
     "Comments suppressed due to low confidence (N)",
 }
 VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level"}
+# Inline emphasis around a marker is presentation rather than identity.
+# The second overview format wraps every `<summary>` in `<strong>` where the first wrapped none.
+# Vetting the tags along with the text blocks on markup changing under a section that has not.
+# That is the same cheap drift the verdict headings already drop their colored circle for.
+EMPHASIS = re.compile(r"</?(?:strong|b|em|i)>", re.IGNORECASE)
 MARKDOWN_HEADING = re.compile(r"\s*#{1,6}\s")
 # The `Review details` metadata bullets, of which the coverage line is one.
+# The bullet stays required, so the second format's bare bold metadata lines are not read here.
+# Dropping it reads that format's own `**Changes:**` prose label as metadata and blocks on it.
+# Each bare line that carries a reading has its own pattern below instead.
 LABEL_LINE = re.compile(r"\s*[-*]\s+\*\*([^*]+):\*\*")
+# Two spellings, one per overview format.
+# The first states it as a `Review details` bullet.
+# The second has no `Review details` section and states it as a bare bold line.
+# Reading the first alone printed `effort=unknown` over a body stating the level outright.
 EFFORT_LINE = re.compile(
-    r"\s*[-*]\s+\*\*Review effort level:\*\*\s*"
+    r"\s*(?:[-*]\s+)?\*\*Review effort(?: level)?:\*\*\s*"
     r"(?:(Default)\s*\(\s*(Lite|Balanced|Max)\s*\)|(Lite|Balanced|Max))\s*$",
     re.IGNORECASE,
 )
+# The second overview format states its own version in the marker its body opens with.
+# Keyed on that marker rather than on the heading wording, a version being what it states.
+CCR_OVERVIEW = re.compile(r"<!--\s*ccr-overview-v2\s*-->")
+# That format's own finding total, which the first format states nowhere.
+# Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
+CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
+# Each enumerated finding links to the thread comment carrying it.
+# The link is what makes an entry countable, the same body's change summary being bulleted too.
+# Deduplicated by the caller, since one finding can be linked more than once.
+CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -993,6 +1034,67 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     return worst, detail
 
 
+def overview_manifest(body: str) -> tuple[int | None, int] | None:
+    """One round's own finding manifest: the total it states, and the count it enumerates.
+
+    None where the body carries no `ccr-overview-v2` marker, which every round in the first
+    format is. The stated total is None where that format's `Findings:` line is absent, since a
+    body stating no total reads identically to one stating zero and the two differ.
+
+    The first format states no total at all, so a finding raised with no thread of its own is
+    found there by its own `Suppressed comments` heading. The second format carries that heading
+    nowhere, and the shortfall between the total it states and the findings it enumerates finds
+    the same finding without anything here having to know what that format calls the section
+    holding it. A section it does name arrives as an unvetted `<summary>` and stops the loop on
+    its own, so the two readings cover each other rather than either being relied on alone.
+
+    The total is compared against the same body rather than against this pull request's threads,
+    which accumulate over every round while a total describes one.
+
+    Quotations are dropped first for the reason a coverage line's are: this change puts the
+    marker into the diff, and a round quoting it is not a round written in that format.
+    """
+    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    if not CCR_OVERVIEW.search(plain):
+        return None
+    stated = CCR_FINDINGS.search(plain)
+    return (int(stated.group(1)) if stated else None, len(set(CCR_ANCHOR.findall(plain))))
+
+
+def head_overview(pr: dict) -> tuple[int | None, int] | None:
+    """The manifest the newest round covering the current head carries, where one carries it.
+
+    Head-scoped for the reason the coverage line is, and unlike the suppressed count: a manifest
+    states one round's totals for one diff, and the push that changes that diff raises a round
+    stating its own. The suppressed count is not head-scoped because its blocks carry the finding
+    text an answer is owed to, where a shortfall carries a number and nothing to answer.
+
+    Newest rather than first, since a re-request during the rollout can land a round in either
+    format on one commit, and the later round is the one describing the reviewer as it is now.
+    """
+    carrying = [
+        (n, m)
+        for n in head_reviews(pr)
+        if (m := overview_manifest(n.get("body") or "")) is not None
+    ]
+    if not carrying:
+        return None
+    return max(carrying, key=lambda pair: pair[0].get("submittedAt") or "")[1]
+
+
+def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
+    """How many findings a manifest states that it enumerates no thread for.
+
+    Zero where there is no manifest and zero where it states no total, both being the absence of
+    the claim this subtracts from rather than a claim that nothing is missing. Floored at zero,
+    since a total smaller than the enumeration is the reviewer counting differently rather than a
+    negative number of findings.
+    """
+    if manifest is None or manifest[0] is None:
+        return 0
+    return max(manifest[0] - manifest[1], 0)
+
+
 def file_table(body: str) -> list[str]:
     """The paths the round's own file summary table names, in the order it names them.
 
@@ -1103,14 +1205,16 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
 
 def normal(text: str) -> str:
-    """A marker reduced toward what a vetted list compares: ASCII, single spaces, counts as `(N)`.
+    """A marker reduced toward what a vetted list compares: emphasis markup dropped, ASCII,
+    single spaces, counts as `(N)`.
 
     Letter case survives, and `unvetted` folds it at the membership test instead.
 
-    The verdict headings carry a colored circle and the suppressed heading carries its finding
-    count, so both drift on every review without the section having changed at all.
+    The verdict headings carry a colored circle, the suppressed heading carries its finding
+    count, and the second overview format wraps each of its own summaries in `<strong>`, so all
+    three drift on every review without the section having changed at all.
     """
-    ascii_only = "".join(c for c in text if ord(c) < 128)
+    ascii_only = "".join(c for c in EMPHASIS.sub("", text) if ord(c) < 128)
     return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
 
 
@@ -1697,6 +1801,13 @@ def digest(
     blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get("body") or "")]
     on_head_blocks = [b for n, b in blocks if (n.get("commit") or {}).get("oid") == head]
     stale = sum(finding_count(b) for n, b in blocks) - sum(finding_count(b) for b in on_head_blocks)
+    # The second overview format's own finding manifest.
+    # It is where that format puts the count the first format's suppressed heading is read for.
+    # Absent on a round in the first format, and on a head no round covers.
+    # The field below is therefore printed only where there is a manifest to print.
+    manifest = head_overview(pr)
+    stated, listed = manifest if manifest else (None, 0)
+    unlisted = unlisted_findings(manifest)
 
     answer = answered_outside_review(pr)
     # Spent where coverage of the same head landed, the precedence the exit codes already hold.
@@ -1778,6 +1889,9 @@ def digest(
         # A trailing `+` on either count says the same as it does on `threads=`/`unresolved=` above: a round old enough to fall out of the `reviews` window is a round its own finding cannot be read from.
         f"suppressed={sum(finding_count(b) for n, b in blocks)}{'+' if revs_truncated else ''} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
+        # Present only where the round covering the head is written in the second format.
+        # `?` where that round states no total, which is not the same reading as a total of zero.
+        + (f"overview={'?' if stated is None else stated}/{listed} " if manifest else "")
         # Present where CodeRabbit has raised at least one outside-diff-range finding on any round, or the truncated window means one could exist unseen.
         # A repository not trialing it, on an untruncated window, stays silent rather than printing a permanent `cr_outside_diff=0`.
         + (
@@ -1830,6 +1944,17 @@ def digest(
             "Whether to merge anyway is the maintainer's call rather than the agent's"
         )
         lines += [f"    {item}" for item in unknown]
+    if unlisted:
+        # The count is all this shape carries, unlike a suppressed block, whose text prints.
+        # What the finding says is in the review body, which is where this sends the reader.
+        lines.append(
+            f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
+            f"{stated} finding{'' if stated == 1 else 's'} and enumerates {listed} with a thread "
+            f"to read {'it' if listed == 1 else 'them'} from, so {unlisted} of them "
+            f"{'is' if unlisted == 1 else 'are'} raised where polling threads cannot see "
+            "them. Read the review body itself and give each the triage a suppressed finding "
+            "gets, before closing the review loop"
+        )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.

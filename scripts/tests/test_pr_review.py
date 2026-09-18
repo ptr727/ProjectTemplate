@@ -139,6 +139,40 @@ def nested(
     )
 
 
+# The version marker the second overview format opens its body with, which is what identifies it.
+CCR_MARKER = "<!-- ccr-overview-v2 -->"
+
+
+def overview_v2(
+    findings: str = "**Findings:** 2",
+    anchors: tuple[str, ...] = ("4000000001", "4000000002"),
+    covers: str = "<!-- fleet-review: reviewed=1 changed=1 findings=2 -->",
+    effort: str = "**Review effort:** Lite",
+) -> str:
+    """The second overview format, whose markers differ from the first's throughout.
+
+    Its verdict heading is the first format's, its overview heading is not, it wraps each
+    `<summary>` in `<strong>` where the first wrapped none, it states its effort and its finding
+    total on bare bold lines rather than as `Review details` bullets, and it enumerates each
+    finding it opened a thread for as a link to that thread's own comment anchor.
+
+    The finding titles and paths are constructed rather than lifted from a live review, per
+    GOVERNANCE.md "Representative Data in Agent-Authored Text". The markers around them are the
+    format's own, which is the whole of what the readers under test key on.
+    """
+    listed = "\n".join(f"- [Finding {i}](#discussion_r{a}) New" for i, a in enumerate(anchors, 1))
+    return (
+        f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Changes recommended\n\n"
+        f"The change is narrow.\n\n{effort}\n{findings}\n\n"
+        f"<details open>\n<summary><strong>Open ({len(anchors)})</strong></summary>\n\n"
+        f"{listed}\n</details>\n\n"
+        "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+        "This pull request narrows one reader.\n\n**Changes:**\n- Narrow the reader.\n\n"
+        "| File | Description |\n| ---- | ----------- |\n| a.py | Narrows the reader. |\n\n"
+        f"{covers}\n</details>\n"
+    )
+
+
 def closer_look() -> str:
     """The findings verdict with stable coverage and nested review details."""
     return (
@@ -1864,6 +1898,153 @@ class TestUnrecognizedShapes(GqlCase):
         )
         self.assertIn("shapes=UNRECOGNIZED", out)
         self.assertIn(f"(round {OLD[:8]})", out)
+
+
+class TestSecondOverviewFormat(GqlCase):
+    """Copilot's `ccr-overview-v2` body, which arrived after the first format and blocked
+    every digest reading a round written in it.
+
+    The first review in it named three markers nothing here had a spelling for, so `status` exited
+    43 over a review whose findings were both readable in plain sight. That exit is the contract
+    working, and the remedy it names is this reader.
+    """
+
+    def test_every_marker_the_format_carries_is_vetted(self) -> None:
+        """The three that blocked, plus the verdict heading and metadata labels beside them."""
+        self.assertEqual([], pr_review.unrecognized_in(overview_v2()))
+
+    def test_the_change_summary_prose_label_is_not_read_as_metadata(self) -> None:
+        """`**Changes:**` opens that format's own prose, and reading it as metadata blocks."""
+        self.assertIn("**Changes:**", overview_v2())
+        self.assertEqual([], pr_review.unrecognized_in(overview_v2()))
+
+    def test_the_effort_line_reads_in_either_format_s_own_spelling(self) -> None:
+        """The first states it as a `Review details` bullet and the second as a bare bold line.
+
+        Reading the first alone left every round in the second printing `effort=unknown` over a
+        body stating the level outright, which is a reading lost rather than one refused.
+        """
+        for level in ("Lite", "Balanced", "Max"):
+            with self.subTest(level=level):
+                pr = payload([review(body=overview_v2(effort=f"**Review effort:** {level}"))])
+                self.assertEqual((level.lower(), "explicit"), pr_review.review_effort(pr))
+        inherited = payload([review(body=overview_v2(effort="**Review effort:** Default (Max)"))])
+        self.assertEqual(("max", "default"), pr_review.review_effort(inherited))
+
+    def test_a_markdown_hard_break_after_the_level_still_reads(self) -> None:
+        """The live line ends on two spaces, which is Markdown's own line break rather than text."""
+        pr = payload([review(body=overview_v2(effort="**Review effort:** Lite  "))])
+        self.assertEqual(("lite", "explicit"), pr_review.review_effort(pr))
+
+    def test_the_manifest_reads_the_stated_total_and_the_findings_it_enumerates(self) -> None:
+        self.assertEqual((2, 2), pr_review.overview_manifest(overview_v2()))
+        self.assertEqual(
+            (3, 1),
+            pr_review.overview_manifest(
+                overview_v2(findings="**Findings:** 3", anchors=("4000000001",))
+            ),
+        )
+
+    def test_a_body_in_the_first_format_carries_no_manifest(self) -> None:
+        """None rather than a zeroed pair, so the digest can stay silent instead of reading 0/0."""
+        for label, body in (("nested", nested()), ("collapsed", collapsed()), ("bare", OVERVIEW)):
+            with self.subTest(case=label):
+                self.assertIsNone(pr_review.overview_manifest(body))
+
+    def test_a_body_quoting_the_marker_is_not_a_body_written_in_the_format(self) -> None:
+        """This change puts the marker into the diff, so a review of it quotes one.
+
+        That is the false positive the suppressed matcher and the refusal matcher have each had
+        once, and the remedy is the one the coverage reader already uses.
+        """
+        fenced = f"{OVERVIEW}\n```text\n{CCR_MARKER}\n```\n"
+        self.assertIsNone(pr_review.overview_manifest(fenced))
+        self.assertIsNone(pr_review.overview_manifest(f"{OVERVIEW}\nThe marker `{CCR_MARKER}`.\n"))
+
+    def test_a_stated_total_larger_than_the_enumeration_is_reported_as_thread_less(self) -> None:
+        """That format carries no `Suppressed comments` heading, so `suppressed=` finds nothing.
+
+        The shortfall is what finds the same finding there, without this having to know what the
+        format calls the section holding it.
+        """
+        self.answer(
+            payload([review(body=overview_v2(findings="**Findings:** 3", anchors=("4000000001",)))])
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=3/1", out)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+        # Reported rather than gated, the same as `suppressed=` and `cr_outside_diff=`.
+        self.assertIn("suppressed=0", out)
+
+    def test_a_manifest_that_accounts_for_every_finding_reports_the_pair_and_no_block(self) -> None:
+        self.answer(payload([review(body=overview_v2())]))
+        out, code = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+        self.assertIn("shapes=ok", out)
+        self.assertEqual(0, code)
+
+    def test_a_body_stating_no_total_reads_as_unknown_rather_than_as_none_withheld(self) -> None:
+        """A total absent and a total of zero are different readings, and one must not print the
+        other: the shortfall this subtracts from is the claim that is missing."""
+        self.assertEqual((None, 2), pr_review.overview_manifest(overview_v2(findings="")))
+        self.assertEqual(0, pr_review.unlisted_findings((None, 2)))
+        self.answer(payload([review(body=overview_v2(findings=""))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=?/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_total_smaller_than_the_enumeration_floors_at_zero(self) -> None:
+        """The reviewer counting differently is not a negative number of findings."""
+        self.assertEqual(0, pr_review.unlisted_findings((1, 2)))
+        self.assertEqual(0, pr_review.unlisted_findings(None))
+
+    def test_a_round_in_the_first_format_prints_no_manifest_field_at_all(self) -> None:
+        """A field reading `0/0` on every pull request that has none is one a reader skips."""
+        self.answer(payload([review(body=nested())]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("overview=", out)
+
+    def test_the_manifest_is_the_head_s_newest_round_rather_than_an_earlier_one(self) -> None:
+        """A manifest states one round's totals for one diff, so a push supersedes it whole.
+
+        Unlike a suppressed block, which carries the finding text an answer is owed to and so
+        must survive the push that supersedes its round.
+        """
+        older = review(oid=OLD, body=overview_v2(findings="**Findings:** 9", anchors=()))
+        newer = review(body=overview_v2())
+        self.answer(payload([older, newer]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_re_request_landing_the_two_formats_on_one_head_reads_the_later(self) -> None:
+        """The rollout can land either format on one commit, and the later one describes the
+        reviewer as it is now."""
+        first = review(at=EARLY, body=nested())
+        second = review(at=LATE, body=overview_v2())
+        self.answer(payload([first, second]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+
+    def test_emphasis_markup_around_a_marker_is_dropped_rather_than_vetted_with_it(self) -> None:
+        """Vetting `<strong>Open (N)</strong>` blocks the next review that drops the tag."""
+        self.assertEqual("Open (N)", pr_review.normal("<strong>Open (2)</strong>"))
+        self.assertEqual("Open (N)", pr_review.normal("Open (2)"))
+        # The first format's own markers carry no emphasis, so nothing about them moves.
+        self.assertEqual("Review details", pr_review.normal("Review details"))
+
+    def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
+        """The shortfall and the vetted lists cover each other rather than either standing alone.
+
+        A section this format names for its withheld findings arrives as an unvetted `<summary>`,
+        which is the reading that survives the format inventing a section nothing has seen.
+        """
+        body = overview_v2().replace(
+            "<summary><strong>What changed in this PR</strong></summary>",
+            "<summary><strong>Withheld (1)</strong></summary>",
+        )
+        self.assertEqual(["summary: Withheld (N)"], pr_review.unrecognized_in(body))
 
 
 class TestCoverageExitCodes(GqlCase):
