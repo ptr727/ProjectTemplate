@@ -123,7 +123,7 @@ The sibling scripts are independently fetchable, and this one deliberately is no
 
 ## Why There Is No Linter Category
 
-Neither this tooling nor its Windows sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `shfmt`, `PSScriptAnalyzer` or `ruff`. That is a decision rather than a gap. Each runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check. Installing native copies would put a second, unpinned version of each on the host. The only host requirements any of it creates are `docker` and `uv`, and both are already managed here. The [Windows README][windows-readme] states the same decision from its side.
+Neither this tooling nor its Windows sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `shfmt`, `PSScriptAnalyzer`, `check-jsonschema` or `ruff`. That is a decision rather than a gap. Each runs as a pinned container image or through `uvx`, which is what keeps a local run and CI the same check. Installing native copies would put a second, unpinned version of each on the host. The only host requirements any of it creates are `docker` and `uv`, and both are already managed here. The [Windows README][windows-readme] states the same decision from its side.
 
 ## bootstrap.sh
 
