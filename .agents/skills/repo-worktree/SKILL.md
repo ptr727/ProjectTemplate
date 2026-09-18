@@ -187,9 +187,9 @@ tree is the hazard the continuation rule exists for. `git worktree list` names t
 holding it and prints the base clone first, and what to do there depends on which checkout that is.
 
 The base clone holding it is the case "The Base Branch" excepts. Return it to its own working
-branch when its tree is clean, `git -C ~/repos/<Repo> checkout <working-branch>`, and then create
-the worktree. Stop when it is not clean, because a dirty shared checkout is the signal that
-another task may be live there.
+branch when its tree is clean, `git -C ~/repos/<Repo> checkout develop`, and then create the
+worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
+task may be live there.
 
 A previous session's own worktree holding it is retired rather than switched. It normally sits at
 the very `~/repos/worktrees/<Repo>-<task-slug>` path the command above wants, so `worktree add`
