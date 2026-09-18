@@ -11,13 +11,16 @@ inputs:
     required: false
     default: 'false'
   semver2:
-    description: NBGV SemVer2 output, threaded from the caller's single get-version job.
+    description: NBGV SemVer2 output, threaded from the caller's single get-version job and passed as the package PackageVersion.
     required: true
   assembly-version:
+    description: NBGV AssemblyVersion output, threaded from the caller's single get-version job and passed as both the assembly's AssemblyVersion and its Version.
     required: true
   assembly-file-version:
+    description: NBGV AssemblyFileVersion output, threaded from the caller's single get-version job and passed as the assembly's FileVersion.
     required: true
   assembly-informational-version:
+    description: NBGV AssemblyInformationalVersion output, threaded from the caller's single get-version job and passed as the assembly's InformationalVersion.
     required: true
   project-file:
     description: Path to the .NET project file.

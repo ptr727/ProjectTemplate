@@ -34,6 +34,10 @@ python3 scripts/prose_lint.py . --check charset --check semicolon --check dash -
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 python3 spec/validate.py
+git ls-files -z ':(top,glob).github/actions/**/action.yml' ':(top,glob).github/actions/**/action.yaml' > "$PROJECTTEMPLATE_TOOL_CACHE/action-files.txt"
+if [ -s "$PROJECTTEMPLATE_TOOL_CACHE/action-files.txt" ]; then
+    xargs -0 uvx check-jsonschema@latest --builtin-schema vendor.github-actions -- < "$PROJECTTEMPLATE_TOOL_CACHE/action-files.txt"
+fi
 python3 scripts/docker_lint.py
 ```
 

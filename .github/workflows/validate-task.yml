@@ -196,7 +196,7 @@ jobs:
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
       # This is #729, decided here, the one place the fleet's uvx tools are pinned or floated.
       - name: Setup uv step
-        if: hashFiles('pyproject.toml') != ''
+        if: hashFiles('pyproject.toml') != '' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           python-version: "3.13"
@@ -246,6 +246,17 @@ jobs:
             fi
           else
             echo "no [tool.mypy] or [tool.pyright] section, skipping"
+          fi
+
+      - name: Lint composite actions step
+        if: hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
+        run: |
+          set -Eeuo pipefail
+          git ls-files -z ':(top,glob).github/actions/**/action.yml' ':(top,glob).github/actions/**/action.yaml' > "$RUNNER_TEMP/action-files.txt"
+          if [ -s "$RUNNER_TEMP/action-files.txt" ]; then
+            xargs -0 uvx check-jsonschema@latest --builtin-schema vendor.github-actions -- < "$RUNNER_TEMP/action-files.txt"
+          else
+            echo "no composite action metadata is tracked"
           fi
 
       # A publish run's content is already gated by the pull request that introduced it.
