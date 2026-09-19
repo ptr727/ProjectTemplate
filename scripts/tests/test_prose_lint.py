@@ -924,7 +924,7 @@ class TestCommentWrap(BaitCase):
             with self.subTest(value=value):
                 self.assertEqual([], self.flag("a.yml", f"# Paths:\n#   root: {value}\n"))
 
-    def test_a_marker_comment_is_exempt_and_that_is_the_exemption_s_common_cost(self) -> None:
+    def test_a_marker_comment_is_exempt_which_is_the_common_cost(self) -> None:
         """The shape cannot tell a two-token marker from a two-token config line.
 
         This is the cost the rule pays most often, pinned so a later change meets it rather than
