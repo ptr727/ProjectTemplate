@@ -1531,7 +1531,7 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A value carrying a space is not exempt, which keeps the shape to a key-value line.
 # A body ending as a sentence is judged as one, the exemption pairing a guard with its anchor.
 # `is_tool_directive` pairs one for the same reason, an anchor alone having exempted such a body.
-# `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
+# The exemption reads `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
 # A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
 # Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
 # The exemption costs two detections and the guard refuses one shape, all stated here.
@@ -1541,7 +1541,7 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A sentence ending on one loses its wrap with nothing reported at all.
 # The guard refuses a value ending in a full stop, an FQDN being the case.
 # Dropping the full stop from `SNIPPET_END` leaves `!` and `?` guarded.
-# It re-exempts the wrapped sentence instead, which is what that guard exists for.
+# It re-exempts a wrapped sentence whose continuation ends in one, which the guard is for.
 # So the full stop stays in that set, and the refusal of an FQDN stands with it.
 # This repository carries no instance of any of the three, so measuring it bounds none of them.
 # `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
