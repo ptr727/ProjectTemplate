@@ -1534,13 +1534,14 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
 # A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
 # Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
-# The exemption costs two detections, stated rather than left to be found.
-# A marker comment is the common one: `todo: refactor` and `note: obsolete` are now exempt.
-# The other is a two-token body with no terminator sitting inside a sentence that wraps.
-# That sentence loses its wrap, and the line under it is reported for case instead.
-# A value ending in a full stop is refused too, an FQDN being the case.
-# The terminator cannot drop the full stop without dropping the sentence guard.
-# Measuring this repository bounds none of the three, which carries no instance of any today.
+# The exemption costs two detections and the guard refuses one shape, all stated here.
+# The common cost is a marker comment, `todo: refactor` and `note: obsolete` being exempt now.
+# The second is a two-token body with no terminator inside a sentence that wraps.
+# A sentence wrapping through one reports the line under it for case instead of the wrap.
+# A sentence ending on one loses its wrap with nothing reported at all.
+# The guard refuses a value ending in a full stop, an FQDN being the case.
+# It cannot drop the full stop without dropping the sentence guard, so that finding stands.
+# This repository carries no instance of any of the three, so measuring it bounds none of them.
 # `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
 # `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
 # Pricing an added comment is what that rule is for.
