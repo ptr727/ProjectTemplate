@@ -826,9 +826,10 @@ class TestCommentWrap(BaitCase):
         """A config key is lowercase by definition, so `comment-case` rejected every spelling.
 
         The reported case is the `External usage:` header a fleet of ESPHome templates carries.
-        `# packages:` was already exempt as a lone key and the line under it was not, so the two
-        shapes that passed each damaged the snippet: a capitalized key changes what a reader
-        pastes, and a leading dash is a different YAML construct from the mapping it belongs to.
+        `# packages:` was already exempt as a lone key and the line under it was not. Three
+        spellings did pass and each changes the line a reader copies: a capitalized key changes
+        the key, a leading dash is a different YAML construct from the mapping it belongs to, and
+        a quoted key parses the same while being written that way for no reason but this gate.
         The same snippet already passes inside a Markdown fence.
         """
         header = (
@@ -843,6 +844,55 @@ class TestCommentWrap(BaitCase):
     def test_a_value_carrying_a_space_is_still_judged(self) -> None:
         """The shape is one key and one value, which is what keeps prose inside the rule."""
         self.assertEqual(["comment-case"], self.flag("a.yml", "# note: this value has spaces\n"))
+
+    def test_the_shape_needs_the_space_after_its_colon(self) -> None:
+        """The space is the shape rather than decoration, a key and a value being two tokens.
+
+        An empty key is not asserted here: a body opening on its colon opens on no lowercase
+        letter, so `comment-case` never reads it and widening the key would pin nothing.
+        """
+        self.assertEqual(["comment-case"], self.flag("a.yml", "# key:value\n"))
+
+    def test_a_two_token_body_punctuated_as_a_sentence_is_still_judged(self) -> None:
+        """A key-value line a reader pastes never ends in a full stop, so the guard costs nothing.
+
+        Without it the shape exempts any two-word sentence, and it silenced a real wrapped one
+        whose continuation happened to be two tokens. `is_tool_directive` pairs its own anchor
+        with this same guard, for this same failure.
+        """
+        for body in ("# one: two.\n", "# conclusion: wrong!\n", "# result: unchanged.\n"):
+            with self.subTest(body=body.strip()):
+                self.assertEqual(["comment-case"], self.flag("a.yml", body))
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag("b.yml", "# The rule reads the file at\n# hand: correctly.\n"),
+        )
+
+    def test_a_punctuated_markdown_html_comment_is_still_prose(self) -> None:
+        """That branch keeps a punctuated HTML comment deliberately, and this must not take it."""
+        self.assertEqual(
+            ["comment-case"], self.flag("a.md", "Text.\n\n<!-- result: unchanged. -->\n")
+        )
+
+    def test_a_sentence_wrapping_through_a_snippet_line_loses_its_wrap(self) -> None:
+        """The exemption's one cost, pinned so a later change meets it rather than finds it.
+
+        A two-token body carrying no terminator is exempt wherever it sits, so a sentence that
+        wraps through one loses the wrap and the line under it is reported for case instead. The
+        sentence guard cannot reach this, the body here ending in no punctuation at all.
+        """
+        self.assertEqual(
+            ["comment-case"],
+            self.flag("a.yml", "# The value the hook reads is\n# empty: false\n# by default.\n"),
+        )
+
+    def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
+        """A comment rule that reads one language and not another is the defect this file tests for."""
+        for name in ("a.yml", "b.sh", "c.py", "d.toml", "e.ini", "Dockerfile", "f.ps1"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    [], self.flag(name, "# Wiring:\n#   sda: GPIO17\n#   scl: GPIO16\n")
+                )
 
     def test_a_colon_ending_real_prose_is_still_judged(self) -> None:
         """The exemption is one token wide, since prose closing on a colon has words before it."""

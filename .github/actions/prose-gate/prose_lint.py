@@ -1523,13 +1523,20 @@ ENUM_PREFIX = re.compile(r"^\d+[.)]\s+")
 KEY_ONLY = re.compile(r"^\S+:$")
 
 # One key, a colon, and one value is a line of configuration a reader pastes, not a sentence.
-# A config key is lowercase by definition, so `comment-case` rejected every spelling of one.
-# The two spellings that passed each damaged the snippet.
-# A capitalized key changes what a reader pastes.
+# A key is lowercase in the formats the fleet writes, so the readable spelling could not pass.
+# Three spellings did pass, and each changes the line the reader copies.
+# A capitalized key changes the key itself.
 # A leading dash is a different YAML construct from the mapping the line belongs to.
+# A quoted key parses the same and is written that way for no reason but this gate.
 # The same snippet already passes inside a Markdown fence, which is what makes this a gap.
 # A value carrying a space is not exempt, which keeps the shape to a key-value line.
-# Measured over this tree it newly exempts one body, a command to paste.
+# The sentence guard is the one `is_tool_directive` pairs with its own anchor, for its own reason.
+# An anchor alone let a body ending as a sentence exempt itself.
+# A key-value line a reader pastes never ends in sentence punctuation, so the guard costs nothing.
+# The exemption costs one detection, stated rather than left to be found.
+# A two-token body with no terminator is exempt wherever it sits, inside a wrapping sentence too.
+# That sentence loses its wrap, and the line under it is reported for case instead.
+# Measuring this repository bounds nothing here, since it carries no such body today.
 SNIPPET = re.compile(r"^\S+:\s+\S+$")
 
 # A label opening a definition names the thing being defined, so it is not the sentence's first word.
@@ -1870,7 +1877,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             or NOT_PROSE.search(body)
             or BARE_URI.match(body.strip())
             or KEY_ONLY.match(body)
-            or SNIPPET.match(body)
+            or (SNIPPET.match(body) and not SENT_END.search(body))
         ):
             prev_body = ""
             continue
