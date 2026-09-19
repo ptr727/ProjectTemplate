@@ -2260,14 +2260,97 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertIn("overview=3/1", out)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)
 
-    def test_an_anchor_in_an_indented_block_outside_the_enumeration_is_not_a_finding(self) -> None:
-        """An indented block is Markdown code that the fence guard does not strip, and a line in
-        one can open with a list marker without being an entry."""
-        body = overview_v2(findings="**Findings:** 3", anchors=("4000000001",)).replace(
-            "This pull request narrows one reader.",
-            "    - see [it](#discussion_r902)\n\nNarrows one reader.",
+    def test_a_line_nested_under_an_entry_is_part_of_it_rather_than_an_entry(self) -> None:
+        """An entry is a top-level item, and everything indented under one belongs to it.
+
+        A sub-bullet citing an earlier round's thread counted as an entry of its own, which
+        cancels the shortfall, and that is the false green this field exists to prevent. The
+        previous case put its injected line outside the walk, so it asserted none of this.
+        """
+        one = overview_v2(findings="**Findings:** 3", anchors=("4000000001",))
+        for label, nested_lines in (
+            ("sub-bullets", "  - supersedes [a](#discussion_r900)\n  - and [b](#discussion_r901)"),
+            ("deeper still", "    - see [it](#discussion_r902)"),
+        ):
+            with self.subTest(case=label):
+                body = one.replace(
+                    "- [Finding 1](#discussion_r4000000001) New",
+                    f"- [Finding 1](#discussion_r4000000001) New\n{nested_lines}",
+                )
+                self.assertEqual((3, 1), pr_review.overview_manifest(body))
+                self.answer(payload([review(body=body)]))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("overview=3/1", out)
+                self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_the_list_s_own_base_indent_is_what_top_level_means(self) -> None:
+        """An enumeration can sit indented as a whole, so top-level is relative to the list
+        rather than to column zero. Fixing the base at zero counts none of an indented list's
+        entries and reports every stated finding as withheld."""
+        body = overview_v2(findings="**Findings:** 2").replace(
+            "- [Finding 1](#discussion_r4000000001) New\n- [Finding 2](#discussion_r4000000002) New",
+            "  - [Finding 1](#discussion_r4000000001) New\n"
+            "    - supersedes [a](#discussion_r900)\n"
+            "  - [Finding 2](#discussion_r4000000002) New",
         )
-        self.assertEqual((3, 1), pr_review.overview_manifest(body))
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+
+    def test_only_the_first_section_carrying_the_label_is_the_enumeration(self) -> None:
+        """A second is a shape nothing has seen, and counting both raises the enumeration on a
+        guess, which is the direction that hides a shortfall."""
+        body = overview_v2(findings="**Findings:** 4").replace(
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>",
+            "<details open>\n<summary><strong>Open (2)</strong></summary>\n\n"
+            "- [Finding 3](#discussion_r4000000003) New\n"
+            "- [Finding 4](#discussion_r4000000004) New\n</details>\n\n"
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>",
+        )
+        self.assertEqual((4, 2), pr_review.overview_manifest(body))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=4/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_a_lazy_continuation_line_does_not_end_the_enumeration(self) -> None:
+        """Markdown renders a line indented under an entry as part of it, and breaking the walk
+        there lost every entry after it and invented a shortfall against findings that were all
+        enumerated."""
+        body = overview_v2(
+            findings="**Findings:** 3", anchors=("4000000001", "4000000002", "4000000003")
+        ).replace(
+            "- [Finding 1](#discussion_r4000000001) New",
+            "- [Finding 1](#discussion_r4000000001)\n  New, in a.py at line 12.",
+        )
+        self.assertEqual((3, 3), pr_review.overview_manifest(body))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_label_spelled_across_lines_is_still_the_enumeration(self) -> None:
+        """`SUMMARY` reads across lines and a line scan does not, so the two readers disagreed:
+        the enumeration went unread while the shape reader saw a vetted label and reported
+        nothing, which is a fabricated block with no second net under it."""
+        body = overview_v2().replace(
+            "<summary><strong>Open (2)</strong></summary>",
+            "<summary>\n  <strong>Open (2)</strong>\n</summary>",
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_section_merely_naming_open_is_not_the_enumeration(self) -> None:
+        """A loose match took `Open questions` for the enumeration and counted none of the real
+        entries. The label is compared as the vetted list holds it, so both readers judge one
+        spelling: a section labeled `Open` with no count is unvetted and stops the loop rather
+        than being read as the enumeration."""
+        body = overview_v2(findings="**Findings:** 3").replace(
+            "<details open>",
+            "<details>\n<summary>Open questions</summary>\n\nNone.\n</details>\n\n<details open>",
+            1,
+        )
+        self.assertEqual((3, 2), pr_review.overview_manifest(body))
+        uncounted = overview_v2().replace("Open (2)", "Open")
+        self.assertEqual((2, 0), pr_review.overview_manifest(uncounted))
+        self.assertEqual(["summary: Open"], pr_review.unrecognized_in(uncounted))
 
     def test_a_body_naming_no_enumeration_reads_every_stated_finding_as_unaccounted(self) -> None:
         """The loud direction, and the rename that causes it stops the loop in its own right, so
@@ -2292,8 +2375,15 @@ class TestSecondOverviewFormat(GqlCase):
         stale = overview_v2(findings="**Findings:** 9", anchors=())
         tied = [review(at=EARLY, body=stale), review(at=EARLY, body=overview_v2())]
         self.assertEqual((2, 2), pr_review.head_overview(payload(tied)))
-        untimed = [review(at=LATE, body=overview_v2()), review(at=EARLY, body=stale)]
-        self.assertEqual((2, 2), pr_review.head_overview(payload(untimed)))
+        # A real difference outranks the index, whichever order the connection carries them in.
+        ordered = [review(at=EARLY, body=stale), review(at=LATE, body=overview_v2())]
+        self.assertEqual((2, 2), pr_review.head_overview(payload(ordered)))
+        # A round carrying no timestamp sorts oldest, not having been submitted.
+        pending = [
+            review(at=LATE, body=overview_v2()),
+            review(body=stale) | {"submittedAt": None},
+        ]
+        self.assertEqual((2, 2), pr_review.head_overview(payload(pending)))
 
     def test_one_selection_idiom_keeps_two_fields_on_one_round(self) -> None:
         """`effort=` and `overview=` are read from a round each, so a digest line whose fields

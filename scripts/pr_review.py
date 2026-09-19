@@ -83,25 +83,30 @@ Subcommands
            spot-verify against `gh pr diff` rather than trusting it outright.
            `overview=T/M` reads the second Copilot review-body format's own finding manifest,
            the total the round covering the head states beside the number of findings it
-           enumerates with a thread anchor. `T` reads `?` where no total is found in the
-           overview preamble, which is a round stating none and equally a round stating one only
-           after its first collapsed section, the two being indistinguishable from here and
-           neither meaning the round withheld nothing. Present only where that round is written
-           in that format, which reached this repository after every round measured for the
-           lists above. A total larger than the
-           enumeration is findings raised where polling threads cannot see them, and a `FINDINGS
-           WITH NO THREAD` block follows naming the shortfall, owed the same triage a suppressed
-           finding is. No exit code rides on it, the same as `suppressed=` and
-           `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
-           One body in that format has been read here, so what follows describes that body
-           rather than the format in general. It carried no `Suppressed comments` heading, which
-           is why the shortfall rather than `suppressed=` is what finds a withheld finding in
-           it, and it stated its file coverage only through the `fleet-review` marker the
-           fleet's own carried `code-review` instructions ask the reviewer for. On that reading
-           a repository not carrying those instructions reads such a round as exit 45,
-           `COVERAGE_IS_UNSTATED`, which is the honest answer rather than a gap here. A later
-           body contradicting either observation is an ordinary shape change, and the vetted
-           lists are what report it.
+           enumerates with a thread anchor. `T` reads `?` where no total is found in the overview
+           preamble, which is a round stating none and equally a round stating one only after its
+           first collapsed section, the two being indistinguishable from here and neither meaning
+           the round withheld nothing. A refusal wearing that format's marker reads `?/0` too, and
+           blocks on coverage rather than here. Present only where the round covering the head is
+           written in that format, which reached this repository after every round the vetted
+           marker lists below were measured over.
+           A total larger than the enumeration is findings the round raised that polling threads
+           cannot see, or an entry this reader lost, and a `FINDINGS WITH NO THREAD` block follows
+           naming the shortfall without deciding which. Either way it is read in the body rather
+           than trusted from the number, and a withheld finding is owed the triage a suppressed
+           one is. No exit code rides on it, the same as `suppressed=` and `cr_outside_diff=`,
+           since what an unread finding says is the reader's to judge.
+           One body in that format has been read here, so what follows describes that body rather
+           than the format in general. It carried no `Suppressed comments` heading, which is why
+           the shortfall rather than `suppressed=` is what finds a withheld finding in it, and it
+           stated its file coverage only through the `fleet-review` marker the fleet's own carried
+           `code-review` instructions ask the reviewer for. On that reading a repository not
+           carrying those instructions reads such a round as exit 45, `COVERAGE_IS_UNSTATED`,
+           which is the honest answer rather than a gap here. A later body in that format that
+           does carry either shape is read by the reader that owns it, `suppressed=` and
+           `coverage=` respectively, since both shapes are already vetted. Nothing reports the
+           contradiction with the paragraph above, the vetted lists reporting an unvetted marker
+           rather than a marker turning up somewhere new.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -396,10 +401,13 @@ CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
 CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
 # An entry in that enumeration is a list item, which is what tells one from a prose mention.
 # Counting anchors body-wide instead counts a back-reference to an earlier round's thread.
-LIST_ITEM = re.compile(r"\s*[-*+]\s|\s*\d+[.)]\s")
-# The enumeration's own label, matched on one line so a scan finds it wherever it sits.
-# The count is optional, and the word boundary is what keeps `Opened` from reading as `Open`.
-CCR_OPEN = re.compile(r"<summary>[^\n]*\bOpen\b", re.IGNORECASE)
+# The indent is captured, since an entry is a top-level item and what is nested under one is not.
+LIST_ITEM = re.compile(r"(\s*)(?:[-*+]\s|\d+[.)]\s)")
+# The enumeration's own label, compared as the vetted list holds it rather than matched loosely.
+# A loose match read `Open questions` and `Still open (2)` as the enumeration and counted neither.
+# Requiring the vetted spelling keeps this reader and the shape reader agreeing on one body.
+# A section labeled `Open` with no count is unvetted, so it stops the loop rather than being read.
+CCR_OPEN = "Open (N)"
 # The section opener, read case-insensitively as every other tag reader in this file is.
 # A body spelling it `<DETAILS>` otherwise never splits, making a section's own total the round's.
 DETAILS_OPEN = re.compile(r"<details", re.IGNORECASE)
@@ -1103,7 +1111,7 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     Each half is read from where that format puts it, by scanning lines rather than by
     partitioning the body into collapsed sections. The total is read from the overview preamble,
     the text ahead of the first section opener, because a total inside a section is that
-    section's own. The enumeration is read from the section labelled `Open`, walking the list
+    section's own. The enumeration is read from the section labeled `Open`, walking the list
     items that follow it and stopping at the first line that is neither blank nor a list item,
     because an entry is a list item under that label and a link anywhere else is a
     back-reference rather than a finding this round raised. Reading anchors on every list item in
@@ -1139,31 +1147,67 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     return (max(totals) if totals else None, len(enumerated_findings(plain)))
 
 
-def enumerated_findings(plain: str) -> set[str]:
-    """The thread anchors the `Open` section lists, read from the first such section only.
+def flat_summaries(plain: str) -> str:
+    """The body with each `<summary>`'s own text collapsed onto the tag's line.
 
-    A line scan rather than a region slice, for the reason `overview_manifest` gives. The walk
-    ends at the first line that is neither blank nor a list item, which is the section's own
-    closing tag in the body read here and is whatever follows the list in a body shaped
-    otherwise, so no closing tag has to be found for the walk to end in the right place.
-
-    The first such section rather than every one, since a second is a shape nothing has seen and
-    counting both would raise the enumeration on a guess. Under-counting overstates the
-    shortfall, which is the direction that reports rather than the one that hides.
+    A `<summary>` may spell its text across lines, and a line scan looking for a label then finds
+    nothing while `SUMMARY` itself, being `DOTALL`, reads it. That disagreement let a body whose
+    label sat on its own line miss the enumeration entirely while the shape reader saw a vetted
+    label and reported nothing, so the two readers are given one text to agree on.
     """
-    lines = plain.splitlines()
+    return SUMMARY.sub(lambda m: f"<summary>{' '.join(m.group(1).split())}</summary>", plain)
+
+
+def enumerated_findings(plain: str) -> set[str]:
+    """The thread anchors the `Open` section's own entries carry.
+
+    An entry is a **top-level** item of that section's list, and everything indented under one
+    belongs to it: a nested sub-bullet citing an earlier round's thread is part of its entry
+    rather than an entry of its own, and counting one as an entry cancels the shortfall, which is
+    the false green this field exists to prevent. Three readings before this one counted a line
+    that was not an entry, each in its own way, so the list's own structure is what is read here
+    rather than a pattern that happens to fit the body last looked at.
+
+    The walk ends at the first line that is neither blank, nor a list item, nor indented past the
+    list's own base, that last being a lazy continuation, which Markdown renders as part of the
+    entry above and which ended the walk mid-list before.
+
+    The first section carrying the vetted label rather than every one, since a second is a shape
+    nothing has seen and counting both would raise the enumeration on a guess.
+
+    Both failure directions are live, which is why neither the digest nor the documentation calls
+    a shortfall a withheld finding outright: counting a line that is not an entry hides a real
+    shortfall, and losing an entry invents one.
+    """
+    lines = flat_summaries(plain).splitlines()
     for i, line in enumerate(lines):
-        if not CCR_OPEN.search(line):
+        label = SUMMARY.search(line)
+        if label is None or unvetted(normal(label.group(1)), {CCR_OPEN}):
             continue
-        listed: set[str] = set()
-        for entry in lines[i + 1 :]:
-            if not entry.strip():
-                continue
-            if not LIST_ITEM.match(entry):
-                break
-            listed.update(CCR_ANCHOR.findall(entry))
-        return listed
+        return entry_anchors(lines[i + 1 :])
     return set()
+
+
+def entry_anchors(lines: list[str]) -> set[str]:
+    """The anchors carried by the top-level items of the list these lines open with."""
+    listed: set[str] = set()
+    base: int | None = None
+    for line in lines:
+        if not line.strip():
+            continue
+        item = LIST_ITEM.match(line)
+        indent = len(line) - len(line.lstrip())
+        if item is None:
+            # Indented past the base, so it continues the entry above rather than ending the list.
+            # Anything else is what follows the list, closing tag included.
+            if base is not None and indent > base:
+                continue
+            break
+        if base is None:
+            base = len(item.group(1))
+        if indent <= base:
+            listed.update(CCR_ANCHOR.findall(line))
+    return listed
 
 
 def head_overview(pr: dict) -> tuple[int | None, int] | None:

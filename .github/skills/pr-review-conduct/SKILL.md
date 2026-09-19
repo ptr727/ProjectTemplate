@@ -72,9 +72,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    give each one the same triage the low-confidence findings above already get.
    Copilot's second review-body format states its own finding total and enumerates the findings
    it opened a thread for, which the digest reads as `overview=T/M`. A total larger than that
-   enumeration is findings that format withheld, the same blind spot under a different name, and
-   the body read in that format so far carried no `Suppressed comments` heading for `suppressed=`
-   to find. Triage a shortfall there the way a low-confidence finding is triaged. Qodo's own
+   enumeration is findings that format withheld, the same blind spot under a different name, or an
+   entry the digest's own reader lost, so read the review body rather than taking the number for
+   either. The body read in that format so far carried no `Suppressed comments` heading for
+   `suppressed=` to find. Triage a withheld finding there the way a low-confidence one is. Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
