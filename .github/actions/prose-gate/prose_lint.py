@@ -2089,13 +2089,15 @@ def issue_ref_findings(
 ) -> list[tuple[int, str, str]]:
     """Every issue or pull request reference on a surface the ban reaches.
 
-    Instruction text is read whole, and every other Markdown file is left alone, since a tracker
-    and a history exist to carry exactly these references.
+    Instruction text is read outside its fenced blocks, since a fence quotes content rather than
+    stating it, and every other Markdown file is left alone, since a tracker and a history exist to
+    carry exactly these references. Every line of such a document is read, so a trailing HTML
+    comment in one is read with the prose around it rather than through the comment parser.
 
-    A Markdown comment is read only where the document is, so an HTML comment in a README is left
-    alone with the rest of the file. Every other comment is read where its marker opens its line,
-    for the reason the body of this function gives, and a continuation line of an open block
-    comment opens its own line like any other.
+    Elsewhere a comment is read where `comment_bodies` reports its marker as opening its line,
+    which a continuation line of an open block comment is reported as doing, having no marker of
+    its own to judge. A `.py` that does not tokenize yields no comment at all there, so a reference
+    in one of its comments goes unread.
 
     Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
     reference in a string literal is fixture data as often as it is prose: a test asserting on a

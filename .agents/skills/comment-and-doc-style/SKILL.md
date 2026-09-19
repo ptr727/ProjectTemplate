@@ -231,11 +231,10 @@ the whole of its value. "A prior version re-scanned from every unmatched open, w
 carries what the reader needs, and the number of the round that found it does not.
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
-request reference in a comment, in a Python docstring, and in instruction text. Exactly which
-comment it reaches is a parser fact that differs by language, so `issue_ref_findings` states it and
-this does not: three attempts to restate it here were each wrong in a different way. Whatever the
-gate does not reach is not licensed, the rule above being what a reader applies to the comment no
-gate reads.
+request reference in a comment, in a Python docstring, and in instruction text. How far each of
+those three reaches is a parser fact that differs by language, and it is not restated here, since
+the rule binds a reader rather than a scan. Whatever a gate does not reach is unlicensed all the
+same.
 
 A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a
 version fragment, and a fixture hash, so the text above is the whole of what covers that half. A
