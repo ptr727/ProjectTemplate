@@ -859,7 +859,7 @@ class TestCommentWrap(BaitCase):
         It silenced a real wrapped sentence whose continuation happened to be two tokens.
         `is_tool_directive` pairs its own anchor with this same guard, for this same failure.
         The guard does cost: a value ending in a full stop is refused, `origin: example.com.`
-        being the case, and the terminator cannot drop the full stop without dropping the guard.
+        being the case, and `SNIPPET_END` cannot drop the full stop without dropping the guard.
         """
         for body in ("# one: two.\n", "# conclusion: wrong!\n", "# result: unchanged.\n"):
             with self.subTest(body=body.strip()):
