@@ -4496,9 +4496,9 @@ class TestTheIssueRefRule(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(["issue-ref"], self.kinds(name, text))
 
-    def test_a_trailing_comment_carries_it_too(self) -> None:
-        """Unlike `comment-added`, which reads a leading comment only, a citation lands anywhere."""
-        self.assertEqual(["issue-ref"], self.kinds("a.py", "x = 1  # per #1011\n"))
+    def test_a_trailing_comment_is_out_of_scope(self) -> None:
+        """The same bound `comment-added` carries, and for the same reason it carries it."""
+        self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
 
     def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
         text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'
@@ -4511,11 +4511,12 @@ class TestTheIssueRefRule(unittest.TestCase):
         """A test builds the numbers it asserts against, so reading one reports a fixture."""
         self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
 
-    def test_a_reference_hugging_the_comment_marker_is_read(self) -> None:
+    def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
         """The body has the marker off, so the reference's own `#` is gone with it.
 
         The comment is read as written as well, which is what tells `#N was the cause` from the
-        `# N items` the same body spells once the marker and the space are stripped.
+        `# N items` the same body spells once the marker and the space are stripped. Only where the
+        marker opens the line, since mid-line the scan's own marker is a guess.
         """
         for name, text in (
             ("a.py", "#1011 was the cause.\nx = 1\n"),
@@ -4541,6 +4542,10 @@ class TestTheIssueRefRule(unittest.TestCase):
             ("b.sh", "n=${#12}\n"),
             ("a.toml", 'docs = "https://example.invalid/spec#4217"\n'),
             ("b.py", "x = 1  #1011 caused it\n"),
+            ("c.yml", "other: some#thing#1011\n"),
+            ("d.yml", "run: sed -i 's#build#1011#g' f\n"),
+            (".gitattributes", "* text=auto eol=lf#a#1011\n"),
+            ("c.sh", "echo a#b#1011\n"),
         ):
             with self.subTest(name=name, text=text):
                 self.assertEqual([], self.kinds(name, text))

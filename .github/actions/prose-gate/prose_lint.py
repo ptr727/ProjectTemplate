@@ -16,7 +16,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
   dead-path      No mention of a path git once tracked and the tree no longer holds.
-  issue-ref      No issue or pull request reference in a comment, a docstring, or rule text.
+  issue-ref      No issue or pull request reference in a leading comment, a docstring, or rule text.
 
 Exit 1 if any violation is found. Read-only, never edits.
 
@@ -58,7 +58,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
-    "issue-ref": "an issue or pull request reference in a code or config comment, a Python docstring, or instruction text",
+    "issue-ref": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -1295,10 +1295,9 @@ def syntax_for(path: Path) -> Syntax | None:
 class Comment(NamedTuple):
     """A comment the parser found, and whether its marker opens the line.
 
-    `raw` carries the line from the marker on, where the parser has it. The body has the marker
-    and the space after it taken off, which makes `# N items` and `#N was the cause` the same
-    string, and only the second one names an issue. Whether the marker opens a comment at all is a
-    parser fact that differs by language mid-line, so a reader of `raw` has `leading` to check.
+    `raw` carries the comment as written, marker included, where the parser has it. The body has
+    the marker and the space after it taken off, which makes `# N items` and `#N was the cause` the
+    same string, and only the second one names an issue.
     """
 
     line: int
@@ -1807,7 +1806,8 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
             body = (line[at + len(opener) : end if end >= 0 else None]).strip()
             if body:
-                out.append(Comment(n, body, leading))
+                written = line[at : end + len(closer)] if end >= 0 else line[at:]
+                out.append(Comment(n, body, leading, written))
             if end < 0:
                 closing = closer
                 break
@@ -2091,7 +2091,8 @@ def issue_ref_findings(
     and a history exist to carry exactly these references.
 
     A Markdown comment is read only where the document is, so an HTML comment in a README is left
-    alone with the rest of the file.
+    alone with the rest of the file. A trailing comment is out of scope, for the reason the body of
+    this function gives.
 
     Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
     reference in a string literal is fixture data as often as it is prose: a test asserting on a
@@ -2110,14 +2111,18 @@ def issue_ref_findings(
                 spans.setdefault(n, []).append(without_lookalikes(line, True))
     else:
         for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
+            # A comment whose marker opens its line, and no other.
+            # Which mid-line marker opens a comment is a parser fact that differs by language.
+            # The scan takes the first one on the line whatever that language does with it.
+            # A URI fragment in a YAML value, a `sed` delimiter and a shell expansion all arrive here.
+            # A marker at the start of its line is unambiguous in every language the gate knows.
+            # `comment-added` judges a leading comment only, for this same reason.
+            # Reading the whole pre-scrub tree both ways reported the same findings either way.
+            if not comment.leading:
+                continue
             # Both spellings, since the body has the marker off and `#N` is then just its digits.
             spans.setdefault(comment.line, []).append(without_lookalikes(comment.body, False))
-            # The written spelling only where the marker opens the line.
-            # That is the one position every language the gate knows agrees opens a comment.
-            # Mid-line the parser takes a `#` that YAML reads inside a value and shell as an expansion.
-            # The written spelling of one of those carries the `#` this rule looks for, and the body does not.
-            # `comment-added` judges a leading comment only, for this same reason.
-            if comment.raw and comment.leading:
+            if comment.raw:
                 spans[comment.line].append(without_lookalikes(comment.raw, False))
         if path.suffix.lower() == ".py":
             for n, texts in python_docstring_spans(raw, lines).items():

@@ -231,9 +231,11 @@ the whole of its value. "A prior version re-scanned from every unmatched open, w
 carries what the reader needs, and the number of the round that found it does not.
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
-request reference in a code or config comment, in a Python docstring, and in instruction text. A
-Markdown comment is read only where the document is one of those, so an HTML comment in a README is
-left alone with the rest of the file.
+request reference in a comment that opens its own line, in a Python docstring, and in instruction
+text. A trailing comment is out of scope, and so is a Markdown comment outside instruction text,
+the first because which mid-line marker opens a comment is a parser fact that differs by language,
+and the second because a README is narrative. Neither bound narrows the rule above, which a reader
+applies to the comment a gate does not read.
 
 A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a
 version fragment, and a fixture hash, so the text above is the whole of what covers that half. A
