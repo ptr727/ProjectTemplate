@@ -374,6 +374,23 @@ def payload(
 class GqlCase(unittest.TestCase):
     """Base that answers every `gql` call from a queue, so no case reaches the network."""
 
+    def setUp(self) -> None:
+        """Patch `gh_rest` to a read that did not happen, for every case rather than every caller.
+
+        A digest carrying an earlier round's coverage forward reads the compare between the two
+        heads over REST. Patched inside `answer` instead, a case building its own payload and
+        never calling it spawned a real `gh` against a pull request that does not exist, which
+        is what this suite exists not to do. A case wanting a delta patches over this itself.
+        """
+        super().setUp()
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_rest",
+                return_value=subprocess.CompletedProcess([], 1, "", "no read in this suite"),
+            )
+        )
+
     def answer(self, *responses: dict) -> mock._patch:
         """Patch `gql` to return each response in turn, repeating the last one.
 
@@ -388,11 +405,8 @@ class GqlCase(unittest.TestCase):
         in-scope check `comment` and `reply` already did, and this suite's cases run against a
         real checkout whose actual origin has nothing to do with the "o/r" they exercise.
 
-        `gh_rest` is patched to a read that did not happen, since a digest carrying an earlier
-        round's coverage forward reads the compare between the two heads. Unpatched, every such
-        case spawned a real `gh` against a pull request that does not exist, which is a network
-        call the suite must not make and which took the run from a quarter of a second to four.
-        A case that wants a delta patches over this with a read of its own.
+        `gh_rest` is patched in `setUp` rather than here, so a case that never calls this still
+        makes no REST read.
         """
         queue = list(responses)
 
@@ -401,13 +415,6 @@ class GqlCase(unittest.TestCase):
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
-        self.enterContext(
-            mock.patch.object(
-                pr_review,
-                "gh_rest",
-                return_value=subprocess.CompletedProcess([], 1, "", "no read in this suite"),
-            )
-        )
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -1977,7 +1984,8 @@ class TestCoverageCarriesForward(GqlCase):
             review(oid=OLD, body=self.FULL, at=EARLY, rid="PRR_a"),
             review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
         )
-        self.assertEqual(0, pr_review.report_verdict(pr))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, pr_review.report_verdict(pr))
         out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=carried:full", out)
         self.assertIn("COVERAGE IS CARRIED", out)
@@ -1988,19 +1996,73 @@ class TestCoverageCarriesForward(GqlCase):
             review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
             review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
         )
-        self.assertEqual(42, pr_review.report_verdict(pr))
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            self.assertEqual(42, pr_review.report_verdict(pr))
+        # The round that read part of the diff is not the round covering the head.
+        # The verdict has to say which of the two it is talking about.
+        self.assertIn("an earlier round read fewer files", said.getvalue())
+        self.assertIn("the file table on this head is not read against them", said.getvalue())
         out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=carried:PARTIAL", out)
 
     def test_exit_45_names_the_one_case_left_for_it(self) -> None:
         """Nothing to carry, which is the only state the block can still be in."""
         pr = self.rounds(review(oid=HEAD, body=self.NONE))
-        self.assertEqual(45, pr_review.report_verdict(pr))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(45, pr_review.report_verdict(pr))
+
+    def test_no_round_covering_the_head_carries_nothing_either(self) -> None:
+        """An empty `head_reviews` reads as unstated too, and that is not a round to carry onto.
+
+        Ungated this fired after every fix push, printing a coverage block beside
+        `review_on_head=NO` while the verdict returned 0, so the digest's loudest block and the
+        exit code disagreed on the most common state in the loop.
+        """
+        pr = self.rounds(review(oid=OLD, body=self.PART))
+        out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("review_on_head=NO", out)
+        self.assertIn("coverage=unstated", out)
+        self.assertNotIn("CARRIED", out)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, pr_review.report_verdict(pr))
+
+    def test_two_rounds_stamped_in_one_second_carry_the_later_listed_one(self) -> None:
+        """`newest_of` exists for this, and a stable sort returned the older of the two.
+
+        GitHub stamps two rounds on one commit with the same second often enough to decide a
+        digest, and which of them a sort returned was the connection's order rather than a
+        reading. A partial then outranked a full stamped beside it, or the reverse.
+        """
+        same = "2026-08-02T10:00:00Z"
+        pr = self.rounds(
+            review(oid=OLD, body=self.PART, at=same, rid="PRR_a"),
+            review(oid=OLD, body=self.FULL, at=same, rid="PRR_b"),
+            review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_c"),
+        )
+        carried = pr_review.carried_coverage(pr)
+        if carried is None:
+            self.fail("two rounds state coverage here, so one of them should have carried")
+        self.assertEqual(pr_review.FULL, carried[0])
+
+    def test_a_carried_partial_does_not_read_the_head_s_table_against_it(self) -> None:
+        """The counts and the table describe two different diffs, which `head_table` refuses.
+
+        Read against each other they manufactured the one arm that locates a real unread file,
+        out of a count from an earlier commit and a table from this one.
+        """
+        pr = self.rounds(
+            review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+            review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
+        )
+        out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("the file table on this head is not read against them", out)
+        self.assertNotIn("omits exactly", out)
 
     def test_a_round_stating_coverage_on_the_head_carries_nothing(self) -> None:
         """The head's own statement is the reading, and the carry never runs."""
         pr = self.rounds(review(oid=HEAD, body=self.FULL))
-        self.assertEqual(0, pr_review.report_verdict(pr))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, pr_review.report_verdict(pr))
         out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=full", out)
         self.assertNotIn("carried", out)
@@ -2035,9 +2097,15 @@ class TestTheDeltaSinceTheCarriedRound(unittest.TestCase):
         self.assertEqual("at least 300 files changed over 9 commits since", self.read("300 9\n"))
 
     def test_a_read_that_did_not_happen_says_so_rather_than_reporting_nothing(self) -> None:
-        """A delta that could not be read and a delta of nothing take opposite decisions."""
+        """A delta that could not be read and a delta of nothing take opposite decisions.
+
+        The filter defaults neither field, so a 200 missing one fails it and reads as unread. A
+        `//` default rendered that as "0 files changed over 0 commits since", which is the
+        `base == head` reading and the opposite decision.
+        """
         self.assertEqual("the delta between them could not be read", self.read("", code=1))
         self.assertEqual("the delta between them could not be read", self.read("not numbers\n"))
+        self.assertEqual("the delta between them could not be read", self.read("\n"))
 
     def test_one_commit_either_side_needs_no_read_at_all(self) -> None:
         self.assertEqual(
@@ -2240,6 +2308,33 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertEqual(
             3, pr_review.stated_total(overview_v2(findings=f"**Findings:** 3 {badge}"))
         )
+
+    def test_only_a_count_the_line_pairs_with_a_badge_is_summed(self) -> None:
+        """Summing every integer read a ten-digit anchor id out of a link as a finding total.
+
+        The format writes a markdown link beside a finding, so `1 [medium](...#discussion_rNNN)`
+        stated two billion findings and `unlisted_findings` reported a shortfall of two billion.
+        """
+        link = "1 [medium](https://github.com/o/r/pull/7#discussion_r2404123456)"
+        self.assertEqual(1, pr_review.stated_total(overview_v2(findings=f"**Findings:** {link}")))
+        image = "3 ![medium](https://example.invalid/badge-medium-3.svg)"
+        self.assertEqual(3, pr_review.stated_total(overview_v2(findings=f"**Findings:** {image}")))
+
+    def test_a_line_pairing_nothing_states_its_total_as_one_leading_number(self) -> None:
+        """The first format's spelling, and a prose tail after it is not a second count."""
+        for line, want in (("12 findings across 4 files", 12), ("40", 40)):
+            with self.subTest(line=line):
+                self.assertEqual(
+                    want, pr_review.stated_total(overview_v2(findings=f"**Findings:** {line}"))
+                )
+
+    def test_a_zero_spelled_in_words_beats_a_number_counting_something_else(self) -> None:
+        """`None` is checked after the counts, so a line spelling zero and then counting reads 0."""
+        for line in ("None found in the 3 files reviewed", "None"):
+            with self.subTest(line=line):
+                self.assertEqual(
+                    0, pr_review.stated_total(overview_v2(findings=f"**Findings:** {line}"))
+                )
 
     def test_a_line_stating_no_number_and_no_none_states_no_total(self) -> None:
         """Prose where a count belongs is the absence of the claim rather than a claim of zero."""
@@ -4677,9 +4772,15 @@ class TestContract(unittest.TestCase):
         self.assertIsNotNone(pr_review.read_coverage(marker.replace("N", "1")))
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
-        """A verify step reading `commit.oid` alone is what let five partial rounds merge."""
-        text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn("partial or absent coverage statement", text)
+        """A verify step reading `commit.oid` alone is what let five partial rounds merge.
+
+        The absent case is named as absent from every round rather than from the one covering the
+        head, since a round stating none now carries an earlier round's statement forward and only
+        a pull request with nothing to carry blocks.
+        """
+        text = " ".join(RUNBOOK.read_text(encoding="utf-8").split())
+        self.assertIn("partial coverage", text)
+        self.assertIn("coverage statement absent from every round on the pull request", text)
 
     def test_the_only_writes_are_the_four_named_here(self) -> None:
         """Every write this script makes is one of four, and each arrived as a reviewed change.

@@ -55,8 +55,9 @@ conversation. Its status gate verifies the current head, diff coverage, output s
 threads, body-only findings, and required checks.
 
 A formal review with no findings is complete only when it covers the current head and states full
-diff coverage. A refusal, partial or absent coverage statement, unrecognized output shape,
-unresolved thread, or body-only finding blocks the review loop. Re-run the loop after every fix
+diff coverage. A refusal, partial coverage, a coverage statement absent from every round
+on the pull request, unrecognized output shape, unresolved thread, or body-only finding
+blocks the review loop. Re-run the loop after every fix
 push. Never infer review completion from `mergeStateStatus: CLEAN`.
 
 Review effort is user-controlled. The automation observes `Lite`, `Balanced`, or `Max`, including an inherited `Default (<level>)`, and never selects or changes the setting. Effort does not determine coverage or completion. A request can complete without a `copilot_work_started` event, so absence of that event is not a stalled-review verdict. When `wait` returns `PENDING` with `requested=yes`, report the state and rerun `wait` for another bounded interval by default. Do not clear the request automatically because it may be active. If the maintainer directs a retry, remove Copilot in the pull request UI, add it again, and rerun `wait`. This recovery replaces only the review request and never changes the effort setting.

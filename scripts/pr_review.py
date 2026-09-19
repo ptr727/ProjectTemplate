@@ -115,8 +115,9 @@ Subcommands
            Five of the ten carry it, on heads carrying those same instructions, so its absence is
            intermittent rather than structural. Both absences measured on one drive were
            re-reviews of a delta of one line and of four files, which is why a round stating none
-           carries an earlier round's statement forward rather than blocking: the block was
-           unclearable, a re-request having never produced the marker either.
+           carries an earlier round's statement forward rather than blocking. A re-request is not
+           the remedy the block named either: four were measured and one produced the marker, so
+           it clears by chance rather than by asking.
            A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
            and read wherever it sits. Whether the shortfall counts those findings a second time
@@ -161,7 +162,9 @@ Subcommands
            41 = the review carrying the head says it did not review, so it covers nothing.
            42, 43, and 45 = the review landed and `status`'s blocking readings apply to it,
            since a wait ending on a round that covered half the diff, or on output nothing here
-           can read, has ended on something other than a review of this pull request.
+           can read, has ended on something other than a review of this pull request. A 42 can
+           be decided by an earlier round whose partial coverage carries to a head stating none,
+           in which case the round the wait ended on is not the round the code came from.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
            wait clears: queued with nothing acting on it, expected and never posted, running
            far past what the job costs, or failed. A check merely still running normally is
@@ -433,11 +436,12 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The rest of the line is taken whole rather than its first number.
 # The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
 CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
-# Markup dropped before those counts are read.
-# A severity badge carries numbers of its own in its width and height.
-# Left in, those are summed into the total.
-MARKUP = re.compile(r"<[^>]*>")
-SEVERITY_COUNT = re.compile(r"\d+")
+# A count is one the line pairs with a badge, which is how the format writes a severity.
+# Summing every integer instead read an anchor id out of a markdown link as a finding total.
+# `1 [medium](.../pull/7#discussion_r2404123456)` then stated two billion findings.
+PAIRED_COUNT = re.compile(r"(\d+)\s*(?:<[^>]*>|!?\[[^\]]*\]\([^)]*\))")
+# The whole total where the line pairs nothing, which is how the first format writes one.
+LEADING_COUNT = re.compile(r"^\s*(\d+)(?!\d)")
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -1138,23 +1142,31 @@ def carried_coverage(pr: dict) -> tuple[str, str, str] | None:
     A round covering the head and stating no coverage is the ordinary shape of this format rather
     than a defect in it: five of ten rounds measured omit the marker, and both omissions measured
     on one drive were re-reviews of a delta of one line and of four files. Blocking every one of
-    those asks for a re-request that has never produced the marker either, so the block is
-    unclearable and a reader learns to route around it.
+    those asks for a re-request that produced the marker in one of the four measured, so the
+    block clears by chance rather than by asking and a reader learns to route around it.
 
     What an earlier round's statement is worth depends on what changed since, which is why the
     caller reports that delta beside this rather than this returning a verdict. The state carries
     as it was: a round that read part of the diff carries partial, since the part it never read is
     still unread.
+
+    `newest_of` rather than a sort, for the reason it documents: two rounds share a timestamp
+    often enough to decide a digest, and a stable sort then returns the older of the two. Returned
+    that way a partial round outranked the full one stamped in the same second, or the reverse,
+    on nothing but the order the connection happened to list them in.
     """
-    for node in sorted(
-        reviewer_nodes(pr, "reviews"), key=lambda n: n.get("submittedAt") or "", reverse=True
-    ):
+    stating = {}
+    for node in reviewer_nodes(pr, "reviews"):
         if refusal_of(node):
             continue
         state, line = coverage_of(node)
         if state != UNSTATED:
-            return state, line, (node.get("commit") or {}).get("oid") or ""
-    return None
+            stating[id(node)] = (node, state, line)
+    newest = newest_of([n for n, _, _ in stating.values()])
+    if newest is None:
+        return None
+    _node, state, line = stating[id(newest)]
+    return state, line, (newest.get("commit") or {}).get("oid") or ""
 
 
 def delta_since(owner: str, repo: str, base: str, head: str) -> str:
@@ -1168,8 +1180,10 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
     coverage stand is the maintainer's reading, and this gives them the number to read it from.
 
     An unreadable compare says so rather than returning a zero, since a delta that could not be
-    read and a delta of nothing take opposite decisions. The API caps its file list at 300, so a
-    larger delta is reported as at least that, never as exactly it.
+    read and a delta of nothing take opposite decisions. The filter defaults neither field for
+    that reason: a 200 missing either one fails the filter and reads as unread, where a `//`
+    default rendered it as a delta of nothing. The API caps its file list at 300, so a larger
+    delta is reported as at least that, never as exactly it.
     """
     if not base or not head:
         return "the commit either side of the delta is unknown"
@@ -1177,7 +1191,7 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
         return "nothing changed between them"
     proc = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{head}",
-        r'"\(.files // [] | length) \(.ahead_by // 0)"',
+        r'"\(.files | length) \(.ahead_by)"',
     )
     if proc.returncode != 0 or not proc.stdout.strip():
         return "the delta between them could not be read"
@@ -1207,21 +1221,27 @@ def second_format(body: str) -> bool:
 def findings_on(tail: str) -> int | None:
     """The total one `**Findings:**` line states, summed over the severities it splits it into.
 
-    None where the line states no total at all, which is the absence of the claim `stated_total`
-    subtracts from rather than a claim that nothing was raised. `None` spelled in words is a
+    None where the line states no total at all, which is the absence of the claim
+    `unlisted_findings` subtracts the opened threads from rather than a claim that nothing was
+    raised. `None` spelled in words is a
     stated zero, which a round raising nothing writes.
 
-    Summed rather than read as one number, because the format states a count per severity joined
-    by a separator that is presentation rather than structure. Every numeric line observed pairs
-    each count with a badge, and a line stating one total and then breaking it down in prose would
-    have both summed. That overstates the shortfall, which is the direction this reader already
-    prefers and which reports rather than blocking.
+    Summed over the counts the line pairs with a badge, because the format states a count per
+    severity joined by a separator that is presentation rather than structure. Paired rather than
+    summing every integer, since the format writes a markdown link beside a finding and an anchor
+    id is ten digits of it.
+
+    A line pairing nothing states its total as one leading number, which is the first format's
+    spelling and is read as that one number. `None` is checked last, so a line spelling a zero in
+    words and then counting something else reads as the zero it states.
     """
-    text = MARKUP.sub(" ", tail)
-    counts = [int(n) for n in SEVERITY_COUNT.findall(text)]
+    counts = [int(n) for n in PAIRED_COUNT.findall(tail)]
     if counts:
         return sum(counts)
-    return 0 if "none" in text.lower() else None
+    lead = LEADING_COUNT.match(tail)
+    if lead:
+        return int(lead.group(1))
+    return 0 if "none" in tail.lower() else None
 
 
 def stated_total(body: str) -> int | None:
@@ -1568,14 +1588,29 @@ def report_verdict(pr: dict) -> int:
                 f"{unread} of the {counts[1]} changed files "
                 f"{'has' if unread == 1 else 'have'} no review"
             )
+        # The table is read against the counts only where both describe the same diff.
+        # A carried partial states counts about an earlier commit.
+        # `head_table` refuses that comparison in its own words, so the reading is withheld.
+        whose = (
+            "an earlier round read fewer files than the pull request changed, and the round "
+            "covering the head states no coverage of its own, so that reading carries"
+            if carried is not None
+            else "the review covering the head read fewer files than the pull request changed"
+        )
+        corroboration = (
+            "the counts describe an earlier commit's diff, so the file table on this head is not "
+            "read against them"
+            if carried is not None
+            else table_against_diff(pr, counts)
+        )
         print(
-            f"status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the "
-            f"pull request changed, so part of the diff has no review at all. Every partial on "
+            f"status=COVERAGE_IS_PARTIAL {whose}, so part of the diff has no review at all. "
+            f"Every partial on "
             f"record stayed partial at the identical ratio across every later round, so a "
             f"re-request is not the remedy it reads as. Splitting is "
             f"the remedy where it applies, and it does not apply to a promotion. Otherwise this "
             f"is the maintainer's call, taken knowing {gap}, and knowing that "
-            f"{table_against_diff(pr, counts)}"
+            f"{corroboration}"
         )
         return 42
     if state == UNSTATED:
@@ -2010,7 +2045,10 @@ def digest(
     # An earlier round's statement stands until something changes it.
     # The delta below is what changed, and the maintainer reads the two together.
     # Reassigned rather than held beside `cover`, so the field and the partial block agree.
-    carried = carried_coverage(pr) if cover == UNSTATED else None
+    # Gated on a round covering the head, since an empty `on_head` reads as unstated too.
+    # Ungated, every push carried an earlier round forward onto a head nobody has reviewed.
+    # The digest then printed a coverage block beside `review_on_head=NO`.
+    carried = carried_coverage(pr) if cover == UNSTATED and on_head else None
     carried_from, carried_since = "", ""
     if carried is not None:
         cover, cover_line, carried_from = carried
@@ -2220,8 +2258,14 @@ def digest(
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
         lines.append(
-            "  COVERAGE IS PARTIAL: the review covering the head read fewer files than "
-            "the pull request changed, so files in the diff have no review at all. A "
+            "  COVERAGE IS PARTIAL: "
+            + (
+                "an earlier round read fewer files than the pull request changed and the round "
+                "covering the head states none, so that reading carries"
+                if carried is not None
+                else "the review covering the head read fewer files than the pull request changed"
+            )
+            + ", so files in the diff have no review at all. A "
             "re-request has never cleared this on record, so report it rather than "
             "retrying into it, and let the maintainer take the merge decision"
         )
@@ -2230,7 +2274,13 @@ def digest(
         # Printed under the same marker, since a maintainer taking the decision wants both.
         # It names no verdict of its own, having been measured against the counts it sits under.
         # The table tracks them nowhere, which is why it is reported rather than read.
-        lines.append(f"    {table_against_diff(pr, read_coverage(cover_line))}")
+        # Withheld on a carried partial, the counts and the table then describing two diffs.
+        lines.append(
+            "    the counts describe an earlier commit's diff, so the file table on this head "
+            "is not read against them"
+            if carried is not None
+            else f"    {table_against_diff(pr, read_coverage(cover_line))}"
+        )
     for node, shape in stuck:
         # Each shape carries its own remedy, which is the whole point of telling them apart.
         # A reader handed one word for all three retries the wrong thing, or waits on a queue.
