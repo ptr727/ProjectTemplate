@@ -97,14 +97,13 @@ Subcommands
            Markdown parser rather than a line scan.
            A total larger than the thread count is findings the round raised that polling threads
            cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall. Two
-           things overstate it rather than hiding it, so a shortfall is confirmed against the body
-           rather than acted on from the number: a thread past the hundred `reviewThreads` reads
-           would count in `M` too, and `threads=` carries the trailing `+` that says the page was
-           cut, and a round whose enumeration lists findings earlier rounds raised states a total
-           `M` counts none of. A
-           withheld finding is owed the triage a suppressed one is. No exit code rides on it, the
-           same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says is the
-           reader's to judge.
+           things overstate that shortfall rather than hiding it, so it is confirmed against the
+           body rather than acted on from the number. One is a thread past the hundred
+           `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
+           trailing `+` saying the page was cut. The other is a round whose enumeration lists
+           findings earlier rounds raised, whose total `M` undercounts. A withheld finding is owed
+           the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
+           `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
            One body in that format has been read here, so what follows describes that body rather
            than the format in general. It carried no `Suppressed comments` heading, which is why
            this field rather than `suppressed=` is what finds a withheld finding in it, and it
@@ -113,10 +112,10 @@ Subcommands
            carrying those instructions reads such a round as exit 45, `COVERAGE_IS_UNSTATED`,
            which is the honest answer rather than a gap here. A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
-           and read wherever it sits, and counted in the shortfall as well, since the total counts
-           it and no thread carries it, so one finding is named by both numbers.
-           An HTML comment is the one quotation shape neither mask strips, so a column-0 `<details>`
-           inside a multi-line one ends the preamble and prints `?`. A later body stating coverage is the other way round: the
+           and read wherever it sits. Whether the shortfall counts those findings a second time
+           turns on whether the stated total includes them, which no body read here says, so treat
+           `suppressed=2` beside a shortfall of 2 as either two findings or four until the body
+           settles it. A later body stating coverage is the other way round: the
            reader requires a bullet, and this format states its metadata on bare bold lines, which
            is why `effort=` had to drop that requirement, so the spelling such a body would most
            likely use is the one `coverage=` does not see. It reads as unstated and blocks at exit
@@ -124,6 +123,9 @@ Subcommands
            the vetted labels does nothing about it since the line never reaches that comparison.
            Nothing reports either contradiction, the vetted lists reporting an unvetted marker
            rather than a marker turning up somewhere new.
+           Two quotation shapes carry a column-0 `<details>` past both masks, a multi-line HTML
+           comment and a raw `<pre>` block, and either ends the preamble and prints `?`. The
+           indented code block is a third, answered by the pattern's own bound rather than a mask.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere

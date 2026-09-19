@@ -2036,8 +2036,12 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual(want, pr_review.stated_total(body))
 
     def test_the_marker_line_carries_nothing_after_it(self) -> None:
-        """The line anchor's closing half, which no case held: every one put text before the marker,
-        which the opening half already refuses."""
+        """The `$` half of the line anchor, which no case held.
+
+        The cases above reach the marker through the opening bound and the two masks, and the one
+        below reaches its trailing `\\s*`, so what was left unheld is a line carrying the marker
+        and then text.
+        """
         self.assertFalse(pr_review.second_format(f"{CCR_MARKER} and prose besides\n"))
         self.assertTrue(pr_review.second_format(f"{CCR_MARKER}\t \n"))
 

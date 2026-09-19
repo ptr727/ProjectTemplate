@@ -74,18 +74,19 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
    Copilot's second review-body format states its own finding total, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. A total larger than that
-   thread count is findings that format withheld, the same blind spot under a different name, so
-   read the review body for them, and dispose of each as this section's outcomes require. The body
-   read in that format so far carried no `Suppressed comments` heading, so `suppressed=` finds
-   nothing in it and there is no collapsed block to quote a count from: the digest's shortfall and
-   the body's own prose are what an answer cites instead. Where such a body does collapse one, the
-   same findings are counted twice, once by `suppressed=` and once in the shortfall, so answer them
-   once and expect both numbers to name them.
-   `T` reads `?` where no total was found, which is a round stating none and equally one this
-   reader could not locate, so it satisfies this item no more than a number does: read the body.
-   A shortfall can also be this reader undercounting rather than the round withholding, where a
-   round's enumeration carries findings that earlier rounds raised, so confirm against the body
-   before treating one as a finding with no thread.
+   thread count is usually findings that format withheld, the same blind spot under a different
+   name, and it is sometimes the digest undercounting instead, where the round's enumeration
+   carries findings earlier rounds raised. Reading the review body is what tells the two apart, and
+   nothing else does, so read it and dispose of what it holds as this section's outcomes require.
+   `T` reads `?` where no total was found, which is a round stating none and equally one the digest
+   could not locate, so a `?` leaves this item unsatisfied and sends you to the body exactly as a
+   shortfall does.
+   The body read in that format so far carried no `Suppressed comments` heading, so `suppressed=`
+   finds nothing in it and there is no collapsed block to quote a count from: the digest's
+   shortfall and the body's own prose are what an answer cites instead. A later body that does
+   collapse one may have those findings counted by `suppressed=` and again in the shortfall, or may
+   have them counted once each, depending on whether its stated total includes them, which no body
+   read so far says. Answer what the body holds rather than what the two numbers add up to.
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
