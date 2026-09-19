@@ -1522,6 +1522,16 @@ ENUM_PREFIX = re.compile(r"^\d+[.)]\s+")
 # The token count carries the test, since a colon ending real prose always has words before it.
 KEY_ONLY = re.compile(r"^\S+:$")
 
+# One key, a colon, and one value is a line of configuration a reader pastes, not a sentence.
+# A config key is lowercase by definition, so `comment-case` rejected every spelling of one.
+# The two spellings that passed each damaged the snippet.
+# A capitalized key changes what a reader pastes.
+# A leading dash is a different YAML construct from the mapping the line belongs to.
+# The same snippet already passes inside a Markdown fence, which is what makes this a gap.
+# A value carrying a space is not exempt, which keeps the shape to a key-value line.
+# Measured over this tree it newly exempts one body, a command to paste.
+SNIPPET = re.compile(r"^\S+:\s+\S+$")
+
 # A label opening a definition names the thing being defined, so it is not the sentence's first word.
 # `#   publish - 'true' when ...` documents an output named `publish`.
 # Capitalizing it renames the output the workflow declares.
@@ -1860,6 +1870,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             or NOT_PROSE.search(body)
             or BARE_URI.match(body.strip())
             or KEY_ONLY.match(body)
+            or SNIPPET.match(body)
         ):
             prev_body = ""
             continue

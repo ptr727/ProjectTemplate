@@ -822,6 +822,28 @@ class TestCommentWrap(BaitCase):
             with self.subTest(text=text.splitlines()[0]):
                 self.assertEqual([], self.flag("a.yml", text))
 
+    def test_a_key_and_its_value_are_configuration_rather_than_a_sentence(self) -> None:
+        """A config key is lowercase by definition, so `comment-case` rejected every spelling.
+
+        The reported case is the `External usage:` header a fleet of ESPHome templates carries.
+        `# packages:` was already exempt as a lone key and the line under it was not, so the two
+        shapes that passed each damaged the snippet: a capitalized key changes what a reader
+        pastes, and a leading dash is a different YAML construct from the mapping it belongs to.
+        The same snippet already passes inside a Markdown fence.
+        """
+        header = (
+            "# External usage:\n"
+            "# packages:\n"
+            "#   device: github://ptr727/ESPHome-Config/templates/x.yaml@main\n"
+        )
+        self.assertEqual([], self.flag("a.yml", header))
+        # Two snippet lines running together are two snippet lines, not a wrapped sentence.
+        self.assertEqual([], self.flag("b.yml", "# Wiring:\n#   sda: GPIO17\n#   scl: GPIO16\n"))
+
+    def test_a_value_carrying_a_space_is_still_judged(self) -> None:
+        """The shape is one key and one value, which is what keeps prose inside the rule."""
+        self.assertEqual(["comment-case"], self.flag("a.yml", "# note: this value has spaces\n"))
+
     def test_a_colon_ending_real_prose_is_still_judged(self) -> None:
         """The exemption is one token wide, since prose closing on a colon has words before it."""
         self.assertEqual(["comment-case"], self.flag("a.yml", "# the outputs are these:\n"))
