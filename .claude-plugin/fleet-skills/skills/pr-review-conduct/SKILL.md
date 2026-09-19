@@ -69,15 +69,16 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    alone reports a clean pass while they stand. The same holds for CodeRabbit's own
    "outside diff range" comments (`cr_outside_diff` in `pr_review.py`'s digest) and for Qodo's
    comment-only findings (`qodo_open`): neither opens a `reviewThreads` entry either, so
-   give each one the same triage the low-confidence findings above already get.
+   give each one the same triage the low-confidence findings above already get. Qodo's own
+   `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
+   reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
    Copilot's second review-body format states its own finding total, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. A total larger than that
    thread count is findings that format withheld, the same blind spot under a different name, so
-   read the review body for them. The body read in that format so far carried no
-   `Suppressed comments` heading for `suppressed=` to find. Triage a withheld finding there the
-   way a low-confidence one is. Qodo's own
-   `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
-   reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
+   read the review body for them, and dispose of each as this section's outcomes require. The body
+   read in that format so far carried no `Suppressed comments` heading, so `suppressed=` finds
+   nothing in it and there is no collapsed block to quote a count from: the digest's shortfall and
+   the body's own prose are what an answer cites instead.
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a

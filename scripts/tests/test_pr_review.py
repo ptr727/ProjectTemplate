@@ -147,9 +147,9 @@ CCR_MARKER = "<!-- ccr-overview-v2 -->"
 
 def overview_v2(
     findings: str = "**Findings:** 2",
-    anchors: tuple[str, ...] = ("4000000001", "4000000002"),
     covers: str = "<!-- fleet-review: reviewed=1 changed=1 findings=2 -->",
     effort: str = "**Review effort:** Lite",
+    entries: int = 2,
 ) -> str:
     """The second overview format, whose markers differ from the first's throughout.
 
@@ -158,15 +158,22 @@ def overview_v2(
     total on bare bold lines rather than as `Review details` bullets, and it enumerates each
     finding it opened a thread for as a link to that thread's own comment anchor.
 
+    The enumeration is built for realism rather than read: the count `overview=T/M` compares the
+    stated total against is the threads the round opened, which a case supplies through `thread()`.
+    A body still carries the enumeration because a real one does, and because the shape readers see
+    its `<summary>`.
+
     The finding titles and paths are constructed rather than lifted from a live review, per
     GOVERNANCE.md "Representative Data in Agent-Authored Text". The markers around them are the
     format's own, which is the whole of what the readers under test key on.
     """
-    listed = "\n".join(f"- [Finding {i}](#discussion_r{a}) New" for i, a in enumerate(anchors, 1))
+    listed = "\n".join(
+        f"- [Finding {i}](#discussion_r400000000{i}) New" for i in range(1, entries + 1)
+    )
     return (
         f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Changes recommended\n\n"
         f"The change is narrow.\n\n{effort}\n{findings}\n\n"
-        f"<details open>\n<summary><strong>Open ({len(anchors)})</strong></summary>\n\n"
+        f"<details open>\n<summary><strong>Open ({entries})</strong></summary>\n\n"
         f"{listed}\n</details>\n\n"
         "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
         "This pull request narrows one reader.\n\n**Changes:**\n- Narrow the reader.\n\n"
@@ -232,8 +239,10 @@ def thread(
 ) -> dict:
     """One `reviewThreads` node. `rid` is the review that opened it, which the manifest counts.
 
-    None leaves the thread belonging to no round, which is what a comment outside a formal review
-    carries and what every case not exercising the manifest wants.
+    None leaves the thread naming no round, which is the shape the reader has to survive rather
+    than a claim about when GitHub returns it, and it is what every case not exercising the
+    manifest wants. A thread belonging to a different round is the realistic exclusion, and a case
+    covers that one separately.
     """
     return {
         "id": tid,
@@ -2097,7 +2106,7 @@ class TestSecondOverviewFormat(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=3/1", out)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)
-        self.assertIn("states 3 findings and opened 1 thread", out)
+        self.assertIn("states 3 findings and opened 1 thread, so 2 findings are", out)
         # Reported rather than gated, the same as `suppressed=` and `cr_outside_diff=`.
         self.assertIn("suppressed=0", out)
 
@@ -2241,6 +2250,77 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertIn("shapes=ok", out)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(45, pr_review.report_verdict(pr))
+
+    def test_the_query_carries_the_two_fields_the_thread_count_is_read_from(self) -> None:
+        """The count is the one reading here taken from the API rather than from prose, so a query
+        that stops carrying either field leaves it reading zero for every round.
+
+        Dropping either left the whole suite green while live output printed a standing full-size
+        shortfall on every round in that format, which is the query-and-reader drift this file
+        already guards for its check window.
+        """
+        self.assertIn("reviews(last:100){ nodes{ id ", pr_review.Q_FULL)
+        self.assertIn("pullRequestReview{ id }", pr_review.Q_FULL)
+
+    def test_a_details_tag_named_in_the_preamble_prose_does_not_end_it(self) -> None:
+        """The opener is a tag on a line of its own, for the reason the marker and the total are.
+
+        Matched anywhere instead, a round naming `<details>` in its own overview prose ended the
+        preamble early and threw its stated total away, printing `?` and no shortfall over a round
+        that withheld findings, which is the false green this field exists to prevent reached by one
+        word of the round's own prose.
+        """
+        named = overview_v2(findings="**Findings:** 3").replace(
+            "The change is narrow.", "The change is narrow, and the <details> wrapper moved."
+        )
+        self.assertEqual(3, pr_review.stated_total(named))
+        # A tag boundary too, so a token that merely opens with those bytes is not this tag.
+        # The line anchor alone does not cover it, a body being able to open a line with one.
+        self.assertEqual(
+            5, pr_review.stated_total(f"{CCR_MARKER}\n\n<detailsfoo>\n\n**Findings:** 5\n")
+        )
+
+    def test_a_total_indented_into_a_code_block_is_a_quotation(self) -> None:
+        """Bounded to three spaces for the reason the marker is, a fourth making the line a code
+        block. The largest total wins, so a quoted number beat the round's own."""
+        quoted = overview_v2(findings="**Findings:** 2").replace(
+            "The change is narrow.", "Example:\n\n    **Findings:** 40\n\nThe change is narrow."
+        )
+        self.assertEqual(2, pr_review.stated_total(quoted))
+        self.assertEqual(
+            2, pr_review.stated_total(quoted.replace("    **Findings:** 40", "\t**Findings:** 40"))
+        )
+
+    def test_the_stated_total_drops_a_quotation_before_reading(self) -> None:
+        """Load-bearing in both directions: a fenced `<details>` example truncates the preamble and
+        suppresses a shortfall, and a fenced total is read as the round's own and invents one."""
+        fenced_tag = overview_v2(findings="**Findings:** 3").replace(
+            "The change is narrow.", "Example:\n\n```html\n<details>\n```\n"
+        )
+        self.assertEqual(3, pr_review.stated_total(fenced_tag))
+        spanned_tag = overview_v2(findings="**Findings:** 3").replace(
+            "The change is narrow.", "The `<details>` wrapper moved."
+        )
+        self.assertEqual(3, pr_review.stated_total(spanned_tag))
+        fenced_total = overview_v2(findings="").replace(
+            "The change is narrow.", "Example:\n\n```text\n**Findings:** 40\n```\n"
+        )
+        self.assertIsNone(pr_review.stated_total(fenced_total))
+
+    def test_the_marker_line_is_read_through_trailing_whitespace_and_crlf(self) -> None:
+        """GitHub returns CRLF bodies, and the trailing `\\s*` is the only thing absorbing the
+        `\\r`, since this reader searches the raw body rather than going through `splitlines`."""
+        self.assertTrue(pr_review.second_format(f"{CCR_MARKER}  \n\n**Findings:** 1\n"))
+        self.assertTrue(pr_review.second_format(overview_v2().replace("\n", "\r\n")))
+        self.assertEqual(2, pr_review.stated_total(overview_v2().replace("\n", "\r\n")))
+
+    def test_every_emphasis_tag_the_stripper_names_is_dropped(self) -> None:
+        """Three of the four arms were speculative, and they apply to every heading, summary and
+        label `normal` touches rather than only to this format's."""
+        for tag in ("strong", "b", "em", "i"):
+            with self.subTest(tag=tag):
+                self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
+        self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
     def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
         """The comment states the sizes, and adding an entry without it is how it goes stale."""

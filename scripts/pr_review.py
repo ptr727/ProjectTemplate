@@ -83,9 +83,10 @@ Subcommands
            spot-verify against `gh pr diff` rather than trusting it outright.
            `overview=T/M` reads the second Copilot review-body format's own finding total, `T`,
            beside the number of review threads that round actually opened, `M`. `T` reads `?`
-           where no total is found in the overview preamble, which is a round stating none and
-           equally a round stating one only after its first collapsed section, the two being
-           indistinguishable from there and neither meaning the round withheld nothing. Present
+           where no total is found in the overview preamble, which covers a round stating none, a
+           round stating one only after its first collapsed section, and a round stating one as a
+           bullet, that last blocking at exit 43 as an unvetted metadata label. None of them says
+           the round withheld nothing, and a `?` is a reason to read the body. Present
            only where the round covering the head is written in that format, which reached this
            repository after every round the vetted marker lists below were measured over.
            `M` is read from the API rather than from the review's prose. That format enumerates
@@ -399,17 +400,24 @@ EFFORT_LINE = re.compile(
 # The second overview format states its own version in the marker its body opens with.
 # Keyed on that marker rather than on the heading wording, a version being what it states.
 # Anchored to a line of its own, since the marker is an HTML comment and renders invisibly.
-# Nobody writing about one has a reason to quote it, and this change's own prose carries it bare.
 # A body naming it mid-sentence is a body about the format rather than one written in it.
+# A writer who wants it seen at all has to quote it, which is why a code span is masked first.
 # Bounded to three spaces of indent, which is the rule `FENCE` reads a fence by.
 # A fourth makes the line a code block, and so a quotation the fence guard never sees.
 CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILINE)
 # That format's own finding total, which the first format states nowhere.
 # Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
-CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
-# The section opener, read case-insensitively as every other tag reader in this file is.
-# A body spelling it `<DETAILS>` otherwise never splits, making a section's own total the round's.
-DETAILS_OPEN = re.compile(r"<details", re.IGNORECASE)
+# Bounded to three spaces for the reason the marker above is, a fourth making it a code block.
+# The largest total wins, so a quoted number otherwise beat the round's own.
+CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
+# The first section opener on a line of its own, which is where the overview preamble ends.
+# Read case-insensitively as every other tag reader in this file is, since a body spelling it
+# `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
+# Anchored to a line for the reason the marker and the total above are.
+# Given a tag boundary as `DETAILS_TAG` already has, so a `<detailsfoo>` is not this tag.
+# Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
+# That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
+DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[\s>])", re.IGNORECASE | re.MULTILINE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -1138,6 +1146,13 @@ def round_threads(pr: dict, review: dict) -> int:
     It is not in the prose to begin with. The anchor each entry links is the database id of the
     thread comment carrying that finding, so the threads the round opened are the same set the
     enumeration names, already structured, and no shape of the body can move the number.
+
+    That equivalence is measured on one round of one body, which is every round in this format read
+    here so far, and it holds only while the enumeration lists what this round raised. A format
+    that lists findings still open from earlier rounds states a total this undercounts, printing a
+    standing shortfall on every round after the first. The body states its own enumeration's size
+    as the `(N)` on the `Open` summary, so a second body is what would settle it, and nothing
+    compares the two yet.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
