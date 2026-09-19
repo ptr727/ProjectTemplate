@@ -854,11 +854,12 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(["comment-case"], self.flag("a.yml", "# key:value\n"))
 
     def test_a_two_token_body_punctuated_as_a_sentence_is_still_judged(self) -> None:
-        """A key-value line a reader pastes never ends in a full stop, so the guard costs nothing.
+        """Without the guard the shape exempts any two-word sentence.
 
-        Without it the shape exempts any two-word sentence, and it silenced a real wrapped one
-        whose continuation happened to be two tokens. `is_tool_directive` pairs its own anchor
-        with this same guard, for this same failure.
+        It silenced a real wrapped sentence whose continuation happened to be two tokens.
+        `is_tool_directive` pairs its own anchor with this same guard, for this same failure.
+        The guard does cost: a value ending in a full stop is refused, `origin: example.com.`
+        being the case, and the terminator cannot drop the full stop without dropping the guard.
         """
         for body in ("# one: two.\n", "# conclusion: wrong!\n", "# result: unchanged.\n"):
             with self.subTest(body=body.strip()):
@@ -875,12 +876,14 @@ class TestCommentWrap(BaitCase):
         )
 
     def test_a_sentence_wrapping_through_a_snippet_line_loses_its_wrap(self) -> None:
-        """The exemption's one cost, pinned so a later change meets it rather than finds it.
+        """One of the exemption's costs, pinned so a later change meets it rather than finds it.
 
-        A two-token body carrying no terminator is exempt wherever it sits, so a sentence that
-        wraps through one loses the wrap and the line under it is reported for case instead. The
-        sentence guard cannot reach this, the body here ending in no punctuation at all.
+        A two-token body carrying no terminator is exempt wherever it sits. A sentence wrapping
+        through one loses the wrap and the line under it is reported for case instead, and a
+        sentence ending on one loses the wrap with no finding at all, which is the quieter half.
+        The sentence guard cannot reach either, the body ending in no punctuation.
         """
+        self.assertEqual([], self.flag("c.yml", "# The value the hook reads is\n# empty: false\n"))
         self.assertEqual(
             ["comment-case"],
             self.flag("a.yml", "# The value the hook reads is\n# empty: false\n# by default.\n"),
@@ -889,9 +892,9 @@ class TestCommentWrap(BaitCase):
     def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
         """One case per syntax, so a failure names the language whose extractor broke.
 
-        Seven file names covering six specs proved nothing about the markers they never used, and
-        this file's own run-on case is the convention: a marker per parser rather than a spread of
-        extensions that resolve to the same one.
+        Seven file names covering six specs proved nothing about the markers they never used.
+        These eleven reach ten of the eleven syntaxes the table declares, the kicad spec being the
+        one neither this case nor the run-on case beside it reaches.
         """
         snippet = "sda: GPIO17"
         for name, text in (

@@ -1538,7 +1538,12 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A marker comment is the common one: `todo: refactor` and `note: obsolete` are now exempt.
 # The other is a two-token body with no terminator sitting inside a sentence that wraps.
 # That sentence loses its wrap, and the line under it is reported for case instead.
-# Measuring this repository bounds neither, since it carries no instance of either today.
+# A value ending in a full stop is refused too, an FQDN being the case.
+# The terminator cannot drop the full stop without dropping the sentence guard.
+# Measuring this repository bounds none of the three, which carries no instance of any today.
+# `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
+# `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
+# Pricing an added comment is what that rule is for.
 SNIPPET = re.compile(r"^\S+:\s+\S+$")
 SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
 
@@ -1961,7 +1966,6 @@ def is_comment_prose(body: str) -> bool:
         and not is_tool_directive(body)
         and not BARE_URI.match(body)
         and not KEY_ONLY.match(body)
-        and not (SNIPPET.match(body) and not SNIPPET_END.search(body))
     )
 
 
