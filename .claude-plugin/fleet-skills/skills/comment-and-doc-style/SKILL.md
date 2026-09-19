@@ -231,11 +231,11 @@ the whole of its value. "A prior version re-scanned from every unmatched open, w
 carries what the reader needs, and the number of the round that found it does not.
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
-request reference in a comment that opens its own line, in a Python docstring, and in instruction
-text. A comment is read where its marker opens its line, since which mid-line marker opens a
-comment is a parser fact that differs by language, and a Markdown comment is read only where the
-document is instruction text, a README being narrative. Neither bound narrows the rule above, which
-a reader applies to the comment a gate does not read.
+request reference in a comment, in a Python docstring, and in instruction text. Exactly which
+comment it reaches is a parser fact that differs by language, so `issue_ref_findings` states it and
+this does not: three attempts to restate it here were each wrong in a different way. Whatever the
+gate does not reach is not licensed, the rule above being what a reader applies to the comment no
+gate reads.
 
 A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a
 version fragment, and a fixture hash, so the text above is the whole of what covers that half. A

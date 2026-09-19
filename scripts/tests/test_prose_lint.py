@@ -4503,9 +4503,10 @@ class TestTheIssueRefRule(unittest.TestCase):
     def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
         """A continuation line opens its own line, so the leading test reads it as one.
 
-        The parser tracks an open block rather than where it opened, so this holds whatever
-        preceded the opener. The finding is wanted, the comment being a real one carrying a real
-        reference, and the case is here so a later change to that branch has to meet it.
+        `extracted_comments` reports every line of an open block as leading, whatever preceded the
+        opener, since a continuation line carries no marker of its own to judge. The finding is
+        wanted, the comment being a real one carrying a real reference, and this case is what a
+        later change to that continuation branch has to meet.
         """
         self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
         self.assertEqual(
