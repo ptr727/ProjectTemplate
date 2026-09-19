@@ -1540,7 +1540,8 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A sentence wrapping through one reports the line under it for case instead of the wrap.
 # A sentence ending on one loses its wrap with nothing reported at all.
 # The guard refuses a value ending in a full stop, an FQDN being the case.
-# `SNIPPET_END` cannot drop the full stop without dropping the guard, so that finding stands.
+# Dropping the full stop leaves `!` and `?` guarded and re-exempts the wrapped sentence.
+# That sentence is what the guard exists for, so the full stop stays and the finding stands.
 # This repository carries no instance of any of the three, so measuring it bounds none of them.
 # `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
 # `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
