@@ -823,14 +823,14 @@ class TestCommentWrap(BaitCase):
                 self.assertEqual([], self.flag("a.yml", text))
 
     def test_a_key_and_its_value_are_configuration_rather_than_a_sentence(self) -> None:
-        """A config key is lowercase by definition, so `comment-case` rejected every spelling.
+        """`comment-case` reads the first character, so a key opening lowercase could not pass.
 
         The reported case is the `External usage:` header a fleet of ESPHome templates carries.
-        `# packages:` was already exempt as a lone key and the line under it was not. Three
-        spellings did pass and each changes the line a reader copies: a capitalized key changes
-        the key, a leading dash is a different YAML construct from the mapping it belongs to, and
-        a quoted key parses the same while being written that way for no reason but this gate.
-        The same snippet already passes inside a Markdown fence.
+        `# packages:` was already exempt as a lone key and the line under it was not. What passed
+        is any key opening on something other than a lowercase letter, and each such spelling
+        changes what a reader pastes: a capitalized, quoted or underscored key changes the key,
+        and a leading dash is a different YAML construct from the mapping it belongs to. The same
+        snippet already passes inside a Markdown fence.
         """
         header = (
             "# External usage:\n"
@@ -887,12 +887,49 @@ class TestCommentWrap(BaitCase):
         )
 
     def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
-        """A comment rule that reads one language and not another is the defect this file tests for."""
-        for name in ("a.yml", "b.sh", "c.py", "d.toml", "e.ini", "Dockerfile", "f.ps1"):
-            with self.subTest(name=name):
-                self.assertEqual(
-                    [], self.flag(name, "# Wiring:\n#   sda: GPIO17\n#   scl: GPIO16\n")
-                )
+        """One case per syntax, so a failure names the language whose extractor broke.
+
+        Seven file names covering six specs proved nothing about the markers they never used, and
+        this file's own run-on case is the convention: a marker per parser rather than a spread of
+        extensions that resolve to the same one.
+        """
+        snippet = "sda: GPIO17"
+        for name, text in (
+            ("a.cs", f"// Wiring:\n//   {snippet}\n"),
+            ("a.c", f"/* Wiring: */\n/*   {snippet} */\n"),
+            ("a.py", f"# Wiring:\n#   {snippet}\n"),
+            ("a.sh", f"# Wiring:\n#   {snippet}\n"),
+            ("a.ps1", f"<# Wiring: #>\n<#   {snippet} #>\n"),
+            ("a.yml", f"# Wiring:\n#   {snippet}\n"),
+            ("a.toml", f"# Wiring:\n#   {snippet}\n"),
+            ("a.ini", f"; Wiring:\n;   {snippet}\n"),
+            ("a.jsonc", f"// Wiring:\n//   {snippet}\n"),
+            ("a.xml", f"<!-- Wiring: -->\n<!--   {snippet} -->\n"),
+            ("a.css", f"/* Wiring: */\n/*   {snippet} */\n"),
+        ):
+            with self.subTest(file=name, syntax=text.strip()[:12]):
+                self.assertEqual([], self.flag(name, text))
+
+    def test_a_value_ending_in_a_colon_is_still_configuration(self) -> None:
+        """A colon ends configuration rather than a sentence, which is why `KEY_ONLY` exists.
+
+        Guarded with `SENT_END`, whose set carries the colon, an address, an image tag and a
+        drive letter were each refused and told to capitalize their key, which is the finding
+        this exemption exists to remove.
+        """
+        for value in ("fd00::", "ghcr.io/o/n:", "C:"):
+            with self.subTest(value=value):
+                self.assertEqual([], self.flag("a.yml", f"# Paths:\n#   root: {value}\n"))
+
+    def test_a_marker_comment_is_exempt_and_that_is_the_exemption_s_common_cost(self) -> None:
+        """The shape cannot tell a two-token marker from a two-token config line.
+
+        This is the cost the rule pays most often, pinned so a later change meets it rather than
+        discovers it. Narrowing it needs a reading of the value, which is a rule of its own.
+        """
+        for body in ("# todo: refactor\n", "# note: obsolete\n", "# fixme: later\n"):
+            with self.subTest(body=body.strip()):
+                self.assertEqual([], self.flag("a.yml", body))
 
     def test_a_colon_ending_real_prose_is_still_judged(self) -> None:
         """The exemption is one token wide, since prose closing on a colon has words before it."""

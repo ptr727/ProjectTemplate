@@ -1523,21 +1523,24 @@ ENUM_PREFIX = re.compile(r"^\d+[.)]\s+")
 KEY_ONLY = re.compile(r"^\S+:$")
 
 # One key, a colon, and one value is a line of configuration a reader pastes, not a sentence.
-# A key is lowercase in the formats the fleet writes, so the readable spelling could not pass.
-# Three spellings did pass, and each changes the line the reader copies.
-# A capitalized key changes the key itself.
+# `comment-case` reads the first character, so every key opening lowercase was rejected.
+# The keys that passed are the ones opening on anything else, and each changes what is pasted.
+# A capitalized key changes the key, and a quoted or underscored one changes how it is written.
 # A leading dash is a different YAML construct from the mapping the line belongs to.
-# A quoted key parses the same and is written that way for no reason but this gate.
 # The same snippet already passes inside a Markdown fence, which is what makes this a gap.
 # A value carrying a space is not exempt, which keeps the shape to a key-value line.
-# The sentence guard is the one `is_tool_directive` pairs with its own anchor, for its own reason.
-# An anchor alone let a body ending as a sentence exempt itself.
-# A key-value line a reader pastes never ends in sentence punctuation, so the guard costs nothing.
-# The exemption costs one detection, stated rather than left to be found.
-# A two-token body with no terminator is exempt wherever it sits, inside a wrapping sentence too.
+# A body ending as a sentence is judged as one, which is the guard `is_tool_directive` pairs.
+# It pairs that guard because an anchor alone let such a body exempt itself.
+# `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
+# A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
+# Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
+# The exemption costs two detections, stated rather than left to be found.
+# A marker comment is the common one: `todo: refactor` and `note: obsolete` are now exempt.
+# The other is a two-token body with no terminator sitting inside a sentence that wraps.
 # That sentence loses its wrap, and the line under it is reported for case instead.
-# Measuring this repository bounds nothing here, since it carries no such body today.
+# Measuring this repository bounds neither, since it carries no instance of either today.
 SNIPPET = re.compile(r"^\S+:\s+\S+$")
+SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
 
 # A label opening a definition names the thing being defined, so it is not the sentence's first word.
 # `#   publish - 'true' when ...` documents an output named `publish`.
@@ -1877,7 +1880,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             or NOT_PROSE.search(body)
             or BARE_URI.match(body.strip())
             or KEY_ONLY.match(body)
-            or (SNIPPET.match(body) and not SENT_END.search(body))
+            or (SNIPPET.match(body) and not SNIPPET_END.search(body))
         ):
             prev_body = ""
             continue
@@ -1958,6 +1961,7 @@ def is_comment_prose(body: str) -> bool:
         and not is_tool_directive(body)
         and not BARE_URI.match(body)
         and not KEY_ONLY.match(body)
+        and not (SNIPPET.match(body) and not SNIPPET_END.search(body))
     )
 
 
