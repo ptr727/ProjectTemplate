@@ -57,7 +57,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
-    "issue-ref": "an issue or pull request reference in a comment, a docstring, or instruction text",
+    "issue-ref": "an issue or pull request reference in a comment, a Python docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -757,8 +757,19 @@ def is_operations_runbook(path: Path, root: Path | None) -> bool:
 
 # The pattern-detectable half of the reference ban, and only that half.
 # An issue or a pull request reference has one shape, and a commit does not.
-# A pinned action is a bare SHA a workflow rule requires, so reading one would report that pin.
-ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,6}(?!\w)")
+# A short SHA is the same shape as a blob id, a version fragment, and a fixture hash.
+# Telling those apart needs the meaning rather than the shape, so the rule text covers that half.
+# Five digits is the ceiling because a sixth makes the shape a hex color as well.
+# Two is the floor because one digit is the same shape as an ordinal or an enumeration.
+# A repository whose numbering reaches either bound states a reference the rule text still bans.
+ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,5}(?!\w)")
+
+# The Skills roots, source and both generated distributions, whose every Markdown file is rule text.
+# A plugin tree carries one root per plugin, so that one is matched by its two fixed ends.
+# Matching any directory named `skills` instead would gate a product's own source tree as fleet law.
+SKILL_ROOTS = (".agents/skills/", ".github/skills/")
+PLUGIN_ROOT = ".claude-plugin/"
+PLUGIN_SKILLS = "/skills/"
 
 # Markdown an agent reads as instructions, where the ban reaches the document and not only its comments.
 # A skill is law wherever it loads, and these documents are the fleet's own rule text.
@@ -782,13 +793,30 @@ INSTRUCTION_DOCS = frozenset(
 def is_instruction_text(path: Path, root: Path | None) -> bool:
     """Whether this Markdown file is instruction text rather than the repository's own narrative.
 
-    A skill is matched by its directory rather than by its name, since the source tree and each
-    generated distribution carry the same file under three roots.
+    A skill is matched by its root rather than by its name, since the source tree and each
+    generated distribution carry the same file under a root of its own.
     """
     if path.suffix.lower() != ".md":
         return False
     key = repo_key(path, root) if root is not None else rel(path)
-    return key in INSTRUCTION_DOCS or "skills" in key.split("/")[:-1]
+    if key in INSTRUCTION_DOCS or key.startswith(SKILL_ROOTS):
+        return True
+    return key.startswith(PLUGIN_ROOT) and PLUGIN_SKILLS in key[len(PLUGIN_ROOT) :]
+
+
+def comment_syntax_including_docs(path: Path) -> Syntax | None:
+    """This file's comment syntax with its documentation markers cleared, or None where it has none.
+
+    `comment-added` skips a documentation comment because CODESTYLE governs its shape. A reference
+    in one is the same defect as a reference in any other comment, and skipping it read a C# `///`
+    block while reading the PowerShell `<# #>` block beside it, so this rule clears the markers and
+    reads both.
+    """
+    spec = syntax_for(path)
+    if spec is None:
+        return None
+    widened: Syntax = {**spec, "doc": ()}
+    return widened
 
 
 def quoted(paths) -> str:
@@ -1982,20 +2010,23 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
-def python_docstring_lines(raw: str) -> set[int]:
-    """Every source line a module, class, or function docstring occupies, empty where it will not parse.
+def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
+    """Each source line a docstring occupies, mapped to the docstring text on that line.
 
     `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
-    where it opens a body, and a docstring's own text may hold one.
+    where it opens a body, and a docstring's own text may hold one. Empty where the source will
+    not parse.
 
-    The lines are returned rather than the text, so a reference is reported on the line that
-    carries it. A docstring's value has its escapes resolved, which no longer maps to a line.
+    The source text is returned rather than the docstring's value, so a reference is reported on
+    the line that carries it. A value has its escapes resolved, which no longer maps to a line.
+    Sliced at the node's own columns rather than taken as whole lines, since a statement can share
+    a line with the closing quote and reading it would report a string literal this rule excludes.
     """
     try:
         tree = ast.parse(raw)
     except (SyntaxError, ValueError):
-        return set()
-    out: set[int] = set()
+        return {}
+    out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -2004,8 +2035,28 @@ def python_docstring_lines(raw: str) -> set[int]:
         first = node.body[0].value
         if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
             continue
-        out.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+        last = first.end_lineno or first.lineno
+        for n in range(first.lineno, last + 1):
+            if n > len(lines):
+                continue
+            text = lines[n - 1]
+            if n == last and first.end_col_offset is not None:
+                text = text[: first.end_col_offset]
+            if n == first.lineno:
+                text = text[first.col_offset :]
+            out.setdefault(n, []).append(text)
     return out
+
+
+def without_link_targets(line: str) -> str:
+    """This Markdown line with every link destination blanked, the rest of it untouched.
+
+    An in-document anchor to a heading that opens on a number carries the same shape a reference
+    does, and a destination is never prose. Blanked rather than removed so a column stays put.
+    """
+    for pattern in (LINK_TARGET, REF_DEF):
+        line = pattern.sub(lambda m: m.group(0).replace(m.group(1), " " * len(m.group(1))), line)
+    return line
 
 
 def issue_ref_findings(
@@ -2019,7 +2070,8 @@ def issue_ref_findings(
     Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
     reference in a string literal is fixture data as often as it is prose: a test asserting on a
     handoff's own chain builds the numbers it asserts against, and reading them would report the
-    fixture rather than a claim about this repository.
+    fixture rather than a claim about this repository. A documentation comment is read like any
+    other comment, unlike in `comment-added`, since a reference in one is the same defect.
     """
     out: list[tuple[int, str, str]] = []
     spans: dict[int, list[str]] = {}
@@ -2029,17 +2081,22 @@ def issue_ref_findings(
         fenced = fenced_lines(lines)
         for n, line in enumerate(lines, 1):
             if n not in fenced:
-                spans.setdefault(n, []).append(line)
+                spans.setdefault(n, []).append(without_link_targets(line))
     else:
-        for comment in comment_bodies(path, raw) or ():
+        for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
             spans.setdefault(comment.line, []).append(comment.body)
         if path.suffix.lower() == ".py":
-            for n in python_docstring_lines(raw):
-                if n <= len(lines):
-                    spans.setdefault(n, []).append(lines[n - 1])
+            for n, texts in python_docstring_spans(raw, lines).items():
+                spans.setdefault(n, []).extend(texts)
+    # One finding per line per distinct reference.
+    # A line carrying a docstring and a comment is read twice, and one reference in both is one claim.
+    seen: set[tuple[int, str]] = set()
     for n in sorted(spans):
         for text in spans[n]:
             for m in ISSUE_REF.finditer(text):
+                if (n, m.group(0)) in seen:
+                    continue
+                seen.add((n, m.group(0)))
                 out.append(
                     (
                         n,

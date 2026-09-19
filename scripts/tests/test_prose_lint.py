@@ -4512,9 +4512,8 @@ class TestTheIssueRefRule(unittest.TestCase):
         self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
 
     def test_code_is_left_alone(self) -> None:
-        self.assertEqual(
-            [], self.kinds("a.py", 'URL = "https://example.invalid/pull/1011#issue"\n')
-        )
+        """The value carries the shape, so a rule reading code rather than comments reports it."""
+        self.assertEqual([], self.kinds("a.yml", "key: v#1011\n"))
 
     def test_a_file_that_will_not_parse_reports_nothing_rather_than_raising(self) -> None:
         self.assertEqual([], self.kinds("a.py", "def f(:\n    # per #1011\n"))
@@ -4540,7 +4539,11 @@ class TestTheIssueRefRule(unittest.TestCase):
                 self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
 
     def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
-        """A fence quotes a commit message or a command, where a reference belongs."""
+        """A fence is quoted content rather than the document's own prose, as every rule reads it.
+
+        An inline code span is not exempt, and deliberately so, since backticks around a reference
+        are how one is ordinarily written rather than a signal that it is being quoted.
+        """
         self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
 
     def test_the_cross_repository_spelling_is_caught(self) -> None:
@@ -4553,9 +4556,58 @@ class TestTheIssueRefRule(unittest.TestCase):
         self.assertEqual([], self.kinds("GOVERNANCE.md", "Render it as `[#N](url/pull/N)`.\n"))
 
     def test_a_shape_that_is_not_a_reference_is_not_matched(self) -> None:
-        for body in ("#5", "#1a2b3c", "# 1011", "ISO 1011"):
+        for body in ("#1a2b3c", "# 1011", "ISO 1011", "#123456"):
             with self.subTest(body=body):
                 self.assertEqual([], self.kinds("a.py", f"# Reads {body} here.\nx = 1\n"))
+
+    def test_the_digit_bounds_are_choices_rather_than_facts_about_a_reference(self) -> None:
+        """Both bounds let a real reference through, which the rule text covers and this does not.
+
+        One digit is the shape of an ordinal and of an enumeration, and six is the shape of a hex
+        color, so each bound trades a detection for the false positives the other side carries.
+        """
+        for body in ("#5", "#123456"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Settled in {body}.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("b.py", "# Settled in #12.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("c.py", "# Settled in #12345.\nx = 1\n"))
+
+    def test_a_documentation_comment_is_read_like_any_other(self) -> None:
+        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries."""
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.cs", "/// <summary>See #1011</summary>\nint x = 1;\n")
+        )
+        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#\n.SYNOPSIS See #1011\n#>\n"))
+
+    def test_a_statement_sharing_the_closing_quote_line_is_not_read(self) -> None:
+        """The docstring span is sliced at its own columns, so the string beside it stays code."""
+        self.assertEqual([], self.kinds("a.py", 'def f() -> None:\n    """Doc."""; y = "#1011"\n'))
+
+    def test_one_reference_on_one_line_reports_once(self) -> None:
+        """A docstring line carrying a comment is read twice, and the claim on it is still one."""
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
+        )
+
+    def test_a_link_destination_is_not_a_reference(self) -> None:
+        """An anchor to a heading that opens on a number is the shape, and a destination is not prose."""
+        self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
+        self.assertEqual([], self.kinds("AGENTS.md", "[s]: #10-converge\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("GOVERNANCE.md", "See [#1011](https://x.invalid/pull/1011).\n"),
+        )
+
+    def test_only_the_skill_roots_are_instruction_text(self) -> None:
+        """A product with a `skills/` directory of its own is not carrying fleet law in it."""
+        for name in ("src/skills/notes.md", "docs/skills/guide.md", "skills/top.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds(".claude-plugin/fleet-skills/skills/x/SKILL.md", "Shipped in #1011.\n"),
+        )
 
     def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
         self.assertIn("issue-ref", prose_lint.RULES)
@@ -4574,10 +4626,13 @@ class TestTheIssueRefRule(unittest.TestCase):
         body = section.group(1)
         self.assertIn("issue-ref", body)
         self.assertIn("docstring", body)
+        # Every instruction document the gate reads, named or covered by a phrase that names it.
+        # An entry carrying a directory is the one an earlier shape of this case skipped.
+        # The rule text then described the surface as the repository root alone.
+        covered = {"CLAUDE.md": "CLAUDE.md", "RESYNC.md": "RESYNC.md", "STANDUP.md": "STANDUP.md"}
         for name in sorted(prose_lint.INSTRUCTION_DOCS):
-            if "/" not in name and name not in {"CLAUDE.md", "RESYNC.md", "STANDUP.md"}:
-                with self.subTest(name=name):
-                    self.assertIn(name, body)
+            with self.subTest(name=name):
+                self.assertIn(covered.get(name, name), body)
 
 
 class TestHarness(unittest.TestCase):

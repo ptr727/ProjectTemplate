@@ -164,7 +164,7 @@ The full comment philosophy, what earns one, structure, capitalization, growth d
 
 ### References
 
-An issue, a pull request, and a commit are each named on a commit message or a pull request body and on no other surface: not a comment, not a docstring, and not an instruction document. The reasons, the surfaces the ban reaches, the narrative files it leaves alone, and what to write instead are in the `comment-and-doc-style` Skill referenced above.
+No comment, no docstring, and no instruction document names an issue, a pull request, or a commit, and a commit message and a pull request body each carry theirs as usual. The reasons, the surfaces the ban reaches, the narrative files it leaves alone, and what to write instead are in the `comment-and-doc-style` Skill referenced above.
 
 ### Character Set
 

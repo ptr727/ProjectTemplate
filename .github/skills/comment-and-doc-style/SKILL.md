@@ -203,11 +203,18 @@ a hook runs on every commit while the label decides a pull request.
 ## Issue, pull request, and commit references
 
 No comment, no docstring, and no instruction document names an issue, a pull request, or a commit.
-The surfaces are code and workflow comments, a docstring in any language, the Skills trees, and the
-fleet's own rule documents at a repository root, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`,
-`WORKFLOW.md`, `AUDIT.md`, `OPERATIONS.md` and their siblings. A README, a tracker, a history, and a
-plan are the repository's own narrative and keep their references, as do a commit message and a pull
-request body, which are the surfaces a reference belongs on.
+The surfaces are code and workflow comments, a docstring, a documentation comment, the Skills
+trees, and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODESTYLE.md`,
+`GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
+`.github/copilot-instructions.md`. A README, a tracker, a history, and a plan are the repository's
+own narrative and keep their references, as do a commit message and a pull request body, which are
+the surfaces a reference belongs on.
+
+A record whose subject is the revision itself keeps it. A disproved-claims entry in
+`.github/copilot-instructions.md` names the revision its proof was read against, since a proof is
+true of one tree at one revision and an entry whose subject has moved is deleted rather than edited
+to look current. The revision there is the record's own load-bearing field rather than a citation
+beside a claim, which is the distinction this rule turns on.
 
 Three reasons, and the first decides it.
 
@@ -225,8 +232,8 @@ carries what the reader needs, and the number of the round that found it does no
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
 request reference in a comment, in a Python docstring, and in instruction text. A commit is not a
-shape a gate can read, since a pinned action is a bare SHA a workflow rule requires, so the text
-above is the whole of what covers that half. A reference in a string literal is not read either: a
+shape a gate can read, since a short SHA carries the same shape as a blob id, a version fragment,
+and a fixture hash, so the text above is the whole of what covers that half. A reference in a string literal is not read either: a
 test builds the numbers it asserts against, and reading those would report a fixture rather than a
 claim about this repository.
 

@@ -6,7 +6,7 @@ of this repo's Copilot reviews):
 
   sha-pin       Action SHA-pinning gaps                        25 findings  (GOVERNANCE.md rule)
   eol           .editorconfig <-> .gitattributes disagreement  40 findings
-  eol-coverage  Git attribute resolution differs from policy
+  eol-coverage  Git attribute resolution differs from policy   not in that audit
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining

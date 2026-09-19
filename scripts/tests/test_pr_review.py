@@ -2597,9 +2597,9 @@ class TestTheRoundsOwnFileTable(GqlCase):
     def test_a_table_naming_every_changed_file_corroborates_nothing(self) -> None:
         """The reporter's case, and the one the measurement answers.
 
-        All seven partial rounds in the corpus name every changed file, two of them here. So
-        does a round stating full coverage, which is why a full table cannot separate a miscount
-        from a file that went unread.
+        All seven partial rounds in the sibling corpus name every changed file, as do two of the
+        four here that carry a table. So does a round stating full coverage, which is why a full
+        table cannot separate a miscount from a file that went unread.
         """
         body = summarized(["a.py", "b.md", "c.yml"], covers=self.PART)
         self.assertIn("corroborates nothing", self.reading(body, ["a.py", "b.md", "c.yml"]))
