@@ -45,12 +45,12 @@ Subcommands
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
            CodeRabbit (`coderabbitai`) and qodo (`qodo-code-review`) are tracked at the identity
            and thread-resolution level, since an open thread blocks a ruleset-gated merge
-           whoever opened it and `unresolved=0` once hid one of theirs that still did (PR #915).
+           whoever opened it and `unresolved=0` once hid one of theirs that still did.
            Both `threads=` and `unresolved=` are read from a single 100-thread page with no
            further pagination, so a pull request carrying more than that undercounts silently
            past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
-           follows, naming the gap rather than leaving either count to be trusted as whole
-           (#973). Reading past the cut needs `reply`'s own paginated walk instead. `suppressed=`
+           follows, naming the gap rather than leaving either count to be trusted as whole.
+           Reading past the cut needs `reply`'s own paginated walk instead. `suppressed=`
            and `cr_outside_diff=` carry the identical marker over the separate 100-review page
            they are both read from, a `REVIEWS TRUNCATED` block following, since an unanswered
            finding on a round old enough to fall out of that window is exactly as invisible.
@@ -60,7 +60,7 @@ Subcommands
            read from what it said. `other_rate_limited` names one whose newest comment or review
            carries its own rate-limit marker instead, a structural
            `<!-- ... rate limited by ... -->` convention rather than free-text prose (observed on
-           CodeRabbit, ptr727/Blog #110), so reading it needs no per-bot wording model the way
+           CodeRabbit), so reading it needs no per-bot wording model the way
            Copilot's quota refusal needed `QUOTA` built for its own text.
            Two of their own finding shapes are read, though, each its own blind spot a thread
            poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
@@ -145,7 +145,7 @@ Subcommands
            repository's own most recently updated PRs rather than a fixed id: the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window carries no
            Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would otherwise
-           empty it on every call for as long as the outage runs (#985). Requests nothing
+           empty it on every call for as long as the outage runs. Requests nothing
            (falling back to polling only) where both windows come up empty, since a repository
            with no Copilot review in either has nothing to read the id from and a fabricated one
            is never an option. The loop runs in-process, so a 45-minute wait costs one agent
@@ -216,7 +216,7 @@ REVIEWER = "copilot-pull-request-reviewer"
 # Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly.
 # Each format read here is its own reader, and doing that well is a separate task per bot.
 # What generalizes without reading any of their prose is thread resolution.
-# An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one (PR #915, ptr727/ProjectTemplate).
+# An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one.
 # Login spellings are read off this repository's own history (`gh pr view --json reviews,comments`) rather than guessed.
 CODERABBIT_LOGIN = "coderabbitai"
 QODO_LOGIN = "qodo-code-review"
@@ -267,10 +267,10 @@ REFUSAL = re.compile(
 # Read against `refusal_of`'s own return rather than the raw body.
 # That way the exemptions built for that anchor, the opening line and the fenced quotation, protect this reading too instead of needing their own.
 # This script's own corpus and this file both quote the sentence below its overview, same as the refusal wording itself does.
-# Observed once, on PR #962 here: "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit."
+# Observed once here: "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit."
 QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNORECASE)
 # A structural marker rather than prose, so reading it needs no per-bot wording model the way `QUOTA` above needs one for Copilot's free-text refusal.
-# Observed on CodeRabbit, a plain PR comment rather than a formal review, ptr727/Blog #110: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
+# Observed on CodeRabbit, a plain PR comment rather than a formal review: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
 # The service name is captured rather than assumed.
 # A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
@@ -480,7 +480,7 @@ HISTORY_PRS = 20
 HISTORY_REVIEWS = 20
 HISTORY_COMMENTS = 5
 
-# The one-time widened retry `copilot_history` reaches for where HISTORY_PRS carries no Copilot activity at all, rather than reverting every caller to blind polling for the rest of an outage that outlasts it (#985).
+# The one-time widened retry `copilot_history` reaches for where HISTORY_PRS carries no Copilot activity at all, rather than reverting every caller to blind polling for the rest of an outage that outlasts it.
 # GitHub's own connection ceiling for a single `first`, the same reason FILES_WINDOW and CHECKS_WINDOW hold it.
 # Reaching further back needs cursor pagination, which this best-effort signal is not worth paying for, so one wider try is where this stops.
 HISTORY_PRS_WIDE = 100
@@ -506,7 +506,7 @@ query($o:String!,$r:String!,$n:Int!){
 # Ordered by `UPDATED_AT` rather than `CREATED_AT`, since a fresh review round bumps a pull request's own update time regardless of how long ago it was opened, where creation order can leave a re-reviewed older pull request outside the window entirely.
 # `reviews(last:$reviews)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:$comments)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
 # It resolves even on a pull request whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
-# `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE (#985).
+# `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE.
 # One document read at two widths costs nothing a second document would not, and it keeps the two reads provably identical apart from that one number.
 Q_BOT_ID = """
 query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
@@ -677,8 +677,8 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     ordinary once an outage outlasts HISTORY_PRS pull requests: every one of them then carries
     the same silence, the narrow window empties out too, and both callers would otherwise fall
     back to blind polling for the rest of the outage with no way to tell that outage apart from a
-    repository that has simply never seen a Copilot review (#985, reproduced on
-    ptr727/ProjectTemplate PRs #981-984). The wider read is what tells the two apart.
+    repository that has simply never seen a Copilot review, a shape reproduced over four
+    consecutive pull requests. The wider read is what tells the two apart.
 
     Emptying out is not the only way the narrow window fails a bot-id lookup, though: it can
     carry real activity and still have none, when every entry within it is a plain comment. A
@@ -781,7 +781,7 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     """The service name a rate-limit marker gives, where this login's newest comment or review
     on this pull request carries one. `None` otherwise.
 
-    Reads both connections since the one observed marker (CodeRabbit, ptr727/Blog #110) rides a
+    Reads both connections since the one observed marker, CodeRabbit's, rides a
     plain PR comment rather than a formal review, and a future bot using the same convention
     might use either. Current pull request only, unlike Copilot's `quota_signal`: that one
     generalizes from a pattern of silence across several pull requests, and this has one
@@ -809,7 +809,7 @@ def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
     to request with at all, which is not a failure, since a repository with no Copilot review
     anywhere carries nothing to read the id from. The id itself is the caller's to find, via
     `copilot_bot_id` over a `copilot_history` read it already paid for, which already tried both
-    the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty (#985).
+    the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty.
     """
     if not bot_id:
         return (
@@ -883,8 +883,8 @@ def threads_truncated(pr: dict) -> bool:
     left unread are the newest ones, not the oldest, exactly the ones most likely to still be
     open. That inversion is why this is its own guard rather than a second use of `window_blind`:
     that one settles the question from what is already in view, and there is no such settling
-    available here, only the fact that something was cut (#973, undercounted since PR #969
-    widened `unresolved` from Copilot's own threads to every tracked reviewer's).
+    available here, only the fact that something was cut, undercounted ever since `unresolved`
+    widened from Copilot's own threads to every tracked reviewer's.
     """
     return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
 
@@ -1293,10 +1293,11 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     nothing rather than as the count being a miscount.
 
     The one arm that locates anything is a table shorter by exactly what the counts say went
-    unread. #479 states 16 of 17 and names 16, omitting `GOVERNANCE.md`, and it is the only
-    evidence on record that the unread file is a real file rather than an artifact of counting.
-    It stays a lead rather than a verdict, since the table is prose the reviewer writes: #609
-    states 61 of 62 and names 50, and #606 names `GOVENANCE.md`, a path no diff here carries.
+    unread. One round states 16 of 17 and names 16, omitting `GOVERNANCE.md`, and it is the
+    only evidence on record that the unread file is a real file rather than an artifact of
+    counting. It stays a lead rather than a verdict, since the table is prose the reviewer
+    writes: another states 61 of 62 and names 50, and a third names `GOVENANCE.md`, a path no
+    diff here carries.
 
     A path named that the diff does not carry is what disqualifies the naming arm, that typo
     being enough to drop a real file into the omissions and read it as the one nobody reviewed.
@@ -1781,8 +1782,8 @@ def suppressed_blocks(body: str) -> list[str]:
 def outside_diff_blocks(body: str) -> list[str]:
     """CodeRabbit's own outside-diff-range findings: a real finding on a line outside the pull
     request's changed hunks, which GitHub cannot attach as an inline review comment, so
-    CodeRabbit collapses it into the review body instead. Observed corpus, ptr727/ProjectTemplate
-    PR #1053: a `<summary>...Outside diff range comments (N)</summary>` heading, nested one
+    CodeRabbit collapses it into the review body instead. Observed corpus: a
+    `<summary>...Outside diff range comments (N)</summary>` heading, nested one
     file-level `<details>` deep in turn nesting a per-finding "Prompt for AI Agents" block,
     wrapped in the review's own blockquote.
 
@@ -1901,13 +1902,13 @@ def digest(
     cover, cover_line = head_coverage(pr)
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
-    # True where the connection cut off before this pull request's actual thread count (#973).
+    # True where the connection cut off before this pull request's actual thread count.
     # Read here rather than inline below, since both the summary line and the explanatory block need it.
     truncated = threads_truncated(pr)
     # Same reasoning, the `reviews` connection rather than `reviewThreads`, feeding `suppressed=` and `cr_outside_diff=` below.
     revs_truncated = reviews_truncated(pr)
     # Any known reviewer's own thread, not only Copilot's.
-    # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one (PR #915).
+    # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one.
     # `thread_author` carries the deleted-account default this needs.
     unresolved = [t for t in threads if not t["isResolved"] and thread_author(t) in KNOWN_REVIEWERS]
     # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
@@ -2786,7 +2787,7 @@ def main(argv: list[str] | None = None) -> int:
     # The liveness query carries the authors, so this costs the loop no extra call.
     drift = reviewer_login_drift(pr)
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
-    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, per PR #962 and the six pull requests after it that carried no Copilot activity at all.
+    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
     history = [] if done or answer or drift else copilot_history(owner, repo)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.

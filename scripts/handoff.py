@@ -79,7 +79,7 @@ from pathlib import Path
 LABEL = "handoff"
 
 # The command that fixes a repository missing the label.
-# `decision` was declared on the hub and applied nowhere else (#1434).
+# `decision` was declared on the hub and applied nowhere else.
 # A downstream session then enumerated an empty queue and reported it healthy.
 # A `handoff` label declared and not applied fails the same silent way, so this refuses instead.
 APPLY = "repo-config/configure.sh apply OWNER/NAME release|operational"

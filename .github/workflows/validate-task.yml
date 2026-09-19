@@ -194,7 +194,7 @@ jobs:
         run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
 
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
-      # This is #729, decided here, the one place the fleet's uvx tools are pinned or floated.
+      # This is the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
         if: hashFiles('pyproject.toml') != '' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0

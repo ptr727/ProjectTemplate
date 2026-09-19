@@ -46,7 +46,7 @@ SKILLS_SRC = ROOT / ".agents" / "skills"
 PLUGIN_NAME = "fleet-skills"
 DIST_PLUGIN = ROOT / ".claude-plugin" / PLUGIN_NAME
 PLUGIN_MANIFEST = DIST_PLUGIN / ".claude-plugin" / "plugin.json"
-# One digest file per skill rather than one stamp over every skill's bytes, so two branches editing two skills touch two files and merge (ptr727/ProjectTemplate#1240).
+# One digest file per skill rather than one stamp over every skill's bytes, so two branches editing two skills touch two files and merge.
 # Under the plugin root and not under .github/skills/, which spec/files.json carries whole to every fleet repository.
 DIGEST_DIR = DIST_PLUGIN / ".source-digests"
 GITHUB_SKILLS = ROOT / ".github" / "skills"
@@ -173,7 +173,7 @@ INCLUDE_ROOT = ROOT
 # A carrier receives the filled text either way, since carriage copies this repository's committed bytes and a fill has already written them, so a region never arrives empty and markers reaching a carrier are not themselves the problem.
 # The generated mirrors already carry live markers to every repository, and are safe doing it because regenerate() rebuilds them wholesale from the authored tree on every run, so nothing in them can hold text its source no longer renders.
 # A carried authored file is copied rather than rebuilt, so a region in one would put generated text into a file its carrier holds as its own, which is what this refuses.
-# Empty today, deliberately: the surfaces that drift restate a rule in their own words for their own audience rather than copying it, and an include fills a region with a heading's whole body, so every one of them is a pointer instead (ptr727/ProjectTemplate#1317).
+# Empty today, deliberately: the surfaces that drift restate a rule in their own words for their own audience rather than copying it, and an include fills a region with a heading's whole body, so every one of them is a pointer instead.
 # Declared empty rather than left out, because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
 INCLUDE_DESTINATIONS: tuple[str, ...] = ()
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")

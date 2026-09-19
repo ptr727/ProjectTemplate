@@ -571,11 +571,11 @@ class NewCase(unittest.TestCase):
         self.assertNotIn(1001, fake.issues)
 
     def test_new_refuses_over_a_bare_closed_row(self) -> None:
-        """An open head keeps `newest_closed` from ever running, so nothing else reads #50.
+        """An open head keeps `newest_closed` from ever running, so nothing else reads the bare row.
 
         `on_track` takes precedence unconditionally, and the closed side is scanned only when it
         returns nothing. So `successor_of` is the one read that meets a bare closed row on this
-        path, and reading it as "nothing succeeds #11" is the guess that forks the lane.
+        path, and reading it as "nothing succeeds the open head" is the guess that forks the lane.
         """
         fake = FakeGh(
             {
@@ -1608,10 +1608,11 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
 
     def test_a_bare_link_refuses_rather_than_reading_as_no_successor(self) -> None:
-        """The successor is real and its block was stripped, so nothing says it succeeds #10.
+        """The successor is real and its block was stripped, so nothing says it succeeds the
+        predecessor.
 
-        Reading that as "#10 has no successor" lets a second link name #10 as well, which forks
-        the lane and strands #11 while the run exits 0.
+        Reading that as "the predecessor has no successor" lets a second link name it as well,
+        which forks the lane and strands the stripped link while the run exits 0.
         """
         fake = FakeGh(
             {

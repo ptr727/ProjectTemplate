@@ -1,7 +1,7 @@
 name: Test pull request action
 
 # Thin caller: the gate is the hub's reusable validate-task.yml, which every fleet repo reaches rather than carries.
-# Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory, and a pull_request to main or develop runs it pre-merge and actionable, which is what makes D1.2 hold on this model too (#585).
+# Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory, and a pull_request to main or develop runs it pre-merge and actionable, which is what makes D1.2 hold on this model too.
 # A release-model repo with a smoke build uses the release-with-smoke variant documented alongside this stub in docs/reusable-workflows.md.
 on:
   push:

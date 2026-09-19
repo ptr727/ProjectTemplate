@@ -49,7 +49,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    item 3 exactly as Copilot's do. `pr_review.py`'s `review_on_head` names Copilot's own coverage
    specifically, not "no review of any kind covers this head": an advisory reviewer carrying the
    exact head under `other_reviewed`, with an empty review body and no new threads, is its own
-   ordinary "reviewed, nothing to flag" shape, not a missing review (#1066).
+   ordinary "reviewed, nothing to flag" shape, not a missing review.
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
    only cause on record that the loop can clear. `pr_review.py wait` exit `46` is the one nothing
