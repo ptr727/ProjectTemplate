@@ -359,7 +359,7 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 8 summaries and 4 labels.
+# The lists are small because the output is regular: 10 headings, 9 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
@@ -380,6 +380,7 @@ VETTED_HEADINGS = {
 VETTED_SUMMARIES = {
     "Pull request overview",
     "Open (N)",
+    "Resolved since last review (N)",
     "What changed in this PR",
     "Show a summary per file",
     "File summaries",
@@ -420,7 +421,9 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
 # Bounded to three spaces for the reason the marker above is, a fourth making it a code block.
 # The largest total wins, so a quoted number otherwise beat the round's own.
-CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
+# `None` is a total of zero spelled in words, which a round raising nothing states.
+# Read as no total at all it printed `?`, and this file's own rule is that the two differ.
+CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*\s*(\d+|[Nn]one)", re.MULTILINE)
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -1139,7 +1142,10 @@ def stated_total(body: str) -> int | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
-    totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
+    totals = [
+        0 if m.group(1).lower() == "none" else int(m.group(1))
+        for m in CCR_FINDINGS.finditer(preamble)
+    ]
     return max(totals) if totals else None
 
 
@@ -1158,12 +1164,17 @@ def round_threads(pr: dict, review: dict) -> int:
     thread comment carrying that finding, so the threads the round opened are the same set the
     enumeration names, already structured, and no shape of the body can move the number.
 
-    That equivalence is measured on one round of one body, which is every round in this format read
-    here so far, and it holds only while the enumeration lists what this round raised. A format
-    that lists findings still open from earlier rounds states a total this undercounts, printing a
-    standing shortfall on every round after the first. The body states its own enumeration's size
-    as the `(N)` on the `Open` summary, so a second body is what would settle it, and nothing
-    compares the two yet.
+    That equivalence holds only while the enumeration lists what this round raised, and the format
+    itself now gives reason to doubt that: a round on this pull request carried a
+    `Resolved since last review (N)` section, so the format tracks a finding's state across rounds
+    rather than describing one round. If `Open (N)` likewise carries what an earlier round raised
+    and this round left open, its total counts findings whose threads belong to that earlier round,
+    and this undercounts by exactly those, printing a standing shortfall.
+
+    What would settle it is a round whose `Open (N)` count exceeds the threads it opened while the
+    body plainly accounts for the difference, and no round read here has shown that yet. Until one
+    does, a shortfall is reported and read in the body rather than acted on, which is what the
+    digest and every reader-facing surface say.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the

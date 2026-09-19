@@ -2065,6 +2065,30 @@ class TestSecondOverviewFormat(GqlCase):
         upper = inside.replace("<details", "<DETAILS").replace("</details>", "</DETAILS>")
         self.assertIsNone(pr_review.stated_total(upper))
 
+    def test_a_total_spelled_none_is_a_total_of_zero(self) -> None:
+        """A round raising nothing states its total in words, seen on this reader's own pull
+        request. Requiring digits read that as no total at all and printed `?`, where the rule this
+        file keeps is that a total absent and a total of zero are different readings."""
+        for spelling in ("None", "none"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(
+                    0, pr_review.stated_total(overview_v2(findings=f"**Findings:** {spelling}"))
+                )
+        # The largest still wins, and a word does not outrank a number.
+        self.assertEqual(
+            3, pr_review.stated_total(overview_v2(findings="**Findings:** None\n\n**Findings:** 3"))
+        )
+
+    def test_the_section_a_round_lists_what_it_resolved_in_is_vetted(self) -> None:
+        """Seen on this reader's own second round, which raised nothing and listed one finding it
+        had resolved. An unvetted summary there stopped the loop at exit 43."""
+        body = overview_v2(findings="**Findings:** None").replace(
+            "<summary><strong>What changed in this PR</strong></summary>",
+            "<summary><strong>Resolved since last review (1)</strong></summary>",
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        self.assertEqual(0, pr_review.stated_total(body))
+
     def test_a_total_absent_and_a_total_of_zero_are_different_readings(self) -> None:
         self.assertIsNone(pr_review.stated_total(overview_v2(findings="")))
         self.assertEqual(0, pr_review.stated_total(overview_v2(findings="**Findings:** 0")))
