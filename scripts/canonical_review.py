@@ -28,13 +28,13 @@ reviewer's read of this one is still a read of these bytes.
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
 measured the local passes a push owed as a large share of what a pull request spent, while what they
 returned went unclassified, so the two were never weighed against each other and the call on that
-evidence was to sweep the read rather than gate it. Nothing here refuses a
-push or a pull request any more.
+evidence was to sweep the read rather than gate it. Nothing here refuses a push or a pull
+request any more.
 `sweep` names the units whose text has moved past the pass that read them, and beside them a
 bounded slice of the never-read backlog, newest-committed first so a unit just authored here is
 read without waiting behind every older one. That is the work one scheduled run files and an agent
-session performs, and `report` renders the whole backlog, to standard output rather than into the tree, for the reason
-`scripts/README.md` gives.
+session performs, and `report` renders the whole backlog, to standard output rather than into
+the tree, for the reason `scripts/README.md` gives.
 
 The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an exit code from
 either engine need not know which one answered: 0 is covered, 1 is a finding, and 2 is the check

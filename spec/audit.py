@@ -408,8 +408,8 @@ def membership_findings(spec):
     """Fleet-wide: every non-fork repo the owner has on GitHub must have a registry entry.
 
     Nothing else in this file, or in spec/validate.py, ever looks past the registry to what
-    actually exists, so a repo that never got an entry is invisible to every tool that reads it. The registry was treated as ground
-    truth about existence, not just about conformance. Ownership only: a fork, or a repo the
+    actually exists, so a repo that never got an entry is invisible to every tool that reads it.
+    The registry was treated as ground truth about existence, not just about conformance. Ownership only: a fork, or a repo the
     owner merely collaborates on, was never meant to carry a registry entry.
 
     A registry entry's status then says what, if anything, the rest of the audit owes the repo:

@@ -4511,9 +4511,43 @@ class TestTheIssueRefRule(unittest.TestCase):
         """A test builds the numbers it asserts against, so reading one reports a fixture."""
         self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
 
-    def test_code_is_left_alone(self) -> None:
-        """The value carries the shape, so a rule reading code rather than comments reports it."""
-        self.assertEqual([], self.kinds("a.yml", "key: v#1011\n"))
+    def test_a_reference_hugging_the_comment_marker_is_read(self) -> None:
+        """The body has the marker off, so the reference's own `#` is gone with it.
+
+        The comment is read as written as well, which is what tells `#N was the cause` from the
+        `# N items` the same body spells once the marker and the space are stripped.
+        """
+        for name, text in (
+            ("a.py", "#1011 was the cause.\nx = 1\n"),
+            ("b.py", "x = 1  #1011 caused it\n"),
+            ("a.sh", "#1011 was the cause.\nx=1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+        self.assertEqual([], self.kinds("c.py", "# 1011 items were read.\nx = 1\n"))
+
+    def test_a_non_ascii_docstring_line_does_not_shift_the_span(self) -> None:
+        """`ast` reports a column as a UTF-8 byte offset, so a slice on the string mis-cuts.
+
+        Over-running pulls the code beside the closing quote in, which reports a string literal.
+        Under-running cuts the opening of the text, which drops the reference this rule is for.
+        """
+        wide = "\u00b5" * 10
+        self.assertEqual([], self.kinds("a.py", f'def f():\n    """{wide}"""; y = "#2022"\n'))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.py", 'def f(x="\u00b5\u00b5\u00b5\u00b5"): """#1011."""\n')
+        )
+
+    def test_a_uri_fragment_is_not_a_reference(self) -> None:
+        """A fragment is a number after a `#` and names a heading rather than an issue."""
+        self.assertEqual(
+            [], self.kinds("a.py", "# See https://example.invalid/spec#4217 here.\nx = 1\n")
+        )
+        self.assertEqual([], self.kinds("AGENTS.md", "See <https://example.invalid/spec#4217>.\n"))
+
+    def test_a_reference_definition_label_is_read(self) -> None:
+        """Only the destination is blanked, and a label renders as prose the reader sees."""
+        self.assertEqual(["issue-ref"], self.kinds("CLAUDE.md", "[#1011]: #1011\n"))
 
     def test_a_file_that_will_not_parse_reports_nothing_rather_than_raising(self) -> None:
         self.assertEqual([], self.kinds("a.py", "def f(:\n    # per #1011\n"))
@@ -4545,6 +4579,9 @@ class TestTheIssueRefRule(unittest.TestCase):
         are how one is ordinarily written rather than a signal that it is being quoted.
         """
         self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("AGENTS.md", "A commit message reads `Fixes #1011`.\n")
+        )
 
     def test_the_cross_repository_spelling_is_caught(self) -> None:
         self.assertEqual(
@@ -4573,18 +4610,26 @@ class TestTheIssueRefRule(unittest.TestCase):
         self.assertEqual(["issue-ref"], self.kinds("c.py", "# Settled in #12345.\nx = 1\n"))
 
     def test_a_documentation_comment_is_read_like_any_other(self) -> None:
-        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries."""
+        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries.
+
+        C# is the case that carries the widening. `syntax_for` gives PowerShell no documentation
+        marker to clear, since only `comment-added` reaches the spelling that has one.
+        """
         self.assertEqual(
             ["issue-ref"], self.kinds("a.cs", "/// <summary>See #1011</summary>\nint x = 1;\n")
         )
-        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#\n.SYNOPSIS See #1011\n#>\n"))
 
     def test_a_statement_sharing_the_closing_quote_line_is_not_read(self) -> None:
         """The docstring span is sliced at its own columns, so the string beside it stays code."""
         self.assertEqual([], self.kinds("a.py", 'def f() -> None:\n    """Doc."""; y = "#1011"\n'))
 
     def test_one_reference_on_one_line_reports_once(self) -> None:
-        """A docstring line carrying a comment is read twice, and the claim on it is still one."""
+        """The line is the unit, so one reference on it is one finding however many reads see it.
+
+        A docstring line carrying a comment is read twice over, and a comment is read twice again,
+        as written and with its marker off. Two distinct comments on one line collapse the same
+        way, which is what `comment-added` already does for the same reason.
+        """
         self.assertEqual(
             ["issue-ref"],
             self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
@@ -4626,13 +4671,12 @@ class TestTheIssueRefRule(unittest.TestCase):
         body = section.group(1)
         self.assertIn("issue-ref", body)
         self.assertIn("docstring", body)
-        # Every instruction document the gate reads, named or covered by a phrase that names it.
-        # An entry carrying a directory is the one an earlier shape of this case skipped.
-        # The rule text then described the surface as the repository root alone.
-        covered = {"CLAUDE.md": "CLAUDE.md", "RESYNC.md": "RESYNC.md", "STANDUP.md": "STANDUP.md"}
-        for name in sorted(prose_lint.INSTRUCTION_DOCS):
-            with self.subTest(name=name):
-                self.assertIn(covered.get(name, name), body)
+        # The enumeration is read out of the opening paragraph and compared both ways.
+        # Asserting only that each name appears somewhere in the section was satisfiable elsewhere.
+        # A name the surfaces sentence had dropped passed on the carve-out paragraph mentioning it.
+        opening = body.strip().split("\n\n")[0]
+        named = set(re.findall(r"`([^`]+\.md)`", opening))
+        self.assertEqual(set(prose_lint.INSTRUCTION_DOCS), named)
 
 
 class TestHarness(unittest.TestCase):

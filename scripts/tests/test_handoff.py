@@ -1608,9 +1608,10 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
 
     def test_a_bare_link_refuses_rather_than_reading_as_no_successor(self) -> None:
-        """The successor is real and its block was stripped, so nothing says it succeeds the head.
+        """The successor is real and its block was stripped, so nothing says it succeeds the
+        predecessor.
 
-        Reading that as "the head has no successor" lets a second link name the head as well,
+        Reading that as "the predecessor has no successor" lets a second link name it as well,
         which forks the lane and strands the stripped link while the run exits 0.
         """
         fake = FakeGh(

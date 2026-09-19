@@ -57,7 +57,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
-    "issue-ref": "an issue or pull request reference in a comment, a Python docstring, or instruction text",
+    "issue-ref": "an issue or pull request reference in a code comment, a Python docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -759,10 +759,15 @@ def is_operations_runbook(path: Path, root: Path | None) -> bool:
 # An issue or a pull request reference has one shape, and a commit does not.
 # A short SHA is the same shape as a blob id, a version fragment, and a fixture hash.
 # Telling those apart needs the meaning rather than the shape, so the rule text covers that half.
-# Five digits is the ceiling because a sixth makes the shape a hex color as well.
-# Two is the floor because one digit is the same shape as an ordinal or an enumeration.
+# Five digits is the ceiling and two is the floor, and each bound trades a detection for a shape.
+# One digit is the shape of an ordinal and of an enumeration.
+# Six is the shape of the hex color a stylesheet writes, and so are three and four.
+# A color in one of those two lengths with no letter in it is reported, which is the rule's cost.
 # A repository whose numbering reaches either bound states a reference the rule text still bans.
 ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,5}(?!\w)")
+
+# A URI, whose fragment is a number after a `#` and is not a reference to anything here.
+URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
 
 # The Skills roots, source and both generated distributions, whose every Markdown file is rule text.
 # A plugin tree carries one root per plugin, so that one is matched by its two fixed ends.
@@ -1287,11 +1292,17 @@ def syntax_for(path: Path) -> Syntax | None:
 
 
 class Comment(NamedTuple):
-    """A comment the parser found, and whether its marker opens the line."""
+    """A comment the parser found, and whether its marker opens the line.
+
+    `raw` carries the comment as written, marker included, where the parser has it. The body has
+    the marker and the space after it taken off, which makes `# N items` and `#N was the cause`
+    the same string, and only the second one names an issue.
+    """
 
     line: int
     body: str
     leading: bool
+    raw: str = ""
 
 
 class Carried(NamedTuple):
@@ -1677,7 +1688,7 @@ def python_comments(raw: str) -> list[Comment] | None:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()
                 body = tok.string.lstrip("#").strip()
-                out.append(Comment(tok.start[0], body, leading))
+                out.append(Comment(tok.start[0], body, leading, tok.string))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return out
@@ -1788,7 +1799,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if isinstance(found, str):  # a line comment runs to end of line
                 body = line[at + len(found) :].strip()
                 if body:
-                    out.append(Comment(n, body, leading))
+                    out.append(Comment(n, body, leading, line[at:]))
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
@@ -1839,7 +1850,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, body, leading in comments:
+    for n, body, leading, _raw in comments:
         if (
             not body
             or NOT_PROSE.search(body)
@@ -2039,24 +2050,34 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
         for n in range(first.lineno, last + 1):
             if n > len(lines):
                 continue
-            text = lines[n - 1]
-            if n == last and first.end_col_offset is not None:
-                text = text[: first.end_col_offset]
-            if n == first.lineno:
-                text = text[first.col_offset :]
-            out.setdefault(n, []).append(text)
+            # `ast` reports a column as a UTF-8 byte offset, so the slice is taken on the bytes.
+            # On the string one non-ASCII character before the closing quote over-runs the span.
+            # One before the opening quote under-runs it and cuts the text this rule reads.
+            data = lines[n - 1].encode("utf-8")
+            end = first.end_col_offset if n == last and first.end_col_offset is not None else None
+            start = first.col_offset if n == first.lineno else 0
+            out.setdefault(n, []).append(data[start:end].decode("utf-8", "replace"))
     return out
 
 
-def without_link_targets(line: str) -> str:
-    """This Markdown line with every link destination blanked, the rest of it untouched.
+def without_lookalikes(text: str, markdown: bool) -> str:
+    """This span with the runs a reference cannot legitimately sit in blanked out.
 
-    An in-document anchor to a heading that opens on a number carries the same shape a reference
-    does, and a destination is never prose. Blanked rather than removed so a column stays put.
+    A URI fragment is a number after a `#` and is not a reference, and in Markdown neither is a
+    link destination, an in-document anchor to a heading that opens on a number carrying the same
+    shape. Blanked rather than spliced out, so one pass over a span holding several of them cannot
+    shift the bounds of the next.
     """
-    for pattern in (LINK_TARGET, REF_DEF):
-        line = pattern.sub(lambda m: m.group(0).replace(m.group(1), " " * len(m.group(1))), line)
-    return line
+    spans = [(m.start(), m.end()) for m in URI_SPAN.finditer(text)]
+    if markdown:
+        for pattern in (LINK_TARGET, REF_DEF):
+            spans += [(m.start(1), m.end(1)) for m in pattern.finditer(text)]
+    if not spans:
+        return text
+    chars = list(text)
+    for start, end in spans:
+        chars[start:end] = " " * (end - start)
+    return "".join(chars)
 
 
 def issue_ref_findings(
@@ -2066,6 +2087,9 @@ def issue_ref_findings(
 
     Instruction text is read whole, and every other Markdown file is left alone, since a tracker
     and a history exist to carry exactly these references.
+
+    A Markdown comment is read only where the document is, so an HTML comment in a README is left
+    alone with the rest of the file.
 
     Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
     reference in a string literal is fixture data as often as it is prose: a test asserting on a
@@ -2081,15 +2105,19 @@ def issue_ref_findings(
         fenced = fenced_lines(lines)
         for n, line in enumerate(lines, 1):
             if n not in fenced:
-                spans.setdefault(n, []).append(without_link_targets(line))
+                spans.setdefault(n, []).append(without_lookalikes(line, True))
     else:
         for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
-            spans.setdefault(comment.line, []).append(comment.body)
+            # Both spellings, since the body has the marker off and `#N` is then just its digits.
+            spans.setdefault(comment.line, []).append(without_lookalikes(comment.body, False))
+            if comment.raw:
+                spans[comment.line].append(without_lookalikes(comment.raw, False))
         if path.suffix.lower() == ".py":
             for n, texts in python_docstring_spans(raw, lines).items():
-                spans.setdefault(n, []).extend(texts)
-    # One finding per line per distinct reference.
-    # A line carrying a docstring and a comment is read twice, and one reference in both is one claim.
+                spans.setdefault(n, []).extend(without_lookalikes(t, False) for t in texts)
+    # One finding per line per distinct reference, the line being the unit this rule reports on.
+    # `comment-added` counts a line once for the same reason, a line with two comments being one line.
+    # Here one comment is read twice over as well, as written and with its marker off.
     seen: set[tuple[int, str]] = set()
     for n in sorted(spans):
         for text in spans[n]:
@@ -2136,7 +2164,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
-        for ln, text, _leading in extracted_comments(path, lines):
+        for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ""
@@ -2382,6 +2410,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "note: dead-path is not checked in a shallow clone, which holds no deletion "
             "history to key on. Fetch the full history to run it.",
+            file=sys.stderr,
+        )
+
+    # Announced for the same reason the two above are, though this one narrows rather than stands down.
+    if "issue-ref" in rules and not git_roots:
+        print(
+            "note: issue-ref reads comments and docstrings here and no instruction document. "
+            "Which Markdown file is instruction text is decided from the repository-relative "
+            "path, and no repository was found to take one from.",
             file=sys.stderr,
         )
 

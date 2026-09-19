@@ -231,11 +231,14 @@ the whole of its value. "A prior version re-scanned from every unmatched open, w
 carries what the reader needs, and the number of the round that found it does not.
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
-request reference in a comment, in a Python docstring, and in instruction text. A commit is not a
-shape a gate can read, since a short SHA carries the same shape as a blob id, a version fragment,
-and a fixture hash, so the text above is the whole of what covers that half. A reference in a string literal is not read either: a
-test builds the numbers it asserts against, and reading those would report a fixture rather than a
-claim about this repository.
+request reference in a code or config comment, in a Python docstring, and in instruction text. A
+Markdown comment is read only where the document is one of those, so an HTML comment in a README is
+left alone with the rest of the file.
+
+A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a
+version fragment, and a fixture hash, so the text above is the whole of what covers that half. A
+reference in a string literal is not read either: a test builds the numbers it asserts against, and
+reading those would report a fixture rather than a claim about this repository.
 
 ## Character set
 
