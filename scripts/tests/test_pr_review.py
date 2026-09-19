@@ -158,8 +158,8 @@ def overview_v2(
     total on bare bold lines rather than as `Review details` bullets, and it enumerates each
     finding it opened a thread for as a link to that thread's own comment anchor.
 
-    The enumeration is built for realism rather than read: the count `overview=T/M` compares the
-    stated total against is the threads the round opened, which a case supplies through `thread()`.
+    The enumeration is built for realism rather than read. `overview=T/M` compares the stated
+    total against the threads the round opened, which a case supplies through `thread()`.
     A body still carries the enumeration because a real one does, and because the shape readers see
     its `<summary>`.
 
