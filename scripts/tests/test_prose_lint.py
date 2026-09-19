@@ -857,7 +857,7 @@ class TestCommentWrap(BaitCase):
         """Without the guard the shape exempts any two-word sentence.
 
         It silenced a real wrapped sentence whose continuation happened to be two tokens.
-        `is_tool_directive` pairs its own anchor with this same guard, for this same failure.
+        `is_tool_directive` pairs a guard with its own anchor the same way, for the same failure.
         The guard does cost: a value ending in a full stop is refused, `origin: example.com.`
         being the case. Dropping the full stop from `SNIPPET_END` would re-exempt the wrapped
         sentence the guard exists for, so it stays.
