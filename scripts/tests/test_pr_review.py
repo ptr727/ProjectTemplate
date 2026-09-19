@@ -2140,11 +2140,27 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertIn("overview=2/2", out)
                 self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
-    def test_one_finding_linked_twice_is_one_finding(self) -> None:
-        """A body can link a finding from its own entry and again from its prose, and counting
-        the link rather than the finding overstates the enumeration."""
+    def test_one_entry_carrying_two_links_is_one_finding(self) -> None:
+        """An entry can link its own thread and cite an earlier round's in the same line, and
+        counting the link rather than the entry reads that as two findings enumerated.
+
+        That is the shape three readings cancelled a shortfall on. The previous case built two
+        separate entries, which is two findings listed rather than one linked twice, so it
+        asserted the opposite of what its name claimed.
+        """
+        one_entry = overview_v2(findings="**Findings:** 2", anchors=("4000000001",)).replace(
+            "- [Finding 1](#discussion_r4000000001) New",
+            "- [Finding 1](#discussion_r4000000001) New, superseding "
+            "[an earlier note](#discussion_r900)",
+        )
+        self.assertEqual((2, 1), pr_review.overview_manifest(one_entry))
+        self.answer(payload([review(body=one_entry)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/1", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        # Two entries are two findings listed, whatever each of them links.
         self.assertEqual(
-            (2, 1),
+            (2, 2),
             pr_review.overview_manifest(
                 overview_v2(findings="**Findings:** 2", anchors=("4000000001", "4000000001"))
             ),
@@ -2310,6 +2326,123 @@ class TestSecondOverviewFormat(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=4/2", out)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_an_entry_counts_once_however_much_of_it_is_not_the_marker_line(self) -> None:
+        """Entries are counted, not links, so everything grouped under an entry is that entry.
+
+        Five readings counted anchors on a line, and a line is the wrong unit whichever way the
+        count is guarded: an entry carries two links as readily as one, and its own link can sit
+        on the line its text wraps onto.
+        """
+        three = overview_v2(
+            findings="**Findings:** 3", anchors=("4000000001", "4000000002", "4000000003")
+        )
+        entry = "- [Finding 1](#discussion_r4000000001) New"
+        for label, replacement in (
+            ("an unindented continuation", f"{entry}\nNew, in a.py at line 12."),
+            ("inline markup of its own", f'{entry}\n<picture><img src="x"></picture>'),
+            ("a table row", f"{entry}\n| a | b |"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(
+                    (3, 3), pr_review.overview_manifest(three.replace(entry, replacement))
+                )
+        # A character Python breaks a line on and Markdown does not.
+        self.assertEqual(
+            (3, 3), pr_review.overview_manifest(three.replace("Finding 1]", "Finding\u20281]"))
+        )
+        # An entry whose own link sits on the line its text wraps onto.
+        wrapped = overview_v2(findings="**Findings:** 2", anchors=("4000000002",)).replace(
+            "- [Finding 1](#discussion_r4000000002) New",
+            "- Finding 1 in a.py\n  [thread](#discussion_r4000000002)",
+        )
+        self.assertEqual((2, 1), pr_review.overview_manifest(wrapped))
+
+    def test_an_enumeration_whose_first_entry_is_indented_deeper_undercounts(self) -> None:
+        """A known limit, pinned rather than left to be rediscovered.
+
+        Markdown allows an entry up to three spaces of indent, so siblings after a deeper first
+        item read as nested here. Reading it correctly needs each marker's own content column,
+        which is a parser rather than a scan. The body read here indents no entry, and the miss
+        reports a shortfall that is not there, where this same shape previously cancelled one.
+        """
+        body = overview_v2(findings="**Findings:** 3").replace(
+            "- [Finding 1](#discussion_r4000000001) New\n- [Finding 2](#discussion_r4000000002) New",
+            "  - [Finding 1](#discussion_r4000000001) New\n"
+            "- [Finding 2](#discussion_r4000000002) New\n"
+            "  - supersedes [a](#discussion_r900)",
+        )
+        self.assertEqual((3, 1), pr_review.overview_manifest(body))
+
+    def test_a_section_nested_inside_the_enumeration_does_not_end_it(self) -> None:
+        """An entry can collapse detail of its own, which CodeRabbit already does per finding.
+
+        Counting only closing tags ends the enumeration at the inner one, dropping every entry
+        after it and inventing a shortfall, so the depth counts both tags.
+        """
+        body = overview_v2(findings="**Findings:** 2").replace(
+            "- [Finding 1](#discussion_r4000000001) New",
+            "- [Finding 1](#discussion_r4000000001) New\n"
+            "  <details><summary>Prompt</summary>\n"
+            "  cites [an earlier note](#discussion_r900)\n"
+            "  </details>",
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+
+    def test_the_enumeration_s_label_is_found_behind_an_attribute(self) -> None:
+        """The observed format emits `<details open>`, so it does put attributes on these tags.
+
+        This reader was the one that refused them, and refusing them missed the section while the
+        shape reader saw a vetted label and reported nothing, which is a fabricated block with no
+        second net under it.
+        """
+        body = overview_v2().replace(
+            "<summary><strong>Open (2)</strong></summary>",
+            '<summary class="x" open><strong>Open (2)</strong></summary>',
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_the_marker_indented_into_a_code_block_is_a_quotation(self) -> None:
+        """Four spaces of indent make a Markdown code block, which the fence guard never sees.
+
+        A first-format round quoting the marker that way was read as a body written in the format,
+        taking a total out of the quotation with it.
+        """
+        quoted = f"{OVERVIEW}\nExample:\n\n    {CCR_MARKER}\n\n**Findings:** 7\n"
+        self.assertIsNone(pr_review.overview_manifest(quoted))
+        # Three spaces are still the marker, which is the rule a fence is read by.
+        self.assertIsNotNone(pr_review.overview_manifest(f"   {CCR_MARKER}\n\n**Findings:** 1\n"))
+
+    def test_a_numbered_enumeration_reads_its_entries(self) -> None:
+        """Nothing observed says the enumeration is bulleted rather than numbered, and losing the
+        ordered marker loses every entry and reads the whole total as withheld."""
+        body = overview_v2(findings="**Findings:** 2").replace(
+            "- [Finding 1](#discussion_r4000000001) New\n- [Finding 2](#discussion_r4000000002) New",
+            "1. [Finding 1](#discussion_r4000000001) New\n2. [Finding 2](#discussion_r4000000002) New",
+        )
+        self.assertEqual((2, 2), pr_review.overview_manifest(body))
+
+    def test_the_preamble_stops_at_the_first_section_opener(self) -> None:
+        """The first is the only one that matters, the enumeration being the first section, and a
+        total inside it is that section's own rather than the round's."""
+        body = overview_v2(findings="").replace(
+            "<summary><strong>Open (2)</strong></summary>",
+            "<summary><strong>Open (2)</strong></summary>\n\n**Findings:** 40",
+        )
+        self.assertEqual((None, 2), pr_review.overview_manifest(body))
+
+    def test_a_total_named_mid_sentence_is_not_the_round_s_own(self) -> None:
+        """The line anchor is what keeps prose about a total from supplying one."""
+        body = overview_v2(findings="The body states **Findings:** 40 in its own overview.")
+        self.assertEqual((None, 2), pr_review.overview_manifest(body))
+
+    def test_a_thread_reference_carrying_no_anchor_is_not_a_link(self) -> None:
+        """`discussion_r` names a thread in prose, and the `#` is what makes it a link to one."""
+        body = overview_v2(findings="**Findings:** 2").replace(
+            "- [Finding 2](#discussion_r4000000002) New", "- Finding 2, see discussion_r4000000002"
+        )
+        self.assertEqual((2, 1), pr_review.overview_manifest(body))
 
     def test_a_lazy_continuation_line_does_not_end_the_enumeration(self) -> None:
         """Markdown renders a line indented under an entry as part of it, and breaking the walk

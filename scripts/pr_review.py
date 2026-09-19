@@ -86,8 +86,7 @@ Subcommands
            enumerates with a thread anchor. `T` reads `?` where no total is found in the overview
            preamble, which is a round stating none and equally a round stating one only after its
            first collapsed section, the two being indistinguishable from here and neither meaning
-           the round withheld nothing. A refusal wearing that format's marker reads `?/0` too, and
-           blocks on coverage rather than here. Present only where the round covering the head is
+           the round withheld nothing. Present only where the round covering the head is
            written in that format, which reached this repository after every round the vetted
            marker lists below were measured over.
            A total larger than the enumeration is findings the round raised that polling threads
@@ -103,9 +102,14 @@ Subcommands
            `code-review` instructions ask the reviewer for. On that reading a repository not
            carrying those instructions reads such a round as exit 45, `COVERAGE_IS_UNSTATED`,
            which is the honest answer rather than a gap here. A later body in that format that
-           does carry either shape is read by the reader that owns it, `suppressed=` and
-           `coverage=` respectively, since both shapes are already vetted. Nothing reports the
-           contradiction with the paragraph above, the vetted lists reporting an unvetted marker
+           does collapse a suppressed section is read by `suppressed=`, that heading being vetted
+           and read wherever it sits. A later body stating coverage is the other way round: the
+           reader requires a bullet, and this format states its metadata on bare bold lines, which
+           is why `effort=` had to drop that requirement, so the spelling such a body would most
+           likely use is the one `coverage=` does not see. It reads as unstated and blocks at exit
+           45, which is the safe direction and the wrong reason, and `Files reviewed` sitting in
+           the vetted labels does nothing about it since the line never reaches that comparison.
+           Nothing reports either contradiction, the vetted lists reporting an unvetted marker
            rather than a marker turning up somewhere new.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
@@ -391,17 +395,17 @@ EFFORT_LINE = re.compile(
 # Anchored to a line of its own, since the marker is an HTML comment and renders invisibly.
 # Nobody writing about one has a reason to quote it, and this change's own prose carries it bare.
 # A body naming it mid-sentence is a body about the format rather than one written in it.
-CCR_OVERVIEW = re.compile(r"^\s*<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILINE)
+# Bounded to three spaces of indent, which is the rule `FENCE` reads a fence by.
+# A fourth makes the line a code block, and so a quotation the fence guard never sees.
+CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILINE)
 # That format's own finding total, which the first format states nowhere.
 # Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
 CCR_FINDINGS = re.compile(r"^\s*\*\*Findings:\*\*\s*(\d+)", re.MULTILINE)
-# Each enumerated finding links to the thread comment carrying it.
-# The link is what makes an entry countable, the same body's change summary being bulleted too.
-# Deduplicated by the caller, since one finding can be linked more than once.
-CCR_ANCHOR = re.compile(r"#discussion_r(\d+)")
-# An entry in that enumeration is a list item, which is what tells one from a prose mention.
-# Counting anchors body-wide instead counts a back-reference to an earlier round's thread.
-# The indent is captured, since an entry is a top-level item and what is nested under one is not.
+# The link an enumerated finding carries to its own thread comment.
+# An entry is counted for carrying one rather than per link, a link being repeatable within one.
+CCR_ANCHOR = re.compile(r"#discussion_r\d+")
+# An entry in that enumeration is a list item, and the indent is what says which are entries.
+# Captured rather than matched, since the entries sit at the shallowest indent the list uses.
 LIST_ITEM = re.compile(r"(\s*)(?:[-*+]\s|\d+[.)]\s)")
 # The enumeration's own label, compared as the vetted list holds it rather than matched loosely.
 # A loose match read `Open questions` and `Still open (2)` as the enumeration and counted neither.
@@ -410,7 +414,10 @@ LIST_ITEM = re.compile(r"(\s*)(?:[-*+]\s|\d+[.)]\s)")
 CCR_OPEN = "Open (N)"
 # The section opener, read case-insensitively as every other tag reader in this file is.
 # A body spelling it `<DETAILS>` otherwise never splits, making a section's own total the round's.
+# `<details` does not match `</details>`, the slash sitting where the `d` has to be.
+# So the pair below counts a nesting depth without either tag reading as the other.
 DETAILS_OPEN = re.compile(r"<details", re.IGNORECASE)
+DETAILS_CLOSE = re.compile(r"</details", re.IGNORECASE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -420,7 +427,12 @@ READS_AS_REVIEWER = re.compile(r"copilot.*review", re.IGNORECASE)
 # It is a literal rather than the pull request's own repository.
 # That one is where the shape was seen, not where the reader failing on it lives.
 HUB = "ptr727/ProjectTemplate"
-SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
+# The opening tag takes an attribute, as `DETAILS_TAG` already allows on its own pair.
+# This reader was the one exception, and the observed format does emit `<details open>`, so a
+# `<summary class="x">` read as no summary at all missed a section while reporting no shape.
+# The attribute must carry a non-space character, for a reason a case already guards.
+# Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
+SUMMARY = re.compile(r"<summary(?:\s[^>]*[^\s>])?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
@@ -1144,7 +1156,7 @@ def overview_manifest(body: str) -> tuple[int | None, int] | None:
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
     totals = [int(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
-    return (max(totals) if totals else None, len(enumerated_findings(plain)))
+    return (max(totals) if totals else None, enumerated_findings(plain))
 
 
 def flat_summaries(plain: str) -> str:
@@ -1158,56 +1170,83 @@ def flat_summaries(plain: str) -> str:
     return SUMMARY.sub(lambda m: f"<summary>{' '.join(m.group(1).split())}</summary>", plain)
 
 
-def enumerated_findings(plain: str) -> set[str]:
-    """The thread anchors the `Open` section's own entries carry.
+def enumerated_findings(plain: str) -> int:
+    """How many findings the `Open` section enumerates with a thread of its own.
 
-    An entry is a **top-level** item of that section's list, and everything indented under one
-    belongs to it: a nested sub-bullet citing an earlier round's thread is part of its entry
-    rather than an entry of its own, and counting one as an entry cancels the shortfall, which is
-    the false green this field exists to prevent. Three readings before this one counted a line
-    that was not an entry, each in its own way, so the list's own structure is what is read here
-    rather than a pattern that happens to fit the body last looked at.
+    Entries are counted rather than links. Five readings before this one counted something other
+    than an entry, each in its own way, and three of them cancelled a shortfall by counting too
+    many, which is the false green this field exists to prevent. What they had in common is that
+    they counted anchors on a line. An entry can carry two, one to its own thread and one back to
+    an earlier round's, and an entry's own thread link can sit on the line its text wraps onto, so
+    a line is the wrong unit whichever way the count is guarded.
 
-    The walk ends at the first line that is neither blank, nor a list item, nor indented past the
-    list's own base, that last being a lazy continuation, which Markdown renders as part of the
-    entry above and which ended the walk mid-list before.
+    So the section's lines are grouped into entries and an entry counts once where anything in it
+    links a thread. The entries are the list items at the shallowest indent the list uses, and
+    everything else in the group belongs to the entry above: a nested sub-bullet, a wrapped line,
+    an inline `<picture>`, a table row. The shallowest indent rather than the first item's, since
+    an item indented deeper than the ones after it otherwise sets the floor too deep and promotes
+    their sub-bullets to entries.
+
+    The section ends at the tag that closes it, counted by depth rather than matched, and at the
+    end of the body where it never closes. That is a structural end rather than a guess about
+    which line stops a list, which is what the four readings before it each got wrong in a
+    different way: a lazy continuation, inline HTML, a table row, and a character Python breaks a
+    line on and Markdown does not, each ended the walk early and invented a shortfall.
 
     The first section carrying the vetted label rather than every one, since a second is a shape
     nothing has seen and counting both would raise the enumeration on a guess.
 
-    Both failure directions are live, which is why neither the digest nor the documentation calls
-    a shortfall a withheld finding outright: counting a line that is not an entry hides a real
-    shortfall, and losing an entry invents one.
+    One shape is read wrongly and deliberately. Markdown allows an entry up to three spaces of
+    indent, so a list whose first item is indented deeper than the ones after it has siblings this
+    reads as nested and undercounts. Reading it correctly means resolving each marker's own content
+    column, which is a Markdown parser rather than a line scan, and the body read here indents no
+    entry at all. Undercounting reports a shortfall that is not there, which is the direction that
+    sends a reader to the body, where the same shape previously cancelled one.
+
+    Both failure directions stay live, which is why neither the digest nor the documentation calls
+    a shortfall a withheld finding outright. Counting what is not an entry hides a real shortfall,
+    and losing an entry invents one.
     """
     lines = flat_summaries(plain).splitlines()
     for i, line in enumerate(lines):
         label = SUMMARY.search(line)
         if label is None or unvetted(normal(label.group(1)), {CCR_OPEN}):
             continue
-        return entry_anchors(lines[i + 1 :])
-    return set()
+        return count_entries(section_lines(lines, i))
+    return 0
 
 
-def entry_anchors(lines: list[str]) -> set[str]:
-    """The anchors carried by the top-level items of the list these lines open with."""
-    listed: set[str] = set()
-    base: int | None = None
-    for line in lines:
-        if not line.strip():
-            continue
-        item = LIST_ITEM.match(line)
-        indent = len(line) - len(line.lstrip())
-        if item is None:
-            # Indented past the base, so it continues the entry above rather than ending the list.
-            # Anything else is what follows the list, closing tag included.
-            if base is not None and indent > base:
-                continue
+def section_lines(lines: list[str], start: int) -> list[str]:
+    """The lines inside the collapsed section whose `<summary>` sits at `start`.
+
+    The depth starts at one, the section's own opener sitting above its summary, and the tag that
+    brings it back to zero ends it. An unclosed section runs to the end of the body, which is the
+    honest reading of markup that never closes rather than a reason to stop early.
+    """
+    depth = 1
+    inside: list[str] = []
+    for line in lines[start + 1 :]:
+        depth += len(DETAILS_OPEN.findall(line)) - len(DETAILS_CLOSE.findall(line))
+        if depth <= 0:
             break
-        if base is None:
-            base = len(item.group(1))
-        if indent <= base:
-            listed.update(CCR_ANCHOR.findall(line))
-    return listed
+        inside.append(line)
+    return inside
+
+
+def count_entries(inside: list[str]) -> int:
+    """How many of these lines' top-level list items carry a thread link somewhere in them."""
+    items = [(n, LIST_ITEM.match(ln)) for n, ln in enumerate(inside)]
+    indents = [len(m.group(1)) for _, m in items if m is not None]
+    if not indents:
+        return 0
+    base = min(indents)
+    starts = [n for n, m in items if m is not None and len(m.group(1)) == base]
+    bounds = [*starts, len(inside)]
+    return sum(
+        1
+        for first, last in zip(starts, bounds[1:], strict=True)
+        if CCR_ANCHOR.search("\n".join(inside[first:last]))
+    )
 
 
 def head_overview(pr: dict) -> tuple[int | None, int] | None:
