@@ -200,6 +200,36 @@ cannot carry it, and there the finding names a remedy that is not yet available.
 escape reaches a commit before any of that, which is where a repository meets this rule first, since
 a hook runs on every commit while the label decides a pull request.
 
+## Issue, pull request, and commit references
+
+No comment, no docstring, and no instruction document names an issue, a pull request, or a commit.
+The surfaces are code and workflow comments, a docstring in any language, the Skills trees, and the
+fleet's own rule documents at a repository root, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`,
+`WORKFLOW.md`, `AUDIT.md`, `OPERATIONS.md` and their siblings. A README, a tracker, a history, and a
+plan are the repository's own narrative and keep their references, as do a commit message and a pull
+request body, which are the surfaces a reference belongs on.
+
+Three reasons, and the first decides it.
+
+- **A reference is a second lookup, and the reader is already holding the file.** A comment earns
+  its place by explaining the line under it to whoever reads that line now. A number they have to
+  go and resolve somewhere else is the opposite of that.
+- **The lookup can be impossible.** A repository may be private, so a reference in content carried
+  into a public one names something its reader cannot open at all.
+- **It pollutes the content.** A rationale block that takes one more citation per round is how a
+  file comes to teach a house style the rules forbid, which is what happened here.
+
+Write the constraint the reference was standing in for, or drop the clause where the reference was
+the whole of its value. "A prior version re-scanned from every unmatched open, which was O(N^2)"
+carries what the reader needs, and the number of the round that found it does not.
+
+The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
+request reference in a comment, in a Python docstring, and in instruction text. A commit is not a
+shape a gate can read, since a pinned action is a bare SHA a workflow rule requires, so the text
+above is the whole of what covers that half. A reference in a string literal is not read either: a
+test builds the numbers it asserts against, and reading those would report a fixture rather than a
+claim about this repository.
+
 ## Character set
 
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR

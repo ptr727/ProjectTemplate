@@ -29,6 +29,7 @@ diff's content reaches no further than the hunk headers this file reads out of i
 from __future__ import annotations
 
 import argparse
+import ast
 import functools
 import io
 import json
@@ -56,6 +57,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
+    "issue-ref": "an issue or pull request reference in a comment, a docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -70,6 +72,7 @@ DEFAULT_RULES = frozenset(
         "comment-added",
         "home-path",
         "dead-path",
+        "issue-ref",
     }
 )
 
@@ -750,6 +753,42 @@ def shallow_checkout(root: Path) -> bool:
 def is_operations_runbook(path: Path, root: Path | None) -> bool:
     """Whether this path is the repository operations runbook."""
     return root is not None and path.resolve() == (root / "OPERATIONS.md").resolve()
+
+
+# The pattern-detectable half of the reference ban, and only that half.
+# An issue or a pull request reference has one shape, and a commit does not.
+# A pinned action is a bare SHA a workflow rule requires, so reading one would report that pin.
+ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,6}(?!\w)")
+
+# Markdown an agent reads as instructions, where the ban reaches the document and not only its comments.
+# A skill is law wherever it loads, and these documents are the fleet's own rule text.
+# A README, a tracker, a history, and a plan are the repository's own narrative and keep their references.
+INSTRUCTION_DOCS = frozenset(
+    {
+        "AGENTS.md",
+        "AUDIT.md",
+        "CLAUDE.md",
+        "CODESTYLE.md",
+        "GOVERNANCE.md",
+        "OPERATIONS.md",
+        "RESYNC.md",
+        "STANDUP.md",
+        "WORKFLOW.md",
+        ".github/copilot-instructions.md",
+    }
+)
+
+
+def is_instruction_text(path: Path, root: Path | None) -> bool:
+    """Whether this Markdown file is instruction text rather than the repository's own narrative.
+
+    A skill is matched by its directory rather than by its name, since the source tree and each
+    generated distribution carry the same file under three roots.
+    """
+    if path.suffix.lower() != ".md":
+        return False
+    key = repo_key(path, root) if root is not None else rel(path)
+    return key in INSTRUCTION_DOCS or "skills" in key.split("/")[:-1]
 
 
 def quoted(paths) -> str:
@@ -1943,6 +1982,77 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
+def python_docstring_lines(raw: str) -> set[int]:
+    """Every source line a module, class, or function docstring occupies, empty where it will not parse.
+
+    `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
+    where it opens a body, and a docstring's own text may hold one.
+
+    The lines are returned rather than the text, so a reference is reported on the line that
+    carries it. A docstring's value has its escapes resolved, which no longer maps to a line.
+    """
+    try:
+        tree = ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return set()
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body or not isinstance(node.body[0], ast.Expr):
+            continue
+        first = node.body[0].value
+        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            continue
+        out.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return out
+
+
+def issue_ref_findings(
+    path: Path, raw: str, lines: list[str], root: Path | None
+) -> list[tuple[int, str, str]]:
+    """Every issue or pull request reference on a surface the ban reaches.
+
+    Instruction text is read whole, and every other Markdown file is left alone, since a tracker
+    and a history exist to carry exactly these references.
+
+    Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
+    reference in a string literal is fixture data as often as it is prose: a test asserting on a
+    handoff's own chain builds the numbers it asserts against, and reading them would report the
+    fixture rather than a claim about this repository.
+    """
+    out: list[tuple[int, str, str]] = []
+    spans: dict[int, list[str]] = {}
+    if path.suffix.lower() == ".md":
+        if not is_instruction_text(path, root):
+            return out
+        fenced = fenced_lines(lines)
+        for n, line in enumerate(lines, 1):
+            if n not in fenced:
+                spans.setdefault(n, []).append(line)
+    else:
+        for comment in comment_bodies(path, raw) or ():
+            spans.setdefault(comment.line, []).append(comment.body)
+        if path.suffix.lower() == ".py":
+            for n in python_docstring_lines(raw):
+                if n <= len(lines):
+                    spans.setdefault(n, []).append(lines[n - 1])
+    for n in sorted(spans):
+        for text in spans[n]:
+            for m in ISSUE_REF.finditer(text):
+                out.append(
+                    (
+                        n,
+                        "issue-ref",
+                        (
+                            f"issue or pull request reference {m.group(0)!r} -> "
+                            "state the constraint it stands for, or drop the clause"
+                        ),
+                    )
+                )
+    return out
+
+
 def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
@@ -1962,6 +2072,8 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     if "comment-added" in rules:
         out.extend(comment_added_findings(path, raw))
+    if "issue-ref" in rules:
+        out.extend(issue_ref_findings(path, raw, lines, root))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.

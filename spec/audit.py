@@ -10,7 +10,7 @@ triaged by spec/divergences.json), intent-staleness advisories (a carried intent
 canonical changed after the copy last did), and branch-model facts (main/develop existence, develop
 behind main), and a fleet-wide membership check (every non-fork repo the registry owner has on
 GitHub carries a registry/repos.json entry, and an 'archived' entry's status agrees with GitHub's
-own archived flag (ptr727/ProjectTemplate#550). Owner-initiated: run it when
+own archived flag. Owner-initiated: run it when
 onboarding a repo, when drift is suspected, or before fleet-wide changes. Read-only - it never
 modifies a target.
 
@@ -90,8 +90,8 @@ def hub_tracked(rev=None):
     `git ls-tree -r` at that commit rather than `git ls-files` against ROOT's checked-out index
     (a filesystem walk is avoided too, since it would pick up __pycache__ and a local .venv and
     make the result depend on working-tree state), so a path present on `main` but absent on
-    `develop`, or the reverse, is not silently missed or falsely added
-    (ptr727/ProjectTemplate#1017 review). Filtered to regular-file modes (100644, 100755) the same
+    `develop`, or the reverse, is not silently missed or falsely added.
+    Filtered to regular-file modes (100644, 100755) the same
     way `_git_revisions()` is: a directory, a symlink, or a submodule gitlink has no file content
     to compare, and every caller here assumes a plain file at each returned path. `-z` NUL-delimits
     the output so an unusual path is not C-quoted, which would otherwise return an escaped string
@@ -266,7 +266,7 @@ def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
 def canonical_blob_sha(path):
     """The hub's git blob identity for path, from the same resolved `main` commit
     `_git_revisions()` and `_hub_main_rev()` walk, not from ROOT's checked-out working tree,
-    which is not necessarily `main` (ptr727/ProjectTemplate#1017 review). Raises OSError, matching
+    which is not necessarily `main`. Raises OSError, matching
     a filesystem read's own contract, when path is absent from that commit or is not a regular
     file there.
     """
@@ -407,9 +407,8 @@ def repo_identity(url):
 def membership_findings(spec):
     """Fleet-wide: every non-fork repo the owner has on GitHub must have a registry entry.
 
-    This is the check ptr727/ProjectTemplate#550 asked for: nothing else in this file, or in
-    spec/validate.py, ever looks past the registry to what actually exists, so a repo that never
-    got an entry is invisible to every tool that reads it. The registry was treated as ground
+    Nothing else in this file, or in spec/validate.py, ever looks past the registry to what
+    actually exists, so a repo that never got an entry is invisible to every tool that reads it. The registry was treated as ground
     truth about existence, not just about conformance. Ownership only: a fork, or a repo the
     owner merely collaborates on, was never meant to carry a registry entry.
 
@@ -802,13 +801,13 @@ def _bracket_matches(text, open_char, close_char):
     nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
     mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
     counting scan per open position: re-scanning from every unmatched open is what made the previous
-    version O(N^2) on a run of N unmatched opens (#1011, CodeRabbit). A close pops the most recently pushed
+    version O(N^2) on a run of N unmatched opens. A close pops the most recently pushed
     open, the same pairing a fresh depth count from that open would find, so this is one pass, not N.
     An open with no closing partner, or a close with nothing open, is left out of the map, same as before.
 
     A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
     matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
-    count (#1011, qodo).
+    count.
     """
     stack = []
     matches = {}
@@ -855,7 +854,7 @@ def markdown_link_spans(text):
             continue
         # This span is not itself a link.
         # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
-        # Retry one character in rather than skipping past the whole span (#1011, qodo).
+        # Retry one character in rather than skipping past the whole span.
         i += 1
 
 
@@ -1722,7 +1721,7 @@ def _code_view(text):
     `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
     A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
-    way, so its body is dropped too, keeping only the `key:` line itself (ptr727/ProjectTemplate#949).
+    way, so its body is dropped too, keeping only the `key:` line itself.
     """
     out = []
     skip_indent = None
@@ -1885,8 +1884,8 @@ def classify_verbatim(down_text, canon_text, past_texts):
 def _hub_main_rev():
     """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA.
 
-    Reached as a checkout of one's own, fetched immediately before use, per AGENTS.md and
-    ptr727/ProjectTemplate#1017, rather than trusting ROOT's checked-out branch. `git fetch`
+    Reached as a checkout of one's own, fetched immediately before use, per AGENTS.md, rather
+    than trusting ROOT's checked-out branch. `git fetch`
     writes into ROOT's own object database, so a separate clone is not needed. Resolved to a
     concrete SHA right away, not the mutable `FETCH_HEAD` pointer, so a later fetch elsewhere in
     the process cannot move it mid-run.
@@ -1931,7 +1930,7 @@ def _git_revisions(rel_path, rev=None):
     history is read once per fidelity/staleness check, then reused for every audited repo's copy.
 
     `rev` names the git revision walked. It defaults to the hub's own `main` via
-    `_hub_main_rev()` (ptr727/ProjectTemplate#1017) rather than the implicit HEAD of whatever
+    `_hub_main_rev()` rather than the implicit HEAD of whatever
     branch ROOT has checked out. The --selftest fixtures pass an explicit `rev` to exercise a
     plain local branch in a throwaway repo with no `origin` to fetch, keeping the offline engine
     self-test offline.
@@ -2002,9 +2001,9 @@ def git_file_history(rel_path):
 def canonical_current_text(rel_path):
     """The hub's current canonical content of rel_path, from the same `_git_revisions()` call
     `git_file_history()` and `hub_last_change()` already make, so "current" and "history" can
-    never disagree about which commit they read (ptr727/ProjectTemplate#1017 review: reading
-    "current" from ROOT's working tree while history walked the resolved `main` SHA let a copy
-    that matches today's main misclassify as stale against its own most recent history entry).
+    never disagree about which commit they read: reading "current" from ROOT's working tree
+    while history walked the resolved `main` SHA let a copy that matches today's main misclassify
+    as stale against its own most recent history entry.
     None if rel_path has no history at `main`, or its newest revision has no file content there.
     """
     revisions = _git_revisions(rel_path)
@@ -2023,8 +2022,8 @@ def _last_effective_change(revisions):
     effective rather than being silently skipped, since a real difference cannot be ruled out.
 
     `revisions` is assumed newest-first with each entry the immediate predecessor of the one
-    before it (verified empirically over every intent-fidelity canonical file's full history,
-    ptr727/ProjectTemplate#1014): this repo's own branching is forward-only (no back-merges from
+    before it (verified empirically over every intent-fidelity canonical file's full history):
+    this repo's own branching is forward-only (no back-merges from
     main into develop) with feature branches squash-merged one at a time, so a canonical file's
     per-path `git log` is a single line, not a graph with siblings to mis-order. A canonical file
     reached through a genuinely branching history (a direct hotfix to main alongside independent
@@ -2044,7 +2043,7 @@ def _last_effective_change(revisions):
 def git_blob_in_file_history(rel_path, blob_sha, rev=None):
     """Whether a blob occurred in a path's hub history.
 
-    `rev` defaults to the hub's own `main` via `_hub_main_rev()` (ptr727/ProjectTemplate#1017)
+    `rev` defaults to the hub's own `main` via `_hub_main_rev()`
     for the same reason `_git_revisions` does: ROOT's checked-out branch is not necessarily
     `main`, and a develop-only revision matching `blob_sha` must not read as "stale" against a
     hub history `main` doesn't actually contain.
@@ -2070,7 +2069,7 @@ def hub_last_change(rel_path):
     Dependabot action-pin bump, a pruned `needs:` list) the same way the verbatim check already
     does, via _last_effective_change over the file's full history. A raw last-commit date treated
     every one of those bumps as the copy "trailing", even though the fidelity model already
-    classifies that class as governed per-repo drift rather than a deviation (ptr727/ProjectTemplate#735).
+    classifies that class as governed per-repo drift rather than a deviation.
 
     Cached because one canonical's date is compared against every audited repo's copy.
     """
@@ -2149,7 +2148,7 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
     and classify a mismatch as stale or modified via the canonical's git history. All findings are DRIFT: a
     byte diff is a hint to review, never proof of breakage.
     """
-    # canonical_current_text() and git_file_history() both read the same _git_revisions() call, so a copy matching today's main can never mismatch against its own history's newest entry (ptr727/ProjectTemplate#1017 review).
+    # canonical_current_text() and git_file_history() both read the same _git_revisions() call, so a copy matching today's main can never mismatch against its own history's newest entry.
     canon_text = canonical_current_text(canonical_rel)
     if canon_text is None:
         return [
@@ -2273,7 +2272,7 @@ def audit_repo(entry, spec, branch=None):
         cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
         if cmp and cmp.get("files"):
             # A non-empty files[] signals main-side changes but is not usable directly.
-            # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries, per #336.
+            # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries.
             # Derive the main-side change set from the merge-base tree instead, taking paths whose object SHA, a blob or a submodule pointer, differs from base to main, additions and deletions included and with no cap.
             # Then drop paths whose objects already match at develop, since content develop already has is not content develop lacks.
             # That is three recursive tree calls, so where any tree is truncated, or unexpectedly not a dict, the filter is skipped and the compare's unfiltered count is kept, which is conservative and marked.
@@ -3126,7 +3125,7 @@ def _selftest():
     ]
     # The deploy-site.yml caller stub once deploy-site-task.yml is hub-hosted: no secrets: inherit, the required crossing secret named instead.
     # inherit is documented for same-org or enterprise callers, so the fleet does not use it across repositories.
-    # No job-level environment: on the caller, unsupported on a job with uses: (ptr727/ProjectTemplate#942).
+    # No job-level environment: on the caller, unsupported on a job with uses:.
     deploy_stub = (
         "jobs:\n"
         "  assert-ref:\n    runs-on: ubuntu-latest\n    steps: []\n"
@@ -3153,7 +3152,7 @@ def _selftest():
         },
         "forbidTokensInJob": {
             # Indent-anchored (4 spaces) to the job's own top level, the shape GitHub rejects
-            # at parse time on a job with uses: (ptr727/ProjectTemplate#942).
+            # at parse time on a job with uses:.
             "deploy": ["\n    environment:"]
         },
     }
@@ -3207,7 +3206,7 @@ def _selftest():
         ),
         (
             # A block scalar crafted to contain the required token as string content must still report it missing.
-            # The real `with:` mapping is removed here, so only the block scalar carries the text (ptr727/ProjectTemplate#949).
+            # The real `with:` mapping is removed here, so only the block scalar carries the text.
             "deploy-site.yml caller stub with the with:/environment: tokens only inside a block-scalar name still reports missing",
             deploy_stub.replace(
                 "    name: Deploy job\n", "    name: |\n      with:\n      environment:\n"
@@ -3479,7 +3478,7 @@ def _selftest():
             "  ok   needs-mask: pruned needs (inline, block, scalar) normalizes equal, forked step differs, next key preserved"
         )
 
-    # _last_effective_change must skip a normalized-only bump, per ptr727/ProjectTemplate#735.
+    # _last_effective_change must skip a normalized-only bump.
     d3, d2, d1 = (
         "2024-03-01T00:00:00+00:00",
         "2024-02-01T00:00:00+00:00",
@@ -3522,7 +3521,7 @@ def _selftest():
         )
 
     # _git_revisions: a deletion revision reads as None even once rel_path exists again in a
-    # later commit, per ptr727/ProjectTemplate#1016 and #1018.
+    # later commit.
     with tempfile.TemporaryDirectory() as tmp_root:
         tmp_root_path = pathlib.Path(tmp_root)
         for cmd in (
@@ -3569,8 +3568,8 @@ def _selftest():
         f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: re-added file"
     )
 
-    # _git_revisions: a path that becomes a directory reads as None too, per
-    # ptr727/ProjectTemplate#1016 (git show on a tree path returns a listing, not file content).
+    # _git_revisions: a path that becomes a directory reads as None too.
+    # git show on a tree path returns a listing rather than file content.
     with tempfile.TemporaryDirectory() as tmp_root:
         tmp_root_path = pathlib.Path(tmp_root)
         for cmd in (
@@ -3614,9 +3613,8 @@ def _selftest():
         f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-directory transition"
     )
 
-    # _git_revisions: a path that becomes a symlink reads as None too, per
-    # ptr727/ProjectTemplate#1016 (a symlink's ls-tree type is "blob", but git show returns its
-    # target path, not file content).
+    # _git_revisions: a path that becomes a symlink reads as None too.
+    # A symlink's ls-tree type is "blob", and git show returns its target path rather than file content.
     with tempfile.TemporaryDirectory() as tmp_root:
         tmp_root_path = pathlib.Path(tmp_root)
         for cmd in (
@@ -3666,7 +3664,7 @@ def _selftest():
                 f"  {'ok  ' if got == want else 'FAIL'} want={want!s:<24} got={got!s:<24}  _git_revisions: file-to-symlink transition"
             )
 
-    # _git_revisions: the default rev reads origin's `main`, not ROOT's checked-out branch (ptr727/ProjectTemplate#1017).
+    # _git_revisions: the default rev reads origin's `main`, not ROOT's checked-out branch.
     # `origin` is a plain local path here, so the fetch stays offline.
     with tempfile.TemporaryDirectory() as tmp_upstream, tempfile.TemporaryDirectory() as tmp_root:
         tmp_upstream_path = pathlib.Path(tmp_upstream)
@@ -4095,10 +4093,10 @@ def _selftest():
     linked = "Utility to clean [media](https://x.example/Foo_(bar)) per the [spec][spec-ref]."
     nested = "See [API [docs]](https://example.test/a_(b)_(c)) for details."
     # A failed outer span used to jump past the whole run instead of retrying one character in,
-    # so a link nested inside a non-link bracket run was skipped (#1011, qodo).
+    # so a link nested inside a non-link bracket run was skipped.
     inner_link = "See [[docs](url)] for details."
     # A backslash-escaped `\[` used to count as real nesting, corrupting the label match instead
-    # of being read as a literal character (#1011, qodo).
+    # of being read as a literal character.
     escaped_bracket = r"See [API \[docs](url) for details."
     if (
         strip_md_links(linked) != "Utility to clean media per the spec."
@@ -4113,7 +4111,7 @@ def _selftest():
         print(
             "  ok   description: Markdown links reduce to their text, plain text passes through, nested brackets/parens balance, nested and escaped labels handled"
         )
-    # A run of unmatched '[' used to re-scan the remaining text from every position (#1011, CodeRabbit),
+    # A run of unmatched '[' used to re-scan the remaining text from every position,
     # O(N^2) on a README tagline read before any length limit. Linear now: a slow run means a regression.
     pathological = "[" * 20000
     start = time.monotonic()

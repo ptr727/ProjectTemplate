@@ -8,8 +8,7 @@ files, in full, when a downstream repository carries it for the first time. So t
 read of a rule happens in a repository that cannot act on the result: the tree is manifest-owned,
 `scripts/carry.py check` compares source and target digests, and a local edit there becomes drift
 on the next fidelity check. Every carrier then re-discovers the same defect, and the finding
-arrives in a session with no hub checkout and no standing to test the claim
-(ptr727/ProjectTemplate#1138).
+arrives in a session with no hub checkout and no standing to test the claim.
 
 This module reproduces the carrier's read here, before a carrier performs it, and keeps a record
 of which content has had one.
@@ -29,14 +28,13 @@ reviewer's read of this one is still a read of these bytes.
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
 measured the local passes a push owed as a large share of what a pull request spent, while what they
 returned went unclassified, so the two were never weighed against each other and the call on that
-evidence
-(ptr727/ProjectTemplate#1631) was to sweep the read rather than gate it. Nothing here refuses a
+evidence was to sweep the read rather than gate it. Nothing here refuses a
 push or a pull request any more.
 `sweep` names the units whose text has moved past the pass that read them, and beside them a
-bounded slice of the backlog #1138 records, newest-committed first so a unit just authored here is
+bounded slice of the never-read backlog, newest-committed first so a unit just authored here is
 read without waiting behind every older one. That is the work one scheduled run files and an agent
 session performs, and `report` renders the whole backlog, to standard output rather than into the tree, for the reason
-`scripts/README.md` gives (ptr727/ProjectTemplate#1268).
+`scripts/README.md` gives.
 
 The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an exit code from
 either engine need not know which one answered: 0 is covered, 1 is a finding, and 2 is the check
@@ -568,8 +566,8 @@ def render_sweep(
     """The sweep's work list and how many units are on it, as Markdown for an issue body.
 
     Two lists rather than one. A stale unit is text a carrier is receiving now that no pass here
-    has read, and every one of those is asked for. A never-read unit is the backlog
-    ptr727/ProjectTemplate#1138 records, and a bounded slice of it is asked for as well, because
+    has read, and every one of those is asked for. A never-read unit is one nothing here has read
+    at all, and a bounded slice of that backlog is asked for as well, because
     a unit nothing has ever read here includes the one this repository authored last week.
     """
     states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}

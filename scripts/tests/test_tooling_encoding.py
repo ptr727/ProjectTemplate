@@ -47,7 +47,7 @@ UNTRACKED_EXCLUDES = tuple(
 # That case proves its cp1252 patch reaches the decoder, and naming an encoding would defeat it.
 EXEMPT_FUNCTIONS = frozenset({("scripts/tests/test_prose_lint.py", "locale_patch_bites")})
 
-# The two production gates #1538 was filed against, and the ones a maintainer runs locally before a push, so the scan reaching them is asserted by name rather than only by count.
+# The two production gates this scan was written for, and the ones a maintainer runs locally before a push, so the scan reaching them is asserted by name rather than only by count.
 GATE_FILES = (
     ".github/actions/prose-gate/prose_lint.py",
     ".github/actions/repo-gate/repo_gate.py",

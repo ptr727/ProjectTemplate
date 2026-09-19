@@ -3243,8 +3243,8 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
 
     A repository reaches this gate at whatever hub commit its own workflow pins, so CI and a hub
-    checkout run different copies from the moment a rule changes until that pin moves. On #1412
-    that gap cost a full investigation: three dead-path findings raised by a pin one commit behind
+    checkout run different copies from the moment a rule changes until that pin moves. That gap
+    once cost a full investigation: three dead-path findings raised by a pin one commit behind
     the exemption that silences them reproduced against no local run, and with neither verdict
     naming its copy the only available readings were a wrong invocation or a defect in the action,
     which is what the issue proposed. Both were wrong and the version gap was not among the
@@ -4468,6 +4468,116 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             "github.base_ref == github.event.repository.default_branch) }}",
             workflow,
         )
+
+
+class TestTheIssueRefRule(unittest.TestCase):
+    """A reference to an issue or a pull request, on the surfaces the ban reaches and no others.
+
+    `root` is passed on every call, since which Markdown file is instruction text is decided from
+    the repository-relative key rather than from the name alone.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def kinds(self, name: str, text: str) -> list[str]:
+        path = self.tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return [kind for _, kind, _ in prose_lint.check_file(path, {"issue-ref"}, self.tmp)]
+
+    def test_a_comment_carries_the_finding_in_every_syntax(self) -> None:
+        for name, text in (
+            ("a.py", "# The retry is one character in (#1011).\nx = 1\n"),
+            ("a.sh", "# The retry is one character in (#1011).\nx=1\n"),
+            ("a.yml", "# The retry is one character in (#1011).\nx: 1\n"),
+            ("a.ps1", "# The retry is one character in (#1011).\n$x = 1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+
+    def test_a_trailing_comment_carries_it_too(self) -> None:
+        """Unlike `comment-added`, which reads a leading comment only, a citation lands anywhere."""
+        self.assertEqual(["issue-ref"], self.kinds("a.py", "x = 1  # per #1011\n"))
+
+    def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
+        text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'
+        path = self.tmp / "a.py"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"issue-ref"}, self.tmp)
+        self.assertEqual([3, 8], [line for line, _, _ in found])
+
+    def test_a_string_literal_is_left_alone(self) -> None:
+        """A test builds the numbers it asserts against, so reading one reports a fixture."""
+        self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
+
+    def test_code_is_left_alone(self) -> None:
+        self.assertEqual(
+            [], self.kinds("a.py", 'URL = "https://example.invalid/pull/1011#issue"\n')
+        )
+
+    def test_a_file_that_will_not_parse_reports_nothing_rather_than_raising(self) -> None:
+        self.assertEqual([], self.kinds("a.py", "def f(:\n    # per #1011\n"))
+
+    def test_instruction_text_is_read_whole(self) -> None:
+        for name in (
+            "GOVERNANCE.md",
+            "AGENTS.md",
+            "OPERATIONS.md",
+            ".github/copilot-instructions.md",
+            ".agents/skills/x/SKILL.md",
+            ".github/skills/x/SKILL.md",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    ["issue-ref"], self.kinds(name, "The rule was settled in #1011.\n")
+                )
+
+    def test_the_repository_own_narrative_keeps_its_references(self) -> None:
+        """A tracker and a history exist to carry exactly these, and a README is not rule text."""
+        for name in ("README.md", "TODO.md", "HISTORY.md", "docs/rollout.md", "scripts/README.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+
+    def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
+        """A fence quotes a commit message or a command, where a reference belongs."""
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
+
+    def test_the_cross_repository_spelling_is_caught(self) -> None:
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.py", "# Settled in owner/repo#1011.\nx = 1\n")
+        )
+
+    def test_the_placeholder_the_rule_text_uses_escapes_its_own_gate(self) -> None:
+        """`#N` is the fleet placeholder, so a rule showing the form it bans stays clean."""
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Render it as `[#N](url/pull/N)`.\n"))
+
+    def test_a_shape_that_is_not_a_reference_is_not_matched(self) -> None:
+        for body in ("#5", "#1a2b3c", "# 1011", "ISO 1011"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Reads {body} here.\nx = 1\n"))
+
+    def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
+        self.assertIn("issue-ref", prose_lint.RULES)
+        self.assertIn("issue-ref", prose_lint.DEFAULT_RULES)
+
+    def test_the_skill_states_the_rule_this_gate_reads(self) -> None:
+        """The gate reads one half of the ban, so the rule text has to carry the other."""
+        doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
+        section = re.search(
+            r"^## Issue, pull request, and commit references$(.*?)^## ",
+            doc,
+            re.MULTILINE | re.DOTALL,
+        )
+        if section is None:
+            self.fail("the reference-ban heading moved, so the parse is blind")
+        body = section.group(1)
+        self.assertIn("issue-ref", body)
+        self.assertIn("docstring", body)
+        for name in sorted(prose_lint.INSTRUCTION_DOCS):
+            if "/" not in name and name not in {"CLAUDE.md", "RESYNC.md", "STANDUP.md"}:
+                with self.subTest(name=name):
+                    self.assertIn(name, body)
 
 
 class TestHarness(unittest.TestCase):

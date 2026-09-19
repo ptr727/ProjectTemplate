@@ -620,7 +620,7 @@ class LedgerCase(RepoCase):
 
     def test_a_recorded_pass_names_the_merge_base_not_the_branch_tip(self) -> None:
         """A branch's own tip is squashed away on merge and stops resolving. The merge-base against
-        the target is a commit the target already holds, so it survives the squash. #1222, #1210."""
+        the target is a commit the target already holds, so it survives the squash."""
         self.write("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nb body\n")
         run(self.tmp, "add", "-A")
         run(self.tmp, "commit", "-m", "advance the branch tip past the merge base")
