@@ -36,7 +36,9 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = the review covering the head stated no changed-file coverage. Request another
+           45 = no round on this pull request states changed-file coverage, the one covering the
+           head included. A round that states none carries the newest round that states some
+           forward, so reaching this code means there is none to carry. Request another
            review only after confirming the head branch carries the current review instructions.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
@@ -104,26 +106,28 @@ Subcommands
            findings earlier rounds raised, whose total `M` undercounts. A withheld finding is owed
            the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
            `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
-           Two bodies in that format have been read here, so what follows describes those rather
-           than the format in general. Neither carried a `Suppressed comments` heading, which is
+           Ten bodies in that format have been read here, so what follows describes those rather
+           than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
-           Neither stated its file coverage the first format's way, and they differ on the
-           `fleet-review` marker the fleet's own carried `code-review` instructions ask the
-           reviewer for: the first carried it and the second, on a head carrying those same
-           instructions, carried no coverage statement at all and read as exit 45,
-           `COVERAGE_IS_UNSTATED`. So a round in this format states coverage inconsistently rather
-           than through one reliable line, and exit 45 on one is the honest reading of a round
-           that stated none rather than a gap here. A later body in that format that
+           None stated its file coverage the first format's way, in either the bulleted spelling
+           or the bare one, so the `fleet-review` marker the fleet's own carried `code-review`
+           instructions ask for is the only coverage statement this format has been seen to make.
+           Five of the ten carry it, on heads carrying those same instructions, so its absence is
+           intermittent rather than structural. Both absences measured on one drive were
+           re-reviews of a delta of one line and of four files, which is why a round stating none
+           carries an earlier round's statement forward rather than blocking: the block was
+           unclearable, a re-request having never produced the marker either.
+           A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
            and read wherever it sits. Whether the shortfall counts those findings a second time
            turns on whether the stated total includes them, which no body read here says, so treat
            `suppressed=2` beside a shortfall of 2 as either two findings or four until the body
-           settles it. A later body stating coverage is the other way round: the
-           reader requires a bullet, and this format states its metadata on bare bold lines, which
-           is why `effort=` had to drop that requirement, so the spelling such a body would most
-           likely use is the one `coverage=` does not see. It reads as unstated and blocks at exit
-           45, which is the safe direction and the wrong reason, and `Files reviewed` sitting in
-           the vetted labels does nothing about it since the line never reaches that comparison.
+           settles it. A body stating coverage as a bare `**Files reviewed:**` line would still go
+           unread, the reader requiring a bullet where this format states its metadata without
+           one, which is why `effort=` had to drop that requirement. Ten rounds have stated it
+           that way none of the time, so this is a gap rather than the reason a round reads as
+           unstated, and `Files reviewed` sitting in the vetted labels does nothing about it
+           since the line never reaches that comparison.
            Nothing reports either contradiction, the vetted lists reporting an unvetted marker
            rather than a marker turning up somewhere new.
            Two quotation shapes carry a column-0 `<details>` past both masks, a multi-line HTML
@@ -348,6 +352,9 @@ TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
 # `UNSTATED` sits last rather than beside the failures, being the absence of a statement.
 # A round that did state full coverage settles the question over one that stated nothing.
 UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
+# Not a state a round reports, but the reading that carries an earlier round's forward.
+# It ranks nowhere in `SEVERITY`, since it is one of the four wearing another round's name.
+CARRIED = "carried"
 SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
 # `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
@@ -423,7 +430,14 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The largest total wins, so a quoted number otherwise beat the round's own.
 # `None` is a total of zero spelled in words, which a round raising nothing states.
 # Read as no total at all it printed `?`, and this file's own rule is that the two differ.
-CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*\s*(\d+|[Nn]one)", re.MULTILINE)
+# The rest of the line is taken whole rather than its first number.
+# The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
+CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
+# Markup dropped before those counts are read.
+# A severity badge carries numbers of its own in its width and height.
+# Left in, those are summed into the total.
+MARKUP = re.compile(r"<[^>]*>")
+SEVERITY_COUNT = re.compile(r"\d+")
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -1116,6 +1130,68 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     return worst, detail
 
 
+def carried_coverage(pr: dict) -> tuple[str, str, str] | None:
+    """The newest round on this pull request that states any coverage, and the commit it read.
+
+    None where no round ever stated any, which is the one case left with nothing to carry.
+
+    A round covering the head and stating no coverage is the ordinary shape of this format rather
+    than a defect in it: five of ten rounds measured omit the marker, and both omissions measured
+    on one drive were re-reviews of a delta of one line and of four files. Blocking every one of
+    those asks for a re-request that has never produced the marker either, so the block is
+    unclearable and a reader learns to route around it.
+
+    What an earlier round's statement is worth depends on what changed since, which is why the
+    caller reports that delta beside this rather than this returning a verdict. The state carries
+    as it was: a round that read part of the diff carries partial, since the part it never read is
+    still unread.
+    """
+    for node in sorted(
+        reviewer_nodes(pr, "reviews"), key=lambda n: n.get("submittedAt") or "", reverse=True
+    ):
+        if refusal_of(node):
+            continue
+        state, line = coverage_of(node)
+        if state != UNSTATED:
+            return state, line, (node.get("commit") or {}).get("oid") or ""
+    return None
+
+
+def delta_since(owner: str, repo: str, base: str, head: str) -> str:
+    """How much changed between the round that stated coverage and the head, as one clause.
+
+    Every reading is a clause its callers complete a sentence with, so a delta that could not be
+    read composes as readably as one that could. Returned as a noun phrase instead, the failure
+    read "with the delta between them could not be read".
+
+    Reported rather than judged. Whether a delta is small enough to let an earlier round's
+    coverage stand is the maintainer's reading, and this gives them the number to read it from.
+
+    An unreadable compare says so rather than returning a zero, since a delta that could not be
+    read and a delta of nothing take opposite decisions. The API caps its file list at 300, so a
+    larger delta is reported as at least that, never as exactly it.
+    """
+    if not base or not head:
+        return "the commit either side of the delta is unknown"
+    if base == head:
+        return "nothing changed between them"
+    proc = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{head}",
+        r'"\(.files // [] | length) \(.ahead_by // 0)"',
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return "the delta between them could not be read"
+    try:
+        files, commits = (int(x) for x in proc.stdout.split())
+    except ValueError:
+        return "the delta between them could not be read"
+    at_least = "at least " if files >= 300 else ""
+    return (
+        f"{at_least}{files} file{'' if files == 1 else 's'} changed over "
+        f"{commits} commit{'' if commits == 1 else 's'} since"
+    )
+
+
 def second_format(body: str) -> bool:
     """Whether this body is written in the second overview format.
 
@@ -1126,6 +1202,26 @@ def second_format(body: str) -> bool:
     into the diff, and a round quoting it is not a round written in that format.
     """
     return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", FENCE.sub("", body or ""))))
+
+
+def findings_on(tail: str) -> int | None:
+    """The total one `**Findings:**` line states, summed over the severities it splits it into.
+
+    None where the line states no total at all, which is the absence of the claim `stated_total`
+    subtracts from rather than a claim that nothing was raised. `None` spelled in words is a
+    stated zero, which a round raising nothing writes.
+
+    Summed rather than read as one number, because the format states a count per severity joined
+    by a separator that is presentation rather than structure. Every numeric line observed pairs
+    each count with a badge, and a line stating one total and then breaking it down in prose would
+    have both summed. That overstates the shortfall, which is the direction this reader already
+    prefers and which reports rather than blocking.
+    """
+    text = MARKUP.sub(" ", tail)
+    counts = [int(n) for n in SEVERITY_COUNT.findall(text)]
+    if counts:
+        return sum(counts)
+    return 0 if "none" in text.lower() else None
 
 
 def stated_total(body: str) -> int | None:
@@ -1142,11 +1238,8 @@ def stated_total(body: str) -> int | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
-    totals = [
-        0 if m.group(1).lower() == "none" else int(m.group(1))
-        for m in CCR_FINDINGS.finditer(preamble)
-    ]
-    return max(totals) if totals else None
+    totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
+    return max([t for t in totals if t is not None], default=None)
 
 
 def round_threads(pr: dict, review: dict) -> int:
@@ -1433,6 +1526,10 @@ def report_verdict(pr: dict) -> int:
 
     The unrecognized shape outranks the coverage one, because a reader that does not understand
     the output cannot be trusted about what it read of the diff either.
+
+    An earlier round's coverage carries forward here as it does in the digest, so the two agree
+    on the exit code, and the digest is where the reader is told which round it came from. This
+    needs no repository to do that, the payload alone answering which round stated coverage.
     """
     # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
     # It exits here with the remedy that fits it, the reader being what needs the fix.
@@ -1451,6 +1548,14 @@ def report_verdict(pr: dict) -> int:
     if not head_reviews(pr):
         return 0
     state, line = head_coverage(pr)
+    # An earlier round's statement stands until something changes it.
+    # A pull request no round ever stated coverage on is the one left with nothing to carry.
+    # That is the case exit 45 still names.
+    # The digest printed above this one says which round is carried and what changed since.
+    # So this reads the same state and says nothing, two wordings being two places to keep true.
+    carried = carried_coverage(pr) if state == UNSTATED else None
+    if carried is not None:
+        state, line, _from_head = carried
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -1475,11 +1580,13 @@ def report_verdict(pr: dict) -> int:
         return 42
     if state == UNSTATED:
         print(
-            "status=COVERAGE_IS_UNSTATED the review covering the head states no changed-file "
-            "coverage, so the review loop cannot prove that it read the full diff. Confirm the "
-            "head branch carries the current code-review skill and Copilot instructions, then "
-            "request another review. Merging without coverage is the maintainer's decision, "
-            "not the agent's."
+            "status=COVERAGE_IS_UNSTATED no round on this pull request states changed-file "
+            "coverage, this one included, so the review loop cannot prove any of them read the "
+            "full diff. A round that states none is the ordinary shape of the second overview "
+            "format and is carried over from an earlier round that states some, so reaching here "
+            "means there is none to carry. Confirm the head branch carries the current "
+            "code-review skill and Copilot instructions, then request another review. Merging "
+            "without coverage is the maintainer's decision, not the agent's."
         )
         return 45
     return 0
@@ -1900,6 +2007,14 @@ def digest(
     on_head = head_reviews(pr)
     effort, effort_source = review_effort(pr)
     cover, cover_line = head_coverage(pr)
+    # An earlier round's statement stands until something changes it.
+    # The delta below is what changed, and the maintainer reads the two together.
+    # Reassigned rather than held beside `cover`, so the field and the partial block agree.
+    carried = carried_coverage(pr) if cover == UNSTATED else None
+    carried_from, carried_since = "", ""
+    if carried is not None:
+        cover, cover_line, carried_from = carried
+        carried_since = delta_since(owner, repo, carried_from, head)
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
     # True where the connection cut off before this pull request's actual thread count.
@@ -2004,7 +2119,9 @@ def digest(
         + f"effort={effort} effort_source={effort_source} "
         # A field of its own beside that one, since a round can cover the head and read part.
         # Those two readings are what `review_on_head=yes` alone conflates.
-        f"coverage={COVERAGE_FIELD[cover]} "
+        # `carried:` prefixes the state rather than replacing it.
+        # What the earlier round said is the reading, and which round said it is the provenance.
+        f"coverage={CARRIED + ':' if carried else ''}{COVERAGE_FIELD[cover]} "
         # Every other field on this line is a reading of the review.
         # This one says whether the readings can be believed at all, so it is not a count.
         f"shapes={'UNRECOGNIZED' if unknown else 'ok'} "
@@ -2088,6 +2205,17 @@ def digest(
             "finding gets, before closing the review loop. A thread past the hundred this reads "
             "would count here too, and `threads=` carries a trailing `+` where that page was cut"
         )
+    if carried is not None:
+        # Printed whatever the carried state is, the provenance being the same question either way.
+        # A carried partial then prints its own block under this one.
+        lines.append(
+            f"  COVERAGE IS CARRIED: the round covering the head states none, which is the "
+            f"ordinary shape of the second overview format rather than a defect in it. The "
+            f"newest round that states any is {carried_from[:8] or 'a commit this cannot name'}, "
+            f"and {carried_since}. Whether that round still covers this head is the "
+            f"maintainer's reading, and the delta is what to read it from"
+        )
+        lines.append(f"    {cover_line}")
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
