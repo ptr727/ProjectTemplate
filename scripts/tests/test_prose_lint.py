@@ -4519,12 +4519,31 @@ class TestTheIssueRefRule(unittest.TestCase):
         """
         for name, text in (
             ("a.py", "#1011 was the cause.\nx = 1\n"),
-            ("b.py", "x = 1  #1011 caused it\n"),
             ("a.sh", "#1011 was the cause.\nx=1\n"),
+            ("a.yml", "#1011 was the cause.\nkey: 1\n"),
         ):
             with self.subTest(name=name):
                 self.assertEqual(["issue-ref"], self.kinds(name, text))
         self.assertEqual([], self.kinds("c.py", "# 1011 items were read.\nx = 1\n"))
+
+    def test_a_marker_the_language_does_not_read_as_one_reports_nothing(self) -> None:
+        """Only a marker that opens the line is read as written, since mid-line it is a guess.
+
+        The parser takes the first `#` on a line whatever the language does with it, so the written
+        spelling of a URI fragment in a YAML value, of a shell parameter expansion, and of a
+        trailing comment each carry a `#` the body does not. A leading marker is a comment in every
+        language the gate knows, and that is the position this reads.
+        """
+        for name, text in (
+            ("a.yml", "docs: https://example.invalid/spec#4217\n"),
+            ("a.yml", "other: a#1011\n"),
+            ("a.sh", "curl https://example.invalid/spec#4217 -o f\n"),
+            ("b.sh", "n=${#12}\n"),
+            ("a.toml", 'docs = "https://example.invalid/spec#4217"\n'),
+            ("b.py", "x = 1  #1011 caused it\n"),
+        ):
+            with self.subTest(name=name, text=text):
+                self.assertEqual([], self.kinds(name, text))
 
     def test_a_non_ascii_docstring_line_does_not_shift_the_span(self) -> None:
         """`ast` reports a column as a UTF-8 byte offset, so a slice on the string mis-cuts.
@@ -4571,6 +4590,10 @@ class TestTheIssueRefRule(unittest.TestCase):
         for name in ("README.md", "TODO.md", "HISTORY.md", "docs/rollout.md", "scripts/README.md"):
             with self.subTest(name=name):
                 self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        # A README under a Skills root is rule text by its root, which the rule says in so many words.
+        self.assertEqual(
+            ["issue-ref"], self.kinds(".agents/skills/README.md", "Shipped in #1011.\n")
+        )
 
     def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
         """A fence is quoted content rather than the document's own prose, as every rule reads it.

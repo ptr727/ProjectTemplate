@@ -2787,7 +2787,7 @@ def main(argv: list[str] | None = None) -> int:
     # The liveness query carries the authors, so this costs the loop no extra call.
     drift = reviewer_login_drift(pr)
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
-    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over seven consecutive pull requests that carried no Copilot activity at all.
+    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
     history = [] if done or answer or drift else copilot_history(owner, repo)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.

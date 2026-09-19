@@ -16,6 +16,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
   dead-path      No mention of a path git once tracked and the tree no longer holds.
+  issue-ref      No issue or pull request reference in a comment, a docstring, or rule text.
 
 Exit 1 if any violation is found. Read-only, never edits.
 
@@ -57,7 +58,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
-    "issue-ref": "an issue or pull request reference in a code comment, a Python docstring, or instruction text",
+    "issue-ref": "an issue or pull request reference in a code or config comment, a Python docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -1294,9 +1295,10 @@ def syntax_for(path: Path) -> Syntax | None:
 class Comment(NamedTuple):
     """A comment the parser found, and whether its marker opens the line.
 
-    `raw` carries the comment as written, marker included, where the parser has it. The body has
-    the marker and the space after it taken off, which makes `# N items` and `#N was the cause`
-    the same string, and only the second one names an issue.
+    `raw` carries the line from the marker on, where the parser has it. The body has the marker
+    and the space after it taken off, which makes `# N items` and `#N was the cause` the same
+    string, and only the second one names an issue. Whether the marker opens a comment at all is a
+    parser fact that differs by language mid-line, so a reader of `raw` has `leading` to check.
     """
 
     line: int
@@ -2110,7 +2112,12 @@ def issue_ref_findings(
         for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
             # Both spellings, since the body has the marker off and `#N` is then just its digits.
             spans.setdefault(comment.line, []).append(without_lookalikes(comment.body, False))
-            if comment.raw:
+            # The written spelling only where the marker opens the line.
+            # That is the one position every language the gate knows agrees opens a comment.
+            # Mid-line the parser takes a `#` that YAML reads inside a value and shell as an expansion.
+            # The written spelling of one of those carries the `#` this rule looks for, and the body does not.
+            # `comment-added` judges a leading comment only, for this same reason.
+            if comment.raw and comment.leading:
                 spans[comment.line].append(without_lookalikes(comment.raw, False))
         if path.suffix.lower() == ".py":
             for n, texts in python_docstring_spans(raw, lines).items():
@@ -2410,15 +2417,6 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "note: dead-path is not checked in a shallow clone, which holds no deletion "
             "history to key on. Fetch the full history to run it.",
-            file=sys.stderr,
-        )
-
-    # Announced for the same reason the two above are, though this one narrows rather than stands down.
-    if "issue-ref" in rules and not git_roots:
-        print(
-            "note: issue-ref reads comments and docstrings here and no instruction document. "
-            "Which Markdown file is instruction text is decided from the repository-relative "
-            "path, and no repository was found to take one from.",
             file=sys.stderr,
         )
 

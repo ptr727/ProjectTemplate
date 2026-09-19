@@ -206,9 +206,9 @@ No comment, no docstring, and no instruction document names an issue, a pull req
 The surfaces are code and workflow comments, a docstring, a documentation comment, the Skills
 trees, and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODESTYLE.md`,
 `GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
-`.github/copilot-instructions.md`. A README, a tracker, a history, and a plan are the repository's
-own narrative and keep their references, as do a commit message and a pull request body, which are
-the surfaces a reference belongs on.
+`.github/copilot-instructions.md`. A tracker, a history, a plan, and a README outside those trees
+are the repository's own narrative and keep their references, as do a commit message and a pull
+request body, which are the surfaces a reference belongs on.
 
 A record whose subject is the revision itself keeps it. A disproved-claims entry in
 `.github/copilot-instructions.md` names the revision its proof was read against, since a proof is

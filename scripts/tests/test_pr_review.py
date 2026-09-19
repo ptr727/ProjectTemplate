@@ -1448,7 +1448,7 @@ class TestCoverage(GqlCase):
                 self.assertEqual((pr_review.FULL, covers), pr_review.coverage_of({"body": covers}))
 
     def test_a_round_that_read_part_of_the_diff_is_a_failure_the_digest_names(self) -> None:
-        """PR 592's shape: three changed files, one never read, and it merged."""
+        """The observed shape: three changed files, one never read, and it merged."""
         line = (
             "Copilot reviewed 2 out of 3 changed files in this pull request and generated "
             "no comments."
@@ -4256,7 +4256,7 @@ class TestBodyReferences(unittest.TestCase):
                 self.assertEqual(["69688ec"], refs(f"{phrase} on this branch.")[1])
 
     def test_a_commit_stated_as_history_is_not_a_claim_about_this_branch(self) -> None:
-        """PR 592's shape: a `develop` commit named as history, correct and not on this head."""
+        """The observed shape: a `develop` commit named as history, correct and not on this head."""
         self.assertEqual(
             [],
             refs(
@@ -4266,13 +4266,13 @@ class TestBodyReferences(unittest.TestCase):
         )
 
     def test_a_sha_inside_quoted_tool_output_is_not_a_claim(self) -> None:
-        """PR 584's shape: a digest pasted to show what the tool prints."""
+        """The observed shape: a digest pasted to show what the tool prints."""
         self.assertEqual(
             [], refs("pr=108 head=9f56a472 rounds=1 review_on_head=yes threads=0 merge=CLEAN")[1]
         )
 
     def test_a_commit_in_another_repository_is_not_a_claim(self) -> None:
-        """PR 571 and 568's shape, and neither carries a URL that would mark it as elsewhere."""
+        """Two observed rounds' shape, neither carrying a URL that would mark it as elsewhere."""
         for body in (
             "Read at Blog `main@2b132e4`. Verdict operational.",
             "Both are on Blog's ground-truth `main` (`2b132e4`), verified by reading it.",
