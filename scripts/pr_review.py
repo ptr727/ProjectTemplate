@@ -104,13 +104,16 @@ Subcommands
            findings earlier rounds raised, whose total `M` undercounts. A withheld finding is owed
            the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
            `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
-           One body in that format has been read here, so what follows describes that body rather
-           than the format in general. It carried no `Suppressed comments` heading, which is why
-           this field rather than `suppressed=` is what finds a withheld finding in it, and it
-           stated its file coverage only through the `fleet-review` marker the fleet's own carried
-           `code-review` instructions ask the reviewer for. On that reading a repository not
-           carrying those instructions reads such a round as exit 45, `COVERAGE_IS_UNSTATED`,
-           which is the honest answer rather than a gap here. A later body in that format that
+           Two bodies in that format have been read here, so what follows describes those rather
+           than the format in general. Neither carried a `Suppressed comments` heading, which is
+           why this field rather than `suppressed=` is what finds a withheld finding in one.
+           Neither stated its file coverage the first format's way, and they differ on the
+           `fleet-review` marker the fleet's own carried `code-review` instructions ask the
+           reviewer for: the first carried it and the second, on a head carrying those same
+           instructions, carried no coverage statement at all and read as exit 45,
+           `COVERAGE_IS_UNSTATED`. So a round in this format states coverage inconsistently rather
+           than through one reliable line, and exit 45 on one is the honest reading of a round
+           that stated none rather than a gap here. A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
            and read wherever it sits. Whether the shortfall counts those findings a second time
            turns on whether the stated total includes them, which no body read here says, so treat
