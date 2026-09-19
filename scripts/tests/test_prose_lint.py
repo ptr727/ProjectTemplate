@@ -3976,7 +3976,7 @@ class TestTheCommentAddedRule(BaitCase):
         )
 
     def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
-        """A trailing comment is out of scope, and the languages below are why.
+        """A trailing line comment is out of scope, and the languages below are why.
 
         Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
         HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
@@ -4496,9 +4496,30 @@ class TestTheIssueRefRule(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(["issue-ref"], self.kinds(name, text))
 
-    def test_a_trailing_comment_is_out_of_scope(self) -> None:
+    def test_a_trailing_line_comment_is_out_of_scope(self) -> None:
         """The same bound `comment-added` carries, and for the same reason it carries it."""
         self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
+
+    def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
+        """The exception the bound carries, pinned here so the three files stating it stay true.
+
+        The parser tracks an open block rather than where it opened, so a continuation line reads
+        as leading whatever preceded the opener. The finding is wanted, the comment being a real
+        one carrying a real reference, and the bound is what has to say so.
+        """
+        self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.c", "int x = 1; /* see\n   #1234 for why */\n")
+        )
+
+    def test_a_block_opener_that_swallows_the_reference_hash_is_read(self) -> None:
+        """PowerShell's `<#` is the one opener in the syntax table ending in the marker character.
+
+        The body loses that `#` with the opener, so only the comment as written carries it, and
+        only a block comment bounded by its closer can be read that way without taking in code.
+        """
+        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#1011 was the cause. #>\n"))
+        self.assertEqual([], self.kinds("b.ps1", '<# Doc. #> $x = "#1011"\n'))
 
     def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
         text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'

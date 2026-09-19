@@ -180,8 +180,10 @@ A change that adds a comment line in code or config fails the `comment-added` ru
 gate. It reports a prose comment that opens its own line, in the diff's scope, and a diff counts a
 modified line as an added one, so rewording one and re-indenting one each report it. That is the
 rule's cost and the label is its answer, since a comment worth keeping takes the same label as a
-comment worth writing. A trailing comment is out of scope, since which mid-line marker opens a
-comment differs by language in ways a gate cannot settle from the marker alone. A docstring is not
+comment worth writing. A trailing line comment is out of scope, since which mid-line marker opens
+a comment differs by language in ways a gate cannot settle from the marker alone. A block comment
+that wraps is the exception, read from its second line on, since the parser tracks an open block
+rather than where it opened. A docstring is not
 a comment line, an instruction to a tool is not a comment the rule reads, and Markdown is out of
 scope.
 
@@ -232,9 +234,10 @@ carries what the reader needs, and the number of the round that found it does no
 
 The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
 request reference in a comment that opens its own line, in a Python docstring, and in instruction
-text. A trailing comment is out of scope, and so is a Markdown comment outside instruction text,
-the first because which mid-line marker opens a comment is a parser fact that differs by language,
-and the second because a README is narrative. Neither bound narrows the rule above, which a reader
+text. A trailing line comment is out of scope, and so is a Markdown comment outside instruction
+text, the first because which mid-line marker opens a comment is a parser fact that differs by
+language, and the second because a README is narrative. A block comment that wraps is read from its
+second line on either way, the parser tracking an open block rather than where it opened. Neither bound narrows the rule above, which a reader
 applies to the comment a gate does not read.
 
 A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a

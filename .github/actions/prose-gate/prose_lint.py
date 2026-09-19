@@ -764,6 +764,8 @@ def is_operations_runbook(path: Path, root: Path | None) -> bool:
 # One digit is the shape of an ordinal and of an enumeration.
 # Six is the shape of the hex color a stylesheet writes, and so are three and four.
 # A color in one of those two lengths with no letter in it is reported, which is the rule's cost.
+# So is a hash-delimited expression a leading comment quotes and whose text opens on digits.
+# A `sed` script and a pattern file's own commented-out entry are the two shapes of that.
 # A repository whose numbering reaches either bound states a reference the rule text still bans.
 ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,5}(?!\w)")
 
@@ -1960,29 +1962,30 @@ def comment_bodies(path: Path, raw: str, spec: Syntax | None = None) -> list[Com
 def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     """Every prose comment line the file holds, which the diff scope narrows to the ones in a change.
 
-    The whole file is read and `main` keeps only the lines the diff touches, which is the path every
-    other rule already takes. Read without a diff the rule would report the tree's every comment, so
-    `main` stands it down there instead.
+       The whole file is read and `main` keeps only the lines the diff touches, which is the path every
+       other rule already takes. Read without a diff the rule would report the tree's every comment, so
+       `main` stands it down there instead.
 
-    `git diff --unified=0` counts a modified line as an added one, so a change that edits the code on
-    a line carrying a trailing comment, re-indents a commented block, or rewords a comment reports
-    that comment. That is the rule's cost rather than a defect in it, and the label is the answer: an
-    earlier shape read the file at the diff's base to tell those apart, and four review passes spent
-    on the rename, duplicate, and prose-filter cases it opened bought precision this rule does not
-    need, since the remedy for a wanted comment is the same label either way.
+       `git diff --unified=0` counts a modified line as an added one, so a change that edits the code on
+       a line carrying a trailing comment, re-indents a commented block, or rewords a comment reports
+       that comment. A block comment that wraps is the exception, read from its second line on, since the parser tracks an open block rather than where it opened.
+    That is the rule's cost rather than a defect in it, and the label is the answer: an
+       earlier shape read the file at the diff's base to tell those apart, and four review passes spent
+       on the rename, duplicate, and prose-filter cases it opened bought precision this rule does not
+       need, since the remedy for a wanted comment is the same label either way.
 
-    Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
-    comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
-    of scope the way a C# `///` comment is, both being the language's documentation form rather
-    than a remark on code. It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
-    than a scan of this rule's own. Two such scans were written and each missed a marker inside a
-    string, one standing the rule down to end of file and one to the next block's terminator.
+       Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
+       comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
+       of scope the way a C# `///` comment is, both being the language's documentation form rather
+       than a remark on code. It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
+       than a scan of this rule's own. Two such scans were written and each missed a marker inside a
+       string, one standing the rule down to end of file and one to the next block's terminator.
 
-    A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
-    since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
-    `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
-    label is the remedy, since a directive whose written reason is punctuated as a sentence reads
-    as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
+       A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
+       since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
+       `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
+       label is the remedy, since a directive whose written reason is punctuated as a sentence reads
+       as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
     """
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
@@ -2091,8 +2094,8 @@ def issue_ref_findings(
     and a history exist to carry exactly these references.
 
     A Markdown comment is read only where the document is, so an HTML comment in a README is left
-    alone with the rest of the file. A trailing comment is out of scope, for the reason the body of
-    this function gives.
+    alone with the rest of the file. A trailing line comment is out of scope, for the reason the
+    body of this function gives. A block comment that wraps is the exception, read from its second line on, since the parser tracks an open block rather than where it opened.
 
     Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
     reference in a string literal is fixture data as often as it is prose: a test asserting on a
