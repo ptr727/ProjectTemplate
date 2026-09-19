@@ -214,7 +214,7 @@ class DescriptionErrorsCase(unittest.TestCase):
 
     def test_a_link_nested_inside_a_non_link_bracket_run_is_still_rejected(self) -> None:
         # A failed outer span used to jump past the whole run instead of retrying one character in.
-        # That skipped the valid inner link in `[[docs](url)]` (#1011, qodo).
+        # That skipped the valid inner link in `[[docs](url)]`.
         self.assertEqual(
             validate.description_errors("Fixture", "See [[docs](url)] for more."),
             ["Fixture: description carries Markdown links - keep it link-free plain text"],
@@ -222,7 +222,7 @@ class DescriptionErrorsCase(unittest.TestCase):
 
     def test_an_escaped_bracket_inside_a_label_does_not_corrupt_the_match(self) -> None:
         # A backslash-escaped `\[` used to count as real nesting, corrupting the label match.
-        # It reads as a literal character instead (#1011, qodo).
+        # It reads as a literal character instead.
         self.assertEqual(
             validate.description_errors("Fixture", r"See [API \[docs](url) for more."),
             ["Fixture: description carries Markdown links - keep it link-free plain text"],
@@ -248,7 +248,7 @@ class DescriptionErrorsCase(unittest.TestCase):
 
     def test_a_long_run_of_unmatched_brackets_stays_linear(self) -> None:
         # A run of unmatched '[' used to re-scan the remaining text from every position.
-        # That was O(N^2) (#1011, CodeRabbit), and a slow run here means a regression back to it.
+        # That was O(N^2), and a slow run here means a regression back to it.
         start = time.monotonic()
         validate.contains_description_markdown_link("[" * 20000)
         self.assertLess(time.monotonic() - start, 1.0)
@@ -1027,7 +1027,7 @@ class RegistryEntryGateCase(unittest.TestCase):
         )
 
     def test_the_retired_config_layout_key_is_reported_as_unknown(self) -> None:
-        """rulesetsDir and pythonConfig were read by nothing, so the pair was retired rather than wired (#1508).
+        """rulesetsDir and pythonConfig were read by nothing, so the pair was retired rather than wired.
 
         The unknown-key check is what makes the retirement stick: a re-added entry is reported rather than ignored.
         """
@@ -1118,7 +1118,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
     Two obligations, and they are different obligations. A pattern the schema copies from validate.py must stay
     byte-identical to it, or the editor and the gate drift apart silently. A pattern the schema states on its own
     must never refuse a value validate.py accepts, since an editor rejecting a valid registry is the direction
-    #1504 reverted an earlier attempt for.
+    an earlier attempt was reverted for.
     """
 
     PORTABLE_END = r"(?![\s\S])"
@@ -1161,7 +1161,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
                 self.assertEqual(pattern, constant)
 
     def test_the_schema_declares_no_retired_key(self) -> None:
-        """configLayout was retired rather than wired (#1508), and the gate's unknown-key check reads this list.
+        """configLayout was retired rather than wired, and the gate's unknown-key check reads this list.
 
         A key left here would keep an entry declaring it validating clean, which is the state the retirement ended.
         """
@@ -1705,7 +1705,7 @@ class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
     an editor green on exactly the entry the gate refuses. The two are deliberately unequal, and in one
     direction only: the schema refuses an absent, null, empty, or non-string value, and the gate refuses every
     one of those plus a value that is only whitespace. A schema pattern closing that last gap would refuse a
-    value the gate accepts, which is the direction #1504 reverted for the registry schema, for this same
+    value the gate accepts, which is the direction an earlier attempt was reverted for on the registry schema, for this same
     reason: U+FEFF is an ECMA-262 `\\s` character and `str.strip` does not remove it, so a `\\S` pattern would
     refuse a value this gate keeps.
     """

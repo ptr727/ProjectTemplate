@@ -28,7 +28,7 @@ runs:
         BASE: ${{ inputs.base }}
         PATHS: ${{ inputs.paths }}
         # A caller reaches this gate at whatever hub commit its workflow pins, and only the action knows which one that is, since a checked-out action carries no history to read it from.
-        # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap, which is the reading it got on #1412.
+        # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap.
         # Both the context and the default environment variable are read, because the context's value for a repository-relative reference is undocumented and the two are populated by different paths.
         # Either being empty leaves the script to fall back to its own checkout, which is the correct answer whenever the action was not fetched from a pin.
         # This repository calls the reusable workflow by a workspace-relative path, so its own runs may well take that fallback, and a downstream repository calling it at a pin is the case these exist for.

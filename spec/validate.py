@@ -32,7 +32,7 @@ BRANCH_POLICIES = ("custom", "none")
 # Stated positively a grammar admits nothing invisible, needs no notion of whitespace at all, and cannot drift when a Python release changes what str.isspace() answers.
 # Each pattern below means the same thing in Python re and in ECMA-262, the engine an editor resolving registry/repos.schema.json actually uses.
 # That schema therefore carries these exact strings, and scripts/tests/test_spec_validate.py asserts that it still does.
-# The portability is what makes an editor-side copy safe at all, since #1504 reverted an earlier attempt for leaving the editor refusing values the gate allowed.
+# The portability is what makes an editor-side copy safe at all, since an earlier attempt was reverted for leaving the editor refusing values the gate allowed.
 # `$` is end-of-string in only one of the two, since Python's also matches just before a trailing newline.
 # `(?![\s\S])` is end-of-string in both, because `\s` and `\S` name different sets in the two engines while their union is every character in each.
 # One line of printable ASCII with no leading or trailing space, for a deployment environment `name`.
@@ -117,14 +117,14 @@ def _bracket_matches(text, open_char, close_char):
     nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
     mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
     counting scan per open position: re-scanning from every unmatched open is what made a prior version of
-    this walk O(N^2) on a run of N unmatched opens (#1011, CodeRabbit, on spec/audit.py's sibling
-    implementation). A close pops the most recently pushed open, the same pairing a fresh depth count from
+    this walk O(N^2) on a run of N unmatched opens, as it did in spec/audit.py's sibling
+    implementation. A close pops the most recently pushed open, the same pairing a fresh depth count from
     that open would find, so this is one pass, not N. An open with no closing partner, or a close with
     nothing open, is left out of the map, same as before.
 
     A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
     matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
-    count (#1011, qodo).
+    count.
     """
     stack = []
     matches = {}
@@ -165,7 +165,7 @@ def contains_description_markdown_link(text):
             return True
         # This span is not itself a link.
         # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
-        # Retry one character in rather than skipping past the whole span (#1011, qodo).
+        # Retry one character in rather than skipping past the whole span.
         i += 1
     return False
 
@@ -766,7 +766,7 @@ def main():
         )
 
     # Checked here because registry/repos.schema.json holds this key to the same grammar the per-repo field uses.
-    # An advisory schema stricter than the gate is the direction #1504 was reverted for.
+    # An advisory schema stricter than the gate is the direction an earlier attempt was reverted for.
     errors.extend(ground_truth_branch_errors_for_repo(reg_defaults, "defaults"))
 
     # Both the defaults object and a repo entry are marked `additionalProperties: false` in registry/repos.schema.json, and no gate runs that schema, so a misspelled key passes CI today.

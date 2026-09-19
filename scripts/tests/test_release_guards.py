@@ -160,8 +160,7 @@ BARE_PREDICATE = re.compile(
 )
 # A wide class written into a pattern does the same as a bare call.
 # `re.UNICODE` is the default for a `str` pattern.
-# Only the `\s` spelling is reached, not `\S` or a set built from either
-# (ptr727/ProjectTemplate#1618).
+# Only the `\s` spelling is reached, not `\S` or a set built from either.
 WIDE_CLASS = re.compile(r"\\s")
 
 
@@ -617,8 +616,7 @@ class ReleaseGuardCase(unittest.TestCase):
         The four functions named below are read, rather than only the one that had the defects,
         since moving a predicate into another of them is the cheapest way past a check that reads
         one. Module-level code is not read, and the set of functions is a literal here rather than
-        derived, so a predicate placed outside both is caught by the behaviour cases or not at all
-        (ptr727/ProjectTemplate#1618).
+        derived, so a predicate placed outside both is caught by the behaviour cases or not at all.
         """
         # The detector is run against source written to fail it.
         # One that only ever sees a clean file can stop working with nothing to show for it.

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Deterministic pre-push checks for GOVERNANCE.md rules nothing else enforces.
 
-Each check maps to a recurring review-finding category (counts from a 1,047-finding audit
-of this repo's Copilot reviews):
+Each check maps to a recurring review-finding category. A count beside one is that
+category's share of a 1,047-finding audit of this repo's Copilot reviews:
 
   sha-pin       Action SHA-pinning gaps                        25 findings  (GOVERNANCE.md rule)
   eol           .editorconfig <-> .gitattributes disagreement  40 findings
-  eol-coverage  Git attribute resolution differs from policy   ptr727/ProjectTemplate#633
+  eol-coverage  Git attribute resolution differs from policy   count not recorded
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining

@@ -607,7 +607,7 @@ docker_source() {
 # Read directly from the CLI rather than from apt_installed_version docker-ce, unlike gh and node.
 # On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all, and reading the apt package version would misreport that working install as absent.
 # This also matches exactly what scripts/host_gate.py's own probes and pattern read, in the same order, so the two never disagree about one host.
-# The daemon is asked first and its own banner is the fallback, because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine, and the two carry different versions (issue #751 recorded a 29.1.3 client against a 29.7.2 engine).
+# The daemon is asked first and its own banner is the fallback, because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine, and the two carry different versions (a 29.1.3 client against a 29.7.2 engine was measured).
 # A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers, so this reports the weaker number rather than nothing.
 docker_version() {
     command -v docker >/dev/null || return 0

@@ -16,6 +16,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
   dead-path      No mention of a path git once tracked and the tree no longer holds.
+  issue-ref      No issue or pull request reference in a leading comment, a docstring, or rule text.
 
 Exit 1 if any violation is found. Read-only, never edits.
 
@@ -29,6 +30,7 @@ diff's content reaches no further than the hunk headers this file reads out of i
 from __future__ import annotations
 
 import argparse
+import ast
 import functools
 import io
 import json
@@ -56,6 +58,7 @@ RULES = {
     "spelling": "a British spelling where the repo convention is US English",
     "home-path": "an absolute home path naming a real account",
     "dead-path": "a mention of a path git once tracked and the tree no longer holds",
+    "issue-ref": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text",
 }
 DEFAULT_RULES = frozenset(
     {
@@ -70,6 +73,7 @@ DEFAULT_RULES = frozenset(
         "comment-added",
         "home-path",
         "dead-path",
+        "issue-ref",
     }
 )
 
@@ -752,6 +756,77 @@ def is_operations_runbook(path: Path, root: Path | None) -> bool:
     return root is not None and path.resolve() == (root / "OPERATIONS.md").resolve()
 
 
+# The pattern-detectable half of the reference ban, and only that half.
+# An issue or a pull request reference has one shape, and a commit does not.
+# A short SHA is the same shape as a blob id, a version fragment, and a fixture hash.
+# Telling those apart needs the meaning rather than the shape, so the rule text covers that half.
+# Five digits is the ceiling and two is the floor, and each bound trades a detection for a shape.
+# One digit is the shape of an ordinal and of an enumeration.
+# Six is the shape of the hex color a stylesheet writes, and so are three and four.
+# A color in one of those two lengths with no letter in it is reported, which is the rule's cost.
+# So is a hash-delimited expression a leading comment quotes and whose text opens on digits.
+# A `sed` script and a pattern file's own commented-out entry are the two shapes of that.
+# A repository whose numbering reaches either bound states a reference the rule text still bans.
+ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,5}(?!\w)")
+
+# A URI, whose fragment is a number after a `#` and is not a reference to anything here.
+URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
+
+# The Skills roots, source and both generated distributions, whose every Markdown file is rule text.
+# A plugin tree carries one root per plugin, so that one is matched by its two fixed ends.
+# Matching any directory named `skills` instead would gate a product's own source tree as fleet law.
+SKILL_ROOTS = (".agents/skills/", ".github/skills/")
+PLUGIN_ROOT = ".claude-plugin/"
+PLUGIN_SKILLS = "/skills/"
+
+# Markdown an agent reads as instructions, where the ban reaches the document and not only its comments.
+# A skill is law wherever it loads, and these documents are the fleet's own rule text.
+# A README, a tracker, a history, and a plan are the repository's own narrative and keep their references.
+INSTRUCTION_DOCS = frozenset(
+    {
+        "AGENTS.md",
+        "AUDIT.md",
+        "CLAUDE.md",
+        "CODESTYLE.md",
+        "GOVERNANCE.md",
+        "OPERATIONS.md",
+        "RESYNC.md",
+        "STANDUP.md",
+        "WORKFLOW.md",
+        ".github/copilot-instructions.md",
+    }
+)
+
+
+def is_instruction_text(path: Path, root: Path | None) -> bool:
+    """Whether this Markdown file is instruction text rather than the repository's own narrative.
+
+    A skill is matched by its root rather than by its name, since the source tree and each
+    generated distribution carry the same file under a root of its own.
+    """
+    if path.suffix.lower() != ".md":
+        return False
+    key = repo_key(path, root) if root is not None else rel(path)
+    if key in INSTRUCTION_DOCS or key.startswith(SKILL_ROOTS):
+        return True
+    return key.startswith(PLUGIN_ROOT) and PLUGIN_SKILLS in key[len(PLUGIN_ROOT) :]
+
+
+def comment_syntax_including_docs(path: Path) -> Syntax | None:
+    """This file's comment syntax with its documentation markers cleared, or None where it has none.
+
+    `comment-added` skips a documentation comment because CODESTYLE governs its shape. A reference
+    in one is the same defect as a reference in any other comment, and the markers are not declared
+    evenly: a C# `///` block is one and goes unread, while `syntax_for` gives PowerShell none, so
+    the `<# #>` block beside it is read. Clearing them is what makes the two agree.
+    """
+    spec = syntax_for(path)
+    if spec is None:
+        return None
+    widened: Syntax = {**spec, "doc": ()}
+    return widened
+
+
 def quoted(paths) -> str:
     """Paths as a sorted, quoted, comma-joined list for an error message.
 
@@ -1220,11 +1295,17 @@ def syntax_for(path: Path) -> Syntax | None:
 
 
 class Comment(NamedTuple):
-    """A comment the parser found, and whether its marker opens the line."""
+    """A comment the parser found, and whether its marker opens the line.
+
+    `raw` carries the comment as written, marker included, where the parser has it. The body has
+    the marker and the space after it taken off, which makes `# N items` and `#N was the cause` the
+    same string, and only the second one names an issue.
+    """
 
     line: int
     body: str
     leading: bool
+    raw: str = ""
 
 
 class Carried(NamedTuple):
@@ -1610,7 +1691,7 @@ def python_comments(raw: str) -> list[Comment] | None:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()
                 body = tok.string.lstrip("#").strip()
-                out.append(Comment(tok.start[0], body, leading))
+                out.append(Comment(tok.start[0], body, leading, tok.string))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return out
@@ -1721,13 +1802,14 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if isinstance(found, str):  # a line comment runs to end of line
                 body = line[at + len(found) :].strip()
                 if body:
-                    out.append(Comment(n, body, leading))
+                    out.append(Comment(n, body, leading, line[at:]))
                 break
             opener, closer = found
             end = line.find(closer, at + len(opener))  # a quote in the comment is prose
             body = (line[at + len(opener) : end if end >= 0 else None]).strip()
             if body:
-                out.append(Comment(n, body, leading))
+                written = line[at : end + len(closer)] if end >= 0 else line[at:]
+                out.append(Comment(n, body, leading, written))
             if end < 0:
                 closing = closer
                 break
@@ -1772,7 +1854,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, body, leading in comments:
+    for n, body, leading, _raw in comments:
         if (
             not body
             or NOT_PROSE.search(body)
@@ -1943,6 +2025,136 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
+def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
+    """Each source line a docstring occupies, mapped to the docstring text on that line.
+
+    `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
+    where it opens a body, and a docstring's own text may hold one. Empty where the source will
+    not parse.
+
+    The source text is returned rather than the docstring's value, so a reference is reported on
+    the line that carries it. A value has its escapes resolved, which no longer maps to a line.
+    Sliced at the node's own columns rather than taken as whole lines, since a statement can share
+    a line with the closing quote and reading it would report a string literal this rule excludes.
+    """
+    try:
+        tree = ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return {}
+    out: dict[int, list[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body or not isinstance(node.body[0], ast.Expr):
+            continue
+        first = node.body[0].value
+        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            continue
+        last = first.end_lineno or first.lineno
+        for n in range(first.lineno, last + 1):
+            if n > len(lines):
+                continue
+            # `ast` reports a column as a UTF-8 byte offset, so the slice is taken on the bytes.
+            # On the string one non-ASCII character before the closing quote over-runs the span.
+            # One before the opening quote under-runs it and cuts the text this rule reads.
+            data = lines[n - 1].encode("utf-8")
+            end = first.end_col_offset if n == last and first.end_col_offset is not None else None
+            start = first.col_offset if n == first.lineno else 0
+            out.setdefault(n, []).append(data[start:end].decode("utf-8", "replace"))
+    return out
+
+
+def without_lookalikes(text: str, markdown: bool) -> str:
+    """This span with the runs a reference cannot legitimately sit in blanked out.
+
+    A URI fragment is a number after a `#` and is not a reference, and in Markdown neither is a
+    link destination, an in-document anchor to a heading that opens on a number carrying the same
+    shape. Blanked rather than spliced out, so one pass over a span holding several of them cannot
+    shift the bounds of the next.
+    """
+    spans = [(m.start(), m.end()) for m in URI_SPAN.finditer(text)]
+    if markdown:
+        for pattern in (LINK_TARGET, REF_DEF):
+            spans += [(m.start(1), m.end(1)) for m in pattern.finditer(text)]
+    if not spans:
+        return text
+    chars = list(text)
+    for start, end in spans:
+        chars[start:end] = " " * (end - start)
+    return "".join(chars)
+
+
+def issue_ref_findings(
+    path: Path, raw: str, lines: list[str], root: Path | None
+) -> list[tuple[int, str, str]]:
+    """Every issue or pull request reference on a surface the ban reaches.
+
+    Instruction text is read outside its fenced blocks, since a fence quotes content rather than
+    stating it, and every other Markdown file is left alone, since a tracker and a history exist to
+    carry exactly these references. Every line of such a document is read, so a trailing HTML
+    comment in one is read with the prose around it rather than through the comment parser.
+
+    Elsewhere a comment is read where `comment_bodies` reports its marker as opening its line,
+    which a continuation line of an open block comment is reported as doing, having no marker of
+    its own to judge. A `.py` that does not tokenize yields no comment at all there, so a reference
+    in one of its comments goes unread.
+
+    Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
+    reference in a string literal is fixture data as often as it is prose: a test asserting on a
+    handoff's own chain builds the numbers it asserts against, and reading them would report the
+    fixture rather than a claim about this repository. A documentation comment is read like any
+    other comment, unlike in `comment-added`, since a reference in one is the same defect.
+    """
+    out: list[tuple[int, str, str]] = []
+    spans: dict[int, list[str]] = {}
+    if path.suffix.lower() == ".md":
+        if not is_instruction_text(path, root):
+            return out
+        fenced = fenced_lines(lines)
+        for n, line in enumerate(lines, 1):
+            if n not in fenced:
+                spans.setdefault(n, []).append(without_lookalikes(line, True))
+    else:
+        for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
+            # A comment whose marker opens its line, and no other.
+            # Which mid-line marker opens a comment is a parser fact that differs by language.
+            # The scan takes the first one on the line whatever that language does with it.
+            # A URI fragment in a YAML value, a `sed` delimiter and a shell expansion all arrive here.
+            # A marker at the start of its line is unambiguous in every language the gate knows.
+            # `comment-added` judges a leading comment only, for this same reason.
+            # Reading the whole pre-scrub tree both ways reported the same findings either way.
+            if not comment.leading:
+                continue
+            # Both spellings, since the body has the marker off and `#N` is then just its digits.
+            spans.setdefault(comment.line, []).append(without_lookalikes(comment.body, False))
+            if comment.raw:
+                spans[comment.line].append(without_lookalikes(comment.raw, False))
+        if path.suffix.lower() == ".py":
+            for n, texts in python_docstring_spans(raw, lines).items():
+                spans.setdefault(n, []).extend(without_lookalikes(t, False) for t in texts)
+    # One finding per line per distinct reference, the line being the unit this rule reports on.
+    # `comment-added` counts a line once for the same reason, a line with two comments being one line.
+    # Here one comment is read twice over as well, as written and with its marker off.
+    seen: set[tuple[int, str]] = set()
+    for n in sorted(spans):
+        for text in spans[n]:
+            for m in ISSUE_REF.finditer(text):
+                if (n, m.group(0)) in seen:
+                    continue
+                seen.add((n, m.group(0)))
+                out.append(
+                    (
+                        n,
+                        "issue-ref",
+                        (
+                            f"issue or pull request reference {m.group(0)!r} -> "
+                            "state the constraint it stands for, or drop the clause"
+                        ),
+                    )
+                )
+    return out
+
+
 def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
@@ -1962,12 +2174,14 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     if "comment-added" in rules:
         out.extend(comment_added_findings(path, raw))
+    if "issue-ref" in rules:
+        out.extend(issue_ref_findings(path, raw, lines, root))
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
-        for ln, text, _leading in extracted_comments(path, lines):
+        for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     in_fence = False
     prev_txt = ""

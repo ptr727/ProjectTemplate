@@ -3243,8 +3243,8 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
 
     A repository reaches this gate at whatever hub commit its own workflow pins, so CI and a hub
-    checkout run different copies from the moment a rule changes until that pin moves. On #1412
-    that gap cost a full investigation: three dead-path findings raised by a pin one commit behind
+    checkout run different copies from the moment a rule changes until that pin moves. That gap
+    once cost a full investigation: three dead-path findings raised by a pin one commit behind
     the exemption that silences them reproduced against no local run, and with neither verdict
     naming its copy the only available readings were a wrong invocation or a defect in the action,
     which is what the issue proposed. Both were wrong and the version gap was not among the
@@ -4468,6 +4468,265 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             "github.base_ref == github.event.repository.default_branch) }}",
             workflow,
         )
+
+
+class TestTheIssueRefRule(unittest.TestCase):
+    """A reference to an issue or a pull request, on the surfaces the ban reaches and no others.
+
+    `root` is passed on every call, since which Markdown file is instruction text is decided from
+    the repository-relative key rather than from the name alone.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def kinds(self, name: str, text: str) -> list[str]:
+        path = self.tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return [kind for _, kind, _ in prose_lint.check_file(path, {"issue-ref"}, self.tmp)]
+
+    def test_a_comment_carries_the_finding_in_every_syntax(self) -> None:
+        for name, text in (
+            ("a.py", "# The retry is one character in (#1011).\nx = 1\n"),
+            ("a.sh", "# The retry is one character in (#1011).\nx=1\n"),
+            ("a.yml", "# The retry is one character in (#1011).\nx: 1\n"),
+            ("a.ps1", "# The retry is one character in (#1011).\n$x = 1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+
+    def test_a_trailing_line_comment_is_out_of_scope(self) -> None:
+        """The same bound `comment-added` carries, and for the same reason it carries it."""
+        self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
+
+    def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
+        """A continuation line opens its own line, so the leading test reads it as one.
+
+        `extracted_comments` reports a non-empty continuation line of an open block as leading,
+        whatever preceded the opener, since such a line carries no marker of its own to judge. The
+        finding is wanted, the comment being a real one carrying a real reference, and this case is
+        what a later change to that continuation branch has to meet.
+        """
+        self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.c", "int x = 1; /* see\n   #1234 for why */\n")
+        )
+
+    def test_a_block_opener_that_swallows_the_reference_hash_is_read(self) -> None:
+        """PowerShell's `<#` is the one opener in the syntax table ending in the marker character.
+
+        The body loses that `#` with the opener, so only the comment as written carries it, and
+        only a block comment bounded by its closer can be read that way without taking in code.
+        """
+        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#1011 was the cause. #>\n"))
+        self.assertEqual([], self.kinds("b.ps1", '<# Doc. #> $x = "#1011"\n'))
+
+    def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
+        text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'
+        path = self.tmp / "a.py"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"issue-ref"}, self.tmp)
+        self.assertEqual([3, 8], [line for line, _, _ in found])
+
+    def test_a_string_literal_is_left_alone(self) -> None:
+        """A test builds the numbers it asserts against, so reading one reports a fixture."""
+        self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
+
+    def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
+        """The body has the marker off, so the reference's own `#` is gone with it.
+
+        The comment is read as written as well, which is what tells `#N was the cause` from the
+        `# N items` the same body spells once the marker and the space are stripped. Only where the
+        marker opens the line, since mid-line the scan's own marker is a guess.
+        """
+        for name, text in (
+            ("a.py", "#1011 was the cause.\nx = 1\n"),
+            ("a.sh", "#1011 was the cause.\nx=1\n"),
+            ("a.yml", "#1011 was the cause.\nkey: 1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+        self.assertEqual([], self.kinds("c.py", "# 1011 items were read.\nx = 1\n"))
+
+    def test_a_marker_the_language_does_not_read_as_one_reports_nothing(self) -> None:
+        """Only a marker that opens the line is read as written, since mid-line it is a guess.
+
+        The parser takes the first `#` on a line whatever the language does with it, so the written
+        spelling of a URI fragment in a YAML value, of a shell parameter expansion, and of a
+        trailing comment each carry a `#` the body does not. A leading marker is a comment in every
+        language the gate knows, and that is the position this reads.
+        """
+        for name, text in (
+            ("a.yml", "docs: https://example.invalid/spec#4217\n"),
+            ("a.yml", "other: a#1011\n"),
+            ("a.sh", "curl https://example.invalid/spec#4217 -o f\n"),
+            ("b.sh", "n=${#12}\n"),
+            ("a.toml", 'docs = "https://example.invalid/spec#4217"\n'),
+            ("b.py", "x = 1  #1011 caused it\n"),
+            ("c.yml", "other: some#thing#1011\n"),
+            ("d.yml", "run: sed -i 's#build#1011#g' f\n"),
+            (".gitattributes", "* text=auto eol=lf#a#1011\n"),
+            ("c.sh", "echo a#b#1011\n"),
+        ):
+            with self.subTest(name=name, text=text):
+                self.assertEqual([], self.kinds(name, text))
+
+    def test_a_non_ascii_docstring_line_does_not_shift_the_span(self) -> None:
+        """`ast` reports a column as a UTF-8 byte offset, so a slice on the string mis-cuts.
+
+        Over-running pulls the code beside the closing quote in, which reports a string literal.
+        Under-running cuts the opening of the text, which drops the reference this rule is for.
+        """
+        wide = "\u00b5" * 10
+        self.assertEqual([], self.kinds("a.py", f'def f():\n    """{wide}"""; y = "#2022"\n'))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.py", 'def f(x="\u00b5\u00b5\u00b5\u00b5"): """#1011."""\n')
+        )
+
+    def test_a_uri_fragment_is_not_a_reference(self) -> None:
+        """A fragment is a number after a `#` and names a heading rather than an issue."""
+        self.assertEqual(
+            [], self.kinds("a.py", "# See https://example.invalid/spec#4217 here.\nx = 1\n")
+        )
+        self.assertEqual([], self.kinds("AGENTS.md", "See <https://example.invalid/spec#4217>.\n"))
+
+    def test_a_reference_definition_label_is_read(self) -> None:
+        """Only the destination is blanked, and a label renders as prose the reader sees."""
+        self.assertEqual(["issue-ref"], self.kinds("CLAUDE.md", "[#1011]: #1011\n"))
+
+    def test_a_file_that_will_not_parse_reports_nothing_rather_than_raising(self) -> None:
+        self.assertEqual([], self.kinds("a.py", "def f(:\n    # per #1011\n"))
+
+    def test_instruction_text_is_read_whole(self) -> None:
+        for name in (
+            "GOVERNANCE.md",
+            "AGENTS.md",
+            "OPERATIONS.md",
+            ".github/copilot-instructions.md",
+            ".agents/skills/x/SKILL.md",
+            ".github/skills/x/SKILL.md",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    ["issue-ref"], self.kinds(name, "The rule was settled in #1011.\n")
+                )
+
+    def test_the_repository_own_narrative_keeps_its_references(self) -> None:
+        """A tracker and a history exist to carry exactly these, and a README is not rule text."""
+        for name in ("README.md", "TODO.md", "HISTORY.md", "docs/rollout.md", "scripts/README.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        # A README under a Skills root is rule text by its root, which the rule says in so many words.
+        self.assertEqual(
+            ["issue-ref"], self.kinds(".agents/skills/README.md", "Shipped in #1011.\n")
+        )
+
+    def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
+        """A fence is quoted content rather than the document's own prose, as every rule reads it.
+
+        An inline code span is not exempt, and deliberately so, since backticks around a reference
+        are how one is ordinarily written rather than a signal that it is being quoted.
+        """
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("AGENTS.md", "A commit message reads `Fixes #1011`.\n")
+        )
+
+    def test_the_cross_repository_spelling_is_caught(self) -> None:
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.py", "# Settled in owner/repo#1011.\nx = 1\n")
+        )
+
+    def test_the_placeholder_the_rule_text_uses_escapes_its_own_gate(self) -> None:
+        """`#N` is the fleet placeholder, so a rule showing the form it bans stays clean."""
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Render it as `[#N](url/pull/N)`.\n"))
+
+    def test_a_shape_that_is_not_a_reference_is_not_matched(self) -> None:
+        for body in ("#1a2b3c", "# 1011", "ISO 1011", "#123456"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Reads {body} here.\nx = 1\n"))
+
+    def test_the_digit_bounds_are_choices_rather_than_facts_about_a_reference(self) -> None:
+        """Both bounds let a real reference through, which the rule text covers and this does not.
+
+        One digit is the shape of an ordinal and of an enumeration, and six is the shape of a hex
+        color, so each bound trades a detection for the false positives the other side carries.
+        """
+        for body in ("#5", "#123456"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Settled in {body}.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("b.py", "# Settled in #12.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("c.py", "# Settled in #12345.\nx = 1\n"))
+
+    def test_a_documentation_comment_is_read_like_any_other(self) -> None:
+        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries.
+
+        C# is the case that carries the widening. `syntax_for` gives PowerShell no documentation
+        marker to clear, since only `comment-added` reaches the spelling that has one.
+        """
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.cs", "/// <summary>See #1011</summary>\nint x = 1;\n")
+        )
+
+    def test_a_statement_sharing_the_closing_quote_line_is_not_read(self) -> None:
+        """The docstring span is sliced at its own columns, so the string beside it stays code."""
+        self.assertEqual([], self.kinds("a.py", 'def f() -> None:\n    """Doc."""; y = "#1011"\n'))
+
+    def test_one_reference_on_one_line_reports_once(self) -> None:
+        """The line is the unit, so one reference on it is one finding however many reads see it.
+
+        A docstring line carrying a comment is read twice over, and a comment is read twice again,
+        as written and with its marker off. Two distinct comments on one line collapse the same
+        way, which is what `comment-added` already does for the same reason.
+        """
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
+        )
+
+    def test_a_link_destination_is_not_a_reference(self) -> None:
+        """An anchor to a heading that opens on a number is the shape, and a destination is not prose."""
+        self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
+        self.assertEqual([], self.kinds("AGENTS.md", "[s]: #10-converge\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("GOVERNANCE.md", "See [#1011](https://x.invalid/pull/1011).\n"),
+        )
+
+    def test_only_the_skill_roots_are_instruction_text(self) -> None:
+        """A product with a `skills/` directory of its own is not carrying fleet law in it."""
+        for name in ("src/skills/notes.md", "docs/skills/guide.md", "skills/top.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds(".claude-plugin/fleet-skills/skills/x/SKILL.md", "Shipped in #1011.\n"),
+        )
+
+    def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
+        self.assertIn("issue-ref", prose_lint.RULES)
+        self.assertIn("issue-ref", prose_lint.DEFAULT_RULES)
+
+    def test_the_skill_states_the_rule_this_gate_reads(self) -> None:
+        """The gate reads one half of the ban, so the rule text has to carry the other."""
+        doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
+        section = re.search(
+            r"^## Issue, pull request, and commit references$(.*?)^## ",
+            doc,
+            re.MULTILINE | re.DOTALL,
+        )
+        if section is None:
+            self.fail("the reference-ban heading moved, so the parse is blind")
+        body = section.group(1)
+        self.assertIn("issue-ref", body)
+        self.assertIn("docstring", body)
+        # The enumeration is read out of the opening paragraph and compared both ways.
+        # Asserting only that each name appears somewhere in the section was satisfiable elsewhere.
+        # A name the surfaces sentence had dropped passed on the carve-out paragraph mentioning it.
+        opening = body.strip().split("\n\n")[0]
+        named = set(re.findall(r"`([^`]+\.md)`", opening))
+        self.assertEqual(set(prose_lint.INSTRUCTION_DOCS), named)
 
 
 class TestHarness(unittest.TestCase):

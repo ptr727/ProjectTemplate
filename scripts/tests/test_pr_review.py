@@ -214,13 +214,13 @@ REFUSED = (
     "review from Copilot again."
 )
 
-# Quoted from the corpus rather than invented: the body PR #962 here carried, byte for byte.
+# Quoted from the corpus rather than invented: the body a refused review carried, byte for byte.
 QUOTA_REFUSED = (
     "Copilot was unable to review this pull request because the user who requested the "
     "review has reached their quota limit."
 )
 
-# Quoted from the corpus rather than invented: ptr727/Blog #110's own comment, trimmed to the marker and its opening line.
+# Quoted from the corpus rather than invented: CodeRabbit's own comment, trimmed to the marker and its opening line.
 # The rest is CodeRabbit's ordinary walkthrough prose.
 RATE_LIMITED_COMMENT = (
     "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n\n"
@@ -515,7 +515,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
     def test_threads_truncated_reads_the_review_threads_page_info(self) -> None:
         """Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward
         from the first page, so `hasNextPage` alone says a page was cut, with nothing in view
-        to settle which end (#973)."""
+        to settle which end."""
         self.assertTrue(pr_review.threads_truncated(payload([review()], more_threads=True)))
         self.assertFalse(pr_review.threads_truncated(payload([review()], more_threads=False)))
 
@@ -582,7 +582,7 @@ class TestDigest(GqlCase):
         self.assertIn("merge=CLEAN", out)
 
     def test_a_truncated_thread_page_marks_the_summary_and_names_the_gap(self) -> None:
-        """#973: `reviewThreads(first:100)` carries no cursor, so a pull request with more than
+        """`reviewThreads(first:100)` carries no cursor, so a pull request with more than
         that many threads must say so rather than letting `threads=`/`unresolved=` undercount
         silently. The connection reads oldest-first, so what is cut is the newest threads."""
         self.answer(payload([review()], [thread("T1")], more_threads=True))
@@ -658,10 +658,10 @@ class TestOtherReviewers(GqlCase):
     in `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below, not here.
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
-    ruleset-gated merge (PR #915, ptr727/ProjectTemplate), since only Copilot's own threads
+    ruleset-gated merge, since only Copilot's own threads
     counted. Coverage and refusal reading stay Copilot-only: `review_on_head` above names
     Copilot's own coverage specifically, the reviewer this script requests and waits for, not
-    "no review of any kind covers this head" (#1066).
+    "no review of any kind covers this head".
     """
 
     def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
@@ -961,7 +961,7 @@ class TestSuppressed(GqlCase):
         self.assertNotIn("REVIEWS TRUNCATED", out)
 
 
-# Trimmed from CodeRabbit's own review body on ptr727/ProjectTemplate PR #1053, one file and one finding rather than the two files the live round carried.
+# Trimmed from CodeRabbit's own review body, one file and one finding rather than the two files the live round carried.
 # Its warning emoji is dropped, since this file's own charset rule keeps its literal source ASCII.
 # The leading blockquote (`>` per line) and the file-level `<details>` nesting are both kept, since both are what the reader has to see through.
 # CodeRabbit wraps its own outside-diff section in a blockquote, and the section nests one file-level wrapper deep before the finding.
@@ -986,7 +986,7 @@ def cr_outside_diff_body(count: int = 1, path: str = "a.py", finding: str = "Off
     )
 
 
-# Two findings under one file, each nested one level deeper in its own "Prompt for AI Agents" `<details>` block, the exact shape PR #1053's own round carries.
+# Two findings under one file, each nested one level deeper in its own "Prompt for AI Agents" `<details>` block, the exact shape the live round carries.
 # A lazy `<details>` pairing loses everything after: it stops at the first finding's own nested block, not the file's close.
 def cr_outside_diff_body_multi(findings: list[str], path: str = "a.py") -> str:
     entries = "".join(
@@ -1078,7 +1078,7 @@ class TestCodeRabbitOutsideDiff(GqlCase):
         self.assertIn("REVIEWS TRUNCATED", out)
 
     def test_every_finding_in_a_multi_finding_section_is_captured(self) -> None:
-        """The shape a lazy `<details>` pairing loses: PR #1053's own round nests a per-finding
+        """The shape a lazy `<details>` pairing loses: the live round nests a per-finding
         "Prompt for AI Agents" block, and a second finding sitting after that nested block's own
         close used to fall outside the captured region entirely, `cr_outside_diff=2` printing
         only the first.
@@ -1102,7 +1102,7 @@ class TestCodeRabbitOutsideDiff(GqlCase):
         self.assertIn(">&2 echo failed", out)
 
 
-# Trimmed from Qodo's own "Code Review by Qodo" comment on ptr727/ProjectTemplate PR #1062, one numbered finding rather than the two the live comment carried.
+# Trimmed from Qodo's own "Code Review by Qodo" comment, one numbered finding rather than the two the live comment carried.
 # Its nested Description/Code/Relevance/Evidence/Agent-prompt sub-summaries are kept, since those are exactly what a naive `<summary>` scan would miscount as findings of their own.
 # The badge's check mark is escaped (U+2713) rather than typed literally, keeping this file's own literal source inside the ASCII charset rule that governs the repository.
 def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str:
@@ -1448,7 +1448,7 @@ class TestCoverage(GqlCase):
                 self.assertEqual((pr_review.FULL, covers), pr_review.coverage_of({"body": covers}))
 
     def test_a_round_that_read_part_of_the_diff_is_a_failure_the_digest_names(self) -> None:
-        """PR 592's shape: three changed files, one never read, and it merged."""
+        """The observed shape: three changed files, one never read, and it merged."""
         line = (
             "Copilot reviewed 2 out of 3 changed files in this pull request and generated "
             "no comments."
@@ -2597,15 +2597,15 @@ class TestTheRoundsOwnFileTable(GqlCase):
     def test_a_table_naming_every_changed_file_corroborates_nothing(self) -> None:
         """The reporter's case, and the one the measurement answers.
 
-        All seven partial rounds on ptr727/Blog name every changed file, as do #476 and #592
-        here. So does a round stating full coverage, which is why a full table cannot separate a
-        miscount from a file that went unread.
+        All seven partial rounds in the sibling corpus name every changed file, as do two of the
+        four here that carry a table. So does a round stating full coverage, which is why a full
+        table cannot separate a miscount from a file that went unread.
         """
         body = summarized(["a.py", "b.md", "c.yml"], covers=self.PART)
         self.assertIn("corroborates nothing", self.reading(body, ["a.py", "b.md", "c.yml"]))
 
     def test_a_table_short_by_what_the_counts_leave_unread_names_the_file(self) -> None:
-        """#479 states 16 of 17 and names 16, omitting `GOVERNANCE.md`.
+        """One round states 16 of 17 and names 16, omitting `GOVERNANCE.md`.
 
         It is the only round on record whose table locates the unread file, and it is reported
         as a lead rather than as a verdict, the table being prose the reviewer writes.
@@ -2618,7 +2618,7 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("lead to check rather than a verdict", out)
 
     def test_a_path_the_diff_does_not_carry_disqualifies_the_naming(self) -> None:
-        """#606 names `GOVENANCE.md`, which no diff here carries.
+        """One round names `GOVENANCE.md`, which no diff here carries.
 
         A misspelled path drops the real file into the omissions, where the arm above would read
         it as the one nobody reviewed, so a table naming anything outside the diff names nothing.
@@ -2631,7 +2631,7 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertNotIn("omits exactly", out)
 
     def test_a_table_short_by_more_than_the_counts_tracks_neither(self) -> None:
-        """#609 states 61 of 62 and names 50, so the shortfalls disagree by eleven files."""
+        """One round states 61 of 62 and names 50, so the shortfalls disagree by eleven files."""
         out = self.reading(summarized(["a.py"], covers=self.PART), ["a.py", "b.md", "c.yml"])
         self.assertIn("names 1 of the 3 changed files", out)
         self.assertIn("names no unread file", out)
@@ -2656,7 +2656,7 @@ class TestTheRoundsOwnFileTable(GqlCase):
     def test_the_table_is_read_from_any_round_on_the_head_rather_than_the_deciding_one(
         self,
     ) -> None:
-        """A re-request restates the counts and carries no table, and #474 is that pair.
+        """A re-request restates the counts and carries no table, and one commit carries that pair.
 
         Thirteen commits here carry more than one round, and on one of them a round with a table
         sits beside a round without, so which of the two the verdict reads must not decide
@@ -3391,7 +3391,7 @@ class TestCli(GqlCase):
         self.assertNotIn("REQUEST NOT PICKED UP", out)
 
     def test_a_pending_request_can_complete_without_pickup_telemetry(self) -> None:
-        """The PR #873 lifecycle reaches a review without `copilot_work_started`."""
+        """One observed lifecycle reaches a review without `copilot_work_started`."""
         self.answer(payload([review(oid=OLD)], pending=True), payload([review()], pending=True))
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7", "--timeout", "600"]))
@@ -3522,8 +3522,8 @@ class TestCli(GqlCase):
         self.assertIn("no Copilot review found", self.out.getvalue())
 
     def test_wait_widens_the_lookback_when_the_narrow_window_is_empty(self) -> None:
-        """The end-to-end path for #985: `wait`'s own auto-request still finds a bot id once
-        the narrow window has aged out, rather than falling back to polling only."""
+        """The end-to-end path for a widened lookback: `wait`'s own auto-request still finds a
+        bot id once the narrow window has aged out, rather than falling back to polling only."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         calls: list[tuple[str, dict]] = []
 
@@ -3568,7 +3568,7 @@ class TestCli(GqlCase):
         self.assertNotIn("auto-request:", self.out.getvalue())
 
     def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
-        """The shape observed live on ptr727/Blog #108 and #109: no Copilot activity at all on
+        """The shape observed live on two consecutive pull requests: no Copilot activity at all on
         this pull request, while the reviewer's own most recent word anywhere in the repository
         is the account quota. Polling this pull request's silence for the full timeout would
         only relearn that same account state a call late, so the wait stops here instead."""
@@ -3775,8 +3775,8 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual([969, 962], [number for number, _ in history])
 
     def test_an_empty_narrow_window_widens_before_giving_up(self) -> None:
-        """The gap #985 fixes: an outage outlasting HISTORY_PRS pull requests must not silently
-        revert every caller to blind polling for the rest of the outage."""
+        """The gap the wider window fixes: an outage outlasting HISTORY_PRS pull requests must
+        not silently revert every caller to blind polling for the rest of the outage."""
         self.answer(payload([]))
         seen: list[object] = []
 
@@ -4256,7 +4256,7 @@ class TestBodyReferences(unittest.TestCase):
                 self.assertEqual(["69688ec"], refs(f"{phrase} on this branch.")[1])
 
     def test_a_commit_stated_as_history_is_not_a_claim_about_this_branch(self) -> None:
-        """PR 592's shape: a `develop` commit named as history, correct and not on this head."""
+        """The observed shape: a `develop` commit named as history, correct and not on this head."""
         self.assertEqual(
             [],
             refs(
@@ -4266,13 +4266,13 @@ class TestBodyReferences(unittest.TestCase):
         )
 
     def test_a_sha_inside_quoted_tool_output_is_not_a_claim(self) -> None:
-        """PR 584's shape: a digest pasted to show what the tool prints."""
+        """The observed shape: a digest pasted to show what the tool prints."""
         self.assertEqual(
             [], refs("pr=108 head=9f56a472 rounds=1 review_on_head=yes threads=0 merge=CLEAN")[1]
         )
 
     def test_a_commit_in_another_repository_is_not_a_claim(self) -> None:
-        """PR 571 and 568's shape, and neither carries a URL that would mark it as elsewhere."""
+        """Two observed rounds' shape, neither carrying a URL that would mark it as elsewhere."""
         for body in (
             "Read at Blog `main@2b132e4`. Verdict operational.",
             "Both are on Blog's ground-truth `main` (`2b132e4`), verified by reading it.",
@@ -4741,7 +4741,7 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
 
 
 class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
-    """#1561: an inherited environment must not redirect the probe, by either mechanism.
+    """An inherited environment must not redirect the probe, by either mechanism.
 
     `GIT_DIR` and `GIT_COMMON_DIR` each override repository discovery on their own. `GIT_WORK_TREE`
     and `GIT_OBJECT_DIRECTORY` are stripped as part of the same discovery set but demonstrate no
@@ -4999,7 +4999,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
 
 
 class TestWaitStaysInScope(unittest.TestCase):
-    """#1562: `wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
+    """`wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
 
     def test_a_cross_owner_target_is_refused_before_the_wait_reads_or_writes_anything(self) -> None:
         """Both transports raise on any call, so a reverted check fails fast rather than
