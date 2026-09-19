@@ -1540,7 +1540,7 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A sentence wrapping through one reports the line under it for case instead of the wrap.
 # A sentence ending on one loses its wrap with nothing reported at all.
 # The guard refuses a value ending in a full stop, an FQDN being the case.
-# It cannot drop the full stop without dropping the sentence guard, so that finding stands.
+# The terminator cannot drop the full stop without dropping the guard, so that finding stands.
 # This repository carries no instance of any of the three, so measuring it bounds none of them.
 # `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
 # `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
