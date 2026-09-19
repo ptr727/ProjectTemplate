@@ -78,7 +78,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    read the review body for them, and dispose of each as this section's outcomes require. The body
    read in that format so far carried no `Suppressed comments` heading, so `suppressed=` finds
    nothing in it and there is no collapsed block to quote a count from: the digest's shortfall and
-   the body's own prose are what an answer cites instead.
+   the body's own prose are what an answer cites instead. Where such a body does collapse one, the
+   same findings are counted twice, once by `suppressed=` and once in the shortfall, so answer them
+   once and expect both numbers to name them.
+   `T` reads `?` where no total was found, which is a round stating none and equally one this
+   reader could not locate, so it satisfies this item no more than a number does: read the body.
+   A shortfall can also be this reader undercounting rather than the round withholding, where a
+   round's enumeration carries findings that earlier rounds raised, so confirm against the body
+   before treating one as a finding with no thread.
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a

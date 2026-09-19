@@ -1989,8 +1989,12 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
     def test_the_format_is_recognized_by_its_marker_on_a_line_of_its_own(self) -> None:
-        """The marker is an HTML comment, so it renders invisibly and a writer naming one has no
-        reason to quote it. This change's own prose carries it bare."""
+        """The marker is an HTML comment, so a writer who wants a reader to see it has to quote it,
+        which is why a fence and a code span are masked before the search.
+
+        The line anchor is what tells a body written in the format from one writing about it, and
+        the bound is three spaces, a fourth making the line a code block instead.
+        """
         self.assertTrue(pr_review.second_format(overview_v2()))
         for label, body in (
             ("mid-sentence", f"{OVERVIEW}\nThe reader keys on {CCR_MARKER} bodies.\n"),
@@ -2003,6 +2007,47 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertFalse(pr_review.second_format(body))
         # Three spaces are still the marker, which is the rule a fence is read by.
         self.assertTrue(pr_review.second_format(f"   {CCR_MARKER}\n"))
+
+    def test_each_of_the_preamble_s_two_bounds_reads_three_spaces_and_refuses_four(self) -> None:
+        """Both bounds are three spaces, and each was pinned on one side only.
+
+        A fourth space, or a tab, makes the line a Markdown code block and so a quotation. A total
+        the bound wrongly refuses prints `?` over a round that stated one. An opener the bound
+        wrongly accepts ends the preamble early and throws the round's total away with it, which
+        prints `?` too, over a round that may have withheld findings.
+        """
+        for indent in ("", " ", "  ", "   "):
+            with self.subTest(total_read=f"{len(indent)} spaces"):
+                self.assertEqual(
+                    3, pr_review.stated_total(overview_v2(findings=f"{indent}**Findings:** 3"))
+                )
+        for indent in ("    ", "\t"):
+            with self.subTest(total_refused=repr(indent)):
+                self.assertIsNone(
+                    pr_review.stated_total(overview_v2(findings=f"{indent}**Findings:** 40"))
+                )
+        # An opener a code block holds is a quotation, leaving the preamble running.
+        # One at the margin is a section, and ends it.
+        for indent, want in (("    ", 3), ("\t", 3), ("", None), ("  ", None)):
+            with self.subTest(opener=repr(indent)):
+                body = overview_v2(findings="**Findings:** 3").replace(
+                    "The change is narrow.", f"Example:\n\n{indent}<details>\n{indent}</details>\n"
+                )
+                self.assertEqual(want, pr_review.stated_total(body))
+
+    def test_the_marker_line_carries_nothing_after_it(self) -> None:
+        """The line anchor's closing half, which no case held: every one put text before the marker,
+        which the opening half already refuses."""
+        self.assertFalse(pr_review.second_format(f"{CCR_MARKER} and prose besides\n"))
+        self.assertTrue(pr_review.second_format(f"{CCR_MARKER}\t \n"))
+
+    def test_a_multi_line_code_span_is_masked_before_either_reading(self) -> None:
+        """The mask's own case, isolated. A one-line span is refused by the line anchor with or
+        without it, so only a span spelled across lines tells the two apart."""
+        spanned = f"{CCR_MARKER}\n\n`quoted\n**Findings:** 40\nend`\n\n**Findings:** 3\n"
+        self.assertEqual(3, pr_review.stated_total(spanned))
+        opener = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
+        self.assertEqual(3, pr_review.stated_total(opener))
 
     def test_the_stated_total_comes_from_the_overview_preamble(self) -> None:
         """A total inside a collapsed section is that section's own, and reading one as the round's

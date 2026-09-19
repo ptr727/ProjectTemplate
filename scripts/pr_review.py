@@ -96,9 +96,12 @@ Subcommands
            shortfall by counting something that was not an entry, telling those apart needing a
            Markdown parser rather than a line scan.
            A total larger than the thread count is findings the round raised that polling threads
-           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall. A
-           thread past the hundred `reviewThreads` reads would count in `M` too, so a cut page
-           overstates the shortfall, and `threads=` carries the trailing `+` that says so. A
+           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall. Two
+           things overstate it rather than hiding it, so a shortfall is confirmed against the body
+           rather than acted on from the number: a thread past the hundred `reviewThreads` reads
+           would count in `M` too, and `threads=` carries the trailing `+` that says the page was
+           cut, and a round whose enumeration lists findings earlier rounds raised states a total
+           `M` counts none of. A
            withheld finding is owed the triage a suppressed one is. No exit code rides on it, the
            same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says is the
            reader's to judge.
@@ -110,7 +113,10 @@ Subcommands
            carrying those instructions reads such a round as exit 45, `COVERAGE_IS_UNSTATED`,
            which is the honest answer rather than a gap here. A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
-           and read wherever it sits. A later body stating coverage is the other way round: the
+           and read wherever it sits, and counted in the shortfall as well, since the total counts
+           it and no thread carries it, so one finding is named by both numbers.
+           An HTML comment is the one quotation shape neither mask strips, so a column-0 `<details>`
+           inside a multi-line one ends the preamble and prints `?`. A later body stating coverage is the other way round: the
            reader requires a bullet, and this format states its metadata on bare bold lines, which
            is why `effort=` had to drop that requirement, so the spelling such a body would most
            likely use is the one `coverage=` does not see. It reads as unstated and blocks at exit
