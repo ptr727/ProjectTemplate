@@ -3976,7 +3976,7 @@ class TestTheCommentAddedRule(BaitCase):
         )
 
     def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
-        """A trailing line comment is out of scope, and the languages below are why.
+        """A trailing comment is out of scope, and the languages below are why.
 
         Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
         HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
@@ -4501,11 +4501,11 @@ class TestTheIssueRefRule(unittest.TestCase):
         self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
 
     def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
-        """The exception the bound carries, pinned here so the three files stating it stay true.
+        """A continuation line opens its own line, so the leading test reads it as one.
 
-        The parser tracks an open block rather than where it opened, so a continuation line reads
-        as leading whatever preceded the opener. The finding is wanted, the comment being a real
-        one carrying a real reference, and the bound is what has to say so.
+        The parser tracks an open block rather than where it opened, so this holds whatever
+        preceded the opener. The finding is wanted, the comment being a real one carrying a real
+        reference, and the case is here so a later change to that branch has to meet it.
         """
         self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
         self.assertEqual(
