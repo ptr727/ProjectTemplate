@@ -436,12 +436,23 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The rest of the line is taken whole rather than its first number.
 # The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
 CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
-# A count is one the line pairs with a badge, which is how the format writes a severity.
-# Summing every integer instead read an anchor id out of a markdown link as a finding total.
-# `1 [medium](.../pull/7#discussion_r2404123456)` then stated two billion findings.
-PAIRED_COUNT = re.compile(r"(\d+)\s*(?:<[^>]*>|!?\[[^\]]*\]\([^)]*\))")
-# The whole total where the line pairs nothing, which is how the first format writes one.
-LEADING_COUNT = re.compile(r"^\s*(\d+)(?!\d)")
+# The markup the format writes a count beside, replaced by one sentinel before a count is read.
+# Masked rather than matched around, because a badge carries digits of its own in its attributes.
+# `2 <img src="b.svg" width="62" height="18">` read `18` as a severity count on that reasoning.
+# Dropping the markup outright would join the digits either side of it into one number instead.
+COUNT_MARKUP = re.compile(r"<[^>]*>|!?\[[^\]]*\]\([^)]*\)")
+# A control character, so no body can carry one of its own and be read as having a count here.
+MARKUP_MASK = "\x00"
+# A count is one the line pairs with that markup, which is how the format writes a severity.
+COUNT_PAIRED = re.compile(r"(\d+)\s*" + MARKUP_MASK)
+# Every integer the markup did not swallow, which is how the first format writes a bare total.
+COUNT_LOOSE = re.compile(r"\d+")
+# A total of zero spelled in words, anchored to where the line states its total.
+# Read as a bare substring instead, `see nonetheless the summary below` stated a zero.
+# Emphasis markers are skipped, the format writing the word italicized as often as bare.
+# Bounded by a lookahead rather than by `\b`, since `_` is a word character.
+# `_None_` then ended on no boundary at all, reading an italicized stated zero as none stated.
+STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -483,6 +494,8 @@ WINDOW = 100
 # A path missing from a short window reads exactly like a path the reviewer left out.
 # The record holds a pull request of 301 changed files, so the truncation is reachable here.
 FILES_WINDOW = 100
+# The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
+COMPARE_FILE_CAP = 300
 
 # How many rollup contexts the full query asks for, which is not the window above.
 # The query is built from this and the truncation line quotes it, so the two cannot drift.
@@ -548,7 +561,7 @@ mutation($pr:ID!,$bot:ID!){
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    headRefOid mergeable mergeStateStatus
+    headRefOid baseRefName mergeable mergeStateStatus
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
@@ -1150,8 +1163,9 @@ def carried_coverage(pr: dict) -> tuple[str, str, str] | None:
     as it was: a round that read part of the diff carries partial, since the part it never read is
     still unread.
 
-    `newest_of` rather than a sort, for the reason it documents: two rounds share a timestamp
-    often enough to decide a digest, and a stable sort then returns the older of the two. Returned
+    `newest_of` rather than plain `max`, for the reason it documents: two rounds share a
+    timestamp often enough to decide a digest, `max` returns the first maximal element, and
+    `reviewer_nodes` returns these oldest first, so a tie selected the older of the two. Returned
     that way a partial round outranked the full one stamped in the same second, or the reverse,
     on nothing but the order the connection happened to list them in.
     """
@@ -1191,7 +1205,8 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
         return "nothing changed between them"
     proc = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{head}",
-        r'"\(.files | length) \(.ahead_by)"',
+        r'if (.files | type) == "array" and (.ahead_by | type) == "number" '
+        r'then "\(.files | length) \(.ahead_by)" else empty end',
     )
     if proc.returncode != 0 or not proc.stdout.strip():
         return "the delta between them could not be read"
@@ -1199,11 +1214,71 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
         files, commits = (int(x) for x in proc.stdout.split())
     except ValueError:
         return "the delta between them could not be read"
-    at_least = "at least " if files >= 300 else ""
+    at_least = "at least " if files >= COMPARE_FILE_CAP else ""
     return (
         f"{at_least}{files} file{'' if files == 1 else 's'} changed over "
         f"{commits} commit{'' if commits == 1 else 's'} since"
     )
+
+
+def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
+    """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
+
+    Read as a three-dot compare, which is the same merge-base reading the pull request's own file
+    list is, so the set at an earlier commit and the set at the head are two readings of one
+    question rather than two questions. Reading one side from the GraphQL payload instead would
+    compare across two APIs with two different ceilings, and a disagreement between them would
+    read as the change set having moved.
+
+    None rather than an empty set wherever the read did not happen, since a pull request that
+    changes nothing and a compare that could not be fetched take opposite decisions, and the
+    caller fails closed on the second. The API caps its file list at 300, and the response carries
+    no flag saying it did, so a set at the cap is returned as unreadable rather than as a set that
+    is probably short.
+    """
+    if not base or not commit:
+        return None
+    proc = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{commit}",
+        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        names = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
+        return None
+    return frozenset(str(n) for n in names)
+
+
+def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
+    """Whether an earlier round's coverage statement still describes this head's change set.
+
+    True only where the set of paths the pull request changes is the same at both commits, which
+    is the condition measured on this fleet: a coverage marker carries across a push that leaves
+    the change set alone and stops carrying the moment a file joins or leaves it. Two pull
+    requests measured in one promotion chain settled the direction, one holding its marker across
+    a push that kept the same three files and one losing it when a file grew to three.
+
+    A round on the head commit itself carries unconditionally, since there is no delta to judge.
+    That is the case the carry exists for, two rounds on one commit where only the first states
+    coverage, and it costs no request.
+
+    None where the comparison could not be made at all, which the caller reads as a refusal
+    rather than as a pass. A bound that fell open when it could not be measured would be the
+    unbounded carry again, reached by a different route.
+    """
+    head = pr.get("headRefOid") or ""
+    if carried_from and carried_from == head:
+        return True
+    base = pr.get("baseRefName") or ""
+    earlier = changed_at(owner, repo, base, carried_from)
+    current = changed_at(owner, repo, base, head)
+    if earlier is None or current is None:
+        return None
+    return earlier == current
 
 
 def second_format(body: str) -> bool:
@@ -1226,22 +1301,37 @@ def findings_on(tail: str) -> int | None:
     raised. `None` spelled in words is a
     stated zero, which a round raising nothing writes.
 
-    Summed over the counts the line pairs with a badge, because the format states a count per
+    The markup is masked to one sentinel first, so no digit inside it is ever read as a count.
+    Masking rather than dropping, since dropping joins the digits either side into one number.
+
+    Summed over the counts the line pairs with that markup, because the format states a count per
     severity joined by a separator that is presentation rather than structure. Paired rather than
     summing every integer, since the format writes a markdown link beside a finding and an anchor
     id is ten digits of it.
 
-    A line pairing nothing states its total as one leading number, which is the first format's
-    spelling and is read as that one number. `None` is checked last, so a line spelling a zero in
-    words and then counting something else reads as the zero it states.
+    The larger of that sum and the largest single integer on the line wins, which is the tie-break
+    `stated_total` already applies across lines and for the same reason: a line stating a total in
+    prose and pairing one severity beside it, `10 findings, 4 <b>medium</b>`, decomposes no way
+    this can tell apart from a two-severity split, and reading the pair alone stated four where
+    the round raised ten. A shortfall that is overstated is reported and read, where one the
+    reader suppressed is a merge gate that closed on findings nobody answered. That direction is
+    the whole of what is claimed here: where a line states a grand total and pairs the severities
+    it decomposes into, the two are summed together and the result overstates.
+
+    `None` is read first and anchored to the front of the line, which is where this format
+    states its total. Anchored, so a body naming the word mid-sentence does not fabricate a
+    stated zero out of a line stating no total at all, and read first because a line stating the
+    zero and then counting something else, `None found in the 3 files reviewed`, states zero
+    findings and three files. Read after the counts it reported three findings.
     """
-    counts = [int(n) for n in PAIRED_COUNT.findall(tail)]
-    if counts:
-        return sum(counts)
-    lead = LEADING_COUNT.match(tail)
-    if lead:
-        return int(lead.group(1))
-    return 0 if "none" in tail.lower() else None
+    masked = COUNT_MARKUP.sub(MARKUP_MASK, tail)
+    if STATED_NONE.search(masked):
+        return 0
+    paired = [int(n) for n in COUNT_PAIRED.findall(masked)]
+    loose = [int(n) for n in COUNT_LOOSE.findall(masked)]
+    if paired or loose:
+        return max(sum(paired), max(loose, default=0))
+    return None
 
 
 def stated_total(body: str) -> int | None:
@@ -1541,7 +1631,7 @@ def reviewer_login_drift(pr: dict) -> list[str]:
     ]
 
 
-def report_verdict(pr: dict) -> int:
+def report_verdict(pr: dict, owner: str, repo: str) -> int:
     """Print the blocking verdict's own status line, and return the exit code it carries.
 
     The unrecognized shape outranks the coverage one, because a reader that does not understand
@@ -1573,7 +1663,12 @@ def report_verdict(pr: dict) -> int:
     # That is the case exit 45 still names.
     # The digest printed above this one says which round is carried and what changed since.
     # So this reads the same state and says nothing, two wordings being two places to keep true.
+    # `carry_holds` is what bounds it, and it is read here for the same reason the state is.
+    # A carry the bound refuses leaves the state unstated, which is the case exit 45 still names.
+    # Read as falsy where the bound could not be measured, so an unreadable compare refuses too.
     carried = carried_coverage(pr) if state == UNSTATED else None
+    if carried is not None and not carry_holds(owner, repo, pr, carried[2]):
+        carried = None
     if carried is not None:
         state, line, _from_head = carried
     if state == PARTIAL:
@@ -2048,11 +2143,20 @@ def digest(
     # Gated on a round covering the head, since an empty `on_head` reads as unstated too.
     # Ungated, every push carried an earlier round forward onto a head nobody has reviewed.
     # The digest then printed a coverage block beside `review_on_head=NO`.
+    # Bounded on the change set, per `carry_holds`.
+    # A round on a commit whose diff touched other files clears no gate on a diff nobody has now.
+    # `carried` is cleared where the bound refuses, and `carried_from` is kept.
+    # So the block below names the round it declined rather than printing nothing about it.
     carried = carried_coverage(pr) if cover == UNSTATED and on_head else None
-    carried_from, carried_since = "", ""
+    carried_from, carried_since, carry_kept = "", "", None
     if carried is not None:
-        cover, cover_line, carried_from = carried
+        carried_from = carried[2]
+        carry_kept = carry_holds(owner, repo, pr, carried_from)
         carried_since = delta_since(owner, repo, carried_from, head)
+        if carry_kept:
+            cover, cover_line, _carried_from = carried
+        else:
+            carried = None
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
     # True where the connection cut off before this pull request's actual thread count.
@@ -2254,6 +2358,21 @@ def digest(
             f"maintainer's reading, and the delta is what to read it from"
         )
         lines.append(f"    {cover_line}")
+    elif carried_from:
+        # The bound refused, so the state stays unstated.
+        # The reader is told which round it declined and on what ground.
+        # The alternative is a digest printing nothing about a statement it found and did not use.
+        why = (
+            "the change set could not be read at both commits, so the bound could not be "
+            "measured and the statement is not carried"
+            if carry_kept is None
+            else "the pull request changes a different set of files at the two commits, so "
+            "that statement describes a diff this head no longer has"
+        )
+        lines.append(
+            f"  COVERAGE IS NOT CARRIED: the newest round that states any is "
+            f"{carried_from[:8] or 'a commit this cannot name'}, and {carried_since}, but {why}"
+        )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
@@ -2943,7 +3062,7 @@ def main(argv: list[str] | None = None) -> int:
         pr = gql(Q_FULL, owner, repo, a.number)
         out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
         print(out)
-        return report_verdict(pr)
+        return report_verdict(pr, owner, repo)
 
     if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
@@ -3036,7 +3155,7 @@ def main(argv: list[str] | None = None) -> int:
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
     if unrecognized_shapes(final) or reviewed_head(final):
-        verdict = report_verdict(final)
+        verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.
         # A partial round means the diff is part-reviewed, which outranks a wedged gate.
