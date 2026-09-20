@@ -1529,9 +1529,9 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A leading dash is a different YAML construct from the mapping the line belongs to.
 # The same snippet already passes inside a Markdown fence, which is what makes this a gap.
 # A value carrying a space is not exempt, which keeps the shape to a key-value line.
-# A body ending as a sentence is judged as one, which is the guard `is_tool_directive` pairs.
-# It pairs that guard because an anchor alone let such a body exempt itself.
-# `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
+# A body ending as a sentence is judged as one, the exemption pairing a guard with its anchor.
+# `is_tool_directive` pairs one for the same reason, an anchor alone having exempted such a body.
+# The exemption reads `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
 # A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
 # Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
 # The exemption costs two detections and the guard refuses one shape, all stated here.
@@ -1540,7 +1540,9 @@ KEY_ONLY = re.compile(r"^\S+:$")
 # A sentence wrapping through one reports the line under it for case instead of the wrap.
 # A sentence ending on one loses its wrap with nothing reported at all.
 # The guard refuses a value ending in a full stop, an FQDN being the case.
-# `SNIPPET_END` cannot drop the full stop without dropping the guard, so that finding stands.
+# Dropping the full stop from `SNIPPET_END` leaves `!` and `?` guarded.
+# It re-exempts a wrapped sentence whose continuation ends in one, which the guard is for.
+# So the full stop stays in that set, and the refusal of an FQDN stands with it.
 # This repository carries no instance of any of the three, so measuring it bounds none of them.
 # `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
 # `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
