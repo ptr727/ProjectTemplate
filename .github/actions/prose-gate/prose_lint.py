@@ -767,10 +767,32 @@ def is_operations_runbook(path: Path, root: Path | None) -> bool:
 # So is a hash-delimited expression a leading comment quotes and whose text opens on digits.
 # A `sed` script and a pattern file's own commented-out entry are the two shapes of that.
 # A repository whose numbering reaches either bound states a reference the rule text still bans.
-ISSUE_REF = re.compile(r"(?<!#)#[0-9]{2,5}(?!\w)")
+ISSUE_REF = re.compile(r"(?<!#)#([0-9]{2,5})(?!\w)")
 
 # A URI, whose fragment is a number after a `#` and is not a reference to anything here.
 URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
+
+# The link spelling of the same reference, read in instruction text and nowhere else.
+# `without_lookalikes` blanks a URI and a link destination before `ISSUE_REF` reads the line.
+# That is why an anchor and a fragment opening on digits go unreported.
+# It is also why every link form of a real reference passed.
+# A destination names what it points at, so it is as detectable as the bare form.
+# An author met by the bare form's finding reaches for the link form next.
+# The host enumeration is one forge rather than every forge.
+# Each forge spells its own paths differently, and encoding several grammars here grows defects.
+# The rule text bans the reference whatever spells it, so an unmatched forge is unlicensed.
+# That is the relationship the rule already holds with a commit SHA.
+# The host is the bare one and its `www` alias, never an arbitrary subdomain of it.
+# The tracker is served from the bare host, and a subdomain is a different service on that domain.
+# No subdomain was measured to serve a tracker-shaped path, so this is the bound that was measured.
+# A wildcard host is the wider claim, and the wider claim is the one that has to be earned.
+# The digits are captured so a line naming one reference twice over reports it once.
+# That key collapses two different references sharing a number on one line as well.
+# The second is reported once the first is fixed, so it is a round rather than a lost detection.
+FORGE_REF = re.compile(
+    r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/([0-9]+)",
+    re.IGNORECASE,
+)
 
 # The Skills roots, source and both generated distributions, whose every Markdown file is rule text.
 # A plugin tree carries one root per plugin, so that one is matched by its two fixed ends.
@@ -1550,6 +1572,25 @@ KEY_ONLY = re.compile(r"^\S+:$")
 SNIPPET = re.compile(r"^\S+:\s+\S+$")
 SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
 
+# A key, a separator, a space, and the rest of the line, the shape `SNIPPET` could not reach.
+# `SNIPPET` bounds the value at one whitespace-free token, so three real shapes split on a space.
+# A YAML tag value splits on the space between the tag and its argument.
+# A quoted value carrying a space splits on that space.
+# A key-value line with a trailing comment splits on the space before the marker.
+# None of the three is prose under any reading, and each is a line a reader pastes.
+# `=` is accepted beside `:` because the spaced form spells the same shape, TOML writing one.
+# The space after the separator is required, which is what keeps a bare URI from being a key.
+# So the unspaced `key=value` an environment file writes is not this shape and is not exempt.
+CONFIG_LINE = re.compile(r"^\S+\s*[:=]\s+\S")
+
+# How many configuration lines a contiguous comment run needs before the run is exempt.
+# `CONFIG_LINE` alone reads a marker comment as configuration.
+# `note: obsolete` and `todo: refactor` carry exactly the shape of one.
+# So an anchor read line by line would exempt every marker comment in the tree.
+# A marker comment is one line and a configuration block is not.
+# The count is what separates them, and two is the smallest count that does.
+CONFIG_RUN_MIN = 2
+
 # A label opening a definition names the thing being defined, so it is not the sentence's first word.
 # `#   publish - 'true' when ...` documents an output named `publish`.
 # Capitalizing it renames the output the workflow declares.
@@ -1867,6 +1908,53 @@ def fenced_lines(lines: list[str]) -> set[int]:
     return out
 
 
+def is_config_line(body: str) -> bool:
+    """Whether a comment body is one line of configuration rather than a sentence.
+
+    The guard is the one `SNIPPET` already pairs with its own anchor: a body closing as a sentence
+    does is judged as one, so `Note: the value is read once.` is prose whose first word happens to
+    take a colon. What follows a real key is a value, and a value does not end in a full stop.
+    """
+    return bool(CONFIG_LINE.match(body)) and not SNIPPET_END.search(body)
+
+
+def config_run_lines(comments: list[Comment]) -> set[int]:
+    """The lines of every run of `CONFIG_RUN_MIN` or more adjacent configuration comment lines.
+
+    The run is the unit rather than the line, and the run is the configuration lines themselves
+    rather than the comment block holding them. A usage block is the case that decides it: three
+    sentences of prose above two `Run:` lines is one comment block, and exempting the block would
+    stop both comment rules reading the prose. So a line joins only by being configuration itself.
+
+    A block's own non-key-value lines need no membership of their own, wherever the block holds a
+    run at all. A PEP 723 block opens on `# /// script`, whose body draws a finding only because the
+    key-value line under it reads as a continuation, and exempting that line is what clears the
+    opener with it. Its closing `# ///` is already exempt as `NOT_PROSE`, being punctuation alone.
+    A block declaring one key is not a run, so its opener still reports, and the count is what that
+    costs rather than a case this misses.
+
+    A trailing comment breaks a run and joins none, since it annotates the code on its own line
+    rather than continuing the comment above it.
+    """
+    out: set[int] = set()
+    run: list[int] = []
+
+    def flush() -> None:
+        if len(run) >= CONFIG_RUN_MIN:
+            out.update(run)
+        run.clear()
+
+    for comment in comments:
+        if not (comment.leading and is_config_line(comment.body)):
+            flush()
+            continue
+        if run and comment.line != run[-1] + 1:
+            flush()
+        run.append(comment.line)
+    flush()
+    return out
+
+
 def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
     """Comment lines whose sentence wraps into the next, or that carry two sentences.
 
@@ -1878,6 +1966,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
     comments = [c for c in comments if c[0] not in skip]
+    configured = config_run_lines(comments)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
@@ -1885,6 +1974,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     for n, body, leading, _raw in comments:
         if (
             not body
+            or n in configured
             or NOT_PROSE.search(body)
             or BARE_URI.match(body.strip())
             or KEY_ONLY.match(body)
@@ -2123,6 +2213,16 @@ def issue_ref_findings(
     carry exactly these references. Every line of such a document is read, so a trailing HTML
     comment in one is read with the prose around it rather than through the comment parser.
 
+    Instruction text is also read for the link spelling, an inline destination, a reference
+    definition, and a bare URL alike, each being a substring of the line the scan already holds.
+    That scan reads the line as written rather than the blanked copy `ISSUE_REF` reads, since the
+    blanking exists to hide exactly the destinations this half is looking for. Nowhere else is read
+    for it, and the rule is what decides that rather than the scan. In a code or workflow comment it
+    carves out a link naming an issue or a pull request on a public repository other than this one,
+    the source citation for the line under it. A docstring and a documentation comment fall under no
+    carve-out, so a link there is banned and goes unread, as one in a code comment does whenever the
+    carve-out's own terms are not met.
+
     Elsewhere a comment is read where `comment_bodies` reports its marker as opening its line,
     which a continuation line of an open block comment is reported as doing, having no marker of
     its own to judge. A `.py` that does not tokenize yields no comment at all there, so a reference
@@ -2136,6 +2236,7 @@ def issue_ref_findings(
     """
     out: list[tuple[int, str, str]] = []
     spans: dict[int, list[str]] = {}
+    links: dict[int, list[str]] = {}
     if path.suffix.lower() == ".md":
         if not is_instruction_text(path, root):
             return out
@@ -2143,6 +2244,7 @@ def issue_ref_findings(
         for n, line in enumerate(lines, 1):
             if n not in fenced:
                 spans.setdefault(n, []).append(without_lookalikes(line, True))
+                links.setdefault(n, []).append(line)
     else:
         for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
             # A comment whose marker opens its line, and no other.
@@ -2164,13 +2266,21 @@ def issue_ref_findings(
     # One finding per line per distinct reference, the line being the unit this rule reports on.
     # `comment-added` counts a line once for the same reason, a line with two comments being one line.
     # Here one comment is read twice over as well, as written and with its marker off.
+    # The key is the number both patterns capture rather than the text that spelled it.
+    # A link carries its reference in the destination and the bare form of it in the link text.
+    # Keyed on the text, the two spellings of one reference never collide and the line reports twice.
+    # The bare scan runs first, so a line carrying both is reported as the spelling to fix first.
+    # The cost is a line naming two different projects' references under one number, reported once.
+    # The second reports on the run after the first is fixed, which the author is already making.
     seen: set[tuple[int, str]] = set()
-    for n in sorted(spans):
-        for text in spans[n]:
-            for m in ISSUE_REF.finditer(text):
-                if (n, m.group(0)) in seen:
+    for n in sorted(set(spans) | set(links)):
+        found = [(ISSUE_REF, t) for t in spans.get(n, ())]
+        found += [(FORGE_REF, t) for t in links.get(n, ())]
+        for pattern, text in found:
+            for m in pattern.finditer(text):
+                if (n, m.group(1)) in seen:
                     continue
-                seen.add((n, m.group(0)))
+                seen.add((n, m.group(1)))
                 out.append(
                     (
                         n,
