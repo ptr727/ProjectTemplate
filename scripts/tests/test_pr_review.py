@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import inspect
 import io
 import json
 import os
@@ -2889,10 +2890,32 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
 
+class TestEveryGqlCaseKeepsItsBaseSetUp(unittest.TestCase):
+    """A subclass overriding `setUp` without chaining silently drops what the base installs.
+
+    `GqlCase.setUp` patches `gh_rest` for every case rather than every caller, and clears the
+    `changed_at` memo so one case does not inherit another's compares. A subclass that overrides
+    `setUp` and does not chain gets neither, so it can spawn a real `gh` against a pull request
+    that does not exist, which is the thing this suite exists not to do.
+
+    Asserted over the class tree rather than fixed in the two that had drifted, since the next
+    subclass to override `setUp` is the one that would reintroduce it.
+    """
+
+    def test_a_subclass_that_overrides_setup_chains_to_it(self) -> None:
+        for cls in GqlCase.__subclasses__():
+            with self.subTest(cls=cls.__name__):
+                if "setUp" not in vars(cls):
+                    continue
+                src = inspect.getsource(cls.setUp)
+                self.assertIn("super().setUp()", src)
+
+
 class TestCoverageExitCodes(GqlCase):
     """Coverage that is partial or unstated blocks a covered-head verdict."""
 
     def setUp(self) -> None:
+        super().setUp()
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
     def partial(self) -> dict:
@@ -3690,6 +3713,7 @@ class TestGqlTransport(unittest.TestCase):
 
 class TestCli(GqlCase):
     def setUp(self) -> None:
+        super().setUp()
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
     def cli(self, argv: list[str]) -> int:
