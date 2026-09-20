@@ -822,6 +822,119 @@ class TestCommentWrap(BaitCase):
             with self.subTest(text=text.splitlines()[0]):
                 self.assertEqual([], self.flag("a.yml", text))
 
+    def test_a_key_and_its_value_are_configuration_rather_than_a_sentence(self) -> None:
+        """`comment-case` reads the first character, so a key opening lowercase could not pass.
+
+        The reported case is the `External usage:` header a fleet of ESPHome templates carries.
+        `# packages:` was already exempt as a lone key and the line under it was not. What passed
+        is any key opening on something other than a lowercase letter, and each such spelling
+        changes what a reader pastes: a capitalized, quoted or underscored key changes the key,
+        and a leading dash is a different YAML construct from the mapping it belongs to. The same
+        snippet already passes inside a Markdown fence.
+        """
+        header = (
+            "# External usage:\n"
+            "# packages:\n"
+            "#   device: github://ptr727/ESPHome-Config/templates/x.yaml@main\n"
+        )
+        self.assertEqual([], self.flag("a.yml", header))
+        # Two snippet lines running together are two snippet lines, not a wrapped sentence.
+        self.assertEqual([], self.flag("b.yml", "# Wiring:\n#   sda: GPIO17\n#   scl: GPIO16\n"))
+
+    def test_a_value_carrying_a_space_is_still_judged(self) -> None:
+        """The shape is one key and one value, which is what keeps prose inside the rule."""
+        self.assertEqual(["comment-case"], self.flag("a.yml", "# note: this value has spaces\n"))
+
+    def test_the_shape_needs_the_space_after_its_colon(self) -> None:
+        """The space is the shape rather than decoration, a key and a value being two tokens.
+
+        An empty key is not asserted here: a body opening on its colon opens on no lowercase
+        letter, so `comment-case` never reads it and widening the key would pin nothing.
+        """
+        self.assertEqual(["comment-case"], self.flag("a.yml", "# key:value\n"))
+
+    def test_a_two_token_body_punctuated_as_a_sentence_is_still_judged(self) -> None:
+        """Without the guard the shape exempts any two-word sentence.
+
+        It silenced a real wrapped sentence whose continuation happened to be two tokens.
+        `is_tool_directive` pairs a guard with its own anchor the same way, for the same failure.
+        The guard does cost: a value ending in a full stop is refused, `origin: example.com.`
+        being the case. Dropping the full stop from `SNIPPET_END` would re-exempt the wrapped
+        sentence the guard exists for, so it stays.
+        """
+        for body in ("# one: two.\n", "# conclusion: wrong!\n", "# result: unchanged.\n"):
+            with self.subTest(body=body.strip()):
+                self.assertEqual(["comment-case"], self.flag("a.yml", body))
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag("b.yml", "# The rule reads the file at\n# hand: correctly.\n"),
+        )
+
+    def test_a_punctuated_markdown_html_comment_is_still_prose(self) -> None:
+        """That branch keeps a punctuated HTML comment deliberately, and this must not take it."""
+        self.assertEqual(
+            ["comment-case"], self.flag("a.md", "Text.\n\n<!-- result: unchanged. -->\n")
+        )
+
+    def test_a_sentence_wrapping_through_a_snippet_line_loses_its_wrap(self) -> None:
+        """One of the exemption's costs, pinned so a later change meets it rather than finds it.
+
+        A two-token body carrying no terminator is exempt wherever it sits. A sentence wrapping
+        through one loses the wrap and the line under it is reported for case instead, and a
+        sentence ending on one loses the wrap with no finding at all, which is the quieter half.
+        The sentence guard cannot reach either, the body ending in no punctuation.
+        """
+        self.assertEqual([], self.flag("c.yml", "# The value the hook reads is\n# empty: false\n"))
+        self.assertEqual(
+            ["comment-case"],
+            self.flag("a.yml", "# The value the hook reads is\n# empty: false\n# by default.\n"),
+        )
+
+    def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
+        """One case per syntax, so a failure names the language whose extractor broke.
+
+        Seven file names covering six specs proved nothing about the markers they never used.
+        These eleven reach ten of the eleven syntaxes the table declares, the kicad spec being the
+        one neither this case nor the run-on case beside it reaches.
+        """
+        snippet = "sda: GPIO17"
+        for name, text in (
+            ("a.cs", f"// Wiring:\n//   {snippet}\n"),
+            ("a.c", f"/* Wiring: */\n/*   {snippet} */\n"),
+            ("a.py", f"# Wiring:\n#   {snippet}\n"),
+            ("a.sh", f"# Wiring:\n#   {snippet}\n"),
+            ("a.ps1", f"<# Wiring: #>\n<#   {snippet} #>\n"),
+            ("a.yml", f"# Wiring:\n#   {snippet}\n"),
+            ("a.toml", f"# Wiring:\n#   {snippet}\n"),
+            ("a.ini", f"; Wiring:\n;   {snippet}\n"),
+            ("a.jsonc", f"// Wiring:\n//   {snippet}\n"),
+            ("a.xml", f"<!-- Wiring: -->\n<!--   {snippet} -->\n"),
+            ("a.css", f"/* Wiring: */\n/*   {snippet} */\n"),
+        ):
+            with self.subTest(file=name, syntax=text.strip()[:12]):
+                self.assertEqual([], self.flag(name, text))
+
+    def test_a_value_ending_in_a_colon_is_still_configuration(self) -> None:
+        """A colon ends configuration rather than a sentence, which is why `KEY_ONLY` exists.
+
+        Guarded with `SENT_END`, whose set carries the colon, an address, an image tag and a
+        drive letter were each refused and told to capitalize their key, which is the finding
+        this exemption exists to remove.
+        """
+        for value in ("fd00::", "ghcr.io/o/n:", "C:"):
+            with self.subTest(value=value):
+                self.assertEqual([], self.flag("a.yml", f"# Paths:\n#   root: {value}\n"))
+
+    def test_a_marker_comment_is_exempt_which_is_the_common_cost(self) -> None:
+        """The shape cannot tell a two-token marker from a two-token config line.
+
+        This is the cost the rule pays most often, pinned so a later change meets it rather than
+        discovers it. Narrowing it needs a reading of the value, which is a rule of its own.
+        """
+        for body in ("# todo: refactor\n", "# note: obsolete\n", "# fixme: later\n"):
+            with self.subTest(body=body.strip()):
+                self.assertEqual([], self.flag("a.yml", body))
+
     def test_a_colon_ending_real_prose_is_still_judged(self) -> None:
         """The exemption is one token wide, since prose closing on a colon has words before it."""
         self.assertEqual(["comment-case"], self.flag("a.yml", "# the outputs are these:\n"))

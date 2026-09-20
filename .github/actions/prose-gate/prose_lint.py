@@ -1522,6 +1522,34 @@ ENUM_PREFIX = re.compile(r"^\d+[.)]\s+")
 # The token count carries the test, since a colon ending real prose always has words before it.
 KEY_ONLY = re.compile(r"^\S+:$")
 
+# One key, a colon, and one value is a line of configuration a reader pastes, not a sentence.
+# `comment-case` reads the first character, so every key opening lowercase was rejected.
+# The keys that passed are the ones opening on anything else, and each changes what is pasted.
+# A capitalized key changes the key, and a quoted or underscored one changes how it is written.
+# A leading dash is a different YAML construct from the mapping the line belongs to.
+# The same snippet already passes inside a Markdown fence, which is what makes this a gap.
+# A value carrying a space is not exempt, which keeps the shape to a key-value line.
+# A body ending as a sentence is judged as one, the exemption pairing a guard with its anchor.
+# `is_tool_directive` pairs one for the same reason, an anchor alone having exempted such a body.
+# The exemption reads `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
+# A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
+# Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
+# The exemption costs two detections and the guard refuses one shape, all stated here.
+# The common cost is a marker comment, `todo: refactor` and `note: obsolete` being exempt now.
+# The second is a two-token body with no terminator inside a sentence that wraps.
+# A sentence wrapping through one reports the line under it for case instead of the wrap.
+# A sentence ending on one loses its wrap with nothing reported at all.
+# The guard refuses a value ending in a full stop, an FQDN being the case.
+# Dropping the full stop from `SNIPPET_END` leaves `!` and `?` guarded.
+# It re-exempts a wrapped sentence whose continuation ends in one, which the guard is for.
+# So the full stop stays in that set, and the refusal of an FQDN stands with it.
+# This repository carries no instance of any of the three, so measuring it bounds none of them.
+# `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
+# `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
+# Pricing an added comment is what that rule is for.
+SNIPPET = re.compile(r"^\S+:\s+\S+$")
+SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
+
 # A label opening a definition names the thing being defined, so it is not the sentence's first word.
 # `#   publish - 'true' when ...` documents an output named `publish`.
 # Capitalizing it renames the output the workflow declares.
@@ -1860,6 +1888,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             or NOT_PROSE.search(body)
             or BARE_URI.match(body.strip())
             or KEY_ONLY.match(body)
+            or (SNIPPET.match(body) and not SNIPPET_END.search(body))
         ):
             prev_body = ""
             continue
