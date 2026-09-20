@@ -59,8 +59,10 @@ coverage is stated for the change set that head has. The round covering the head
 newest round that states it at all does and the pull request changes the same set of files at
 both commits, which is the only condition under which a statement carries forward. Only that
 newest round is consulted, so an older round whose change set does match carries nothing. A round reporting partial coverage
-of the diff blocks the merge, and so does a refusal, a coverage statement absent from every round
-on the pull request, an unrecognized output shape, an unresolved thread, or a body-only finding.
+of the diff blocks the merge, and so does a refusal, a coverage statement that does not reach
+this head, meaning absent from every round or carried by none because the change set moved or
+could not be compared, an unrecognized output shape, an unresolved thread, or a body-only
+finding.
 Re-run the loop after every fix
 push. Never infer review completion from `mergeStateStatus: CLEAN`.
 

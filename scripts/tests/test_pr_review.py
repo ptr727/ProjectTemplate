@@ -47,7 +47,7 @@ OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
 
 def review(
     login: str = pr_review.REVIEWER,
-    oid: str = HEAD,
+    oid: str | None = HEAD,
     body: str = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
     at: str = EARLY,
     rid: str = "PRR_one",
@@ -1955,8 +1955,8 @@ class TestCoverageCarriesForward(GqlCase):
 
     Five of ten rounds measured in the second overview format state no coverage, and the two
     measured on one drive were re-reviews of a one-line and a four-file delta. Blocking each of
-    those asks for a re-request that has never produced the statement either, so the block was
-    unclearable and the maintainer waived it every time.
+    those asks for a re-request that produced the marker in one of the four measured, so the
+    block clears by chance rather than by asking and a reader learns to route around it.
     """
 
     NONE = OVERVIEW + "\n**Findings:** None"
@@ -2126,6 +2126,43 @@ class TestCoverageCarriesForward(GqlCase):
             out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=unstated", out)
         self.assertIn("the bound could not be measured", out)
+
+    def test_a_round_that_names_no_commit_is_named_as_refused_rather_than_dropped(self) -> None:
+        """A review of a commit a force-push made unreachable carries a null `oid`.
+
+        Keyed on the commit rather than on the candidate, that round was refused and the digest
+        printed no carry block at all, so its loudest surface said nothing about a statement it
+        had found and declined. The exit code was right the whole time, which is what made the
+        silence hard to see.
+        """
+        pr = self.rounds(
+            review(oid=None, body=self.FULL, at=EARLY, rid="PRR_a"),
+            review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
+        )
+        with self.compare(**{HEAD: ["a.py"]}):
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+        self.assertIn("COVERAGE IS NOT CARRIED", out)
+        self.assertIn("names no commit", out)
+        self.assertIn("a commit this cannot name", out)
+
+    def test_a_ref_is_refused_for_what_it_does_to_the_path_not_for_being_unusual(self) -> None:
+        """An allow-list of the ASCII a branch name usually carries refused valid refs.
+
+        `release/1.0+build` and a non-ASCII name are both refs git accepts, and refusing one
+        refuses the carry on every pull request in that repository. What is refused instead is
+        the set that changes the path rather than traveling along it, plus a dot segment, which
+        git forbids in a ref and which reaches another repository.
+        """
+        for ref in ("release/1.0+build", "feature/(wip)", "f\u00fcnf", "main"):
+            with self.subTest(ref=ref), self.compare(c0ffee=["a.py"]):
+                pr_review.changed_at.cache_clear()
+                self.assertEqual(frozenset({"a.py"}), pr_review.changed_at("o", "r", ref, "c0ffee"))
+        for ref in ("fix#1", "a?b", "a%2f", "a b", "../../x", "..", "a/../b"):
+            with self.subTest(ref=ref), self.compare(c0ffee=["a.py"]):
+                pr_review.changed_at.cache_clear()
+                self.assertIsNone(pr_review.changed_at("o", "r", ref, "c0ffee"))
 
     def test_a_head_round_stating_coverage_is_the_head_reading_not_a_carry(self) -> None:
         """The case a short-circuit on `carried_from == head` looked like, and it never runs.
@@ -2509,7 +2546,11 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
     def test_a_zero_spelled_in_words_beats_a_number_counting_something_else(self) -> None:
-        """`None` is checked after the counts, so a line spelling zero and then counting reads 0."""
+        """`None` is read before the counts, so a line spelling zero and then counting reads 0.
+
+        Read after them, `None found in the 3 files reviewed` reported three findings, the file
+        count being the only number on the line.
+        """
         for line in ("None found in the 3 files reviewed", "None"):
             with self.subTest(line=line):
                 self.assertEqual(
@@ -4956,15 +4997,17 @@ class TestContract(unittest.TestCase):
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
         """A verify step reading `commit.oid` alone is what let five partial rounds merge.
 
-        The absent case is named as absent from every round rather than from the one covering the
-        head, since a round stating none now carries an earlier round's statement forward and only
-        a pull request with nothing to carry blocks.
+        The absent case is named as a statement that does not reach this head rather than as one
+        absent from the round covering it, since a round stating none carries an earlier round's
+        statement forward, and the three ways a head ends up with no statement are that nothing
+        stated one, that the change set moved since the round that did, and that the comparison
+        could not be read.
         """
         text = " ".join(RUNBOOK.read_text(encoding="utf-8").split())
         # Pinned as whole sentences rather than as the fragment `partial coverage`.
         # Any rewording of the paragraph would still satisfy that fragment while saying more.
         self.assertIn("A round reporting partial coverage of the diff blocks the merge", text)
-        self.assertIn("coverage statement absent from every round on the pull request", text)
+        self.assertIn("a coverage statement that does not reach this head", text)
 
     def test_the_only_writes_are_the_four_named_here(self) -> None:
         """Every write this script makes is one of four, and each arrived as a reviewed change.

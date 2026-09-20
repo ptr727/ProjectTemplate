@@ -19,7 +19,8 @@ Subcommands
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
-           and the round covering the head read the whole diff. `review_on_head` and `rounds=`
+           and full diff coverage is stated for this head, by the round covering it or by the
+           carry below. `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
            tracked other reviewer, named under `other_reviewed` below, can carry the exact head
@@ -28,8 +29,10 @@ Subcommands
            shape, the same reading an empty-bodied Copilot round already gets, not a gap.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
-           42 = that round read fewer files than the pull request changed, so part of the diff
-           has no review at all. Measured over four pull requests and seven rounds here, a
+           42 = a round read fewer files than the pull request changed, so part of the diff
+           has no review at all. That round is the one covering the head, or the one carried
+           to it under 45 below, an unread part staying unread across a push that leaves the
+           change set alone. Measured over four pull requests and seven rounds here, a
            re-request never cleared one and no round ever recovered, so this is a state to
            hand to the maintainer rather than one to retry into.
            43 = the reviewer sent a shape this script has no reader for, so no field here can
@@ -512,9 +515,17 @@ WINDOW = 100
 FILES_WINDOW = 100
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
-# What a git ref may hold before it is interpolated into a REST path.
-# Git permits `#` and `%` in a ref name, and a `#` truncates the path at a fragment.
-SAFE_REF = re.compile(r"[A-Za-z0-9._/-]+")
+# What a git ref may not hold before it is interpolated into a REST path.
+# Refused rather than allow-listed, git permitting more than a branch name usually carries.
+# An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
+# Each of those is a ref git accepts, and refusing one refuses the carry on every pull request.
+# What is refused instead is the set that changes the path rather than traveling along it.
+# `#` truncates the path at a fragment, `?` at a query, and `%` opens an escape.
+# A space and a control character are not path characters at all.
+UNSAFE_REF = re.compile(r"[\s#?%]|[\x00-\x1f\x7f]")
+# A dot segment travels up the path and reaches another repository, which no ref shape excuses.
+# Git forbids `..` in a ref name, so this refuses a value that never came from a ref at all.
+DOT_SEGMENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 
 # How many rollup contexts the full query asks for, which is not the window above.
 # The query is built from this and the truncation line quotes it, so the two cannot drift.
@@ -1262,16 +1273,22 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     the bound from its own reads, so an unmemoized transient failure in one and not the other
     printed a carried block beside an exit code that refused the carry, and the reverse, which is
     the fail-open direction since the exit code is what a wait keys on. It also reads each ref
-    once rather than four times, closing the window in which the base branch advancing between
-    two reads of it manufactures a set mismatch. The key is the ref as written, so a branch that
-    advances during a long wait is answered from the read taken before it did, which is a stale
-    reading held consistently rather than two fresh readings that disagree.
+    once per run rather than once per caller. It does not close the other window: the two
+    compares are still taken at two moments, so a base branch advancing between them still
+    manufactures a set mismatch, which refuses the carry and is the fail-closed direction. The
+    key is the ref as written, so a branch that advances during a run is answered from the read
+    taken before it did, a stale reading held consistently rather than two that disagree.
 
-    The refs are checked against the characters a compare path can carry before one is
-    interpolated into it, since git permits `#` and `%` in a ref name and a `#` truncates the
-    path at a fragment, answering about a different ref rather than failing.
+    The refs are checked before either is interpolated into a compare path, because git permits
+    a character that changes the path rather than traveling along it. A `#` truncates it at a
+    fragment, answering about a different ref rather than failing. The check refuses that set
+    rather than allow-listing the ASCII a branch name usually carries, an allow-list having
+    refused a valid `release/1.0+build` and any non-ASCII name. A dot segment is refused
+    separately, since it reaches another repository and git forbids one in a ref anyway, so a
+    value carrying one did not come from a ref.
     """
-    if not base or not commit or not all(SAFE_REF.fullmatch(r) for r in (base, commit)):
+    refs = (base, commit)
+    if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
         return None
     proc = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{commit}",
@@ -1358,7 +1375,10 @@ def findings_on(tail: str) -> int | None:
     markup at all, is the format's presentation rather than its structure: `**3** high` pairs a
     count with no markup and read by pairing alone it summed to nothing.
 
-    Summing overstates rather than understates, which is the direction this picks deliberately.
+    Summing overstates rather than understates wherever the line states its counts outside the
+    markup, which every body measured does, and which is the direction this picks deliberately.
+    A count written inside the markup instead, `[3](url) high`, is masked away with it and the
+    line then states no total at all, which prints `?` rather than a fabricated zero.
     A line stating a grand total and then the severities it decomposes into is summed with its
     own parts, and a line stating a total in prose beside a file count sums both. A shortfall
     overstated prints a block a reader checks against the body, where one the reader suppressed
@@ -1731,8 +1751,10 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
                 f"{'has' if unread == 1 else 'have'} no review"
             )
         # The table is read against the counts only where both describe the same diff.
-        # A carried partial states counts about an earlier commit.
-        # `head_table` refuses that comparison in its own words, so the reading is withheld.
+        # A carried partial states counts about an earlier commit, and the table is this head's.
+        # The ternary below withholds the reading rather than any refusal `head_table` makes.
+        # Withheld although an identical path set means both denominators name the same files.
+        # What that earlier round read of those files is still not what this head holds.
         whose = (
             "an earlier round read fewer files than the pull request changed, and the round "
             "covering the head states no coverage of its own, so that reading carries"
@@ -2194,16 +2216,20 @@ def digest(
     # The digest then printed a coverage block beside `review_on_head=NO`.
     # Bounded on the change set, per `carry_holds`.
     # A round on a commit whose diff touched other files clears no gate on a diff nobody has now.
-    # `carried` is cleared where the bound refuses, and `carried_from` is kept.
-    # So the block below names the round it declined rather than printing nothing about it.
-    carried = carried_coverage(pr) if cover == UNSTATED and on_head else None
+    # The candidate is held apart from the carry, so a refused one is still a round to name.
+    # Keyed on the candidate rather than on its commit, which a round can leave unnamed.
+    # A review of a commit a force-push made unreachable carries a null `oid`.
+    # Keyed on the commit, that round was refused and the digest then said nothing at all.
+    candidate = carried_coverage(pr) if cover == UNSTATED and on_head else None
+    carried = None
     carried_from, carried_since, carry_kept = "", "", None
-    if carried is not None:
-        carried_from = carried[2]
+    if candidate is not None:
+        carried_from = candidate[2]
         carry_kept = carry_holds(owner, repo, pr, carried_from)
         carried_since = delta_since(owner, repo, carried_from, head)
         if carry_kept:
-            cover, cover_line, _carried_from = carried
+            carried = candidate
+            cover, cover_line, _carried_from = candidate
         else:
             carried = None
     unknown = unrecognized_shapes(pr)
@@ -2407,17 +2433,22 @@ def digest(
             f"maintainer's reading, and the delta is what to read it from"
         )
         lines.append(f"    {cover_line}")
-    elif carried_from:
+    elif candidate is not None:
         # The bound refused, so the state stays unstated.
         # The reader is told which round it declined and on what ground.
         # The alternative is a digest printing nothing about a statement it found and did not use.
-        why = (
-            "the change set could not be read at both commits, so the bound could not be "
-            "measured and the statement is not carried"
-            if carry_kept is None
-            else "the pull request changes a different set of files at the two commits, so "
-            "that statement describes a diff this head no longer has"
-        )
+        if not carried_from:
+            why = "that round names no commit, so there is no change set of its own to compare"
+        elif carry_kept is None:
+            why = (
+                "the change set could not be read at both commits, so the bound could not be "
+                "measured and the statement is not carried"
+            )
+        else:
+            why = (
+                "the pull request changes a different set of files at the two commits, so "
+                "that statement describes a diff this head no longer has"
+            )
         lines.append(
             f"  COVERAGE IS NOT CARRIED: the newest round that states any is "
             f"{carried_from[:8] or 'a commit this cannot name'}, and {carried_since}, but {why}"
