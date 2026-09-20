@@ -19,7 +19,8 @@ Subcommands
            does not, 71 = there were references and none could be read, so nothing was decided.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
-           and the round covering the head read the whole diff. `review_on_head` and `rounds=`
+           and full diff coverage is stated for this head, by the round covering it or by the
+           carry below. `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
            tracked other reviewer, named under `other_reviewed` below, can carry the exact head
@@ -28,16 +29,22 @@ Subcommands
            shape, the same reading an empty-bodied Copilot round already gets, not a gap.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
-           42 = that round read fewer files than the pull request changed, so part of the diff
-           has no review at all. Measured over four pull requests and seven rounds here, a
+           42 = a round read fewer files than the pull request changed, so part of the diff
+           has no review at all. That round is the one covering the head, or the one carried
+           to it under 45 below, an unread part staying unread across a push that leaves the
+           change set alone. Measured over four pull requests and seven rounds here, a
            re-request never cleared one and no round ever recovered, so this is a state to
            hand to the maintainer rather than one to retry into.
            43 = the reviewer sent a shape this script has no reader for, so no field here can
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = the review covering the head stated no changed-file coverage. Request another
-           review only after confirming the head branch carries the current review instructions.
+           45 = no statement of changed-file coverage describes this head. A round that states
+           none carries the newest round that states some forward, bounded on the change set,
+           so this covers three states: nothing ever stated coverage, the round that did
+           describes a different set of changed files, or that comparison could not be read.
+           Request another review only after confirming the head branch carries the current
+           review instructions.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -104,26 +111,29 @@ Subcommands
            findings earlier rounds raised, whose total `M` undercounts. A withheld finding is owed
            the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
            `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
-           Two bodies in that format have been read here, so what follows describes those rather
-           than the format in general. Neither carried a `Suppressed comments` heading, which is
+           Ten bodies in that format have been read here, so what follows describes those rather
+           than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
-           Neither stated its file coverage the first format's way, and they differ on the
-           `fleet-review` marker the fleet's own carried `code-review` instructions ask the
-           reviewer for: the first carried it and the second, on a head carrying those same
-           instructions, carried no coverage statement at all and read as exit 45,
-           `COVERAGE_IS_UNSTATED`. So a round in this format states coverage inconsistently rather
-           than through one reliable line, and exit 45 on one is the honest reading of a round
-           that stated none rather than a gap here. A later body in that format that
+           None stated its file coverage the first format's way, in either the bulleted spelling
+           or the bare one, so the `fleet-review` marker the fleet's own carried `code-review`
+           instructions ask for is the only coverage statement this format has been seen to make.
+           Five of the ten carry it, on heads carrying those same instructions, so its absence is
+           intermittent rather than structural. Both absences measured on one drive were
+           re-reviews of a delta of one line and of four files, which is why a round stating none
+           carries an earlier round's statement forward rather than blocking. A re-request is not
+           the remedy the block named either: four were measured and one produced the marker, so
+           it clears by chance rather than by asking.
+           A later body in that format that
            does collapse a suppressed section is read by `suppressed=`, that heading being vetted
            and read wherever it sits. Whether the shortfall counts those findings a second time
            turns on whether the stated total includes them, which no body read here says, so treat
            `suppressed=2` beside a shortfall of 2 as either two findings or four until the body
-           settles it. A later body stating coverage is the other way round: the
-           reader requires a bullet, and this format states its metadata on bare bold lines, which
-           is why `effort=` had to drop that requirement, so the spelling such a body would most
-           likely use is the one `coverage=` does not see. It reads as unstated and blocks at exit
-           45, which is the safe direction and the wrong reason, and `Files reviewed` sitting in
-           the vetted labels does nothing about it since the line never reaches that comparison.
+           settles it. A body stating coverage as a bare `**Files reviewed:**` line would still go
+           unread, the reader requiring a bullet where this format states its metadata without
+           one, which is why `effort=` had to drop that requirement. Ten rounds have stated it
+           that way none of the time, so this is a gap rather than the reason a round reads as
+           unstated, and `Files reviewed` sitting in the vetted labels does nothing about it
+           since the line never reaches that comparison.
            Nothing reports either contradiction, the vetted lists reporting an unvetted marker
            rather than a marker turning up somewhere new.
            Two quotation shapes carry a column-0 `<details>` past both masks, a multi-line HTML
@@ -157,7 +167,9 @@ Subcommands
            41 = the review carrying the head says it did not review, so it covers nothing.
            42, 43, and 45 = the review landed and `status`'s blocking readings apply to it,
            since a wait ending on a round that covered half the diff, or on output nothing here
-           can read, has ended on something other than a review of this pull request.
+           can read, has ended on something other than a review of this pull request. A 42 can
+           be decided by an earlier round whose partial coverage carries to a head stating none,
+           in which case the round the wait ended on is not the round the code came from.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
            wait clears: queued with nothing acting on it, expected and never posted, running
            far past what the job costs, or failed. A check merely still running normally is
@@ -196,6 +208,7 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
+import functools
 import io
 import json
 import os
@@ -348,6 +361,9 @@ TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
 # `UNSTATED` sits last rather than beside the failures, being the absence of a statement.
 # A round that did state full coverage settles the question over one that stated nothing.
 UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
+# Not a state a round reports, but the reading that carries an earlier round's forward.
+# It ranks nowhere in `SEVERITY`, since it is one of the four wearing another round's name.
+CARRIED = "carried"
 SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
 # `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
@@ -423,7 +439,39 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The largest total wins, so a quoted number otherwise beat the round's own.
 # `None` is a total of zero spelled in words, which a round raising nothing states.
 # Read as no total at all it printed `?`, and this file's own rule is that the two differ.
-CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*\s*(\d+|[Nn]one)", re.MULTILINE)
+# The rest of the line is taken whole rather than its first number.
+# The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
+CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
+# The markup the format writes a count beside, replaced by one sentinel before a count is read.
+# Masked rather than matched around, because a badge carries digits of its own in its attributes.
+# `2 <img src="b.svg" width="62" height="18">` read `18` as a severity count on that reasoning.
+# Dropping the markup outright would join the digits either side of it into one number instead.
+# The tag alternative is bounded by `[^<>]`, so it cannot span from one tag into another.
+# An unmatched `<` earlier in the line otherwise paired with a later tag's closing `>`.
+# Every count between the two was swallowed with it.
+# It opens on a name character for the same reason, a `<` followed by a space being prose.
+# The link alternative tolerates one level of nested parentheses and brackets, a URL carrying a
+# `)` of its own having otherwise ended the match early and left its anchor id on the line.
+# A reference-style link is its own alternative, its label being a number as often as a word.
+COUNT_MARKUP = re.compile(
+    r"</?[A-Za-z][^<>]*>"
+    r"|!?\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]\([^()]*(?:\([^()]*\)[^()]*)*\)"
+    r"|!?\[[^\[\]]*\]\[[^\[\]]*\]"
+)
+# A control character, so no body can carry one of its own and be read as having a count here.
+MARKUP_MASK = "\x00"
+# Every integer the markup did not swallow, which is how this format states each severity.
+# Bounded to four digits, because a review states tens of findings and never thousands.
+# A longer run is an identifier, so the mask is not the only thing saying an anchor id is not one.
+# That bound is also what keeps `int` from being handed a digit run long enough to raise.
+# A digit touching a `.` is part of a decimal, so `confidence < 0.5` contributes no count.
+COUNT_LOOSE = re.compile(r"(?<![\d.])\d{1,4}(?![\d.])")
+# A total of zero spelled in words, anchored to where the line states its total.
+# Read as a bare substring instead, `see nonetheless the summary below` stated a zero.
+# Emphasis markers are skipped, the format writing the word italicized as often as bare.
+# Bounded by a lookahead rather than by `\b`, since `_` is a word character.
+# `_None_` then ended on no boundary at all, reading an italicized stated zero as none stated.
+STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -465,6 +513,19 @@ WINDOW = 100
 # A path missing from a short window reads exactly like a path the reviewer left out.
 # The record holds a pull request of 301 changed files, so the truncation is reachable here.
 FILES_WINDOW = 100
+# The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
+COMPARE_FILE_CAP = 300
+# What a git ref may not hold before it is interpolated into a REST path.
+# Refused rather than allow-listed, git permitting more than a branch name usually carries.
+# An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
+# Each of those is a ref git accepts, and refusing one refuses the carry on every pull request.
+# What is refused instead is the set that changes the path rather than traveling along it.
+# `#` truncates the path at a fragment, `?` at a query, and `%` opens an escape.
+# A space and a control character are not path characters at all.
+UNSAFE_REF = re.compile(r"[\s#?%]|[\x00-\x1f\x7f]")
+# A dot segment travels up the path and reaches another repository, which no ref shape excuses.
+# Git forbids `..` in a ref name, so this refuses a value that never came from a ref at all.
+DOT_SEGMENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 
 # How many rollup contexts the full query asks for, which is not the window above.
 # The query is built from this and the truncation line quotes it, so the two cannot drift.
@@ -530,7 +591,7 @@ mutation($pr:ID!,$bot:ID!){
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    headRefOid mergeable mergeStateStatus
+    headRefOid baseRefName mergeable mergeStateStatus
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
@@ -1116,6 +1177,171 @@ def head_coverage(pr: dict) -> tuple[str, str]:
     return worst, detail
 
 
+def carried_coverage(pr: dict) -> tuple[str, str, str] | None:
+    """The newest round on this pull request that states any coverage, and the commit it read.
+
+    None where no round ever stated any, which is the one case left with nothing to carry.
+
+    A round covering the head and stating no coverage is the ordinary shape of this format rather
+    than a defect in it: five of ten rounds measured omit the marker, and both omissions measured
+    on one drive were re-reviews of a delta of one line and of four files. Blocking every one of
+    those asks for a re-request that produced the marker in one of the four measured, so the
+    block clears by chance rather than by asking and a reader learns to route around it.
+
+    What an earlier round's statement is worth depends on what changed since, which is why the
+    caller reports that delta beside this rather than this returning a verdict. The state carries
+    as it was: a round that read part of the diff carries partial, since the part it never read is
+    still unread.
+
+    `newest_of` rather than plain `max`, for the reason it documents: two rounds share a
+    timestamp often enough to decide a digest, `max` returns the first maximal element, and
+    `reviewer_nodes` returns these oldest first, so a tie selected the older of the two. Returned
+    that way a partial round outranked the full one stamped in the same second, or the reverse,
+    on nothing but the order the connection happened to list them in.
+    """
+    stating = {}
+    for node in reviewer_nodes(pr, "reviews"):
+        if refusal_of(node):
+            continue
+        state, line = coverage_of(node)
+        if state != UNSTATED:
+            stating[id(node)] = (node, state, line)
+    newest = newest_of([n for n, _, _ in stating.values()])
+    if newest is None:
+        return None
+    _node, state, line = stating[id(newest)]
+    return state, line, (newest.get("commit") or {}).get("oid") or ""
+
+
+def delta_since(owner: str, repo: str, base: str, head: str) -> str:
+    """How much changed between the round that stated coverage and the head, as one clause.
+
+    Every reading is a clause its callers complete a sentence with, so a delta that could not be
+    read composes as readably as one that could. Returned as a noun phrase instead, the failure
+    read "with the delta between them could not be read".
+
+    Reported rather than judged. Whether a delta is small enough to let an earlier round's
+    coverage stand is the maintainer's reading, and this gives them the number to read it from.
+
+    An unreadable compare says so rather than returning a zero, since a delta that could not be
+    read and a delta of nothing take opposite decisions. The filter defaults neither field for
+    that reason: a 200 missing either one fails the filter and reads as unread, where a `//`
+    default rendered it as a delta of nothing. The API caps its file list at 300, so a larger
+    delta is reported as at least that, never as exactly it.
+    """
+    if not base or not head:
+        return "the commit either side of the delta is unknown"
+    if base == head:
+        return "nothing changed between them"
+    proc = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{head}",
+        r'if (.files | type) == "array" and (.ahead_by | type) == "number" '
+        r'then "\(.files | length) \(.ahead_by)" else empty end',
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return "the delta between them could not be read"
+    try:
+        files, commits = (int(x) for x in proc.stdout.split())
+    except ValueError:
+        return "the delta between them could not be read"
+    at_least = "at least " if files >= COMPARE_FILE_CAP else ""
+    return (
+        f"{at_least}{files} file{'' if files == 1 else 's'} changed over "
+        f"{commits} commit{'' if commits == 1 else 's'} since"
+    )
+
+
+@functools.cache
+def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
+    """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
+
+    Read as a three-dot compare, which is the same merge-base reading the pull request's own file
+    list is, so the set at an earlier commit and the set at the head are two readings of one
+    question rather than two questions. Reading one side from the GraphQL payload instead would
+    compare across two APIs with two different ceilings, and a disagreement between them would
+    read as the change set having moved.
+
+    None rather than an empty set wherever the read did not happen, since a pull request that
+    changes nothing and a compare that could not be fetched take opposite decisions, and the
+    caller fails closed on the second. The API caps its file list at 300, and the response carries
+    no flag saying it did, so a set at the cap is returned as unreadable rather than as a set that
+    is probably short. A name the response leaves null would coerce to the literal path `None`
+    and compare equal to another round's null, so an entry that is not a non-empty string makes
+    the whole reading unreadable rather than a set with a fabricated member in it.
+
+    Memoized for the run, which is what makes `digest` and `report_verdict` agree. Each computes
+    the bound from its own reads, so an unmemoized transient failure in one and not the other
+    printed a carried block beside an exit code that refused the carry, and the reverse, which is
+    the fail-open direction since the exit code is what a wait keys on. It also reads each ref
+    once per run rather than once per caller. It does not close the other window: the two
+    compares are still taken at two moments, so a base branch advancing between them still
+    manufactures a set mismatch, which refuses the carry and is the fail-closed direction. The
+    key is the ref as written, so a branch that advances during a run is answered from the read
+    taken before it did, a stale reading held consistently rather than two that disagree.
+
+    The refs are checked before either is interpolated into a compare path, because git permits
+    a character that changes the path rather than traveling along it. A `#` truncates it at a
+    fragment, answering about a different ref rather than failing. The check refuses that set
+    rather than allow-listing the ASCII a branch name usually carries, an allow-list having
+    refused a valid `release/1.0+build` and any non-ASCII name. A dot segment is refused
+    separately, since it reaches another repository and git forbids one in a ref anyway, so a
+    value carrying one did not come from a ref.
+    """
+    refs = (base, commit)
+    if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
+        return None
+    proc = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{commit}",
+        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        names = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
+        return None
+    if not all(isinstance(n, str) and n for n in names):
+        return None
+    return frozenset(names)
+
+
+def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
+    """Whether an earlier round's coverage statement still describes this head's change set.
+
+    True only where the set of paths the pull request changes is the same at both commits, which
+    is the condition measured on this fleet for the reviewer's own marker carrying: one pull
+    request in a promotion chain held its marker across a push whose change set stayed the same
+    three files, and the next lost it across a push that grew its change set from one file to
+    three. The reviewer keyed on the set rather than on the head moving, and so does this.
+
+    Path identity is the whole of the test, so a push that rewrites the contents of exactly the
+    same files carries the statement onto content that statement never read. That is deliberate
+    rather than overlooked. The carry is consulted only where a round did cover the head and
+    stated nothing, so the reviewer has read this commit and declined to restate its coverage,
+    and the delta the digest prints beside the carried reading is what a maintainer judges the
+    rest from.
+
+    There is deliberately no short-circuit for a round on the head commit itself. It reads like
+    the carry's own case, two rounds on one commit where only the first states coverage, and it
+    is unreachable: `head_coverage` takes the worst state over every round on the head and
+    `UNSTATED` ranks last in `SEVERITY`, so a head round stating coverage is the head reading and
+    neither caller consults the carry at all.
+
+    None where the comparison could not be made at all, which the caller reads as a refusal
+    rather than as a pass. A bound that fell open when it could not be measured would be the
+    unbounded carry again, reached by a different route.
+    """
+    head = pr.get("headRefOid") or ""
+    base = pr.get("baseRefName") or ""
+    earlier = changed_at(owner, repo, base, carried_from)
+    current = changed_at(owner, repo, base, head)
+    if earlier is None or current is None:
+        return None
+    return earlier == current
+
+
 def second_format(body: str) -> bool:
     """Whether this body is written in the second overview format.
 
@@ -1126,6 +1352,50 @@ def second_format(body: str) -> bool:
     into the diff, and a round quoting it is not a round written in that format.
     """
     return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", FENCE.sub("", body or ""))))
+
+
+def findings_on(tail: str) -> int | None:
+    """The total one `**Findings:**` line states, summed over the severities it splits it into.
+
+    None where the line states no total at all, which is the absence of the claim
+    `unlisted_findings` subtracts the opened threads from rather than a claim that nothing was
+    raised. `None` spelled in words is a
+    stated zero, which a round raising nothing writes.
+
+    The markup is masked to one sentinel first, so the digits a badge carries in its own
+    attributes are not read as counts. Masking rather than dropping, since dropping joins the
+    digits either side into one number. The mask is bounded rather than exhaustive, and the
+    four-digit ceiling on a count is the second guard under it: an identifier that survives a
+    mask that terminated early is still not read, where an unbounded reading turned one link's
+    anchor id into a total of two billion.
+
+    Summed over every count left on the line, because the format states one per severity joined
+    by a separator that is presentation rather than structure. Summed rather than paired with the
+    markup beside each one, since which side of a count that markup sits on, and whether it is
+    markup at all, is the format's presentation rather than its structure: `**3** high` pairs a
+    count with no markup and read by pairing alone it summed to nothing.
+
+    Summing overstates rather than understates wherever the line states its counts outside the
+    markup, which every body measured does, and which is the direction this picks deliberately.
+    A count written inside the markup instead, `[3](url) high`, is masked away with it and the
+    line then states no total at all, which prints `?` rather than a fabricated zero.
+    A line stating a grand total and then the severities it decomposes into is summed with its
+    own parts, and a line stating a total in prose beside a file count sums both. A shortfall
+    overstated prints a block a reader checks against the body, where one the reader suppressed
+    closes a merge gate over findings nobody answered. `stated_total` takes the largest across
+    lines for the same reason.
+
+    `None` is read first and anchored to the front of the line, which is where this format
+    states its total. Anchored, so a body naming the word mid-sentence does not fabricate a
+    stated zero out of a line stating no total at all, and read first because a line stating the
+    zero and then counting something else, `None found in the 3 files reviewed`, states zero
+    findings and three files. Read after the counts it reported three findings.
+    """
+    masked = COUNT_MARKUP.sub(MARKUP_MASK, tail)
+    if STATED_NONE.search(masked):
+        return 0
+    counts = [int(n) for n in COUNT_LOOSE.findall(masked)]
+    return sum(counts) if counts else None
 
 
 def stated_total(body: str) -> int | None:
@@ -1142,11 +1412,8 @@ def stated_total(body: str) -> int | None:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
-    totals = [
-        0 if m.group(1).lower() == "none" else int(m.group(1))
-        for m in CCR_FINDINGS.finditer(preamble)
-    ]
-    return max(totals) if totals else None
+    totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
+    return max([t for t in totals if t is not None], default=None)
 
 
 def round_threads(pr: dict, review: dict) -> int:
@@ -1428,11 +1695,18 @@ def reviewer_login_drift(pr: dict) -> list[str]:
     ]
 
 
-def report_verdict(pr: dict) -> int:
+def report_verdict(pr: dict, owner: str, repo: str) -> int:
     """Print the blocking verdict's own status line, and return the exit code it carries.
 
     The unrecognized shape outranks the coverage one, because a reader that does not understand
     the output cannot be trusted about what it read of the diff either.
+
+    An earlier round's coverage carries forward here as it does in the digest, so the two agree
+    on the exit code, and the digest is where the reader is told which round it came from. Which
+    round stated coverage is answered by the payload alone, and whether that statement still
+    describes this head is not, so this takes the repository and reads the compare `carry_holds`
+    bounds the carry on. That reader is memoized for the run, which is what keeps this and the
+    digest from reaching two verdicts out of two independent sets of network reads.
     """
     # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
     # It exits here with the remedy that fits it, the reader being what needs the fix.
@@ -1451,6 +1725,19 @@ def report_verdict(pr: dict) -> int:
     if not head_reviews(pr):
         return 0
     state, line = head_coverage(pr)
+    # An earlier round's statement stands until something changes it.
+    # A pull request no round ever stated coverage on is the one left with nothing to carry.
+    # That is the case exit 45 still names.
+    # The digest printed above this one says which round is carried and what changed since.
+    # So this reads the same state and says nothing, two wordings being two places to keep true.
+    # `carry_holds` is what bounds it, and it is read here for the same reason the state is.
+    # A carry the bound refuses leaves the state unstated, which is the case exit 45 still names.
+    # Read as falsy where the bound could not be measured, so an unreadable compare refuses too.
+    carried = carried_coverage(pr) if state == UNSTATED else None
+    if carried is not None and not carry_holds(owner, repo, pr, carried[2]):
+        carried = None
+    if carried is not None:
+        state, line, _from_head = carried
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -1463,23 +1750,44 @@ def report_verdict(pr: dict) -> int:
                 f"{unread} of the {counts[1]} changed files "
                 f"{'has' if unread == 1 else 'have'} no review"
             )
+        # The table is read against the counts only where both describe the same diff.
+        # A carried partial states counts about an earlier commit, and the table is this head's.
+        # The ternary below withholds the reading rather than any refusal `head_table` makes.
+        # Withheld although an identical path set means both denominators name the same files.
+        # What that earlier round read of those files is still not what this head holds.
+        whose = (
+            "an earlier round read fewer files than the pull request changed, and the round "
+            "covering the head states no coverage of its own, so that reading carries"
+            if carried is not None
+            else "the review covering the head read fewer files than the pull request changed"
+        )
+        corroboration = (
+            "the counts describe an earlier commit's diff, so the file table on this head is not "
+            "read against them"
+            if carried is not None
+            else table_against_diff(pr, counts)
+        )
         print(
-            f"status=COVERAGE_IS_PARTIAL the review covering the head read fewer files than the "
-            f"pull request changed, so part of the diff has no review at all. Every partial on "
+            f"status=COVERAGE_IS_PARTIAL {whose}, so part of the diff has no review at all. "
+            f"Every partial on "
             f"record stayed partial at the identical ratio across every later round, so a "
             f"re-request is not the remedy it reads as. Splitting is "
             f"the remedy where it applies, and it does not apply to a promotion. Otherwise this "
             f"is the maintainer's call, taken knowing {gap}, and knowing that "
-            f"{table_against_diff(pr, counts)}"
+            f"{corroboration}"
         )
         return 42
     if state == UNSTATED:
         print(
-            "status=COVERAGE_IS_UNSTATED the review covering the head states no changed-file "
-            "coverage, so the review loop cannot prove that it read the full diff. Confirm the "
-            "head branch carries the current code-review skill and Copilot instructions, then "
-            "request another review. Merging without coverage is the maintainer's decision, "
-            "not the agent's."
+            "status=COVERAGE_IS_UNSTATED no statement of changed-file coverage describes this "
+            "head, so the review loop cannot prove any round read the full diff. A round that "
+            "states none is the ordinary shape of the second overview format and carries the "
+            "newest round that states some forward, bounded on the change set. Reaching here "
+            "means one of three things, and the digest above says which: no round ever stated "
+            "coverage, the round that did describes a different set of changed files than this "
+            "head has, or that comparison could not be read. Confirm the head branch carries "
+            "the current code-review skill and Copilot instructions, then request another "
+            "review. Merging without coverage is the maintainer's decision, not the agent's."
         )
         return 45
     return 0
@@ -1900,6 +2208,30 @@ def digest(
     on_head = head_reviews(pr)
     effort, effort_source = review_effort(pr)
     cover, cover_line = head_coverage(pr)
+    # An earlier round's statement stands until something changes it.
+    # The delta below is what changed, and the maintainer reads the two together.
+    # Reassigned rather than held beside `cover`, so the field and the partial block agree.
+    # Gated on a round covering the head, since an empty `on_head` reads as unstated too.
+    # Ungated, every push carried an earlier round forward onto a head nobody has reviewed.
+    # The digest then printed a coverage block beside `review_on_head=NO`.
+    # Bounded on the change set, per `carry_holds`.
+    # A round on a commit whose diff touched other files clears no gate on a diff nobody has now.
+    # The candidate is held apart from the carry, so a refused one is still a round to name.
+    # Keyed on the candidate rather than on its commit, which a round can leave unnamed.
+    # A review of a commit a force-push made unreachable carries a null `oid`.
+    # Keyed on the commit, that round was refused and the digest then said nothing at all.
+    candidate = carried_coverage(pr) if cover == UNSTATED and on_head else None
+    carried = None
+    carried_from, carried_since, carry_kept = "", "", None
+    if candidate is not None:
+        carried_from = candidate[2]
+        carry_kept = carry_holds(owner, repo, pr, carried_from)
+        carried_since = delta_since(owner, repo, carried_from, head)
+        if carry_kept:
+            carried = candidate
+            cover, cover_line, _carried_from = candidate
+        else:
+            carried = None
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
     # True where the connection cut off before this pull request's actual thread count.
@@ -2004,7 +2336,9 @@ def digest(
         + f"effort={effort} effort_source={effort_source} "
         # A field of its own beside that one, since a round can cover the head and read part.
         # Those two readings are what `review_on_head=yes` alone conflates.
-        f"coverage={COVERAGE_FIELD[cover]} "
+        # `carried:` prefixes the state rather than replacing it.
+        # What the earlier round said is the reading, and which round said it is the provenance.
+        f"coverage={CARRIED + ':' if carried else ''}{COVERAGE_FIELD[cover]} "
         # Every other field on this line is a reading of the review.
         # This one says whether the readings can be believed at all, so it is not a count.
         f"shapes={'UNRECOGNIZED' if unknown else 'ok'} "
@@ -2088,12 +2422,49 @@ def digest(
             "finding gets, before closing the review loop. A thread past the hundred this reads "
             "would count here too, and `threads=` carries a trailing `+` where that page was cut"
         )
+    if carried is not None:
+        # Printed whatever the carried state is, the provenance being the same question either way.
+        # A carried partial then prints its own block under this one.
+        lines.append(
+            f"  COVERAGE IS CARRIED: the round covering the head states none, which is the "
+            f"ordinary shape of the second overview format rather than a defect in it. The "
+            f"newest round that states any is {carried_from[:8] or 'a commit this cannot name'}, "
+            f"and {carried_since}. Whether that round still covers this head is the "
+            f"maintainer's reading, and the delta is what to read it from"
+        )
+        lines.append(f"    {cover_line}")
+    elif candidate is not None:
+        # The bound refused, so the state stays unstated.
+        # The reader is told which round it declined and on what ground.
+        # The alternative is a digest printing nothing about a statement it found and did not use.
+        if not carried_from:
+            why = "that round names no commit, so there is no change set of its own to compare"
+        elif carry_kept is None:
+            why = (
+                "the change set could not be read at both commits, so the bound could not be "
+                "measured and the statement is not carried"
+            )
+        else:
+            why = (
+                "the pull request changes a different set of files at the two commits, so "
+                "that statement describes a diff this head no longer has"
+            )
+        lines.append(
+            f"  COVERAGE IS NOT CARRIED: the newest round that states any is "
+            f"{carried_from[:8] or 'a commit this cannot name'}, and {carried_since}, but {why}"
+        )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
         lines.append(
-            "  COVERAGE IS PARTIAL: the review covering the head read fewer files than "
-            "the pull request changed, so files in the diff have no review at all. A "
+            "  COVERAGE IS PARTIAL: "
+            + (
+                "an earlier round read fewer files than the pull request changed and the round "
+                "covering the head states none, so that reading carries"
+                if carried is not None
+                else "the review covering the head read fewer files than the pull request changed"
+            )
+            + ", so files in the diff have no review at all. A "
             "re-request has never cleared this on record, so report it rather than "
             "retrying into it, and let the maintainer take the merge decision"
         )
@@ -2102,7 +2473,13 @@ def digest(
         # Printed under the same marker, since a maintainer taking the decision wants both.
         # It names no verdict of its own, having been measured against the counts it sits under.
         # The table tracks them nowhere, which is why it is reported rather than read.
-        lines.append(f"    {table_against_diff(pr, read_coverage(cover_line))}")
+        # Withheld on a carried partial, the counts and the table then describing two diffs.
+        lines.append(
+            "    the counts describe an earlier commit's diff, so the file table on this head "
+            "is not read against them"
+            if carried is not None
+            else f"    {table_against_diff(pr, read_coverage(cover_line))}"
+        )
     for node, shape in stuck:
         # Each shape carries its own remedy, which is the whole point of telling them apart.
         # A reader handed one word for all three retries the wrong thing, or waits on a queue.
@@ -2765,7 +3142,7 @@ def main(argv: list[str] | None = None) -> int:
         pr = gql(Q_FULL, owner, repo, a.number)
         out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
         print(out)
-        return report_verdict(pr)
+        return report_verdict(pr, owner, repo)
 
     if a.cmd == "reply":
         return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
@@ -2858,7 +3235,7 @@ def main(argv: list[str] | None = None) -> int:
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
     if unrecognized_shapes(final) or reviewed_head(final):
-        verdict = report_verdict(final)
+        verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.
         # A partial round means the diff is part-reviewed, which outranks a wedged gate.

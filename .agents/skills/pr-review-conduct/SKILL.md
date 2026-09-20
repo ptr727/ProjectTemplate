@@ -42,7 +42,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 2. A review is confirmed on the **current head SHA**, matched by commit SHA rather than assumed
    from a green merge-state. A push makes checks go green *before* the re-review lands, and the
    matched review is **read**, not just counted. A review can carry the head SHA and still decline
-   the PR outright, or say it read only part of the changed files. The coverage this item
+   the PR outright, or say it read only part of the changed files. Where the round covering the
+   head states no coverage at all, the newest round that does state some stands in for it, and
+   only where the pull request changes the same set of files at both commits, since a statement
+   about a diff this head no longer has says nothing about this one. A head round's own
+   statement always wins, and `pr_review.py` refuses the carry where it cannot read that set at
+   both commits. The coverage this item
    requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
    `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is
    a required reviewer: an advisory reviewer's absence blocks nothing, while its findings owe

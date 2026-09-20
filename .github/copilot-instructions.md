@@ -54,9 +54,16 @@ review identifiers by hand. Use `comment` for a suppressed-finding answer in the
 conversation. Its status gate verifies the current head, diff coverage, output shape, inline
 threads, body-only findings, and required checks.
 
-A formal review with no findings is complete only when it covers the current head and states full
-diff coverage. A refusal, partial or absent coverage statement, unrecognized output shape,
-unresolved thread, or body-only finding blocks the review loop. Re-run the loop after every fix
+A formal review with no findings is complete only when it covers the current head and full diff
+coverage is stated for the change set that head has. The round covering the head states it, or the
+newest round that states it at all does and the pull request changes the same set of files at
+both commits, which is the only condition under which a statement carries forward. Only that
+newest round is consulted, so an older round whose change set does match carries nothing. A round reporting partial coverage
+of the diff blocks the merge, and so does a refusal, a coverage statement that does not reach
+this head, meaning absent from every round or carried by none because the change set moved or
+could not be compared, an unrecognized output shape, an unresolved thread, or a body-only
+finding.
+Re-run the loop after every fix
 push. Never infer review completion from `mergeStateStatus: CLEAN`.
 
 Review effort is user-controlled. The automation observes `Lite`, `Balanced`, or `Max`, including an inherited `Default (<level>)`, and never selects or changes the setting. Effort does not determine coverage or completion. A request can complete without a `copilot_work_started` event, so absence of that event is not a stalled-review verdict. When `wait` returns `PENDING` with `requested=yes`, report the state and rerun `wait` for another bounded interval by default. Do not clear the request automatically because it may be active. If the maintainer directs a retry, remove Copilot in the pull request UI, add it again, and rerun `wait`. This recovery replaces only the review request and never changes the effort setting.
