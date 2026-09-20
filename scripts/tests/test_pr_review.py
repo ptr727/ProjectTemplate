@@ -384,6 +384,10 @@ class GqlCase(unittest.TestCase):
         is what this suite exists not to do. A case wanting a delta patches over this itself.
         """
         super().setUp()
+        # `changed_at` is memoized for the run, and these cases share their commit constants.
+        # Without this a case inherits another's compares and the suite becomes order-dependent.
+        pr_review.changed_at.cache_clear()
+        self.addCleanup(pr_review.changed_at.cache_clear)
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -1973,12 +1977,19 @@ class TestCoverageCarriesForward(GqlCase):
         """
 
         def rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+            self.calls.append(path)
+            # Answered only for a compare, so a REST read added here later fails loudly.
+            # Otherwise a canned pair of numbers meant for `delta_since` would satisfy it.
+            if "/compare/" not in path:
+                return subprocess.CompletedProcess([], 1, "", "not a compare")
             if jq and "@json" in jq:
                 names = at.get(path.rsplit("...", 1)[-1])
                 if names is None:
                     return subprocess.CompletedProcess([], 1, "", "no read for this commit")
                 return subprocess.CompletedProcess([], 0, json.dumps(names), "")
             return subprocess.CompletedProcess([], 0, "1 1", "")
+
+        self.calls: list[str] = []
 
         return mock.patch.object(pr_review, "gh_rest", side_effect=rest)
 
@@ -2028,8 +2039,8 @@ class TestCoverageCarriesForward(GqlCase):
             out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=carried:PARTIAL", out)
 
-    def test_exit_45_names_the_one_case_left_for_it(self) -> None:
-        """Nothing to carry, which is the only state the block can still be in."""
+    def test_exit_45_still_covers_a_pull_request_with_nothing_to_carry(self) -> None:
+        """Nothing ever stated coverage, which is the first of the three states it now covers."""
         pr = self.rounds(review(oid=HEAD, body=self.NONE))
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
@@ -2116,17 +2127,59 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("coverage=unstated", out)
         self.assertIn("the bound could not be measured", out)
 
-    def test_an_earlier_round_on_this_same_head_carries_without_a_compare(self) -> None:
-        """Two rounds on one commit where only the first states coverage, the carry's own case.
+    def test_a_head_round_stating_coverage_is_the_head_reading_not_a_carry(self) -> None:
+        """The case a short-circuit on `carried_from == head` looked like, and it never runs.
 
-        There is no delta to judge between a commit and itself, so this reads no compare at all
-        and holds even where every compare fails, which `GqlCase` leaves it doing here.
+        `head_coverage` takes the worst state over every round on the head and `UNSTATED` ranks
+        last, so one round stating coverage is the head's own reading and no caller consults the
+        carry. The short-circuit was removed rather than kept as a guard against a state that
+        cannot arise, and this holds the reasoning that made it dead.
         """
         pr = self.rounds(
             review(oid=HEAD, body=self.FULL, at=EARLY, rid="PRR_a"),
             review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
         )
-        self.assertIs(True, pr_review.carry_holds("o", "r", pr, HEAD))
+        self.assertEqual(pr_review.FULL, pr_review.head_coverage(pr)[0])
+        self.assertEqual(pr_review.UNSTATED, pr_review.SEVERITY[-1])
+
+    def test_the_digest_and_the_verdict_never_reach_two_answers(self) -> None:
+        """Each computed the bound from its own reads, so a failure in one and not the other
+        printed a carried block beside an exit code refusing the carry, and the reverse.
+
+        The reverse is the one that mattered: a wait keys on the exit code, so a carry the
+        digest had just refused read as clean. Memoizing the compare is what closes it, and the
+        call log is what says the two are reading one answer rather than agreeing by luck.
+        """
+        pr = self.rounds(
+            review(oid=OLD, body=self.FULL, at=EARLY, rid="PRR_a"),
+            review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py"]}):
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = pr_review.report_verdict(pr, "o", "r")
+            changed = [p for p in self.calls if "/compare/" in p]
+        self.assertIn("coverage=carried:full", out)
+        self.assertEqual(0, code)
+        # Two change-set reads and one delta, rather than the five two unmemoized callers made.
+        self.assertEqual(3, len(changed))
+
+    def test_the_verdict_names_which_of_the_three_states_it_reached(self) -> None:
+        """Exit 45 named one state and reaches three, so its own text said no round states
+        coverage while the digest two lines above named the round that does."""
+        pr = self.rounds(
+            review(oid=OLD, body=self.FULL, at=EARLY, rid="PRR_a"),
+            review(oid=HEAD, body=self.NONE, at=LATE, rid="PRR_b"),
+        )
+        with (
+            self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(io.StringIO()) as said,
+        ):
+            self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+        text = " ".join(said.getvalue().split())
+        self.assertIn("no statement of changed-file coverage describes this head", text)
+        self.assertIn("one of three things", text)
+        self.assertNotIn("no round on this pull request states changed-file coverage", text)
 
     def test_a_change_set_at_the_compare_cap_reads_as_unreadable(self) -> None:
         """The API caps its file list and flags nothing, so a set at the cap proves nothing."""
@@ -2390,24 +2443,70 @@ class TestSecondOverviewFormat(GqlCase):
             3, pr_review.stated_total(overview_v2(findings=f"**Findings:** 3 {badge}"))
         )
 
-    def test_only_a_count_the_line_pairs_with_a_badge_is_summed(self) -> None:
+    def test_a_count_inside_the_markup_is_not_one_of_the_counts(self) -> None:
         """Summing every integer read a ten-digit anchor id out of a link as a finding total.
 
         The format writes a markdown link beside a finding, so `1 [medium](...#discussion_rNNN)`
         stated two billion findings and `unlisted_findings` reported a shortfall of two billion.
+        The markup is masked before any count is read, and the four-digit ceiling is the second
+        guard under it, for a mask that terminates early on a bracket the URL carries itself.
         """
         link = "1 [medium](https://github.com/o/r/pull/7#discussion_r2404123456)"
         self.assertEqual(1, pr_review.stated_total(overview_v2(findings=f"**Findings:** {link}")))
         image = "3 ![medium](https://example.invalid/badge-medium-3.svg)"
         self.assertEqual(3, pr_review.stated_total(overview_v2(findings=f"**Findings:** {image}")))
 
-    def test_a_line_pairing_nothing_states_its_total_as_one_leading_number(self) -> None:
-        """The first format's spelling, and a prose tail after it is not a second count."""
-        for line, want in (("12 findings across 4 files", 12), ("40", 40)):
+    def test_every_count_the_markup_did_not_swallow_is_summed(self) -> None:
+        """The reader sums rather than picking, which overstates and never understates.
+
+        Reading one number per line understated every severity split the format writes, and no
+        rule tells a total followed by context apart from a two-severity breakdown, so `12
+        findings across 4 files` sums to 16 and is the named cost of the direction. A shortfall
+        prints a block a reader checks against the body and blocks no merge, where a suppressed
+        one closes the gate over findings nobody answered.
+        """
+        for line, want in (("12 findings across 4 files", 16), ("40", 40)):
             with self.subTest(line=line):
                 self.assertEqual(
                     want, pr_review.stated_total(overview_v2(findings=f"**Findings:** {line}"))
                 )
+
+    def test_a_severity_split_the_format_writes_another_way_still_sums(self) -> None:
+        """Pairing each count with markup beside it read a bold split as its first number.
+
+        Which side of a count the markup sits on, and whether the severity carries markup at
+        all, is this format's presentation rather than its structure, so pairing on it dropped
+        four shapes measured against one reader.
+        """
+        for line, want in (
+            ("**3** high \u00b7 **2** low", 5),
+            ("2 medium, 3 low", 5),
+            ("<b>medium</b> 2 \u00b7 <b>low</b> 3", 5),
+            ("2 [medium][1] 3 [low][2]", 5),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(
+                    want, pr_review.stated_total(overview_v2(findings=f"**Findings:** {line}"))
+                )
+
+    def test_an_identifier_and_a_decimal_are_not_counts(self) -> None:
+        """Each is a digit run the mask alone did not stop, and neither is a finding total."""
+        for line, want in (
+            ("2 high (confidence < 0.5), 3 <b>low</b>", 5),
+            ("1 [medium](https://en.wikipedia.org/wiki/X_(Y)#discussion_r2404123456)", 1),
+            ("4 [a [b] c](https://x/9999)", 4),
+            ('3 <img src="b.svg" width="62" height="18">', 3),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(
+                    want, pr_review.stated_total(overview_v2(findings=f"**Findings:** {line}"))
+                )
+
+    def test_a_digit_run_no_int_should_be_handed_states_no_total(self) -> None:
+        """`int` raises above 4300 digits, and `COUNT_LOOSE` scans the whole line now."""
+        self.assertIsNone(
+            pr_review.stated_total(overview_v2(findings="**Findings:** " + "1" * 4400))
+        )
 
     def test_a_zero_spelled_in_words_beats_a_number_counting_something_else(self) -> None:
         """`None` is checked after the counts, so a line spelling zero and then counting reads 0."""

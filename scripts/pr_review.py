@@ -36,10 +36,12 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = no round on this pull request states changed-file coverage, the one covering the
-           head included. A round that states none carries the newest round that states some
-           forward, so reaching this code means there is none to carry. Request another
-           review only after confirming the head branch carries the current review instructions.
+           45 = no statement of changed-file coverage describes this head. A round that states
+           none carries the newest round that states some forward, bounded on the change set,
+           so this covers three states: nothing ever stated coverage, the round that did
+           describes a different set of changed files, or that comparison could not be read.
+           Request another review only after confirming the head branch carries the current
+           review instructions.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -203,6 +205,7 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
+import functools
 import io
 import json
 import os
@@ -440,13 +443,26 @@ CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
 # Masked rather than matched around, because a badge carries digits of its own in its attributes.
 # `2 <img src="b.svg" width="62" height="18">` read `18` as a severity count on that reasoning.
 # Dropping the markup outright would join the digits either side of it into one number instead.
-COUNT_MARKUP = re.compile(r"<[^>]*>|!?\[[^\]]*\]\([^)]*\)")
+# The tag alternative is bounded by `[^<>]`, so it cannot span from one tag into another.
+# An unmatched `<` earlier in the line otherwise paired with a later tag's closing `>`.
+# Every count between the two was swallowed with it.
+# It opens on a name character for the same reason, a `<` followed by a space being prose.
+# The link alternative tolerates one level of nested parentheses and brackets, a URL carrying a
+# `)` of its own having otherwise ended the match early and left its anchor id on the line.
+# A reference-style link is its own alternative, its label being a number as often as a word.
+COUNT_MARKUP = re.compile(
+    r"</?[A-Za-z][^<>]*>"
+    r"|!?\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]\([^()]*(?:\([^()]*\)[^()]*)*\)"
+    r"|!?\[[^\[\]]*\]\[[^\[\]]*\]"
+)
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
-# A count is one the line pairs with that markup, which is how the format writes a severity.
-COUNT_PAIRED = re.compile(r"(\d+)\s*" + MARKUP_MASK)
-# Every integer the markup did not swallow, which is how the first format writes a bare total.
-COUNT_LOOSE = re.compile(r"\d+")
+# Every integer the markup did not swallow, which is how this format states each severity.
+# Bounded to four digits, because a review states tens of findings and never thousands.
+# A longer run is an identifier, so the mask is not the only thing saying an anchor id is not one.
+# That bound is also what keeps `int` from being handed a digit run long enough to raise.
+# A digit touching a `.` is part of a decimal, so `confidence < 0.5` contributes no count.
+COUNT_LOOSE = re.compile(r"(?<![\d.])\d{1,4}(?![\d.])")
 # A total of zero spelled in words, anchored to where the line states its total.
 # Read as a bare substring instead, `see nonetheless the summary below` stated a zero.
 # Emphasis markers are skipped, the format writing the word italicized as often as bare.
@@ -496,6 +512,9 @@ WINDOW = 100
 FILES_WINDOW = 100
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
+# What a git ref may hold before it is interpolated into a REST path.
+# Git permits `#` and `%` in a ref name, and a `#` truncates the path at a fragment.
+SAFE_REF = re.compile(r"[A-Za-z0-9._/-]+")
 
 # How many rollup contexts the full query asks for, which is not the window above.
 # The query is built from this and the truncation line quotes it, so the two cannot drift.
@@ -1221,6 +1240,7 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
     )
 
 
+@functools.cache
 def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
     """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
 
@@ -1234,9 +1254,24 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     changes nothing and a compare that could not be fetched take opposite decisions, and the
     caller fails closed on the second. The API caps its file list at 300, and the response carries
     no flag saying it did, so a set at the cap is returned as unreadable rather than as a set that
-    is probably short.
+    is probably short. A name the response leaves null would coerce to the literal path `None`
+    and compare equal to another round's null, so an entry that is not a non-empty string makes
+    the whole reading unreadable rather than a set with a fabricated member in it.
+
+    Memoized for the run, which is what makes `digest` and `report_verdict` agree. Each computes
+    the bound from its own reads, so an unmemoized transient failure in one and not the other
+    printed a carried block beside an exit code that refused the carry, and the reverse, which is
+    the fail-open direction since the exit code is what a wait keys on. It also reads each ref
+    once rather than four times, closing the window in which the base branch advancing between
+    two reads of it manufactures a set mismatch. The key is the ref as written, so a branch that
+    advances during a long wait is answered from the read taken before it did, which is a stale
+    reading held consistently rather than two fresh readings that disagree.
+
+    The refs are checked against the characters a compare path can carry before one is
+    interpolated into it, since git permits `#` and `%` in a ref name and a `#` truncates the
+    path at a fragment, answering about a different ref rather than failing.
     """
-    if not base or not commit:
+    if not base or not commit or not all(SAFE_REF.fullmatch(r) for r in (base, commit)):
         return None
     proc = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{commit}",
@@ -1250,29 +1285,38 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
         return None
     if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
         return None
-    return frozenset(str(n) for n in names)
+    if not all(isinstance(n, str) and n for n in names):
+        return None
+    return frozenset(names)
 
 
 def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
     """Whether an earlier round's coverage statement still describes this head's change set.
 
     True only where the set of paths the pull request changes is the same at both commits, which
-    is the condition measured on this fleet: a coverage marker carries across a push that leaves
-    the change set alone and stops carrying the moment a file joins or leaves it. Two pull
-    requests measured in one promotion chain settled the direction, one holding its marker across
-    a push that kept the same three files and one losing it when a file grew to three.
+    is the condition measured on this fleet for the reviewer's own marker carrying: one pull
+    request in a promotion chain held its marker across a push whose change set stayed the same
+    three files, and the next lost it across a push that grew its change set from one file to
+    three. The reviewer keyed on the set rather than on the head moving, and so does this.
 
-    A round on the head commit itself carries unconditionally, since there is no delta to judge.
-    That is the case the carry exists for, two rounds on one commit where only the first states
-    coverage, and it costs no request.
+    Path identity is the whole of the test, so a push that rewrites the contents of exactly the
+    same files carries the statement onto content that statement never read. That is deliberate
+    rather than overlooked. The carry is consulted only where a round did cover the head and
+    stated nothing, so the reviewer has read this commit and declined to restate its coverage,
+    and the delta the digest prints beside the carried reading is what a maintainer judges the
+    rest from.
+
+    There is deliberately no short-circuit for a round on the head commit itself. It reads like
+    the carry's own case, two rounds on one commit where only the first states coverage, and it
+    is unreachable: `head_coverage` takes the worst state over every round on the head and
+    `UNSTATED` ranks last in `SEVERITY`, so a head round stating coverage is the head reading and
+    neither caller consults the carry at all.
 
     None where the comparison could not be made at all, which the caller reads as a refusal
     rather than as a pass. A bound that fell open when it could not be measured would be the
     unbounded carry again, reached by a different route.
     """
     head = pr.get("headRefOid") or ""
-    if carried_from and carried_from == head:
-        return True
     base = pr.get("baseRefName") or ""
     earlier = changed_at(owner, repo, base, carried_from)
     current = changed_at(owner, repo, base, head)
@@ -1301,22 +1345,25 @@ def findings_on(tail: str) -> int | None:
     raised. `None` spelled in words is a
     stated zero, which a round raising nothing writes.
 
-    The markup is masked to one sentinel first, so no digit inside it is ever read as a count.
-    Masking rather than dropping, since dropping joins the digits either side into one number.
+    The markup is masked to one sentinel first, so the digits a badge carries in its own
+    attributes are not read as counts. Masking rather than dropping, since dropping joins the
+    digits either side into one number. The mask is bounded rather than exhaustive, and the
+    four-digit ceiling on a count is the second guard under it: an identifier that survives a
+    mask that terminated early is still not read, where an unbounded reading turned one link's
+    anchor id into a total of two billion.
 
-    Summed over the counts the line pairs with that markup, because the format states a count per
-    severity joined by a separator that is presentation rather than structure. Paired rather than
-    summing every integer, since the format writes a markdown link beside a finding and an anchor
-    id is ten digits of it.
+    Summed over every count left on the line, because the format states one per severity joined
+    by a separator that is presentation rather than structure. Summed rather than paired with the
+    markup beside each one, since which side of a count that markup sits on, and whether it is
+    markup at all, is the format's presentation rather than its structure: `**3** high` pairs a
+    count with no markup and read by pairing alone it summed to nothing.
 
-    The larger of that sum and the largest single integer on the line wins, which is the tie-break
-    `stated_total` already applies across lines and for the same reason: a line stating a total in
-    prose and pairing one severity beside it, `10 findings, 4 <b>medium</b>`, decomposes no way
-    this can tell apart from a two-severity split, and reading the pair alone stated four where
-    the round raised ten. A shortfall that is overstated is reported and read, where one the
-    reader suppressed is a merge gate that closed on findings nobody answered. That direction is
-    the whole of what is claimed here: where a line states a grand total and pairs the severities
-    it decomposes into, the two are summed together and the result overstates.
+    Summing overstates rather than understates, which is the direction this picks deliberately.
+    A line stating a grand total and then the severities it decomposes into is summed with its
+    own parts, and a line stating a total in prose beside a file count sums both. A shortfall
+    overstated prints a block a reader checks against the body, where one the reader suppressed
+    closes a merge gate over findings nobody answered. `stated_total` takes the largest across
+    lines for the same reason.
 
     `None` is read first and anchored to the front of the line, which is where this format
     states its total. Anchored, so a body naming the word mid-sentence does not fabricate a
@@ -1327,11 +1374,8 @@ def findings_on(tail: str) -> int | None:
     masked = COUNT_MARKUP.sub(MARKUP_MASK, tail)
     if STATED_NONE.search(masked):
         return 0
-    paired = [int(n) for n in COUNT_PAIRED.findall(masked)]
-    loose = [int(n) for n in COUNT_LOOSE.findall(masked)]
-    if paired or loose:
-        return max(sum(paired), max(loose, default=0))
-    return None
+    counts = [int(n) for n in COUNT_LOOSE.findall(masked)]
+    return sum(counts) if counts else None
 
 
 def stated_total(body: str) -> int | None:
@@ -1638,8 +1682,11 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
     the output cannot be trusted about what it read of the diff either.
 
     An earlier round's coverage carries forward here as it does in the digest, so the two agree
-    on the exit code, and the digest is where the reader is told which round it came from. This
-    needs no repository to do that, the payload alone answering which round stated coverage.
+    on the exit code, and the digest is where the reader is told which round it came from. Which
+    round stated coverage is answered by the payload alone, and whether that statement still
+    describes this head is not, so this takes the repository and reads the compare `carry_holds`
+    bounds the carry on. That reader is memoized for the run, which is what keeps this and the
+    digest from reaching two verdicts out of two independent sets of network reads.
     """
     # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
     # It exits here with the remedy that fits it, the reader being what needs the fix.
@@ -1710,13 +1757,15 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
         return 42
     if state == UNSTATED:
         print(
-            "status=COVERAGE_IS_UNSTATED no round on this pull request states changed-file "
-            "coverage, this one included, so the review loop cannot prove any of them read the "
-            "full diff. A round that states none is the ordinary shape of the second overview "
-            "format and is carried over from an earlier round that states some, so reaching here "
-            "means there is none to carry. Confirm the head branch carries the current "
-            "code-review skill and Copilot instructions, then request another review. Merging "
-            "without coverage is the maintainer's decision, not the agent's."
+            "status=COVERAGE_IS_UNSTATED no statement of changed-file coverage describes this "
+            "head, so the review loop cannot prove any round read the full diff. A round that "
+            "states none is the ordinary shape of the second overview format and carries the "
+            "newest round that states some forward, bounded on the change set. Reaching here "
+            "means one of three things, and the digest above says which: no round ever stated "
+            "coverage, the round that did describes a different set of changed files than this "
+            "head has, or that comparison could not be read. Confirm the head branch carries "
+            "the current code-review skill and Copilot instructions, then request another "
+            "review. Merging without coverage is the maintainer's decision, not the agent's."
         )
         return 45
     return 0

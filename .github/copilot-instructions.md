@@ -55,9 +55,10 @@ conversation. Its status gate verifies the current head, diff coverage, output s
 threads, body-only findings, and required checks.
 
 A formal review with no findings is complete only when it covers the current head and full diff
-coverage is stated for the change set that head has. The round covering the head states it, or an
-earlier round states it and the pull request changes the same set of files at both commits, which
-is the only condition under which a statement carries forward. A round reporting partial coverage
+coverage is stated for the change set that head has. The round covering the head states it, or the
+newest round that states it at all does and the pull request changes the same set of files at
+both commits, which is the only condition under which a statement carries forward. Only that
+newest round is consulted, so an older round whose change set does match carries nothing. A round reporting partial coverage
 of the diff blocks the merge, and so does a refusal, a coverage statement absent from every round
 on the pull request, an unrecognized output shape, an unresolved thread, or a body-only finding.
 Re-run the loop after every fix
