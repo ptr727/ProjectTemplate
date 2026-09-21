@@ -1986,6 +1986,13 @@ class TestCoverage(GqlCase):
                 self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
         # A marker carrying its own `>` is still the quotation rather than a block of its own.
         self.assertEqual([], pr_review.coverage_statements(f"> {MARKER}\n"))
+        # An indented line is a code block, so its `>` is text rather than a quotation's marker.
+        # Opening a quotation on one swallowed every line to the next blank one, and a statement among them read as none stated at all, which blocks a merge on a satisfied item.
+        for label, quoted_line in (("four spaces", "    > prompt"), ("one tab", "\t> prompt")):
+            with self.subTest(case=label):
+                body = f"Some prose.\n\n{quoted_line}\n{sentence}\n"
+                self.assertEqual([sentence], pr_review.coverage_statements(body))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
         # What opens a block is a shape rather than any line starting with a tag character.
         # An indented line is a code block and an inline tag leaves its line paragraph text, so neither interrupts a paragraph and neither ends the quotation above it.
         for label, line in (

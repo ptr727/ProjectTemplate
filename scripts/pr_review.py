@@ -1220,12 +1220,15 @@ def coverage_statements(body: str) -> list[str]:
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
             continue
-        if BLOCKQUOTE.match(stripped):
-            quoted = True
-            continue
         # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
         expanded = ln.expandtabs(4)
-        if len(expanded) - len(expanded.lstrip()) < 4 and STARTS_BLOCK.match(stripped):
+        indented = len(expanded) - len(expanded.lstrip()) >= 4
+        # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
+        # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
+        if not indented and BLOCKQUOTE.match(stripped):
+            quoted = True
+            continue
+        if not indented and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
