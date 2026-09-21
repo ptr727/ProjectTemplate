@@ -1044,6 +1044,78 @@ def cr_outside_diff_body_multi(findings: list[str], path: str = "a.py") -> str:
     )
 
 
+class TestPreviouslyMissed(GqlCase):
+    """A finding raised against code the branch did not change, which reaches no thread either.
+
+    The section is the suppressed section's structural twin: a counted heading, entries collapsed
+    into the review body, and no inline comment for any of them. It is read the same way for that
+    reason, and counted over every round rather than the head's, since a push cannot answer a
+    finding nobody replied to.
+    """
+
+    def test_the_section_is_counted_and_split_by_round(self) -> None:
+        for label, reviews, want, on_head, earlier in (
+            ("on the head", [review(body=previously_missed())], 1, 1, 0),
+            ("a counted heading", [review(body=previously_missed(count="(3)"))], 3, 3, 0),
+            (
+                "on an earlier round",
+                [review(oid=OLD, body=previously_missed()), review()],
+                1,
+                0,
+                1,
+            ),
+        ):
+            with self.subTest(case=label):
+                self.answer(payload(reviews))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(f"previously_missed={want} ", out)
+                self.assertIn(f"(on_head={on_head} earlier={earlier})", out)
+
+    def test_a_round_raising_none_prints_no_field_at_all(self) -> None:
+        """A permanent zero on every repository whose reviewer never raises one is noise.
+
+        `cr_outside_diff=` is silent for the same reason, and this follows it rather than
+        inventing a second convention for the same situation.
+        """
+        self.answer(payload([review()]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("previously_missed=", out)
+
+    def test_the_finding_prints_with_its_severity_and_no_icon_markup(self) -> None:
+        """This digest is the only place the finding appears, so it prints whole.
+
+        The severity prints as the word the badge carries rather than as the two icon URLs that
+        carry it, which would bury the title following them under a line of markup per finding.
+        """
+        self.answer(payload([review(body=previously_missed())]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("PREVIOUSLY MISSED (on head)", out)
+        self.assertIn("raised against code this branch did not change", out)
+        self.assertIn("no thread to resolve", out)
+        self.assertIn(f"Low severity {MISSED_TITLE}", out)
+        self.assertNotIn("<picture>", out)
+        self.assertNotIn("githubassets.com", out)
+        self.assertNotIn("<summary>", out)
+
+    def test_it_is_counted_apart_from_a_suppressed_finding(self) -> None:
+        """The two take different answers, one withheld by the reviewer and one raised outright."""
+        self.answer(payload([review(body=previously_missed()), review(oid=OLD, body=collapsed())]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("suppressed=1 ", out)
+        self.assertIn("previously_missed=1 ", out)
+
+    def test_no_exit_code_rides_on_it(self) -> None:
+        """It reports a finding to triage rather than a state that blocks, as `suppressed=` does.
+
+        A section that is read is also a section that no longer reports an unrecognized shape, so
+        the gate it used to stop dead now stops only where something is genuinely unread.
+        """
+        self.answer(payload([review(body=previously_missed())]))
+        out, code = pr_review.digest("o", "r", 7)
+        self.assertIn("shapes=ok", out)
+        self.assertEqual(0, code)
+
+
 class TestCodeRabbitOutsideDiff(GqlCase):
     def cr_review(self, oid: str = HEAD, body: str = "") -> dict:
         return {
@@ -1435,6 +1507,39 @@ class TestQuotaRefusal(GqlCase):
         self.assertFalse(pr_review.quota_refusal({"body": body}))
 
 
+MARKER = "<!-- fleet-review: reviewed=8 changed=8 findings=0 -->"
+# The badge the second overview format renders a severity as, quoted from a live review body.
+# The icon URLs are the corpus's own, since the version in them is what a reader must not key on.
+BADGE = (
+    '<picture><source media="(prefers-color-scheme: dark)" srcset="https://github.'
+    'githubassets.com/static/images/icons/copilot-code-review/low-v2-dark.svg">'
+    '<source media="(prefers-color-scheme: light)" srcset="https://github.githubassets.com'
+    '/static/images/icons/copilot-code-review/low-v2-light.svg"><img src="https://github.'
+    'githubassets.com/static/images/icons/copilot-code-review/low-v2-light.png" '
+    'alt="Low severity" width="62" height="18" align="texttop"></picture>'
+)
+MISSED_TITLE = "Overstates I2C bus requirement for all board templates"
+
+
+def previously_missed(
+    count: str = "(1)",
+    title: str = MISSED_TITLE,
+    finding: str = "`OPERATIONS.md:220`\n\nThe last sentence is too broad.",
+    badge: str = BADGE,
+) -> str:
+    """The section as the live format writes it: a counted heading wrapping badge-led entries.
+
+    Quoted from a review body rather than invented, since the nesting is the half of the shape a
+    reader gets wrong: the section is one `<details>` and each finding is another inside it.
+    """
+    return (
+        f"{OVERVIEW}\n{COVERED}\n\n<details>\n"
+        f"<summary><strong>Previously missed {count}</strong></summary>\n\n"
+        "In code that hasn't changed since last review\n\n"
+        f"<details>\n<summary>{badge} {title}</summary>\n\n{finding}\n</details>\n</details>\n"
+    )
+
+
 class TestCoverage(GqlCase):
     """The round that covered the head and read part of the diff, which is a clean pass elsewhere.
 
@@ -1667,6 +1772,61 @@ class TestCoverage(GqlCase):
             review(login="ptr727", body=partial), review(body=OVERVIEW + "\n" + COVERED)
         )
         self.assertIn("coverage=full", out)
+
+    def test_the_marker_is_read_where_the_reviewer_puts_it_inside_a_sentence(self) -> None:
+        """The second overview format ends a prose sentence with the marker rather than giving it
+        a line, and read only as the whole of a line that round stated no coverage at all.
+
+        The instruction the marker is emitted from asks that the body end with it and says nothing
+        about a line of its own, so both placements are the reviewer following it. The counts are
+        identical either way, and it was only ever the anchoring that differed.
+        """
+        for label, line in (
+            ("alone on its line", MARKER),
+            ("ending a prose sentence", f"The changes are internally consistent, with {MARKER}"),
+            ("with text either side", f"Consistent, {MARKER} as measured."),
+        ):
+            with self.subTest(case=label):
+                self.assertTrue(pr_review.is_coverage_line(line))
+                self.assertEqual((8, 8), pr_review.read_coverage(line))
+        out = self.digest_for(
+            review(body=f"{OVERVIEW}\nThe changes are internally consistent, with {MARKER}")
+        )
+        self.assertIn("coverage=full", out)
+        self.assertNotIn("coverage=unstated", out)
+
+    def test_a_quoted_marker_is_not_this_round_stating_its_coverage(self) -> None:
+        """Reading the marker within its line costs the exclusion the line anchor gave for free.
+
+        A `>` is not whitespace, so a blockquoted marker used to fail the anchor without anything
+        having to refuse it. It is refused deliberately now, beside the fence and the span that
+        were always refused, because a body quoting a coverage line is not a body stating one and
+        this pull request's own review is as able to quote one as any other.
+        """
+        for label, body in (
+            ("in a fenced block", f"```text\n{MARKER}\n```"),
+            ("in an inline code span", f"The marker `{MARKER}` is quoted."),
+            ("blockquoted", f"> {MARKER}"),
+            ("blockquoted and indented", f"  > {MARKER}"),
+            ("blockquoted twice", f">> {MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual([], pr_review.coverage_statements(body))
+        # The same marker outside a quotation is still read, which is what says the guard is narrow.
+        self.assertEqual(
+            [f"Prose about the change. {MARKER}"],
+            pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
+        )
+
+    def test_the_marker_wins_over_a_prose_count_sharing_its_line(self) -> None:
+        """One line can now carry both, which the line anchor made impossible before.
+
+        The marker is the stable shape the prose readers exist to be rescued from, so it settles
+        the line. Read the other way round, a sentence whose wording drifts would outrank counts
+        the reviewer stated exactly.
+        """
+        line = f"Copilot reviewed 2 out of 3 changed files in this pull request. {MARKER}"
+        self.assertEqual((8, 8), pr_review.read_coverage(line))
 
 
 class TestUnrecognizedShapes(GqlCase):
@@ -1949,6 +2109,54 @@ class TestUnrecognizedShapes(GqlCase):
         )
         self.assertIn("shapes=UNRECOGNIZED", out)
         self.assertIn(f"(round {OLD[:8]})", out)
+
+    def test_the_previously_missed_heading_is_a_vetted_section_rather_than_a_block(self) -> None:
+        """A live round carrying it blocked every gate on the pull request until it was read.
+
+        The heading states its own count, which `normal` reduces to `(N)` exactly as it does for
+        the suppressed heading beside it, so the list holds the reduced spelling rather than one
+        number the next round would not carry.
+        """
+        self.assertEqual([], pr_review.unrecognized_in(previously_missed()))
+        # The count in the heading is the round's, so a different one is the same shape.
+        self.assertEqual([], pr_review.unrecognized_in(previously_missed(count="(4)")))
+        # The vetted spelling carries its count, as the suppressed heading beside it does, and every measured round writes one.
+        # A spelling that drops it is a wording this has not seen, so it blocks rather than being vetted ahead of the evidence for it.
+        self.assertEqual(
+            ["summary: Previously missed"],
+            pr_review.unrecognized_in(previously_missed(count="")),
+        )
+
+    def test_a_finding_entry_is_recognized_by_its_badge_rather_than_by_its_title(self) -> None:
+        """A title differs on every finding, so vetting one by text blocks on each new finding.
+
+        The severity is the part that does not differ, and the badge carrying it renders as a
+        theme-switched `picture` whose only textual carrier is the `img` `alt`. Keyed on anything
+        else, the entry reads as an unknown section and stops the gate for presentation alone.
+        """
+        self.assertEqual([], pr_review.unrecognized_in(previously_missed()))
+        for severity in ("Low", "Medium", "High", "Critical"):
+            with self.subTest(severity=severity):
+                badge = BADGE.replace('alt="Low severity"', f'alt="{severity} severity"')
+                self.assertEqual([], pr_review.unrecognized_in(previously_missed(badge=badge)))
+
+    def test_the_badge_reduces_to_its_alt_text_rather_than_to_its_icon_urls(self) -> None:
+        """The URLs carry a version the icon set has already bumped once, and the `alt` does not.
+
+        Reduced the other way round, every rebuild of the icon set would present as a new shape.
+        """
+        self.assertEqual(
+            f"Low severity {MISSED_TITLE}", pr_review.normal(f"{BADGE} {MISSED_TITLE}")
+        )
+        bumped = BADGE.replace("low-v2", "low-v9")
+        self.assertEqual(
+            f"Low severity {MISSED_TITLE}", pr_review.normal(f"{bumped} {MISSED_TITLE}")
+        )
+
+    def test_a_section_that_is_genuinely_unknown_still_blocks_beside_them(self) -> None:
+        """Recognizing these two is not widening the gate to whatever wears a `<details>`."""
+        body = previously_missed().replace("Previously missed (1)", "Speculative rewrites (1)")
+        self.assertIn("summary: Speculative rewrites (N)", pr_review.unrecognized_in(body))
 
 
 class TestCoverageCarriesForward(GqlCase):

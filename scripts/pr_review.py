@@ -265,6 +265,9 @@ CHECK_STALL = 1800
 # The alternation is the runbook's, since the heading wording has changed once already.
 # Matching one phrasing alone reports zero on a review that has them.
 SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
+# The second overview format's own section for a finding against code the pull request did not change.
+# Matched on the wording alone, the heading carrying its count in the `(N)` every section heading here carries.
+PREVIOUSLY_MISSED = re.compile(r"Previously missed", re.IGNORECASE)
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
 CR_OUTSIDE_DIFF = re.compile(r"Outside diff range comments", re.IGNORECASE)
 # A refusal declines the round as a formal review carrying the head and no threads.
@@ -314,8 +317,31 @@ QODO_BADGE = re.compile(r"<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</
 # That one keeps the text requirement, since the name alone does not say the line states coverage.
 COVERAGE_BULLET = re.compile(r"\s*[-*]\s*\*\*Files reviewed:", re.IGNORECASE)
 COVERAGE_SENTENCE = re.compile(r"\s*Copilot\b", re.IGNORECASE)
+# A blockquote marker (`>` per line, Markdown's own quoting convention) sits in front of every line CodeRabbit wraps its outside-diff section in.
+# `HEADING`'s `\s*` does not match `>`, so a heading under one reads as prose without this stripped first.
+# Read by two callers for opposite purposes, which is why it is defined here rather than beside either.
+# `marker_blocks` strips it to find a heading underneath, and `coverage_statements` refuses the line outright.
+# A quoted marker is a quotation whichever convention quotes it, and the coverage reader has no use for what a blockquote carries.
+BLOCKQUOTE = re.compile(r"^>+\s?")
+# The severity the second overview format now renders as a theme-switched `picture` element.
+# Its only textual carrier is the `img` `alt`, every other part being a URL that changes with the icon set.
+# The set is versioned in those URLs and has already been bumped once, so matching them would pin this reader to one revision.
+# Reduced to the `alt` text rather than dropped, since the severity is the half of a finding entry worth reading.
+SEVERITY_BADGE = re.compile(
+    r"<picture\b[^>]*>.*?<img\b[^>]*\salt=\"([^\"]*)\"[^>]*>.*?</picture>",
+    re.DOTALL | re.IGNORECASE,
+)
+# What is left of a finding entry's own heading once the badge above is reduced to its text.
+# A finding entry cannot be vetted the way a section heading is, its title being different on every finding.
+# The badge is therefore what identifies the shape, and the title after it is free text by design.
+SEVERITY_TEXT = re.compile(r"(?:critical|high|medium|low)\s+severity\b", re.IGNORECASE)
 # Ask the reviewer for a stable coverage shape instead of adapting only to changing prose.
 # Keep the prose readers for reviews made before the marker shipped.
+# Searched within its line rather than matched as the whole of one, because the reviewer writes it both ways.
+# The instruction it is emitted from asks only that the body end with it, and one of the two overview formats ends a prose sentence with it instead.
+# Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
+# The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
+# That refusal is `coverage_statements`, which drops a fenced block, an inline code span, and a blockquoted line, in that order, ahead of every reader here.
 FLEET_REVIEW = re.compile(
     r"\s*<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->\s*",
     re.IGNORECASE,
@@ -375,7 +401,7 @@ COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTAT
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 9 summaries and 4 labels.
+# The lists are small because the output is regular: 10 headings, 10 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
@@ -403,6 +429,7 @@ VETTED_SUMMARIES = {
     "Review details",
     "Suppressed comments (N)",
     "Comments suppressed due to low confidence (N)",
+    "Previously missed (N)",
 }
 VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
 # Inline emphasis around a marker is presentation rather than identity.
@@ -1103,7 +1130,7 @@ def review_effort(pr: dict) -> tuple[str, str]:
 
 def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
-    if FLEET_REVIEW.fullmatch(line):
+    if FLEET_REVIEW.search(line):
         return True
     if COVERAGE_BULLET.match(line):
         return True
@@ -1115,9 +1142,20 @@ def coverage_statements(body: str) -> list[str]:
 
     An inline code span is a quotation the same as a fenced block, so a span carrying a coverage
     line reads as one this round stated rather than one it quoted.
+
+    A blockquoted line is the third such convention and is dropped whole rather than unwrapped.
+    The line anchor used to exclude one for free, the marker reader having required the marker to
+    be the whole of its line and a `>` not being whitespace. Reading the marker within its line
+    took that exclusion away, so the quotation it was refusing is refused here instead, where the
+    other two already are. The prose readers beside it are unaffected either way, each being
+    anchored to a line opener that a `>` already fails.
     """
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
-    return [ln.strip() for ln in plain.splitlines() if is_coverage_line(ln)]
+    return [
+        ln.strip()
+        for ln in plain.splitlines()
+        if not BLOCKQUOTE.match(ln.lstrip()) and is_coverage_line(ln)
+    ]
 
 
 def read_coverage(line: str) -> tuple[int, int] | None:
@@ -1129,7 +1167,7 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     it is a line this script is parsing wrongly, and reading it as full coverage fails open on
     exactly the statement that says something is off.
     """
-    marker = FLEET_REVIEW.fullmatch(line)
+    marker = FLEET_REVIEW.search(line)
     m = COVERAGE_COUNTS.search(line)
     if marker:
         reviewed, changed = marker.group(1), marker.group(2)
@@ -1612,9 +1650,29 @@ def normal(text: str) -> str:
     The verdict headings carry a colored circle, the suppressed heading carries its finding
     count, and the second overview format wraps each of its own summaries in `<strong>`, so all
     three drift on every review without the section having changed at all.
+
+    A severity badge is reduced to its own `alt` text for the same reason and one more: the markup
+    around that text is a pair of versioned icon URLs, so a marker carrying one drifts whenever the
+    icon set is rebuilt, and the text it carries is the only part a reader wants.
     """
-    ascii_only = "".join(c for c in EMPHASIS.sub("", text) if ord(c) < 128)
+    unbadged = SEVERITY_BADGE.sub(lambda m: m.group(1), text)
+    ascii_only = "".join(c for c in EMPHASIS.sub("", unbadged) if ord(c) < 128)
     return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
+
+
+def finding_entry(marker: str) -> bool:
+    """Whether this normalized summary is one finding's own heading rather than a section's.
+
+    A section heading is fixed wording a vetted list can hold. A finding entry is a severity and
+    then the finding's title, and the title differs on every finding, so no list can ever hold one
+    and vetting by text would block on each new finding forever. The severity is what says which of
+    the two this is, and `normal` has already reduced the badge carrying it to its own text.
+
+    Recognizing the shape is not the same as passing over the finding. An entry reached this way
+    sits inside a collapsed section, and that section is read whole and printed by the digest, so
+    what is recognized here is the presentation while the finding itself still reaches a reader.
+    """
+    return bool(SEVERITY_TEXT.match(marker))
 
 
 def unvetted(marker: str, vetted: set[str]) -> bool:
@@ -1649,7 +1707,7 @@ def unrecognized_in(body: str) -> list[str]:
         f"summary: {marker}"
         # Deduplicated on the raw text before normalizing, which is what it did before the hoist.
         for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
-        if unvetted(marker, VETTED_SUMMARIES)
+        if unvetted(marker, VETTED_SUMMARIES) and not finding_entry(marker)
     ]
     found += [
         f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
@@ -2019,10 +2077,6 @@ def heading_of(block: str) -> str:
     return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
 
-# A blockquote marker (`>` per line, Markdown's own quoting convention) sits in front of every line CodeRabbit wraps its outside-diff section in.
-# `HEADING`'s `\s*` does not match `>`, so a heading under one reads as prose without this stripped first.
-# Copilot's own shapes carry no such prefix, so this is only ever asked of CodeRabbit's own marker below, never of `SUPPRESSED`.
-BLOCKQUOTE = re.compile(r"^>+\s?")
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
@@ -2085,6 +2139,23 @@ def suppressed_blocks(body: str) -> list[str]:
     See `marker_blocks` for the shared reading.
     """
     return marker_blocks(body, SUPPRESSED)
+
+
+def previously_missed_blocks(body: str) -> list[str]:
+    """Findings the round raises against code that has not changed since the last review.
+
+    The second overview format collapses these into the review body under a counted heading of
+    their own, each entry a severity badge and a title, and raises no inline thread for any of
+    them. That is a suppressed finding's exact shape, so it is read the same way and for the same
+    reason: a finding carrying no thread has no resolved state, and the digest is the only place a
+    reader meets it at all.
+
+    Counted across every round rather than the head's, as a suppressed finding is. A round that
+    raised one and was then superseded by a push did not thereby have it answered.
+
+    See `marker_blocks` for the shared reading.
+    """
+    return marker_blocks(body, PREVIOUSLY_MISSED)
 
 
 def outside_diff_blocks(body: str) -> list[str]:
@@ -2265,6 +2336,15 @@ def digest(
     blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get("body") or "")]
     on_head_blocks = [b for n, b in blocks if (n.get("commit") or {}).get("oid") == head]
     stale = sum(finding_count(b) for n, b in blocks) - sum(finding_count(b) for b in on_head_blocks)
+    # Read over the same rounds and split the same way, a previously-missed finding reaching no thread exactly as a suppressed one does.
+    # Kept as its own list rather than folded into the one above, because the two take different answers.
+    # A suppressed finding is one the reviewer chose to withhold, and this one is a finding it raised outright against code the branch never touched.
+    # That one is as likely to be declined as fixed, which is a reader's call rather than one a shared count makes.
+    pm_blocks = [(n, b) for n in revs for b in previously_missed_blocks(n.get("body") or "")]
+    pm_on_head = [b for n, b in pm_blocks if (n.get("commit") or {}).get("oid") == head]
+    pm_stale = sum(finding_count(b) for n, b in pm_blocks) - sum(
+        finding_count(b) for b in pm_on_head
+    )
     # The second format's stated finding total, beside the threads that round actually opened.
     # It is where that format puts the count the first format's suppressed heading is read for.
     # Absent on a round in the first format, and on a head no round covers.
@@ -2355,6 +2435,15 @@ def digest(
         # A trailing `+` on either count says the same as it does on `threads=`/`unresolved=` above: a round old enough to fall out of the `reviews` window is a round its own finding cannot be read from.
         f"suppressed={sum(finding_count(b) for n, b in blocks)}{'+' if revs_truncated else ''} "
         f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
+        # Present where the round raised at least one finding against unchanged code, or the truncated window means one could exist unseen.
+        # Silent otherwise, rather than printing a permanent zero on every repository whose reviewer never raises one.
+        # No exit code rides on it, the same as `suppressed=`: it reports a finding to triage rather than a state that blocks.
+        + (
+            f"previously_missed={sum(finding_count(b) for n, b in pm_blocks)}{'+' if revs_truncated else ''} "
+            f"(on_head={sum(finding_count(b) for b in pm_on_head)} earlier={pm_stale}) "
+            if pm_blocks or revs_truncated
+            else ""
+        )
         # Present only where the round covering the head is written in the second format.
         # `?` where that round states no total, which is not the same reading as a total of zero.
         + (f"overview={'?' if stated is None else stated}/{listed} " if manifest else "")
@@ -2599,6 +2688,27 @@ def digest(
         )
         # Indentation is kept, since a block carries fenced code a flattened line would garble.
         lines += [f"    {ln.rstrip()}" for ln in TAGS.sub("", b).splitlines() if ln.strip()]
+    for n, b in pm_blocks:
+        # Mirrors the `SUPPRESSED` rendering above, its own reasons applying identically here.
+        sha = ((n.get("commit") or {}).get("oid") or "")[:8]
+        if not sha:
+            where = "commit unknown, treat as outstanding"
+        elif sha == head[:8]:
+            where = "on head"
+        else:
+            where = f"raised on {sha}, earlier round"
+        lines.append(
+            f"  PREVIOUSLY MISSED ({where}): no thread to resolve, "
+            "raised against code this branch did not change, "
+            "answer it in the PR conversation quoting the finding"
+        )
+        # The badge each entry opens on is reduced to its own text, which is the half of it a reader wants.
+        # Left as markup it prints two icon URLs per finding and buries the title that follows them.
+        lines += [
+            f"    {ln.rstrip()}"
+            for ln in TAGS.sub("", SEVERITY_BADGE.sub(lambda m: m.group(1), b)).splitlines()
+            if ln.strip()
+        ]
     for n, b in cr_blocks:
         # Mirrors the `SUPPRESSED` rendering above, its own reasons applying identically here.
         sha = ((n.get("commit") or {}).get("oid") or "")[:8]
