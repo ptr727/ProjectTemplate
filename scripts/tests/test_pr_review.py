@@ -2048,10 +2048,18 @@ class TestCoverage(GqlCase):
                 self.assertIsNone(pr_review.read_coverage(huge))
                 self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({"body": huge})[0])
                 self.assertEqual((9999, 9999), pr_review.read_coverage(line.format(n="9999")))
+                # The bound at its own edge rather than only well past it.
+                # A 4400-digit run is refused whatever the bound is, so it pins nothing upward.
+                self.assertIsNone(pr_review.read_coverage(line.format(n="99999")))
         # A heading stating one falls to the floor a block carries rather than crashing.
+        for run in ("9" * 4400, "99999"):
+            with self.subTest(digits=len(run)):
+                self.assertEqual(
+                    1, pr_review.finding_count(f"<summary>Suppressed comments ({run})</summary>")
+                )
+        # A count the bound admits is read rather than floored, which is the other side of it.
         self.assertEqual(
-            1,
-            pr_review.finding_count("<summary>Suppressed comments (" + "9" * 4400 + ")</summary>"),
+            9999, pr_review.finding_count("<summary>Suppressed comments (9999)</summary>")
         )
         # A round carrying one does not read as full on the strength of another line.
         good = "Copilot reviewed 4 out of 4 changed files in this pull request."
