@@ -345,13 +345,16 @@ BLOCKQUOTE = re.compile(r"^>+\s?")
 # Its only textual carrier is the `img` `alt`, every other part being a URL that changes with the icon set.
 # The set is versioned in those URLs and has already been bumped once, so matching them would pin this reader to one revision.
 # Reduced to the `alt` text rather than dropped, since the severity is the half of a finding entry worth reading.
+# Either quoting is read, both being valid HTML and the attribute's own spelling being exactly the kind of presentation this reader exists not to depend on.
+# Read in one only, a change of quoting leaves the badge unreduced, which prints two icon URLs per finding and can report the entry as a shape nothing here knows.
 # Neither gap may cross a `picture` tag, or one match spans from the first element to a later element's `img`.
 # An entry whose own `img` carries no `alt`, which the icon set drifting is exactly how to get, then pairs with the next entry's.
 # Everything between, that entry's title and its whole finding text, is replaced by the later severity and lost from the only place these findings appear.
 # Bounded, such an entry keeps its markup and reads as an unrecognized shape, which is the failure that reports itself.
 SEVERITY_BADGE = re.compile(
     r"<picture\b[^>]*>(?:(?!</?picture\b).)*?"
-    r"<img\b[^>]*\salt=\"([^\"]*)\"[^>]*>(?:(?!</?picture\b).)*?</picture>",
+    r"<img\b[^>]*\salt=(?:\"([^\"]*)\"|'([^']*)')[^>]*>"
+    r"(?:(?!</?picture\b).)*?</picture>",
     re.DOTALL | re.IGNORECASE,
 )
 # What is left of a finding entry's own heading once the badge above is reduced to its text.
@@ -1728,6 +1731,15 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     )
 
 
+def badge_text(match: re.Match[str]) -> str:
+    """The severity a badge states, taken from whichever quoting its `alt` uses.
+
+    One group per quoting, since a single group cannot hold two alternatives, and the one that
+    did not match is `None` rather than empty.
+    """
+    return match.group(1) if match.group(1) is not None else (match.group(2) or "")
+
+
 def normal(text: str) -> str:
     """A marker reduced toward what a vetted list compares: emphasis markup dropped, ASCII,
     single spaces, counts as `(N)`.
@@ -1742,7 +1754,7 @@ def normal(text: str) -> str:
     around that text is a pair of versioned icon URLs, so a marker carrying one drifts whenever the
     icon set is rebuilt, and the text it carries is the only part a reader wants.
     """
-    unbadged = SEVERITY_BADGE.sub(lambda m: m.group(1), text)
+    unbadged = SEVERITY_BADGE.sub(badge_text, text)
     ascii_only = "".join(c for c in EMPHASIS.sub("", unbadged) if ord(c) < 128)
     return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
 
@@ -2311,7 +2323,7 @@ def unwrap(block: str) -> str:
     nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
     title following them. The word is kept and the markup is not.
     """
-    return TAGS.sub("", EMPHASIS.sub("", SEVERITY_BADGE.sub(lambda m: m.group(1), block)))
+    return TAGS.sub("", EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, block)))
 
 
 def previously_missed_blocks(body: str) -> list[str]:

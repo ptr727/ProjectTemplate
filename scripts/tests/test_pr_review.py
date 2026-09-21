@@ -2400,9 +2400,15 @@ class TestUnrecognizedShapes(GqlCase):
         fused = pr_review.normal(f"{stripped} Title A {BADGE} Title B")
         self.assertIn("Title A", fused)
         self.assertIn("Title B", fused)
-        # A single-quoted `alt` is the same drift, and must not reach past its own element either.
+        # A single-quoted `alt` is valid HTML and the same drift, so it is read rather than merely kept from reaching past its own element.
+        # Asserting only the second left this passing because the badge was not matched at all, which is the regression it was meant to hold.
         single = BADGE.replace('alt="Low severity"', "alt='Low severity'")
+        self.assertEqual(
+            f"Low severity {MISSED_TITLE}", pr_review.normal(f"{single} {MISSED_TITLE}")
+        )
         self.assertIn("Title A", pr_review.normal(f"{single} Title A {BADGE} Title B"))
+        # The digest prints the word rather than the markup, whichever quoting the badge carries.
+        self.assertNotIn("<picture>", pr_review.normal(f"{single} {MISSED_TITLE}"))
 
 
 class TestCoverageCarriesForward(GqlCase):
