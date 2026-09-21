@@ -24,6 +24,22 @@ The consequence a review loop actually needs: **a private repository has Copilot
 
 The repository already has first-class status, wait, comment, reply, resolution, coverage, and output-shape handling in `scripts/pr_review.py`.
 
+A review is requested by that script rather than by hand. `wait` requests one on the current head where nothing it reads already settles the round and nothing is outstanding, so an accepted request that is never picked up is a state it cannot clear for itself. Clearing the request set is what leaves the next `wait` nothing to defer to. Nothing in the commands below is the script, so none of its scope refusals reaches them, and the owner in the target is checked by whoever runs them:
+
+```sh
+PR_NODE=$(gh pr view <N> --repo <owner>/<repo> --json id --jq '.id')
+[ -n "$PR_NODE" ] || { echo "no pull request id was read, so nothing is written" >&2; exit 1; }
+humans=$(gh pr view <N> --repo <owner>/<repo> --json reviewRequests --jq '.reviewRequests | length')
+[ -n "$humans" ] || { echo "the pending set was not read, so nothing is written" >&2; exit 1; }
+[ "$humans" = 0 ] || { echo "a human or team reviewer is requested, so this stall is the maintainer's" >&2; exit 1; }
+gh api graphql -f query='
+mutation($pr: ID!) {
+  requestReviews(input: { pullRequestId: $pr, botIds: [], union: false }) { pullRequest { id } }
+}' -F pr="$PR_NODE"
+```
+
+`union: false` replaces the whole request set rather than adding to it, and nothing here restores a request it drops, which is what the count guards. That read omits a Bot reviewer, so it answers whether a human or a team is requested and never whether the reviewer bot is, which the digest's own `requested` field answers instead. The next `wait` then requests afresh, or polls and says so on its own auto-request line where no review in the repository carries the reviewer's node id for it to request with. A stall still pending after that wait is the maintainer's too, rather than a second clear. Measured on a live pull request in another repository in this fleet on 2026-09-21 and reported on [issue #1741][stall-issue], where a request sat unpicked for roughly eight minutes across two plain re-requests, and a clear followed by a request drew a round within a minute, twice. The pull request UI offers the same recovery by removing and re-adding the reviewer, and no agent seat can reach it.
+
 ### CodeRabbit
 
 The review body provides an actionable summary and links each finding to an inline thread. This makes manual triage straightforward.
@@ -75,6 +91,7 @@ Private repositories remain Copilot-only unless a candidate's approved plan, dat
 <!-- GitHub -->
 
 [pr-892]: https://github.com/ptr727/ProjectTemplate/pull/892
+[stall-issue]: https://github.com/ptr727/ProjectTemplate/issues/1741
 
 <!-- External -->
 
