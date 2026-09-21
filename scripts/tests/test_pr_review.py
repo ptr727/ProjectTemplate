@@ -1069,7 +1069,9 @@ class TestPreviouslyMissed(GqlCase):
                 self.answer(payload(reviews))
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(f"previously_missed={want} ", out)
-                self.assertIn(f"(on_head={on_head} earlier={earlier})", out)
+                self.assertIn(
+                    f"previously_missed={want} (on_head={on_head} earlier={earlier})", out
+                )
 
     def test_a_round_raising_none_prints_no_field_at_all(self) -> None:
         """A permanent zero on every repository whose reviewer never raises one is noise.
@@ -1114,6 +1116,78 @@ class TestPreviouslyMissed(GqlCase):
         out, code = pr_review.digest("o", "r", 7)
         self.assertIn("shapes=ok", out)
         self.assertEqual(0, code)
+
+    def test_prose_naming_the_section_is_not_the_section(self) -> None:
+        """`marker_blocks` accepts a line on a count alone, so an unanchored marker reads an
+        ordinary English sentence carrying a number as a section this round raised.
+
+        The observed wording is common enough to write by accident, and the result is a banner
+        telling the reader a clean round raised a finding against code the branch never touched.
+        """
+        prose = f"{OVERVIEW}\nThe change restores a guard previously missed (2) rounds ago.\n\n{COVERED}\n"
+        self.assertEqual([], pr_review.previously_missed_blocks(prose))
+        self.answer(payload([review(body=prose)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("previously_missed=", out)
+        self.assertNotIn("PREVIOUSLY MISSED", out)
+
+    def test_a_quoted_heading_is_not_a_section_this_round_raised(self) -> None:
+        """Every other reader in this file strips a quotation before looking, and this one did not.
+
+        It is reachable on this script's own pull requests rather than hypothetically: the test
+        bodies here quote these headings, so a round reviewing this file reported its own test
+        data as findings it had raised.
+        """
+        fenced = (
+            f"{OVERVIEW}\n```text\n<summary><strong>Previously missed (1)</strong></summary>\n```\n"
+        )
+        self.assertEqual([], pr_review.previously_missed_blocks(fenced))
+        spanned = f"{OVERVIEW}\nThe heading `<summary>Previously missed (1)</summary>` is quoted.\n"
+        self.assertEqual([], pr_review.previously_missed_blocks(spanned))
+        # The same heading outside a quotation is still the section, which keeps the guard narrow.
+        self.assertEqual(1, len(pr_review.previously_missed_blocks(previously_missed())))
+
+    def test_a_section_ends_where_its_sibling_s_heading_starts(self) -> None:
+        """Two sections sharing one wrapper is a shape the corpus carries, a Markdown heading each
+        rather than a wrapper each.
+
+        Run to the end of the region regardless, the first block contains the second whole, so the
+        digest prints those findings twice and the second printing asserts the opposite triage
+        about them.
+        """
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Previously missed (1)\n\nThe previously missed finding.\n\n"
+            "### Suppressed comments (1)\n\nThe suppressed finding.\n</details>\n"
+        )
+        pm = pr_review.previously_missed_blocks(shared)
+        self.assertEqual(1, len(pm))
+        self.assertIn("The previously missed finding.", pm[0])
+        self.assertNotIn("The suppressed finding.", pm[0])
+        # The digest therefore prints each finding once, under its own banner.
+        self.answer(payload([review(body=shared)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, out.count("The suppressed finding."))
+        self.assertEqual(1, out.count("The previously missed finding."))
+
+    def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
+        """All of these sections come from one format, so a badge in a suppressed block buries its
+        title exactly as one in a previously-missed block does.
+
+        Reducing it in only the newer render leaves the older one printing two icon URLs per
+        finding, which is the defect the reduction was added for.
+        """
+        body = collapsed(finding=f"{BADGE} The suppressed finding's title")
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("Low severity The suppressed finding's title", out)
+        self.assertNotIn("<picture>", out)
+        self.assertNotIn("githubassets.com", out)
+        # Emphasis is presentation too, and the section heading wears it in this format.
+        self.answer(payload([review(body=previously_missed())]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("Previously missed (1)", out)
+        self.assertNotIn("<strong>", out)
 
 
 class TestCodeRabbitOutsideDiff(GqlCase):
@@ -1793,7 +1867,8 @@ class TestCoverage(GqlCase):
             review(body=f"{OVERVIEW}\nThe changes are internally consistent, with {MARKER}")
         )
         self.assertIn("coverage=full", out)
-        self.assertNotIn("coverage=unstated", out)
+        # The digest says it could read every shape, which is what separates this from a round defaulting to full because it parsed nothing.
+        self.assertIn("shapes=ok", out)
 
     def test_a_quoted_marker_is_not_this_round_stating_its_coverage(self) -> None:
         """Reading the marker within its line costs the exclusion the line anchor gave for free.
@@ -1818,15 +1893,53 @@ class TestCoverage(GqlCase):
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
 
-    def test_the_marker_wins_over_a_prose_count_sharing_its_line(self) -> None:
-        """One line can now carry both, which the line anchor made impossible before.
+    def test_a_line_stating_both_readings_and_disagreeing_is_believed_neither_way(self) -> None:
+        """Reading the marker within its line is what lets one line carry both readings.
 
-        The marker is the stable shape the prose readers exist to be rescued from, so it settles
-        the line. Read the other way round, a sentence whose wording drifts would outrank counts
-        the reviewer stated exactly.
+        `coverage_of` takes the worst reading across lines, so settling one line on the marker
+        alone makes the verdict turn on whether the reviewer pressed return: the same two claims
+        read `full` on one line and `partial` on two. The round whose prose says it read 2 of 3
+        files is the one that clears the gate under that reading, which is the fail-open direction
+        `read_coverage` exists to refuse.
         """
-        line = f"Copilot reviewed 2 out of 3 changed files in this pull request. {MARKER}"
-        self.assertEqual((8, 8), pr_review.read_coverage(line))
+        prose = "Copilot reviewed 2 out of 3 changed files in this pull request."
+        overstated = "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        self.assertIsNone(pr_review.read_coverage(f"{prose} {overstated}"))
+        # Blocking rather than passing, which is what the two disagreeing leaves unanswered.
+        out = self.digest_for(review(body=f"{OVERVIEW}\n{prose} {overstated}"))
+        self.assertNotIn("coverage=full", out)
+        # Agreeing on one line is not a contradiction, so it still reads.
+        agreed = "<!-- fleet-review: reviewed=2 changed=3 findings=0 -->"
+        self.assertEqual((2, 3), pr_review.read_coverage(f"{prose} {agreed}"))
+
+    def test_a_blockquote_runs_past_the_line_that_opens_it(self) -> None:
+        """Markdown's lazy continuation: a line carrying no `>` under one that does is still
+        inside the quotation, and renders as part of it.
+
+        Refusing only the marked line reads the very next line as this round's own statement,
+        which is the quotation the guard was added to refuse arriving one line later.
+        """
+        lazy = f"> Quoting the reviewer's own body:\n{MARKER}\n"
+        self.assertEqual([], pr_review.coverage_statements(lazy))
+        # A blank line closes the quotation, so a statement after one is the round's own again.
+        closed = f"> Quoting the reviewer's own body:\n\n{MARKER}\n"
+        self.assertEqual([MARKER], pr_review.coverage_statements(closed))
+
+    def test_a_count_longer_than_any_review_states_is_refused_rather_than_fatal(self) -> None:
+        """`int` raises above 4300 digits, so an unbounded run crashed the digest rather than
+        reporting a line it could not believe.
+
+        Reading the marker within its line is what made that reachable from any line carrying one.
+        The bound is four digits, which `COUNT_LOOSE` already holds its own runs to.
+        """
+        huge = "<!-- fleet-review: reviewed=" + "9" * 4400 + " changed=1 findings=0 -->"
+        self.assertIsNone(pr_review.read_coverage(huge))
+        self.assertEqual([], pr_review.coverage_statements(huge))
+        # Four digits is a count, and the bound refuses only what no review states.
+        self.assertEqual(
+            (9999, 9999),
+            pr_review.read_coverage("<!-- fleet-review: reviewed=9999 changed=9999 findings=0 -->"),
+        )
 
 
 class TestUnrecognizedShapes(GqlCase):
@@ -2157,6 +2270,34 @@ class TestUnrecognizedShapes(GqlCase):
         """Recognizing these two is not widening the gate to whatever wears a `<details>`."""
         body = previously_missed().replace("Previously missed (1)", "Speculative rewrites (1)")
         self.assertIn("summary: Speculative rewrites (N)", pr_review.unrecognized_in(body))
+        # The case that matters is a section heading opening on a severity, which is the one word a finding entry is recognized by.
+        # Named without one, this test never reaches the boundary it exists to hold.
+        # A section this has no reader for would then be vetted on its first word while its findings reach no digest at all.
+        severity_led = previously_missed().replace(
+            "Previously missed (1)", "High severity findings (2)"
+        )
+        self.assertIn(
+            "summary: High severity findings (N)", pr_review.unrecognized_in(severity_led)
+        )
+        # What separates the two is the count, which every section heading here states and a finding's own title does not.
+        self.assertTrue(pr_review.finding_entry(f"Low severity {MISSED_TITLE}"))
+        self.assertFalse(pr_review.finding_entry("High severity findings (N)"))
+
+    def test_a_badge_missing_its_alt_does_not_swallow_the_next_entry(self) -> None:
+        """The icon set drifting is exactly how an entry loses its `alt`, and the two unbounded
+        gaps then pair the first element's opening with a later element's `img`.
+
+        Everything between is replaced by the later severity, so one entry's title and its whole
+        finding text vanish from the only place these findings appear. Bounded, the entry keeps
+        its markup and reads as an unrecognized shape, which is a failure that reports itself.
+        """
+        stripped = BADGE.replace(' alt="Low severity"', "")
+        fused = pr_review.normal(f"{stripped} Title A {BADGE} Title B")
+        self.assertIn("Title A", fused)
+        self.assertIn("Title B", fused)
+        # A single-quoted `alt` is the same drift, and must not reach past its own element either.
+        single = BADGE.replace('alt="Low severity"', "alt='Low severity'")
+        self.assertIn("Title A", pr_review.normal(f"{single} Title A {BADGE} Title B"))
 
 
 class TestCoverageCarriesForward(GqlCase):
