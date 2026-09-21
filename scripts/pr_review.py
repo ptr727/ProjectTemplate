@@ -539,6 +539,11 @@ MARKUP_MASK = "\x00"
 # That bound is also what keeps `int` from being handed a digit run long enough to raise.
 # A digit touching a `.` is part of a decimal, so `confidence < 0.5` contributes no count.
 COUNT_LOOSE = re.compile(r"(?<![\d.])\d{1,4}(?![\d.])")
+# The digits a count may carry before it is a run to refuse rather than a number to read.
+# `int` raises above 4300 of them, so every conversion of a matched run goes through `counted` rather than straight to `int`.
+# Bounding the pattern instead would leave the line unmatched, which reads as no statement at all rather than as one this cannot believe.
+# Four is what `COUNT_LOOSE` above already holds its own runs to, a review stating tens of files and never thousands.
+COUNT_DIGITS = 4
 # A total of zero spelled in words, anchored to where the line states its total.
 # Read as a bare substring instead, `see nonetheless the summary below` stated a zero.
 # Emphasis markers are skipped, the format writing the word italicized as often as bare.
@@ -1249,13 +1254,19 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     prose = None
     if m:
         got = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
-        prose = (int(got[0]), int(got[1]))
+        # Bounded exactly as the marker's own runs are below, and for the same reason.
+        # Guarding one of the two left the other crashing the digest on the sentence spelling.
+        read = (counted(got[0]), counted(got[1]))
+        if read[0] is None or read[1] is None:
+            return None
+        prose = (read[0], read[1])
     if marker:
         # Judged before conversion, `int` raising above 4300 digits and no review stating a count of even five.
         # A run this long is a line to refuse rather than one to crash on.
-        if any(len(marker.group(i)) > 4 for i in (1, 2)):
+        pair = (counted(marker.group(1)), counted(marker.group(2)))
+        if pair[0] is None or pair[1] is None:
             return None
-        counts = (int(marker.group(1)), int(marker.group(2)))
+        counts = (pair[0], pair[1])
         # A line carrying both readings and disagreeing is a line this cannot believe, which is the impossible pair below reached a different way, and it takes that case's answer.
         # Taking the worse of the two instead reads an impossible pair as the better one, a negative shortfall never being the larger.
         # `reviewed=4 changed=3` beside a prose `4/4` then passed the gate outright, where refusing the line blocks it.
@@ -1738,6 +1749,11 @@ def badge_text(match: re.Match[str]) -> str:
     did not match is `None` rather than empty.
     """
     return match.group(1) if match.group(1) is not None else (match.group(2) or "")
+
+
+def counted(digits: str) -> int | None:
+    """The number this run of digits states, or None where it carries more than a count does."""
+    return int(digits) if len(digits) <= COUNT_DIGITS else None
 
 
 def normal(text: str) -> str:
@@ -2359,9 +2375,14 @@ def outside_diff_blocks(body: str) -> list[str]:
 
 
 def finding_count(block: str) -> int:
-    """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass."""
+    """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass.
+
+    A run longer than a count carries falls to that same floor rather than crashing the digest,
+    the block existing being what says there is at least one finding in it.
+    """
     m = COUNT.search(heading_of(block))
-    return max(int(m.group(1)), 1) if m else 1
+    stated = counted(m.group(1)) if m else None
+    return max(stated, 1) if stated is not None else 1
 
 
 def qodo_review_comment(pr: dict) -> dict | None:

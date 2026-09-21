@@ -2034,6 +2034,25 @@ class TestCoverage(GqlCase):
                 # And one this cannot believe, which blocks rather than passing.
                 self.assertIsNone(pr_review.read_coverage(huge))
                 self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({"body": huge})[0])
+        # The prose spellings carry counts too, and guarding only the marker left each of them crashing the digest rather than refusing the line.
+        for label, line in (
+            (
+                "the sentence spelling",
+                "Copilot reviewed {n} out of {n} changed files in this pull request.",
+            ),
+            ("the bullet spelling", "- **Files reviewed:** {n}/{n} changed files"),
+        ):
+            with self.subTest(case=label):
+                huge = line.format(n="9" * 4400)
+                self.assertTrue(pr_review.is_coverage_line(huge))
+                self.assertIsNone(pr_review.read_coverage(huge))
+                self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({"body": huge})[0])
+                self.assertEqual((9999, 9999), pr_review.read_coverage(line.format(n="9999")))
+        # A heading stating one falls to the floor a block carries rather than crashing.
+        self.assertEqual(
+            1,
+            pr_review.finding_count("<summary>Suppressed comments (" + "9" * 4400 + ")</summary>"),
+        )
         # A round carrying one does not read as full on the strength of another line.
         good = "Copilot reviewed 4 out of 4 changed files in this pull request."
         huge = "<!-- fleet-review: reviewed=99999 changed=5 findings=0 -->"
