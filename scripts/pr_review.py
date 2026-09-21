@@ -269,12 +269,13 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # Anchored to the opening of its line, past whatever markup a heading wears, rather than matched anywhere in it.
 # The wording is ordinary English, so a body-wide match reads a sentence such as `restores a guard previously missed (2) rounds ago` as this section.
 # `marker_blocks` accepts a line on a count alone, which is what lets that sentence through, so the anchor is what separates a heading from prose naming one.
-# The opener admits any run of tags and non-word characters, rather than a list of the ones seen so far.
-# Spelled as a list, a heading wearing anything else, an emoji being what this format already puts on its verdict headings, matched nothing and the section went unread.
-# That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read and the findings reach nobody.
-# A word character cannot open the run, which is the whole of what separates a heading from a sentence naming one.
+# The opener admits heading markup and anything outside ASCII, and nothing else.
+# An emoji is what this format already puts on its verdict headings, and a spelling that admitted no such character read a heading wearing one as no section at all.
+# That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read while the findings reach nobody.
+# Widened to any non-word character instead, ordinary punctuation opened the run and a sentence such as `- Previously missed (2) findings were re-raised` became the section, printing the prose around it as the finding.
+# Punctuation is what prose opens with and markup is what a heading opens with, so the class is the markup rather than the complement of a word.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[^\w<])*Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[\s>#*_]|[^\x00-\x7f])*Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -512,7 +513,9 @@ COUNT_MARKUP = re.compile(
 # Markdown's lazy continuation carries paragraph text only, which of the three coverage spellings is the reviewer's own sentence alone.
 # The bullet spelling and the marker each open a block, so each is the round's own line again however the lines above it are quoted.
 # Read as continuations they reported `unstated` over a round stating full coverage, which blocks a merge on a satisfied item.
-STARTS_BLOCK = re.compile(r"[-*+]\s|<|#{1,6}\s")
+# A bare `<` is not one of these, an inline tag opening a line of prose leaving that line paragraph text, and a comment or a tag standing alone is what opens an HTML block.
+# The caller also holds the four-space bound, an indented line being a code block, which cannot interrupt a paragraph and so cannot end a quotation either.
+STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--|</?[A-Za-z][^>]*>\s*$")
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
@@ -1200,7 +1203,7 @@ def coverage_statements(body: str) -> list[str]:
         if BLOCKQUOTE.match(stripped):
             quoted = True
             continue
-        if STARTS_BLOCK.match(stripped):
+        if len(ln) - len(stripped) < 4 and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
@@ -1219,10 +1222,10 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     it is a line this script is parsing wrongly, and reading it as full coverage fails open on
     exactly the statement that says something is off.
 
-    Two readings on one line that disagree take the worse of the two, which is what `coverage_of`
-    already does between lines. Reading the marker within its line rather than as the whole of one
-    is what makes a line able to carry both, and settling such a line on the marker alone would
-    make the verdict turn on whether the reviewer happened to press return.
+    Two readings on one line that disagree are that same case, reached within a line rather than
+    between two. Reading the marker within its line rather than as the whole of one is what makes a
+    line able to carry both, and settling such a line on the marker alone would clear the gate for a
+    round whose own prose says it read part of the diff.
     """
     marker = FLEET_REVIEW.search(line)
     m = COVERAGE_COUNTS.search(line)
@@ -1236,11 +1239,12 @@ def read_coverage(line: str) -> tuple[int, int] | None:
         if any(len(marker.group(i)) > 4 for i in (1, 2)):
             return None
         counts = (int(marker.group(1)), int(marker.group(2)))
-        # A line carrying both readings and disagreeing is the same case as two lines carrying them, so it settles the same way.
-        # `coverage_of` takes the worst reading across lines, and the worst of the two is taken here.
-        # Settled on the marker instead, the verdict would turn on whether the reviewer happened to press return.
+        # A line carrying both readings and disagreeing is a line this cannot believe, which is the impossible pair below reached a different way, and it takes that case's answer.
+        # Taking the worse of the two instead reads an impossible pair as the better one, a negative shortfall never being the larger.
+        # `reviewed=4 changed=3` beside a prose `4/4` then passed the gate outright, where refusing the line blocks it.
+        # One line and two do not settle under the same code, reading unvetted and partial, and neither passes, which is the property that matters here.
         if prose is not None and prose != counts:
-            counts = max((counts, prose), key=lambda pair: pair[1] - pair[0])
+            return None
         return counts if counts[0] <= counts[1] else None
     if prose is None:
         return None
@@ -2261,6 +2265,12 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     heading here states one and a finding's own title does not. Requiring it also keeps this off
     the CodeRabbit blocks, whose own marker is in neither of the two and which were never bounded
     before this.
+
+    The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
+    block runs into it, which is where this started before the bound existed at all. It is strictly
+    narrowing, since the requirement can only lose a bound and never invent one, and every vetted
+    heading states a count, so the shape that reaches this also reports `shapes=UNRECOGNIZED` in
+    the same digest and tells its reader not to believe the fields beside it.
     """
     for j in range(start + 1, len(scan_lines)):
         line = scan_lines[j]

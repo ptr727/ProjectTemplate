@@ -1130,6 +1130,32 @@ class TestPreviouslyMissed(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("previously_missed=", out)
         self.assertNotIn("PREVIOUSLY MISSED", out)
+        # A sentence opening on punctuation rather than on a word is the same prose, and the fixture above happens to put a word first, so it held while these did not.
+        for opener in ("- ", "...", "(", '"'):
+            with self.subTest(opener=opener):
+                line = f"{opener}Previously missed (2) findings were re-raised this round."
+                self.assertIsNone(pr_review.PREVIOUSLY_MISSED.match(line))
+                self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{line}\n"))
+
+    def test_the_heading_is_read_through_whatever_markup_it_wears(self) -> None:
+        """What the anchor must admit, beside the prose above that it must not.
+
+        This format puts an emoji on its verdict headings, so a spelling admitting none reads a
+        heading wearing one as no section at all, and silently: the heading is vetted and `normal`
+        drops the emoji before the comparison, so every shape reports as read while the findings
+        reach nobody.
+        """
+        for label, heading in (
+            ("the live spelling", "<summary><strong>Previously missed (1)</strong></summary>"),
+            (
+                "an emoji beside it",
+                "<summary><strong>\u26a0\ufe0f Previously missed (1)</strong></summary>",
+            ),
+            ("a markdown heading", "### Previously missed (1)"),
+            ("bold, with no tags", "**Previously missed (1)**"),
+        ):
+            with self.subTest(case=label):
+                self.assertIsNotNone(pr_review.PREVIOUSLY_MISSED.match(heading))
 
     def test_a_quoted_heading_is_not_a_section_this_round_raised(self) -> None:
         """Every other reader in this file strips a quotation before looking, and this one did not.
@@ -1893,25 +1919,31 @@ class TestCoverage(GqlCase):
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
 
-    def test_a_line_stating_both_readings_and_disagreeing_takes_the_worse(self) -> None:
+    def test_a_line_stating_both_readings_and_disagreeing_is_refused(self) -> None:
         """Reading the marker within its line is what lets one line carry both readings.
 
-        `coverage_of` already takes the worst reading across lines, so a line carrying both settles
-        the same way. Settled on the marker instead, the same two claims read `full` on one line
-        and `partial` on two, which makes the verdict turn on whether the reviewer pressed return
-        and clears the gate for the round whose own prose says it read 2 of 3 files.
+        Two readings that disagree leave unanswered which one the round meant, which is the case
+        `read_coverage` already returns None for, and refusing the line blocks rather than passing.
+
+        Taking the worse of the two instead reads an impossible pair as the better one, since a
+        negative shortfall is never the larger, so a marker claiming it read more files than the
+        pull request changed cleared the gate outright beside a prose count that disagreed.
         """
         prose = "Copilot reviewed 2 out of 3 changed files in this pull request."
         overstated = "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
-        self.assertEqual((2, 3), pr_review.read_coverage(f"{prose} {overstated}"))
-        # The reading a line break would have given, which is the point of taking the worse.
-        self.assertEqual(
-            pr_review.coverage_of({"body": f"{prose}\n{overstated}"})[0],
-            pr_review.coverage_of({"body": f"{prose} {overstated}"})[0],
-        )
+        self.assertIsNone(pr_review.read_coverage(f"{prose} {overstated}"))
         self.assertIn(
-            "coverage=PARTIAL", self.digest_for(review(body=f"{OVERVIEW}\n{prose} {overstated}"))
+            "coverage=UNVETTED", self.digest_for(review(body=f"{OVERVIEW}\n{prose} {overstated}"))
         )
+        # An impossible pair beside a readable one is the case that passed, so it is held by name.
+        for label, line in (
+            ("the bullet spelling", "- **Files reviewed:** 4/4 changed files "),
+            ("the sentence spelling", f"{prose[:-1]}. "),
+        ):
+            with self.subTest(case=label):
+                impossible = f"{line}<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+                self.assertIsNone(pr_review.read_coverage(impossible))
+                self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({"body": impossible})[0])
         # Agreeing on one line is no contradiction, so the counts read straight through.
         agreed = "<!-- fleet-review: reviewed=2 changed=3 findings=0 -->"
         self.assertEqual((2, 3), pr_review.read_coverage(f"{prose} {agreed}"))
@@ -1944,6 +1976,16 @@ class TestCoverage(GqlCase):
                 self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
         # A marker carrying its own `>` is still the quotation rather than a block of its own.
         self.assertEqual([], pr_review.coverage_statements(f"> {MARKER}\n"))
+        # What opens a block is a shape rather than any line starting with a tag character.
+        # An indented line is a code block and an inline tag leaves its line paragraph text, so neither interrupts a paragraph and neither ends the quotation above it.
+        for label, line in (
+            ("indented four spaces", f"    {MARKER}"),
+            ("opening on an inline tag", f"<span>see</span> {MARKER}"),
+        ):
+            with self.subTest(case=label):
+                body = f"> Quoting the reviewer's own body:\n{line}\n"
+                self.assertEqual([], pr_review.coverage_statements(body))
+                self.assertEqual(pr_review.UNSTATED, pr_review.coverage_of({"body": body})[0])
 
     def test_a_count_longer_than_any_review_states_is_refused_rather_than_unseen(self) -> None:
         """`int` raises above 4300 digits, so an unbounded run crashed the digest rather than
