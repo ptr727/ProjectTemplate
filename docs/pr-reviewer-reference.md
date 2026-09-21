@@ -27,9 +27,9 @@ The repository already has first-class status, wait, comment, reply, resolution,
 A review is requested by that script rather than by hand. `wait` requests one on the current head where nothing it reads already settles the round and nothing is outstanding, so an accepted request that is never picked up is a state it cannot clear for itself. Clearing the request set is what leaves the next `wait` nothing to defer to. Nothing in the commands below is the script, so none of its scope refusals reaches them, and the owner in the target is checked by whoever runs them:
 
 ```sh
-PR_NODE=$(gh pr view <N> --repo <owner>/<repo> --json id --jq '.id')
+PR_NODE=$(gh pr view "<N>" --repo "<owner>/<repo>" --json id --jq '.id')
 [ -n "$PR_NODE" ] || { echo "no pull request id was read, so nothing is written" >&2; exit 1; }
-humans=$(gh pr view <N> --repo <owner>/<repo> --json reviewRequests --jq '.reviewRequests | length')
+humans=$(gh pr view "<N>" --repo "<owner>/<repo>" --json reviewRequests --jq '.reviewRequests | length')
 [ -n "$humans" ] || { echo "the pending set was not read, so nothing is written" >&2; exit 1; }
 [ "$humans" = 0 ] || { echo "a human or team reviewer is requested, so this stall is the maintainer's" >&2; exit 1; }
 gh api graphql -f query='
