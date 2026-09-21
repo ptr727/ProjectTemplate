@@ -34,6 +34,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
 CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "code-review" / "SKILL.md"
+REVIEWER_REFERENCE = REPO / "docs" / "pr-reviewer-reference.md"
 
 
 def flowed_text(text: str) -> str:
@@ -5561,8 +5562,9 @@ class TestContract(unittest.TestCase):
         actually needs rather than dropped when the first of them arrived. `requestReviews`
         closes the gap where `wait` only polled and never asked. `addComment` owns body-only
         finding responses. The reply and resolve pair owns inline threads. `union:true` only
-        adds to the request set, so it cannot drop a requested human reviewer. The runbook keeps
-        the `union:false` clear-and-recover form as a manual operation.
+        adds to the request set, so it cannot drop a requested human reviewer.
+        `docs/pr-reviewer-reference.md` keeps the `union:false` clear-and-recover form as a
+        manual operation, the runbook carrying no mutation of its own.
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         for verb in (
@@ -5584,9 +5586,9 @@ class TestContract(unittest.TestCase):
         self.assertNotIn(
             "union:false",
             "".join(source.split()),
-            "the additive form is the only one this script issues, since dropping "
-            "a pending human reviewer is the runbook's manual recovery path, never "
-            "an automatic one",
+            "the additive form is the only one this script issues, since the "
+            "replacing form runs by hand and only where no human or team "
+            "reviewer is pending, which no script can decide",
         )
         # `mutation(` opens a document, so the count is the number of documents.
         # A fifth arriving is a write nobody reviewed as one rather than a style drift.
@@ -5595,6 +5597,20 @@ class TestContract(unittest.TestCase):
         self.assertIn("addPullRequestReviewThreadReply", source)
         self.assertIn("resolveReviewThread", source)
         self.assertIn("requestReviews", source)
+
+    def test_the_reviewer_reference_holds_the_manual_clear(self) -> None:
+        """The three surfaces routing a stalled driver there are pinned to something that exists.
+
+        The guard above proves only that this script does not issue the replacing form. Nothing
+        proved the file the same docstring names still holds it, so deleting that code block left
+        the skill, the runbook, and the README each pointing at a recovery nobody could run, with
+        every gate green. Whitespace is collapsed because the document writes the argument with a
+        space where the guard above writes the token without one.
+        """
+        text = flowed_text(REVIEWER_REFERENCE.read_text(encoding="utf-8"))
+        self.assertIn(
+            "requestReviews(input: { pullRequestId: $pr, botIds: [], union: false })", text
+        )
 
     def test_the_runbook_routes_mutations_to_the_script(self) -> None:
         """Provider mechanics have one executable owner instead of copied query snippets."""
