@@ -33,6 +33,19 @@ import pr_review
 REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
+CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "code-review" / "SKILL.md"
+
+
+def flowed_text(text: str) -> str:
+    """Collapse every whitespace run in `text` to one space, stripping the ends.
+
+    A hard-wrapped body rewraps when a word is added earlier in the paragraph, so a sentence
+    pinned against its raw text fails on an edit making no claim about it. Collapsing pins the
+    words rather than the line breaks. An assertion whose subject is the layout itself reads
+    raw instead, since collapsing would let a differently wrapped or indented line match.
+    """
+    return " ".join(text.split())
+
 
 HEAD = "a" * 40
 OLD = "b" * 40
@@ -5491,18 +5504,19 @@ class TestClaimsIsReadOnly(unittest.TestCase):
 
 class TestContract(unittest.TestCase):
     def test_status_documents_its_no_review_success_case(self) -> None:
-        self.assertIn("Exit 0 = no Copilot review covers the head yet", pr_review.__doc__ or "")
+        doc = flowed_text(pr_review.__doc__ or "")
+        self.assertIn("Exit 0 = no Copilot review covers the head yet", doc)
 
     def test_status_documents_review_on_head_as_copilot_scoped(self) -> None:
         """`review_on_head=NO` alongside a genuine `other_reviewed` head is a scoping fact, not
         a coverage gap, the exact confusion that reached this docstring as a filed issue.
         """
-        doc = pr_review.__doc__ or ""
+        doc = flowed_text(pr_review.__doc__ or "")
         self.assertIn('never "no review of any kind covers this head"', doc)
         self.assertIn("not a gap", doc)
 
     def test_status_documents_the_coderabbit_and_qodo_finding_fields(self) -> None:
-        doc = pr_review.__doc__ or ""
+        doc = flowed_text(pr_review.__doc__ or "")
         self.assertIn("cr_outside_diff=N (on_head=X earlier=Y)", doc)
         self.assertIn("qodo_open=N", doc)
 
@@ -5518,11 +5532,10 @@ class TestContract(unittest.TestCase):
 
     def test_the_runbook_publishes_the_machine_readable_coverage_marker(self) -> None:
         """The instructed shape is stable while the parser retains legacy prose readers."""
-        text = (REPO / ".github" / "skills" / "code-review" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
         marker = "<!-- fleet-review: reviewed=N changed=N findings=N -->"
-        self.assertIn(marker, text)
+        # Raw, because `read_coverage` is called once per line.
+        # A marker split over two lines yields no statement, so one line is what is asserted.
+        self.assertIn(marker, CODE_REVIEW_SKILL.read_text(encoding="utf-8"))
         self.assertIsNotNone(pr_review.read_coverage(marker.replace("N", "1")))
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
@@ -5668,7 +5681,7 @@ class TestContract(unittest.TestCase):
         of it, which is the direction that costs a reader trust in the field. Raised in review
         here. This holds the docstring to naming the condition rather than only the shapes.
         """
-        doc = pr_review.__doc__ or ""
+        doc = flowed_text(pr_review.__doc__ or "")
         self.assertIn("44 =", doc)
         self.assertIn("BLOCKED", doc)
         # Every shape the digest can print is named where the code can return 44 for it.
