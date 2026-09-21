@@ -45,6 +45,10 @@ LATE = "2026-08-02T11:00:00Z"
 # The shape 28 of the 333 measured bodies carry: an overview, and no count of what was read.
 # A body of no text at all is not one of the shapes, and the reader now says so, correctly.
 OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
+# The wall-clock ceiling the two backtracking cases read, stated once so they cannot drift apart.
+# Each case sizes its own input so that a regression finishes and trips this rather than running long enough to hang the suite.
+# Three seconds against readings of microseconds and milliseconds, which is the margin that makes a loaded runner a non-issue rather than the clock being trusted.
+BACKTRACK_BOUND = 3.0
 
 
 def review(
@@ -1132,12 +1136,17 @@ class TestPreviouslyMissed(GqlCase):
         self.assertNotIn("previously_missed=", out)
         self.assertNotIn("PREVIOUSLY MISSED", out)
         # A sentence opening on punctuation rather than on a word is the same prose, and the fixture above happens to put a word first, so it held while these did not.
-        # A run of non-ASCII whitespace used to be parseable two ways, which doubled the parse per character and hung the read rather than slowing it.
+        # A run of non-ASCII whitespace used to be parseable two ways, which doubled the parse per character.
+        # The run is sized so a regression fails rather than hangs, which is the half of this a wall clock cannot do on its own.
+        # The bound is read after the call returns, so at 40 characters a regression runs for hours and this never reaches its own assertion.
+        # At 28 the same regression takes about twenty seconds and the bound trips, where the reader as written takes microseconds.
+        # The size is chosen for headroom on the catch side rather than the first one that clears the bound: the cost doubles per character, so 26 sits at about five seconds and a runner twice this host's speed would let a regression pass.
+        # That is the margin the bound rests on rather than the wall clock being reliable: roughly five orders of magnitude, against a CI runner that would have to be tens of thousands of times slower to flake.
         start = time.monotonic()
         self.assertEqual(
-            [], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{chr(0xA0) * 40}aligned note\n")
+            [], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{chr(0xA0) * 28}aligned note\n")
         )
-        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertLess(time.monotonic() - start, BACKTRACK_BOUND)
         for opener in ("- ", "* ", "+ ", "...", "(", '"'):
             with self.subTest(opener=opener):
                 line = f"{opener}Previously missed (2) findings were re-raised this round."
@@ -2016,9 +2025,13 @@ class TestCoverage(GqlCase):
         in the whitespace it sits in, so a body carrying a long one took seconds to read where the
         marker itself is the only thing a search is looking for.
         """
+        # Quadratic rather than exponential, so a regression returns rather than hanging.
+        # The run carries a character of its own, since a line of nothing but spaces strips to empty and is skipped as blank before any reader sees it.
+        # Sized without one this asserted a bound over an input that never reached the pattern, so restoring the runs left it green and it guarded nothing.
+        # Measured with the character: about 2.7 milliseconds as written and about 5.7 seconds with the runs restored.
         start = time.monotonic()
-        self.assertEqual([], pr_review.coverage_statements(" " * 65526 + "\n"))
-        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertEqual([], pr_review.coverage_statements(" " * 65526 + "x\n"))
+        self.assertLess(time.monotonic() - start, BACKTRACK_BOUND)
         # Dropping the runs changes no reading, the marker being what either spelling matched.
         self.assertEqual((8, 8), pr_review.read_coverage(MARKER))
         self.assertEqual((8, 8), pr_review.read_coverage(f"  {MARKER}\t "))
