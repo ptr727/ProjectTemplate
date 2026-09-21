@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1131,6 +1132,12 @@ class TestPreviouslyMissed(GqlCase):
         self.assertNotIn("previously_missed=", out)
         self.assertNotIn("PREVIOUSLY MISSED", out)
         # A sentence opening on punctuation rather than on a word is the same prose, and the fixture above happens to put a word first, so it held while these did not.
+        # A run of non-ASCII whitespace used to be parseable two ways, which doubled the parse per character and hung the read rather than slowing it.
+        start = time.monotonic()
+        self.assertEqual(
+            [], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{chr(0xA0) * 40}aligned note\n")
+        )
+        self.assertLess(time.monotonic() - start, 1.0)
         for opener in ("- ", "...", "(", '"'):
             with self.subTest(opener=opener):
                 line = f"{opener}Previously missed (2) findings were re-raised this round."
@@ -1980,10 +1987,15 @@ class TestCoverage(GqlCase):
         # An indented line is a code block and an inline tag leaves its line paragraph text, so neither interrupts a paragraph and neither ends the quotation above it.
         for label, line in (
             ("indented four spaces", f"    {MARKER}"),
+            # A tab is four columns of indentation and so the same code block, which a count of characters reads as one column and lets through.
+            ("indented one tab", f"\t{MARKER}"),
             ("opening on an inline tag", f"<span>see</span> {MARKER}"),
+            # Only some tag names open a block that can interrupt a paragraph, and this is not one.
+            ("a lone closing tag", "</span>"),
         ):
             with self.subTest(case=label):
-                body = f"> Quoting the reviewer's own body:\n{line}\n"
+                sentence = "Copilot reviewed 3 out of 3 changed files in this pull request."
+                body = f"> Quoting the reviewer's own body:\n{line}\n{sentence}\n"
                 self.assertEqual([], pr_review.coverage_statements(body))
                 self.assertEqual(pr_review.UNSTATED, pr_review.coverage_of({"body": body})[0])
 

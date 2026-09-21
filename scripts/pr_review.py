@@ -274,8 +274,13 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read while the findings reach nobody.
 # Widened to any non-word character instead, ordinary punctuation opened the run and a sentence such as `- Previously missed (2) findings were re-raised` became the section, printing the prose around it as the finding.
 # Punctuation is what prose opens with and markup is what a heading opens with, so the class is the markup rather than the complement of a word.
+# The whitespace is spelled out rather than taken from `\s`, which is Unicode-aware and so overlaps the non-ASCII alternative on every non-ASCII space.
+# Two alternatives able to consume the same character make the run ambiguous, and the parse then doubles per character of it on a line that does not go on to say this, which is a hang rather than a slow read.
+# A body carrying 30 non-breaking spaces in a line took minutes, and every alternative here now opens on a character the others cannot.
+# What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
+# It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[\s>#*_]|[^\x00-\x7f])*Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[ \t>#*_]|[^\x00-\x7f])*Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -513,9 +518,11 @@ COUNT_MARKUP = re.compile(
 # Markdown's lazy continuation carries paragraph text only, which of the three coverage spellings is the reviewer's own sentence alone.
 # The bullet spelling and the marker each open a block, so each is the round's own line again however the lines above it are quoted.
 # Read as continuations they reported `unstated` over a round stating full coverage, which blocks a merge on a satisfied item.
-# A bare `<` is not one of these, an inline tag opening a line of prose leaving that line paragraph text, and a comment or a tag standing alone is what opens an HTML block.
+# A bare `<` is not one of these, an inline tag opening a line of prose leaving that line paragraph text.
+# A tag standing alone is not one either, though it looks like it should be: only some tag names open a block that can interrupt a paragraph, and a lone `</span>` is not among them, so accepting any of them read a quoted line as this round's own.
+# No coverage spelling opens with a tag in any case, the bullet opening on its marker and the sentence on the reviewer's name, so the alternative bought nothing and is dropped rather than narrowed to a list of tag names.
 # The caller also holds the four-space bound, an indented line being a code block, which cannot interrupt a paragraph and so cannot end a quotation either.
-STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--|</?[A-Za-z][^>]*>\s*$")
+STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--")
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
@@ -1203,7 +1210,10 @@ def coverage_statements(body: str) -> list[str]:
         if BLOCKQUOTE.match(stripped):
             quoted = True
             continue
-        if len(ln) - len(stripped) < 4 and STARTS_BLOCK.match(stripped):
+        # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
+        if len(ln.expandtabs(4)) - len(ln.expandtabs(4).lstrip()) < 4 and STARTS_BLOCK.match(
+            stripped
+        ):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
