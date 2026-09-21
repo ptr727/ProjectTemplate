@@ -74,7 +74,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    alone reports a clean pass while they stand. The same holds for CodeRabbit's own
    "outside diff range" comments (`cr_outside_diff` in `pr_review.py`'s digest) and for Qodo's
    comment-only findings (`qodo_open`): neither opens a `reviewThreads` entry either, so
-   give each one the same triage the low-confidence findings above already get. Qodo's own
+   give each one the same triage the low-confidence findings above already get. Copilot's own
+   section for findings against code the pull request did not change, `Previously missed` in the
+   review body and `previously_missed` in the digest, is a fourth such class and takes that same
+   triage. It raises no thread for the same reason the others do not, and a finding it holds is
+   raised outright rather than withheld, so "the branch did not touch that code" is a reason to
+   decline one with evidence rather than a reason to leave it unanswered. Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
    Copilot's second review-body format states its own finding total, which the digest reads as
