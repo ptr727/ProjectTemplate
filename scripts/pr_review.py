@@ -1213,9 +1213,8 @@ def coverage_statements(body: str) -> list[str]:
             quoted = True
             continue
         # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
-        if len(ln.expandtabs(4)) - len(ln.expandtabs(4).lstrip()) < 4 and STARTS_BLOCK.match(
-            stripped
-        ):
+        expanded = ln.expandtabs(4)
+        if len(expanded) - len(expanded.lstrip()) < 4 and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
