@@ -1893,49 +1893,82 @@ class TestCoverage(GqlCase):
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
 
-    def test_a_line_stating_both_readings_and_disagreeing_is_believed_neither_way(self) -> None:
+    def test_a_line_stating_both_readings_and_disagreeing_takes_the_worse(self) -> None:
         """Reading the marker within its line is what lets one line carry both readings.
 
-        `coverage_of` takes the worst reading across lines, so settling one line on the marker
-        alone makes the verdict turn on whether the reviewer pressed return: the same two claims
-        read `full` on one line and `partial` on two. The round whose prose says it read 2 of 3
-        files is the one that clears the gate under that reading, which is the fail-open direction
-        `read_coverage` exists to refuse.
+        `coverage_of` already takes the worst reading across lines, so a line carrying both settles
+        the same way. Settled on the marker instead, the same two claims read `full` on one line
+        and `partial` on two, which makes the verdict turn on whether the reviewer pressed return
+        and clears the gate for the round whose own prose says it read 2 of 3 files.
         """
         prose = "Copilot reviewed 2 out of 3 changed files in this pull request."
         overstated = "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
-        self.assertIsNone(pr_review.read_coverage(f"{prose} {overstated}"))
-        # Blocking rather than passing, which is what the two disagreeing leaves unanswered.
-        out = self.digest_for(review(body=f"{OVERVIEW}\n{prose} {overstated}"))
-        self.assertNotIn("coverage=full", out)
-        # Agreeing on one line is not a contradiction, so it still reads.
+        self.assertEqual((2, 3), pr_review.read_coverage(f"{prose} {overstated}"))
+        # The reading a line break would have given, which is the point of taking the worse.
+        self.assertEqual(
+            pr_review.coverage_of({"body": f"{prose}\n{overstated}"})[0],
+            pr_review.coverage_of({"body": f"{prose} {overstated}"})[0],
+        )
+        self.assertIn(
+            "coverage=PARTIAL", self.digest_for(review(body=f"{OVERVIEW}\n{prose} {overstated}"))
+        )
+        # Agreeing on one line is no contradiction, so the counts read straight through.
         agreed = "<!-- fleet-review: reviewed=2 changed=3 findings=0 -->"
         self.assertEqual((2, 3), pr_review.read_coverage(f"{prose} {agreed}"))
 
-    def test_a_blockquote_runs_past_the_line_that_opens_it(self) -> None:
-        """Markdown's lazy continuation: a line carrying no `>` under one that does is still
-        inside the quotation, and renders as part of it.
+    def test_a_blockquote_continues_through_prose_and_ends_at_a_new_block(self) -> None:
+        """Markdown's lazy continuation carries paragraph text, and a line opening its own block
+        ends the quotation above it rather than joining it.
 
-        Refusing only the marked line reads the very next line as this round's own statement,
-        which is the quotation the guard was added to refuse arriving one line later.
+        Of the three spellings read here only the reviewer's own sentence is paragraph text. Read
+        as though the bullet and the marker were continuations too, a round stating full coverage
+        under a quoted note reported no coverage at all, which blocks a merge on a satisfied item.
         """
-        lazy = f"> Quoting the reviewer's own body:\n{MARKER}\n"
-        self.assertEqual([], pr_review.coverage_statements(lazy))
-        # A blank line closes the quotation, so a statement after one is the round's own again.
-        closed = f"> Quoting the reviewer's own body:\n\n{MARKER}\n"
-        self.assertEqual([MARKER], pr_review.coverage_statements(closed))
+        sentence = "Copilot reviewed 4 out of 4 changed files in this pull request."
+        # Paragraph text under a quotation is inside it, so it is not this round's own statement.
+        self.assertEqual(
+            [], pr_review.coverage_statements(f"> Quoting the reviewer:\n{sentence}\n")
+        )
+        # A blank line closes the quotation, so the same sentence after one is the round's own.
+        self.assertEqual(
+            [sentence], pr_review.coverage_statements(f"> Quoting the reviewer:\n\n{sentence}\n")
+        )
+        # Each of the two block openers ends the quotation wherever it sits.
+        for label, line in (
+            ("the marker", MARKER),
+            ("the bullet spelling", "- **Files reviewed:** 4/4 changed files"),
+        ):
+            with self.subTest(case=label):
+                body = f"> [!NOTE]\n> Reviewed with Copilot.\n{line}\n"
+                self.assertEqual([line], pr_review.coverage_statements(body))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
+        # A marker carrying its own `>` is still the quotation rather than a block of its own.
+        self.assertEqual([], pr_review.coverage_statements(f"> {MARKER}\n"))
 
-    def test_a_count_longer_than_any_review_states_is_refused_rather_than_fatal(self) -> None:
+    def test_a_count_longer_than_any_review_states_is_refused_rather_than_unseen(self) -> None:
         """`int` raises above 4300 digits, so an unbounded run crashed the digest rather than
         reporting a line it could not believe.
 
-        Reading the marker within its line is what made that reachable from any line carrying one.
-        The bound is four digits, which `COUNT_LOOSE` already holds its own runs to.
+        Refusing it in the pattern instead is the other failure: the line stops being a coverage
+        statement at all, so it leaves the gate silently and a round carrying one reads as full on
+        whatever else its body says. It stays a statement, and the reader is what refuses it.
         """
-        huge = "<!-- fleet-review: reviewed=" + "9" * 4400 + " changed=1 findings=0 -->"
-        self.assertIsNone(pr_review.read_coverage(huge))
-        self.assertEqual([], pr_review.coverage_statements(huge))
-        # Four digits is a count, and the bound refuses only what no review states.
+        for digits in (5, 4400):
+            with self.subTest(digits=digits):
+                huge = "<!-- fleet-review: reviewed=" + "9" * digits + " changed=5 findings=0 -->"
+                # A statement, rather than a line nothing here sees.
+                self.assertTrue(pr_review.is_coverage_line(huge))
+                self.assertEqual([huge], pr_review.coverage_statements(huge))
+                # And one this cannot believe, which blocks rather than passing.
+                self.assertIsNone(pr_review.read_coverage(huge))
+                self.assertEqual(pr_review.UNVETTED, pr_review.coverage_of({"body": huge})[0])
+        # A round carrying one does not read as full on the strength of another line.
+        good = "Copilot reviewed 4 out of 4 changed files in this pull request."
+        huge = "<!-- fleet-review: reviewed=99999 changed=5 findings=0 -->"
+        self.assertEqual(
+            pr_review.UNVETTED, pr_review.coverage_of({"body": f"{good}\n{huge}\n"})[0]
+        )
+        # Four digits is a count a review could state, and it reads.
         self.assertEqual(
             (9999, 9999),
             pr_review.read_coverage("<!-- fleet-review: reviewed=9999 changed=9999 findings=0 -->"),

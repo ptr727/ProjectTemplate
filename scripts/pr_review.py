@@ -269,8 +269,12 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # Anchored to the opening of its line, past whatever markup a heading wears, rather than matched anywhere in it.
 # The wording is ordinary English, so a body-wide match reads a sentence such as `restores a guard previously missed (2) rounds ago` as this section.
 # `marker_blocks` accepts a line on a count alone, which is what lets that sentence through, so the anchor is what separates a heading from prose naming one.
+# The opener admits any run of tags and non-word characters, rather than a list of the ones seen so far.
+# Spelled as a list, a heading wearing anything else, an emoji being what this format already puts on its verdict headings, matched nothing and the section went unread.
+# That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read and the findings reach nobody.
+# A word character cannot open the run, which is the whole of what separates a heading from a sentence naming one.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:[\s>#*_]|</?(?:summary|strong|b|em|i)\b[^>]*>)*Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[^\w<])*Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -358,11 +362,11 @@ NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
 # Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
 # The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
 # That refusal is `coverage_statements`, which drops a fenced block, an inline code span, and a blockquoted line, in that order, ahead of every reader here.
-# Each count is bounded to four digits, which `COUNT_LOOSE` already bounds its own runs to and for the same reason: a review states tens of files and never thousands.
-# The bound is load-bearing rather than tidy, `int` raising on a run past 4300 digits, so an unbounded run crashed the digest instead of reporting a line it could not believe.
-# Reading the marker within its line is what made that reachable from any line carrying one rather than from a line that is nothing else.
+# The digit runs are matched unbounded and judged in `read_coverage` rather than bounded here, which is the difference between a line this cannot believe and a line that is not a statement at all.
+# Bounded here, a marker stating a count longer than any review states stopped matching, so the line left the gate silently and a round carrying one read as full on whatever else it said.
+# `int` also raises on a run past 4300 digits, so the judgment has to happen somewhere, and the place that can answer `unvetted` is the reader rather than the pattern.
 FLEET_REVIEW = re.compile(
-    r"\s*<!--\s*fleet-review:\s*reviewed=(\d{1,4})\s+changed=(\d{1,4})\s+findings=(\d{1,4})\s*-->\s*",
+    r"\s*<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->\s*",
     re.IGNORECASE,
 )
 # The count pair itself, in the two spellings the corpus carries.
@@ -504,6 +508,11 @@ COUNT_MARKUP = re.compile(
     r"|!?\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]\([^()]*(?:\([^()]*\)[^()]*)*\)"
     r"|!?\[[^\[\]]*\]\[[^\[\]]*\]"
 )
+# What opens a block of its own, and so ends a blockquote rather than continuing it.
+# Markdown's lazy continuation carries paragraph text only, which of the three coverage spellings is the reviewer's own sentence alone.
+# The bullet spelling and the marker each open a block, so each is the round's own line again however the lines above it are quoted.
+# Read as continuations they reported `unstated` over a round stating full coverage, which blocks a merge on a satisfied item.
+STARTS_BLOCK = re.compile(r"[-*+]\s|<|#{1,6}\s")
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
@@ -1173,20 +1182,28 @@ def coverage_statements(body: str) -> list[str]:
     it, which is Markdown's own lazy continuation: a line carrying no `>` under one that does is
     still rendered inside the quotation. Refusing only the marked line reads the line after a
     quotation's first as this round's own statement.
+
+    Continuation carries paragraph text and nothing else, so a line opening a block of its own ends
+    the quotation above it. Of the three spellings read here only the reviewer's own sentence is
+    paragraph text, the bullet and the marker each opening a block, and treating those as quoted
+    reported no coverage at all over a round that stated it in full.
     """
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     found = []
     quoted = False
     for ln in plain.splitlines():
+        stripped = ln.lstrip()
         if not ln.strip():
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
             continue
-        if BLOCKQUOTE.match(ln.lstrip()):
+        if BLOCKQUOTE.match(stripped):
             quoted = True
             continue
-        # A line under a blockquote that carries no `>` of its own is still inside it, which is Markdown's own lazy continuation and renders as part of the quotation.
-        # Read per line, the guard above refuses the marker's own line and then reads the very next one.
+        if STARTS_BLOCK.match(stripped):
+            # A line opening its own block is not continuation text, so the quotation ends above it.
+            quoted = False
+        # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
         if quoted or not is_coverage_line(ln):
             continue
         found.append(ln.strip())
@@ -1202,10 +1219,10 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     it is a line this script is parsing wrongly, and reading it as full coverage fails open on
     exactly the statement that says something is off.
 
-    Two readings on one line that disagree are that same case. Reading the marker within its line
-    rather than as the whole of one is what makes a line able to carry both, and `coverage_of`
-    takes the worst reading across lines, so settling one line on the marker alone would make the
-    verdict turn on whether the reviewer happened to press return.
+    Two readings on one line that disagree take the worse of the two, which is what `coverage_of`
+    already does between lines. Reading the marker within its line rather than as the whole of one
+    is what makes a line able to carry both, and settling such a line on the marker alone would
+    make the verdict turn on whether the reviewer happened to press return.
     """
     marker = FLEET_REVIEW.search(line)
     m = COVERAGE_COUNTS.search(line)
@@ -1214,12 +1231,16 @@ def read_coverage(line: str) -> tuple[int, int] | None:
         got = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
         prose = (int(got[0]), int(got[1]))
     if marker:
-        counts = (int(marker.group(1)), int(marker.group(2)))
-        # A line carrying both readings and disagreeing between them is the case above, reached within one line rather than between two.
-        # Reading the marker and dropping the sentence would clear the coverage gate for a round whose own prose says it read part of the diff.
-        # Which of the two the reviewer meant is exactly what the line leaves unanswered.
-        if prose is not None and prose != counts:
+        # Judged before conversion, `int` raising above 4300 digits and no review stating a count of even five.
+        # A run this long is a line to refuse rather than one to crash on.
+        if any(len(marker.group(i)) > 4 for i in (1, 2)):
             return None
+        counts = (int(marker.group(1)), int(marker.group(2)))
+        # A line carrying both readings and disagreeing is the same case as two lines carrying them, so it settles the same way.
+        # `coverage_of` takes the worst reading across lines, and the worst of the two is taken here.
+        # Settled on the marker instead, the verdict would turn on whether the reviewer happened to press return.
+        if prose is not None and prose != counts:
+            counts = max((counts, prose), key=lambda pair: pair[1] - pair[0])
         return counts if counts[0] <= counts[1] else None
     if prose is None:
         return None
@@ -2164,18 +2185,13 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
     return regions, leftover
 
 
-def details_regions(body: str) -> tuple[list[str], str]:
-    """Every top-level `<details>...</details>` region's own content, plus what is left once
-    every top-level region is removed whole.
-    """
-    regions, leftover = details_spans(body)
-    return [body[a:b] for a, b in regions], "".join(body[a:b] for a, b in leftover)
-
-
-# Every character a quotation covers replaced by a space, and every newline kept.
+# Every character a quotation covers replaced by a space, and every line boundary kept.
 # Length-preserving on purpose, so a span found in the masked copy addresses the same text in the body.
 # A mask that dropped the quotation instead would shift every offset after it and return a block starting mid-finding.
-QUOTED_CHAR = re.compile(r"[^\n]")
+# The class spells out every character `str.splitlines` breaks on rather than the newline alone, because the block is taken by line index while the span is found by offset.
+# A quoted snippet carrying a form feed, a vertical tab, a lone carriage return or a Unicode line separator otherwise left the masked copy one line shorter than the body.
+# The block then started a line early and dropped the finding text off its end, which is the defect the spans exist to prevent arriving through the mask instead.
+QUOTED_CHAR = re.compile("[^\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 def mask_quotations(body: str) -> str:
@@ -2234,12 +2250,23 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     regardless, the first section's block contains the second whole, and the digest prints those
     findings twice, the second time under a banner asserting the opposite triage about them.
 
-    Bounded at a heading rather than at any line the other marker matches, so a finding naming a
-    sibling section in its own text does not cut the block it sits in.
+    A heading is not enough to tell the two apart. In this format every finding entry is its own
+    `<summary>`, so `HEADING` matches all of them, and the suppressed marker is ordinary English
+    that an entry's title carries as readily as a heading does. Bounded on the heading alone, a
+    section whose second entry is titled `Low confidence fallback swallows the error` ends at that
+    entry, and the entries after it print under the other section's banner, which asserts the
+    opposite triage about them, while both counts come out wrong.
+
+    A stated count is what separates them, the same signal `finding_entry` reads: every section
+    heading here states one and a finding's own title does not. Requiring it also keeps this off
+    the CodeRabbit blocks, whose own marker is in neither of the two and which were never bounded
+    before this.
     """
     for j in range(start + 1, len(scan_lines)):
         line = scan_lines[j]
-        if HEADING.match(line) and any(o is not marker and o.search(line) for o in SECTION_MARKERS):
+        if not (HEADING.match(line) and COUNT.search(line)):
+            continue
+        if any(o is not marker and o.search(line) for o in SECTION_MARKERS):
             return j
     return len(scan_lines)
 
@@ -2289,7 +2316,7 @@ def outside_diff_blocks(body: str) -> list[str]:
     wrapped in the review's own blockquote.
 
     Reads a section spanning several files or several findings in one file just as reliably as a
-    single finding, since `details_regions` counts the nesting rather than pairing the first
+    single finding, since `details_spans` counts the nesting rather than pairing the first
     open it meets with the first close.
     """
     return marker_blocks(body, CR_OUTSIDE_DIFF, strip_blockquote=True)
