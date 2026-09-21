@@ -93,7 +93,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    states a different bound for this specific release: `timeout 2700 gh run watch <run-id> --repo
    owner/repo --exit-status` on a host with GNU `timeout`, or the equivalent bounded-wait
    mechanism enforcing the same bound on a host without it (macOS without coreutils, native
-   Windows). Report a timeout separately from a completed run's own conclusion, the tag or
+   Windows). Never pipe `gh run watch` into another command unless the shell running it sets
+   `pipefail`, since without it a pipeline reports its last stage's exit status and
+   `gh run watch ... | tail` reports whether `tail` succeeded rather than whether the run
+   did. Read the watch's own exit status, or read the conclusion back with
+   `gh run view <run-id> --repo owner/repo --json status,conclusion`.
+   Report a timeout separately from a completed run's own conclusion, the tag or
    version it produced. A run that fails, times out, or never starts is reported, never silently
    retried.
 7. In the hub, when the chosen scope includes a release, bring this checkout to the merged
