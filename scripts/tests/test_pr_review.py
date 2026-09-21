@@ -1999,6 +1999,21 @@ class TestCoverage(GqlCase):
                 self.assertEqual([], pr_review.coverage_statements(body))
                 self.assertEqual(pr_review.UNSTATED, pr_review.coverage_of({"body": body})[0])
 
+    def test_a_long_whitespace_run_does_not_slow_the_read(self) -> None:
+        """The marker carries no whitespace of its own at either end, a search having no use for it.
+
+        Left in place from the spelling that matched a whole line, the unanchored run is quadratic
+        in the whitespace it sits in, so a body carrying a long one took seconds to read where the
+        marker itself is the only thing a search is looking for.
+        """
+        start = time.monotonic()
+        self.assertEqual([], pr_review.coverage_statements(" " * 65526 + "\n"))
+        self.assertLess(time.monotonic() - start, 1.0)
+        # Dropping the runs changes no reading, the marker being what either spelling matched.
+        self.assertEqual((8, 8), pr_review.read_coverage(MARKER))
+        self.assertEqual((8, 8), pr_review.read_coverage(f"  {MARKER}\t "))
+        self.assertEqual([MARKER], pr_review.coverage_statements(f"{MARKER}\r\n"))
+
     def test_a_count_longer_than_any_review_states_is_refused_rather_than_unseen(self) -> None:
         """`int` raises above 4300 digits, so an unbounded run crashed the digest rather than
         reporting a line it could not believe.

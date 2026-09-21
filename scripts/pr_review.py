@@ -364,6 +364,8 @@ NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
 # Ask the reviewer for a stable coverage shape instead of adapting only to changing prose.
 # Keep the prose readers for reviews made before the marker shipped.
 # Searched within its line rather than matched as the whole of one, because the reviewer writes it both ways.
+# It carries no whitespace of its own at either end, which a search has no use for and pays for: an unanchored run of `\s*` is quadratic in the whitespace run it sits in.
+# Left in place from the spelling that matched a whole line, a line of 16000 spaces took half a second and 65000 took nine, where the marker itself is what a search is looking for.
 # The instruction it is emitted from asks only that the body end with it, and one of the two overview formats ends a prose sentence with it instead.
 # Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
 # The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
@@ -372,7 +374,7 @@ NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
 # Bounded here, a marker stating a count longer than any review states stopped matching, so the line left the gate silently and a round carrying one read as full on whatever else it said.
 # `int` also raises on a run past 4300 digits, so the judgment has to happen somewhere, and the place that can answer `unvetted` is the reader rather than the pattern.
 FLEET_REVIEW = re.compile(
-    r"\s*<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->\s*",
+    r"<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->",
     re.IGNORECASE,
 )
 # The count pair itself, in the two spellings the corpus carries.
