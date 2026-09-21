@@ -789,6 +789,10 @@ URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
 # The digits are captured so a line naming one reference twice over reports it once.
 # That key collapses two different references sharing a number on one line as well.
 # The second is reported once the first is fixed, so it is a round rather than a lost detection.
+# Those digits are unbounded in length, where `ISSUE_REF` bounds its own at two through five.
+# Each of that pattern's bounds trades a detection for a shape the bare form is confusable with.
+# A path segment after `/issues/` or `/pull/` is confusable with nothing, so it trades neither.
+# The two disagree deliberately, and the URL form reads a number the bare form is bounded out of.
 FORGE_REF = re.compile(
     r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/([0-9]+)",
     re.IGNORECASE,
