@@ -277,10 +277,13 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # The whitespace is spelled out rather than taken from `\s`, which is Unicode-aware and so overlaps the non-ASCII alternative on every non-ASCII space.
 # Two alternatives able to consume the same character make the run ambiguous, and the parse then doubles per character of it on a line that does not go on to say this, which is a hang rather than a slow read.
 # A body carrying 30 non-breaking spaces in a line took minutes, and every alternative here now opens on a character the others cannot.
+# An emphasis marker is admitted only where no space follows it, which is what tells `**Previously missed (1)**` from the list item `* Previously missed (2) findings`.
+# A bullet is the one prose opener that is also heading markup, and `marker_blocks` accepts a line on a count alone, so the list item read as the section and printed the prose around it as findings.
+# One character per iteration rather than a run of them, since a repeated group that can split a run of stars more than one way is ambiguous and parses exponentially in it.
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[ \t>#*_]|[^\x00-\x7f])*Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.

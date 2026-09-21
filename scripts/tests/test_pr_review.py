@@ -1138,7 +1138,7 @@ class TestPreviouslyMissed(GqlCase):
             [], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{chr(0xA0) * 40}aligned note\n")
         )
         self.assertLess(time.monotonic() - start, 1.0)
-        for opener in ("- ", "...", "(", '"'):
+        for opener in ("- ", "* ", "+ ", "...", "(", '"'):
             with self.subTest(opener=opener):
                 line = f"{opener}Previously missed (2) findings were re-raised this round."
                 self.assertIsNone(pr_review.PREVIOUSLY_MISSED.match(line))
@@ -1160,6 +1160,9 @@ class TestPreviouslyMissed(GqlCase):
             ),
             ("a markdown heading", "### Previously missed (1)"),
             ("bold, with no tags", "**Previously missed (1)**"),
+            # An emphasis marker is heading markup and a bullet is prose, and a space is what separates them, so both spellings are held here rather than only the one.
+            ("italic, with no tags", "_Previously missed (1)_"),
+            ("bold and italic", "***Previously missed (1)***"),
         ):
             with self.subTest(case=label):
                 self.assertIsNotNone(pr_review.PREVIOUSLY_MISSED.match(heading))
