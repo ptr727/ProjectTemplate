@@ -890,6 +890,96 @@ class TestCommentWrap(BaitCase):
             self.flag("a.yml", "# The value the hook reads is\n# empty: false\n# by default.\n"),
         )
 
+    def test_a_configuration_run_is_exempt_in_the_widened_shape(self) -> None:
+        """The four shapes the single-token value could not reach, each as a two-line run.
+
+        A YAML tag value, a quoted value carrying a space, and a key-value line with a trailing
+        comment each split on a space, so the narrow shape read every one of them as prose and
+        asked the author to capitalize a key a reader pastes. The fourth is the separator rather
+        than the value: `=` spells the same shape that `:` does, and the narrow one read neither.
+        """
+        for label, text in (
+            ("tag", "#   board: !include board.yaml\n#   label: friendly\n"),
+            ("quoted", '# label: "Compressor 1"\n# other: "Compressor 2"\n'),
+            ("trailing", "# sda: GPIO15 # a strapping pin\n# scl: GPIO16 # another one\n"),
+            ("equals", '# requires-python = ">=3.9"\n# dependencies = ["bleak"]\n'),
+        ):
+            with self.subTest(shape=label):
+                self.assertEqual([], self.flag("a.yml", text))
+
+    def test_a_metadata_block_opener_rides_on_the_lines_under_it(self) -> None:
+        """A PEP 723 block, which `uv` parses verbatim, so no reformatting is available.
+
+        The opener is not key-value and joins no run. It drew a finding only because the line
+        under it read as a continuation of it, so exempting that line is what clears the opener.
+        """
+        block = (
+            '# /// script\n# requires-python = ">=3.9"\n# dependencies = ["bleak"]\n# ///\nx = 1\n'
+        )
+        self.assertEqual([], self.flag("a.py", block))
+
+    def test_a_metadata_block_declaring_one_key_is_not_a_run(self) -> None:
+        """The count's own cost, reached by a block rather than by a marker comment.
+
+        One key-value line is not a run, so nothing carries the opener and it reports. `uv` parses
+        the block verbatim, so no reformatting is available either, and the `comments` label reaches
+        `comment-added` rather than this rule. The finding therefore stands with no remedy at all,
+        which is what the count costs on a block rather than on a marker comment.
+        """
+        block = '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'
+        self.assertEqual(["comment-wrap"], self.flag("a.py", block))
+
+    def test_a_sentence_wrapping_into_a_run_loses_its_wrap(self) -> None:
+        """The third cost, pinned so a later change meets it rather than finds it.
+
+        The narrow shape already carries this one, and the wider shape makes it reachable from any
+        unterminated key-and-rest-of-line body. A sentence wrapping into a run loses its wrap with
+        nothing reported, and one wrapping out of a run has the line under it reported for case.
+        """
+        into = '# The hook reads the value from\n# label: "Compressor 1"\n# other: "Compressor 2"\n'
+        self.assertEqual([], self.flag("a.yml", into))
+        out = (
+            "# The hook reads\n"
+            "# note: the first value\n"
+            "# note: the second value\n"
+            "# and then stops.\n"
+        )
+        self.assertEqual(["comment-case"], self.flag("b.yml", out))
+
+    def test_one_configuration_line_alone_still_reports(self) -> None:
+        """The exemption's accepted cost, pinned so a later change meets it rather than finds it.
+
+        Widening the anchor hands it to a marker comment, `note: obsolete` carrying exactly the
+        shape of a configuration line. Two is what separates a block from a marker, so a genuine
+        one-line snippet in the widened shape is read as prose.
+        """
+        self.assertEqual(["comment-case"], self.flag("a.yml", '# label: "Compressor 1"\nx: 1\n'))
+
+    def test_prose_above_a_usage_block_is_still_read(self) -> None:
+        """Why the run is the configuration lines rather than the comment block holding them.
+
+        A wrapper script opens on sentences and closes on invocation lines, all in one comment
+        block. Exempting the block would stop both rules reading the sentences above it.
+        """
+        text = (
+            "# The wrapper runs the installer with a\n"
+            "# python of any supported version.\n"
+            "#   Run: scripts/install.sh\n"
+            "#   Or: AGENTS_HOME=/x scripts/install.sh\n"
+            "x=1\n"
+        )
+        self.assertEqual(["comment-wrap"], self.flag("a.sh", text))
+
+    def test_a_body_closing_as_a_sentence_is_not_a_configuration_line(self) -> None:
+        """The guard the narrow shape already pairs with its anchor, applied to the wider one.
+
+        Both bodies open on a word and a colon, so the anchor alone reads them as a two-line
+        configuration block and exempts the pair. Each closes as a sentence does, which is what
+        the guard reads, so both are judged as the prose they are and both report.
+        """
+        text = "# note: the value is read once.\n# todo: the value is read twice.\n"
+        self.assertEqual(["comment-case", "comment-case"], self.flag("a.yml", text))
+
     def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
         """One case per syntax, so a failure names the language whose extractor broke.
 
@@ -4798,14 +4888,63 @@ class TestTheIssueRefRule(unittest.TestCase):
             self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
         )
 
-    def test_a_link_destination_is_not_a_reference(self) -> None:
-        """An anchor to a heading that opens on a number is the shape, and a destination is not prose."""
+    def test_an_anchor_to_a_heading_is_not_a_reference(self) -> None:
+        """A heading that opens on a number anchors to a link destination carrying the same shape.
+
+        The blanking that hides it is also what hid every URL spelling of a real reference, which
+        the forge pattern reads off the unblanked line instead. A destination naming no tracker is
+        untouched by that pattern, so both halves hold at once: the anchor passes and the link text
+        beside it still reports.
+        """
         self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
         self.assertEqual([], self.kinds("AGENTS.md", "[s]: #10-converge\n"))
         self.assertEqual(
             ["issue-ref"],
             self.kinds("GOVERNANCE.md", "See [#1011](https://x.invalid/pull/1011).\n"),
         )
+
+    def test_one_reference_on_one_line_is_one_finding_in_either_spelling(self) -> None:
+        """The line is the unit, and a link carries the same reference twice over.
+
+        The destination names it and the link text spells it bare, so a key on the matched text
+        reports one reference as two. The number both patterns capture is the key instead.
+        """
+        url = "https://github.com/acme/widget/issues/4242"
+        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", f"See [#4242]({url}) today.\n"))
+        self.assertEqual(
+            ["issue-ref", "issue-ref"],
+            self.kinds("CODESTYLE.md", f"See [#4243]({url}) today.\n"),
+        )
+
+    def test_a_service_subdomain_is_not_the_forge_host(self) -> None:
+        """The tracker is served from the bare host, so a service beside it is a different service.
+
+        `www` is that host's own alias rather than a service of its own, which is why it reads as
+        the host and the two constructed service names below do not.
+        """
+        for url in (
+            "https://docs.github.com/acme/widget/issues/4242",
+            "https://raw.github.com/acme/widget/issues/4242",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("CODESTYLE.md", "See https://www.github.com/acme/widget/pull/4242 now.\n"),
+        )
+
+    def test_two_references_sharing_a_number_on_one_line_report_once(self) -> None:
+        """The digit key's own cost, pinned so a later change meets it rather than finds it.
+
+        Two projects number their trackers independently, so one line can name two references under
+        one number and the key cannot tell them apart. The second reports on the run after the first
+        is fixed, which is a round rather than a lost detection, and it is written down either way.
+        """
+        text = (
+            "See https://github.com/acme/widget/issues/4242 and "
+            "https://github.com/other/thing/issues/4242 now.\n"
+        )
+        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
 
     def test_only_the_skill_roots_are_instruction_text(self) -> None:
         """A product with a `skills/` directory of its own is not carrying fleet law in it."""
@@ -4816,6 +4955,50 @@ class TestTheIssueRefRule(unittest.TestCase):
             ["issue-ref"],
             self.kinds(".claude-plugin/fleet-skills/skills/x/SKILL.md", "Shipped in #1011.\n"),
         )
+
+    def test_the_link_spelling_is_read_in_instruction_text(self) -> None:
+        """Every link form of one reference, each of which passed while the bare form reported."""
+        url = "https://github.com/acme/widget/pull/4242"
+        for label, text in (
+            ("inline", f"The [pull request]({url}) landed.\n"),
+            ("bare", f"See {url} for the history.\n"),
+            ("definition", f"The [pull request][pr-a] landed.\n\n[pr-a]: {url}\n"),
+            ("issues", "See https://github.com/acme/widget/issues/4242 today.\n"),
+        ):
+            with self.subTest(form=label):
+                self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
+
+    def test_a_link_naming_another_tracker_is_kept_in_code(self) -> None:
+        """The surface split the rule turns on: in code the link is the citation for the line."""
+        text = (
+            "# Raise the frequency to clear the timeout.\n"
+            "# https://github.com/acme/widget/issues/4242\n"
+            "frequency: 400kHz\n"
+        )
+        self.assertEqual([], self.kinds("a.yml", text))
+
+    def test_a_link_in_a_narrative_document_is_kept(self) -> None:
+        """A tracker, a history and a README exist to carry exactly these references."""
+        text = "Landed in https://github.com/acme/widget/pull/4242 upstream.\n"
+        for name in ("README.md", "HISTORY.md", "TODO.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, text))
+
+    def test_a_fenced_link_is_quoted_rather_than_stated(self) -> None:
+        """The same bound the bare form already carries, a fence quoting content."""
+        text = "Text.\n\n```\nhttps://github.com/acme/widget/pull/4242\n```\n"
+        self.assertEqual([], self.kinds("CODESTYLE.md", text))
+
+    def test_a_link_to_something_other_than_a_tracker_is_not_a_reference(self) -> None:
+        """The path decides it, so a link to a file, a release or a repository is untouched."""
+        for url in (
+            "https://github.com/acme/widget",
+            "https://github.com/acme/widget/blob/main/README.md",
+            "https://github.com/acme/widget/releases/tag/4242",
+            "https://example.com/acme/widget/pull/4242",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
 
     def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
         self.assertIn("issue-ref", prose_lint.RULES)

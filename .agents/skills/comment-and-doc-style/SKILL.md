@@ -203,18 +203,25 @@ a hook runs on every commit while the label decides a pull request.
 ## Issue, pull request, and commit references
 
 No comment, no docstring, and no instruction document names an issue, a pull request, or a commit.
-The surfaces are code and workflow comments, a docstring, a documentation comment, the Skills
-trees, and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODESTYLE.md`,
+The surfaces are code and workflow comments, a docstring, a documentation comment, the Skills trees,
+and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODESTYLE.md`,
 `GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
 `.github/copilot-instructions.md`. A tracker, a history, a plan, and a README outside those trees
 are the repository's own narrative and keep their references, as do a commit message and a pull
 request body, which are the surfaces a reference belongs on.
 
-A record whose subject is the revision itself keeps it. A disproved-claims entry in
-`.github/copilot-instructions.md` names the revision its proof was read against, since a proof is
-true of one tree at one revision and an entry whose subject has moved is deleted rather than edited
-to look current. The revision there is the record's own load-bearing field rather than a citation
-beside a claim, which is the distinction this rule turns on.
+Two carve-outs, each stated as a single case. Whatever neither of them affirmatively permits is
+banned by the paragraph above, which is the whole of the test and is why no list of banned cases
+follows. The first: **in a code or workflow comment, a URL naming an issue or a pull request on a
+public repository other than this one is a source citation and is permitted.** It does the same job
+as the datasheet link, the vendor wiki link, and the SDK doc link the rule already leaves alone on
+the adjacent line. The second is the revision record in the paragraph below.
+
+The second carve-out: a record whose subject is the revision itself keeps it. A disproved-claims
+entry in `.github/copilot-instructions.md` names the revision its proof was read against, since a
+proof is true of one tree at one revision and an entry whose subject has moved is deleted rather
+than edited to look current. The revision there is the record's own load-bearing field rather than a
+citation beside a claim, which is the distinction this rule turns on.
 
 Three reasons, and the first decides it.
 
@@ -226,18 +233,45 @@ Three reasons, and the first decides it.
 - **It pollutes the content.** A rationale block that takes one more citation per round is how a
   file comes to teach a house style the rules forbid, which is what happened here.
 
+The first carve-out is where all three fail at once, which is what makes it one case rather than a
+taxonomy. Another repository's status is not a fact this file can hold, it changes without anyone
+touching this file, and the constraint the citation stands in for is therefore unwritable. The
+lookup is not impossible, that repository being public. And a URL line is not pollution on a surface
+where the datasheet, the forum thread, and the component docs already sit on the adjacent lines, the
+hostname being the only thing that separates them. A workaround whose justification is an open
+report on the project it works around is the routine case, and a reader revisiting the workaround
+needs to know whether the cause still stands.
+
+Move one of that carve-out's conditions and a reason comes back. An instruction document states its
+constraint rather than citing a tracker for it, so the first reason holds there whatever the tracker
+names. A private repository's tracker cannot be opened by a reader of the content carried into a
+public repository, which is the second reason exactly. This repository's own tracker holds status
+this file can state, so the first and the third hold on every surface. And a bare reference carries
+no destination a reader can open at all, the hash-and-number form resolving against whichever
+repository the reader happens to be in, which is why that carve-out is written as a URL.
+
 Write the constraint the reference was standing in for, or drop the clause where the reference was
 the whole of its value. "A prior version re-scanned from every unmatched open, which was O(N^2)"
-carries what the reader needs, and the number of the round that found it does not.
+carries what the reader needs, and the number of the round that found it does not. Inside the
+carve-out there is nothing to rewrite, the referenced thing being live status somewhere else, and
+the carve-out is why that case needs no remedy rather than a remedy an author is expected to find.
 
-The `issue-ref` rule in the prose gate reads the pattern-detectable half of this, an issue or pull
-request reference in a comment, in a Python docstring, and in instruction text. Whatever a gate
-does not reach is unlicensed all the same, since the rule binds a reader rather than a scan.
+The `issue-ref` rule in the prose gate reads the pattern-detectable half of this: a bare reference
+in a comment, in a Python docstring, and in instruction text, and in instruction text a URL naming
+an issue or a pull request as well, written as an inline link destination, as a reference
+definition, or bare in the prose. It reads one forge's URL paths, so a URL naming a tracker it does
+not know is banned there and goes unreported. Whatever a gate does not reach is unlicensed all the
+same, since the rule binds a reader rather than a scan. Reading the URL in instruction text is what
+stops the gate reporting the bare spelling and passing the URL on the one surface it reads both,
+since an author met by the bare form's finding is otherwise pointed at respelling the reference
+rather than at removing it. On every other surface the gate reads the bare form alone, so a banned
+URL is banned there and goes unreported.
 
-A commit is not a shape a gate can read, since a short SHA carries the same shape as a blob id, a
-version fragment, and a fixture hash, so the text above is the whole of what covers that half. A
-reference in a string literal is not read either: a test builds the numbers it asserts against, and
-reading those would report a fixture rather than a claim about this repository.
+A bare commit reference is not a shape a gate can read, since a short SHA carries the same shape as
+a blob id, a version fragment, and a fixture hash. The URL spelling of one is readable and is read
+by nothing here, so the text above is the whole of what covers a commit either way. A reference in a
+string literal is not read either: a test builds the numbers it asserts against, and reading those
+would report a fixture rather than a claim about this repository.
 
 ## Character set
 

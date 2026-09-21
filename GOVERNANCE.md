@@ -164,7 +164,7 @@ The full comment philosophy, what earns one, structure, capitalization, growth d
 
 ### References
 
-No comment, no docstring, and no instruction document names an issue, a pull request, or a commit, and a commit message and a pull request body each carry theirs as usual. The reasons, the surfaces the ban reaches, the narrative files it leaves alone, and what to write instead are in the `comment-and-doc-style` Skill referenced above.
+No comment, no docstring, and no instruction document names an issue, a pull request, or a commit, and a commit message and a pull request body each carry theirs as usual. Two carve-outs. In a code or workflow comment, a URL naming an issue or a pull request on a public repository other than this one is a source citation and is permitted. And a record whose subject is the revision itself keeps it, which is what lets a disproved-claims entry in `.github/copilot-instructions.md` name the revision its proof was read against. Whatever neither carve-out affirmatively permits is banned by the sentence above them, which is the whole of the test. The reasons, the surfaces the ban reaches, the narrative files it leaves alone, and what to write instead are in the `comment-and-doc-style` Skill referenced above.
 
 ### Character Set
 
