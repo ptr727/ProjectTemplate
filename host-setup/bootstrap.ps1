@@ -238,7 +238,12 @@ function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-function Test-Ownership { param([string]$Path) Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned') }
+function Test-Ownership {
+    param([string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+    Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')
+}
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
 function Remove-Owned {
@@ -292,6 +297,7 @@ function Invoke-SwapIn {
     $staging = Get-StagingPath
     $tree = Get-TreePath
     $retired = Get-RetiredPath
+    $moved = $false
 
     if (Test-Path -LiteralPath $tree) {
         if (-not (Test-Ownership -Path $tree)) { die "$tree exists and this loader did not create it, so it will not be replaced. Choose another -Dir." }
@@ -305,6 +311,7 @@ function Invoke-SwapIn {
         }
         try {
             Move-Item -LiteralPath $tree -Destination $retired
+            $moved = $true
         } catch {
             die "Could not move the previous tree at $tree aside, which a process holding a file in it causes: $($_.Exception.Message)"
         }
@@ -313,7 +320,7 @@ function Invoke-SwapIn {
         Move-Item -LiteralPath $staging -Destination $tree
     } catch {
         $reason = $_.Exception.Message
-        if (Test-Path -LiteralPath $retired) {
+        if ($moved) {
             try {
                 Move-Item -LiteralPath $retired -Destination $tree
             } catch {

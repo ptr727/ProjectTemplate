@@ -185,7 +185,7 @@ download_tree() {
 
 # Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
 swap_in() {
-    local staging tree retired
+    local staging tree retired moved=false
     staging=$(staging_path)
     tree=$(tree_path)
     retired=$(retired_path)
@@ -194,9 +194,10 @@ swap_in() {
         is_ours "$tree" || die "$tree exists and this loader did not create it, so it will not be replaced. Choose another --dir."
         remove_owned "$retired"
         mv "$tree" "$retired"
+        moved=true
     fi
     if ! mv "$staging" "$tree"; then
-        [[ -e $retired ]] && mv "$retired" "$tree"
+        [[ $moved == true ]] && mv "$retired" "$tree"
         die "Could not move the extracted tree into place at $tree"
     fi
     if is_ours "$retired"; then

@@ -25,6 +25,7 @@ Run as `python3 scripts/tests/test_bootstrap.py`, or under `python3 -m unittest 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -623,6 +624,8 @@ class TestKeptTreeHandling(unittest.TestCase):
 
     def locked_entry(self, tree: Path) -> None:
         """An entry `rm` cannot remove, standing in for a removal that stops part way."""
+        if os.geteuid() == 0:
+            self.skipTest("root removes a read-only directory's entries regardless of its mode")
         locked = tree / "locked"
         locked.mkdir()
         (locked / "file").touch()
@@ -647,6 +650,17 @@ class TestKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("swap_in")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "new")
+
+    def test_a_failed_swap_never_moves_a_foreign_old_tree_into_place(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        foreign = self.dir / "skills-tree.old"
+        foreign.mkdir()
+        result = self.run_loader(
+            'mv() { [[ $1 == *.new ]] && return 1; command mv "$@"; }\nswap_in'
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(foreign.is_dir())
+        self.assertFalse((self.dir / "skills-tree").exists())
 
     def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
         self.owned_tree("skills-tree.old", "old")
