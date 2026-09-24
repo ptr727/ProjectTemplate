@@ -396,7 +396,7 @@ function Show-Report {
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Status'
     # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
     Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) { info "The fleet skills copy is not current, and the report's reason says why: -Host or -Skills lands a missing or stale one, and re-installing does not settle one that cannot be judged" }
+    if ($LASTEXITCODE -ne 0) { info 'The fleet skills report found no current copy, and -Host or -Skills lands one unless the report above says the copy cannot be judged' }
 }
 
 # The order is fixed rather than chosen.
