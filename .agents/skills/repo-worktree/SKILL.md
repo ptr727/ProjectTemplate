@@ -161,7 +161,7 @@ and again in the handoff. Do not present work there as ordinarily reviewable fro
 workspace.
 
 ```sh
-TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"
+TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"
 git clone --no-checkout "$TASK_ORIGIN" "<temporary-root>/<Repo>-<task-slug>"
 git -C "<temporary-root>/<Repo>-<task-slug>" fetch origin develop
 git -C "<temporary-root>/<Repo>-<task-slug>" switch -c "<task-branch>" origin/develop
