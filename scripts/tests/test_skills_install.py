@@ -332,7 +332,7 @@ class ReportCase(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         snapshot = json.loads(out)["snapshot"]
         self.assertFalse(snapshot["current"])
-        self.assertIn("another revision", snapshot["reason"])
+        self.assertIn("does not record the intended revision", snapshot["reason"])
 
     def test_an_explicit_intended_revision_is_passed_through(self) -> None:
         self.write_stamp({"commit": "abc", "dirty": False})
@@ -365,7 +365,7 @@ class ReportCase(unittest.TestCase):
         self.write_stamp({"commit": "abc", "dirty": True})
         exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
-        self.assertIn("dirty checkout", json.loads(out)["snapshot"]["reason"])
+        self.assertIn("records a dirty checkout", json.loads(out)["snapshot"]["reason"])
 
     def test_unreadable_stamp_reports_not_current_instead_of_crashing(self) -> None:
         self.stamp.write_text("not valid json {{{", encoding="utf-8")
