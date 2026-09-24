@@ -82,18 +82,32 @@ def git_in(root, *args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def is_bootstrap_tree(root):
+    """Whether `root` is a tree the bootstrap extracted, which carries the marker it writes."""
+    return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+
+
+def bootstrap_tree_commit(root):
+    """The commit the bootstrap resolved for the tree at `root`, or None where it wrote none."""
+    try:
+        return (root / BOOTSTRAP_COMMIT_MARKER).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty."""
 
     def git(*args):
         return git_in(ROOT, *args)
 
-    sha = git("rev-parse", "HEAD")
+    # A tree the bootstrap extracted is asked nothing of git, which would answer for whatever repository encloses it, as live_channel reads the same tree.
+    sha = None if is_bootstrap_tree(ROOT) else git("rev-parse", "HEAD")
     if not sha:
         # A bootstrap runs this from a fetched tarball tree, which has no .git to answer for it.
         # The loader resolved its ref to a commit before downloading and hands that in, keeping the stamp checkable instead of permanently stale.
         # A tarball of a resolved commit is clean by construction, which is what dirty=False records.
-        handed = os.environ.get("SKILLS_SOURCE_COMMIT")
+        handed = os.environ.get("SKILLS_SOURCE_COMMIT") or bootstrap_tree_commit(ROOT)
         if handed:
             return {"vcs": "archive", "commit": handed, "dirty": False}
         return {"vcs": "none"}
@@ -206,6 +220,13 @@ def entry_location(entry):
     return location if isinstance(location, str) and location else None
 
 
+def replaceable_registration(location):
+    """Whether a registration naming `location` is one this run should point at this tree instead."""
+    if not location.is_dir():
+        return True
+    return is_bootstrap_tree(location) and location.resolve() != ROOT.resolve()
+
+
 def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
@@ -214,11 +235,11 @@ def register_claude_marketplace():
     internal state, not a documented contract, so writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
     """
-    # An earlier bootstrap registered a tree it then deleted, and re-adding under the same name reads "already" and changes nothing.
-    # Only a registration whose directory is gone is replaced: one naming a live checkout is somebody's choice, and it stands.
+    # Re-adding under a registered name reads "already" and changes nothing, so a registration to replace is removed first.
+    # A bootstrap's own tree, deleted or not, is the bootstrap's to replace, where one naming a checkout is somebody's choice, and it stands.
     entry = marketplace_entry()
     location = entry_location(entry) if entry else None
-    if location is not None and not Path(location).is_dir():
+    if location is not None and replaceable_registration(Path(location)):
         remove = subprocess.run(
             ["claude", "plugin", "marketplace", "remove", MARKETPLACE_NAME],
             capture_output=True,
@@ -324,18 +345,13 @@ def live_channel():
         }
     # A tree the bootstrap keeps is a tarball rather than a checkout, so git has nothing to say about it.
     # Asking anyway would answer for whatever repository encloses it, a home directory kept in git being the ordinary case.
-    if (root / BOOTSTRAP_OWNED_MARKER).is_file():
-        commit_file = root / BOOTSTRAP_COMMIT_MARKER
-        try:
-            commit = commit_file.read_text(encoding="utf-8").strip() or None
-        except OSError:
-            commit = None
+    if is_bootstrap_tree(root):
         return {
             "registered": True,
             "checkout": str(root),
             "vcs": "archive",
             "branch": None,
-            "commit": commit,
+            "commit": bootstrap_tree_commit(root),
             "dirty": None,
         }
     # Only the generated plugin tree is what this channel loads, so only it decides dirty here.

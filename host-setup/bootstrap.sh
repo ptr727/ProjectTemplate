@@ -129,6 +129,7 @@ tree_name() {
 }
 tree_path() { printf '%s\n' "$DIR/$(tree_name)"; }
 staging_path() { printf '%s\n' "$DIR/$(tree_name).new"; }
+retired_path() { printf '%s\n' "$DIR/$(tree_name).old"; }
 archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
@@ -155,7 +156,7 @@ download_tree() {
         die "Could not download $REPO at $REF. Check the ref exists and that this host reaches codeload.github.com."
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # It is extracted beside the tree and swapped in only once complete, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    # It is extracted beside the tree rather than over it, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
     staging=$(staging_path)
     remove_owned "$staging"
     mkdir -p "$staging"
@@ -166,9 +167,29 @@ download_tree() {
     # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
     [[ -n $RESOLVED ]] && printf '%s\n' "$RESOLVED" >"$staging/.bootstrap-commit"
 
+    TREE="$staging"
+    # A kept tree is swapped in by the skills step itself, so a stand-up failing before it leaves the plugin loading what it loaded before.
+    keeps_tree || swap_in
+    return 0
+}
+
+# Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
+swap_in() {
+    local staging tree retired
+    staging=$(staging_path)
     tree=$(tree_path)
-    remove_owned "$tree"
-    mv "$staging" "$tree"
+    retired=$(retired_path)
+
+    remove_owned "$retired"
+    if [[ -e $tree ]]; then
+        is_ours "$tree" || die "$tree exists and this loader did not create it, so it will not be replaced. Choose another --dir."
+        mv -T "$tree" "$retired"
+    fi
+    if ! mv -T "$staging" "$tree"; then
+        [[ -e $retired ]] && mv -T "$retired" "$tree"
+        die "Could not move the extracted tree into place at $tree"
+    fi
+    rm -rf "$retired"
 
     TREE="$tree"
     info "Extracted to $TREE"
@@ -181,6 +202,7 @@ cleanup() {
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
     is_ours "$(staging_path)" && rm -rf "$(staging_path)"
+    is_ours "$(retired_path)" && rm -rf "$(retired_path)"
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0
     is_ours "$(tree_path)" && rm -rf "$(tree_path)"
@@ -230,6 +252,12 @@ stand_up() {
         run_tool install-tools.sh --install
     fi
     run_tool setup-github.sh --configure
+    install_skills
+}
+
+# The installer registers the directory it runs from, so the kept tree has to hold its name before it runs.
+install_skills() {
+    keeps_tree && swap_in
     SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh
 }
 
@@ -357,7 +385,7 @@ main() {
     upgrade) run_tool upgrade-host.sh --packages ;;
     tools) run_tool install-tools.sh --install ;;
     github) run_tool setup-github.sh --configure ;;
-    skills) SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh ;;
+    skills) install_skills ;;
     sudo) run_tool install-tools.sh --sudo-timestamp ;;
     release) run_tool upgrade-host.sh --release ;;
     host) stand_up host ;;
@@ -366,7 +394,7 @@ main() {
 
     step "Done"
     if keeps_tree; then
-        info "The tree Claude Code loads the fleet skills from is kept at $TREE"
+        info "The fleet skills tree is kept at $TREE"
     elif [[ $KEEP == true ]]; then
         info "The fetched tree is at $TREE"
     fi

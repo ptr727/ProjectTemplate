@@ -79,6 +79,22 @@ class SourceRefCase(unittest.TestCase):
             with mock.patch.dict("os.environ", {}, clear=True):
                 self.assertEqual(skills_install.source_ref(), {"vcs": "none"})
 
+    def test_a_bootstrap_tree_is_never_asked_of_git(self) -> None:
+        """A kept tree inside a home directory kept in git would otherwise stamp that repository's
+        commit, and read dirty for every path it does not track."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.source_ref(),
+                {"vcs": "archive", "commit": "cafe1234", "dirty": False},
+            )
+
     def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
         """In a real checkout the environment variable is stray state, and the checkout is the truth."""
 
@@ -594,6 +610,21 @@ class RegisterCase(unittest.TestCase):
     def test_a_registration_naming_a_live_checkout_is_left_alone(self) -> None:
         live = self.enterContext(tempfile.TemporaryDirectory())
         self.registered_at(live)
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertFalse(self.removes())
+
+    def test_a_registration_naming_another_bootstrap_tree_is_replaced(self) -> None:
+        """An earlier loader's kept tree, under another --dir or the old cache path, is not a
+        checkout anybody chose, and leaving it registered leaves the new tree unloaded."""
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (other / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        self.registered_at(str(other))
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertTrue(self.removes())
+
+    def test_a_registration_naming_this_bootstrap_tree_is_left_alone(self) -> None:
+        mock.patch("skills_install.is_bootstrap_tree", return_value=True).start()
+        self.registered_at(str(skills_install.ROOT))
         self.assertTrue(skills_install.register_claude_marketplace())
         self.assertFalse(self.removes())
 
