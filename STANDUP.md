@@ -53,7 +53,7 @@ python3 scripts/host_gate.py            # from a hub checkout, against the fleet
 **Re-run it with `--repo` once section 2 has carried the file**, because a bare run reads no declaration but the one at its own working directory, so any floor the target adds goes unapplied. No warning covers the gap here, because the run above is not inside the target and the target is not an ancestor of the hub checkout it runs from. So this re-run is the only thing that counts the target's floors:
 
 ```shell
-python3 scripts/host_gate.py --repo <path-to-target-checkout>   # after section 2, so the repo's own floors count
+python3 scripts/host_gate.py --repo "<path-to-target-checkout>"   # after section 2, so the repo's own floors count
 ```
 
 A finding at either point is a **host** misconfiguration to fix on the machine or surface to the maintainer, never something to patch per repo, and [`docs/host-setup.md`][host-setup] is the contract it checks.
@@ -146,8 +146,8 @@ Capture the source, verify the capture **against the source**, and hold the veri
 After the baseline files are present, apply every applicable whole-tree declaration from the fetched hub checkout. The carry tool resolves the repository through the registry and refuses a shared or dirty target worktree.
 
 ```shell
-python3 scripts/carry.py check <Repo> --target /path/to/worktree
-python3 scripts/carry.py apply <Repo> --target /path/to/worktree
+python3 scripts/carry.py check "<Repo>" --target /path/to/worktree
+python3 scripts/carry.py apply "<Repo>" --target /path/to/worktree
 ```
 
 Read every extra-path report before `apply` prunes it. Finish with another `check`. It uses the same comparison as `apply` and must report clean.

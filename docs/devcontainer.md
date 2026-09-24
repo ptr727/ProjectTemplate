@@ -93,7 +93,7 @@ dotnet test                                        # tests pass
 ```shell
 uv --version                                       # uv 0.x
 which dotnet                                       # nothing - dotnet intentionally absent
-cd <package> && uv sync && uv run pytest           # tests pass
+cd "<package>" && uv sync && uv run pytest           # tests pass
 ```
 
 If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed signers`, the bind-mount of `allowed_signers` is missing or the file on the host is empty, so re-run the snippet in [host setup][host-setup].
