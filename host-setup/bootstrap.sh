@@ -255,7 +255,7 @@ report() {
     run_tool setup-github.sh --status
     # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
     if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
-        info "The fleet skills report found no current copy, and --host or --skills lands one unless the report above says the copy cannot be judged"
+        info "The fleet skills step did not report a current copy, and the output above says why"
     fi
 }
 
