@@ -527,6 +527,94 @@ class LiveChannelCase(unittest.TestCase):
         self.assertIsNone(live["dirty"])
         self.assertIsNone(live["branch"])
 
+    def test_a_tree_the_bootstrap_keeps_reads_its_commit_marker_rather_than_git(self) -> None:
+        """A kept tree is a tarball, and git asked about it answers for whatever encloses it."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        self.listing(
+            json.dumps([{"name": skills_install.MARKETPLACE_NAME, "installLocation": str(tree)}])
+        )
+        with mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")):
+            live = skills_install.live_channel()
+        self.assertEqual(
+            live,
+            {
+                "registered": True,
+                "checkout": str(tree),
+                "vcs": "archive",
+                "branch": None,
+                "commit": "cafe1234",
+                "dirty": None,
+            },
+        )
+
+    def test_a_kept_tree_with_no_commit_marker_names_no_commit(self) -> None:
+        """A loader that could not resolve its ref writes no commit, which is not a checkout to ask."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        self.listing(
+            json.dumps([{"name": skills_install.MARKETPLACE_NAME, "installLocation": str(tree)}])
+        )
+        with mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")):
+            live = skills_install.live_channel()
+        self.assertIsNone(live["commit"])
+        self.assertEqual(live["vcs"], "archive")
+
+
+class RegisterCase(unittest.TestCase):
+    """Re-adding a marketplace under a registered name changes nothing, so a registration left
+    pointing at a deleted tree has to be removed before the add can take."""
+
+    def setUp(self) -> None:
+        self.addCleanup(mock.patch.stopall)
+        self.calls: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            self.calls.append(args)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        mock.patch("subprocess.run", side_effect=fake_run).start()
+
+    def registered_at(self, location: str) -> None:
+        mock.patch(
+            "skills_install.marketplace_entry",
+            return_value={"name": skills_install.MARKETPLACE_NAME, "installLocation": location},
+        ).start()
+
+    def removes(self) -> bool:
+        return any(c[:4] == ["claude", "plugin", "marketplace", "remove"] for c in self.calls)
+
+    def test_a_registration_whose_tree_is_gone_is_removed_before_the_add(self) -> None:
+        self.registered_at("/no/such/tree")
+        self.assertTrue(skills_install.register_claude_marketplace())
+        verbs = [c[3] for c in self.calls if c[:3] == ["claude", "plugin", "marketplace"]]
+        self.assertEqual(verbs, ["remove", "add"])
+
+    def test_a_registration_naming_a_live_checkout_is_left_alone(self) -> None:
+        live = self.enterContext(tempfile.TemporaryDirectory())
+        self.registered_at(live)
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertFalse(self.removes())
+
+    def test_no_registration_at_all_removes_nothing(self) -> None:
+        mock.patch("skills_install.marketplace_entry", return_value={}).start()
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertFalse(self.removes())
+
+    def test_a_failed_remove_is_a_failed_registration(self) -> None:
+        self.registered_at("/no/such/tree")
+
+        def failing(args, **kwargs):
+            self.calls.append(args)
+            code = 1 if args[3] == "remove" else 0
+            return mock.Mock(returncode=code, stdout="", stderr="boom")
+
+        mock.patch("subprocess.run", side_effect=failing).start()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertFalse(skills_install.register_claude_marketplace())
+        self.assertFalse(any(c[3] == "add" for c in self.calls if len(c) > 3))
+
 
 class MainExitCodeCase(unittest.TestCase):
     """A caller scripting this installer needs the exit code to distinguish a real failure

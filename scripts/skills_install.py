@@ -53,6 +53,9 @@ CLAUDE_PLUGIN_DIR = ROOT / ".claude-plugin"
 MARKETPLACE_NAME = "projecttemplate-fleet"
 PLUGIN_NAME = "fleet-skills"
 STAMP_VERSION = 1
+# The markers the bootstrap writes into the tree it keeps, which is where the marketplace points on a bootstrapped host.
+BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
+BOOTSTRAP_COMMIT_MARKER = ".bootstrap-commit"
 
 
 def agents_home():
@@ -176,6 +179,33 @@ def claude_available():
     return shutil.which("claude") is not None
 
 
+def marketplace_entry():
+    """This marketplace's entry in the CLI's listing, {} when it is not registered, None when there is no listing."""
+    try:
+        listing = subprocess.run(
+            ["claude", "plugin", "marketplace", "list", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        entries = None
+    if not isinstance(entries, list):
+        return None
+    return next(
+        (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), {}
+    )
+
+
+def entry_location(entry):
+    """The directory a listing entry names, or None where it names none."""
+    location = entry.get("installLocation") or entry.get("path")
+    return location if isinstance(location, str) and location else None
+
+
 def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
@@ -184,6 +214,22 @@ def register_claude_marketplace():
     internal state, not a documented contract, so writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
     """
+    # An earlier bootstrap registered a tree it then deleted, and re-adding under the same name reads "already" and changes nothing.
+    # Only a registration whose directory is gone is replaced: one naming a live checkout is somebody's choice, and it stands.
+    entry = marketplace_entry()
+    location = entry_location(entry) if entry else None
+    if location is not None and not Path(location).is_dir():
+        remove = subprocess.run(
+            ["claude", "plugin", "marketplace", "remove", MARKETPLACE_NAME],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if remove.returncode != 0:
+            print(remove.stdout, remove.stderr, file=sys.stderr)
+            return False
+
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
         capture_output=True,
@@ -258,30 +304,16 @@ def live_channel():
     """
     if not claude_available():
         return {"registered": None, "reason": "`claude` not found on PATH"}
-    try:
-        listing = subprocess.run(
-            ["claude", "plugin", "marketplace", "list", "--json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
-        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        entries = None
-    if not isinstance(entries, list):
+    entry = marketplace_entry()
+    if entry is None:
         return {
             "registered": None,
             "reason": "`claude plugin marketplace list --json` gave no listing",
         }
-    entry = next(
-        (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), None
-    )
-    if entry is None:
+    if not entry:
         return {"registered": False}
-    location = entry.get("installLocation") or entry.get("path")
-    if not isinstance(location, str) or not location:
+    location = entry_location(entry)
+    if location is None:
         return {"registered": True, "reason": "the listing names no location"}
     root = Path(location)
     if not root.is_dir():
@@ -289,6 +321,22 @@ def live_channel():
             "registered": True,
             "checkout": str(root),
             "reason": "the registered checkout does not exist, so this channel serves nothing",
+        }
+    # A tree the bootstrap keeps is a tarball rather than a checkout, so git has nothing to say about it.
+    # Asking anyway would answer for whatever repository encloses it, a home directory kept in git being the ordinary case.
+    if (root / BOOTSTRAP_OWNED_MARKER).is_file():
+        commit_file = root / BOOTSTRAP_COMMIT_MARKER
+        try:
+            commit = commit_file.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            commit = None
+        return {
+            "registered": True,
+            "checkout": str(root),
+            "vcs": "archive",
+            "branch": None,
+            "commit": commit,
+            "dirty": None,
         }
     # Only the generated plugin tree is what this channel loads, so only it decides dirty here.
     # An ignored or untracked file there is loaded the same as a tracked one, so both count.

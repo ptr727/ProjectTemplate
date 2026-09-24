@@ -5,6 +5,9 @@
 # A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
+# A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
+# That tree is replaced whole by the next such run and is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+#
 # An unverified loader is worse than none, which is why this one does more than its Linux peer before it trusts anything.
 # It pins TLS 1.2 itself rather than assume a fresh host's default reaches GitHub, it checks a fetched tree for the marker it wrote before removing anything under -Dir, and it hands off to PowerShell 7 explicitly rather than assume the console it started in already carries it.
 #
@@ -105,6 +108,9 @@ Options:
       -Ref REF      Branch, tag, pull request ref, or commit to run from, default main
       -Dir PATH     Where the tree is extracted, default %LOCALAPPDATA%\host-setup
       -Keep         Leave the extracted tree in place, which is removed by default
+
+-Host, -Dev, and -Skills keep their tree, at hub under that directory, because the Claude Code
+plugin they register loads it in place. The next such run replaces it, and a -DryRun leaves it.
 
 With no action on a console, the menu asks. With no action and no console, the report runs, since a
 redirected run is not a place to answer a question.
@@ -213,22 +219,31 @@ function Resolve-Ref {
     $script:RESOLVED = ''
 }
 
+# The actions that install the skills register a Claude Code marketplace that loads their tree in place, so that tree is kept.
+# A dry run changes nothing, so it takes a transient tree like any other action rather than replacing the one the plugin loads.
+function Test-KeepsTree {
+    if ($script:DRY_RUN) { return $false }
+    return $script:MODE -in @('host', 'dev', 'skills')
+}
+
 # The paths this loader creates under DIR, named in one place so the cleanup and the download agree.
 # DIR itself is never removed, since -Dir may name a directory the caller owns and put other things in.
-function Get-TreePath { Join-Path $script:DIR 'tree' }
-function Get-ArchivePath { Join-Path $script:DIR 'tree.tar.gz' }
-function Get-MarkerPath { Join-Path (Get-TreePath) '.bootstrap-owned' }
+# A kept tree and a transient one take different names, so a report run sharing a -Dir with a host run never removes the tree Claude Code loads.
+function Get-TreeName { if (Test-KeepsTree) { 'hub' } else { 'tree' } }
+function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
+function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
+function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
-# DIR is a caller-supplied path, so 'tree' under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-function Test-TreeOwnership { Test-Path (Get-MarkerPath) }
+# DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+function Test-Ownership { param([string]$Path) Test-Path (Join-Path $Path '.bootstrap-owned') }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
-function Remove-Tree {
-    $tree = Get-TreePath
-    if (-not (Test-Path $tree)) { return }
-    if (-not (Test-TreeOwnership)) { die "$tree exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-    Remove-Item -Recurse -Force $tree
+function Remove-Owned {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    if (-not (Test-Ownership -Path $Path)) { die "$Path exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
+    Remove-Item -Recurse -Force $Path
 }
 
 function Get-Tree {
@@ -246,32 +261,36 @@ function Get-Tree {
     }
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # Extracting into a directory of our own keeps a second run from reading the first one's tree.
-    $tree = Get-TreePath
-    Remove-Tree
-    New-Item -ItemType Directory -Path $tree -Force | Out-Null
-    New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
-    & tar -xzf $archive -C $tree --strip-components=1
+    # It is extracted beside the tree and swapped in only once complete, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    $staging = Get-StagingPath
+    Remove-Owned -Path $staging
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $staging '.bootstrap-owned') -Force | Out-Null
+    & tar -xzf $archive -C $staging --strip-components=1
     if ($LASTEXITCODE -ne 0) { die 'Could not extract the downloaded archive' }
     Remove-Item -Force $archive -ErrorAction SilentlyContinue
+    # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
+    if ($script:RESOLVED) { Set-Content -Path (Join-Path $staging '.bootstrap-commit') -Value $script:RESOLVED -Encoding ascii }
+
+    $tree = Get-TreePath
+    Remove-Owned -Path $tree
+    Move-Item -Path $staging -Destination $tree
 
     $script:TREE = $tree
     info "Extracted to $script:TREE"
 }
 
-# A tree that is not ours was already refused where it mattered, at the download.
+# Removes what this run created rather than what it finished, because TREE is set only once the tree is in place.
+# A failed extract leaves both the archive and a part-written staging tree, so keying this on TREE left a tarball in the cache on every failed attempt.
+# A path that is not ours was already refused where it mattered, at the download.
 # Refusing again from here would print the same error a second time, after the one that actually stopped the run.
-# Removes what this run created rather than what it finished, because TREE is set only once extraction has succeeded.
-# A failed extract leaves both the archive and a part-written tree, so keying this on TREE left a tarball in the cache on every failed attempt.
 function Invoke-Cleanup {
-    if ($script:KEEP) { return }
-    $tree = Get-TreePath
-    if ((Test-Path $tree) -and -not (Test-TreeOwnership)) {
-        Remove-Item -Force (Get-ArchivePath) -ErrorAction SilentlyContinue
-        return
-    }
-    Remove-Tree
     Remove-Item -Force (Get-ArchivePath) -ErrorAction SilentlyContinue
+    $staging = Get-StagingPath
+    if (Test-Ownership -Path $staging) { Remove-Item -Recurse -Force $staging }
+    if ($script:KEEP -or (Test-KeepsTree)) { return }
+    $tree = Get-TreePath
+    if (Test-Ownership -Path $tree) { Remove-Item -Recurse -Force $tree }
 }
 
 # --- Handoff ---
@@ -461,7 +480,11 @@ function main {
     }
 
     step 'Done'
-    if ($script:KEEP) { info "The fetched tree is at $script:TREE" }
+    if (Test-KeepsTree) {
+        info "The tree Claude Code loads the fleet skills from is kept at $script:TREE"
+    } elseif ($script:KEEP) {
+        info "The fetched tree is at $script:TREE"
+    }
 }
 
 main

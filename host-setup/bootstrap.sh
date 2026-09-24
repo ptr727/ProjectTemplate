@@ -6,6 +6,9 @@
 #
 # A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
+#
+# A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
+# That tree lives under the data directory rather than the cache, is replaced whole by the next such run, and is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
 
 set -Eeuo pipefail
 
@@ -14,7 +17,7 @@ readonly DEFAULT_REF="main"
 
 MODE=""
 REF="$DEFAULT_REF"
-DIR="${XDG_CACHE_HOME:-$HOME/.cache}/host-setup"
+DIR=""
 KEEP=false
 DRY_RUN=false
 ASSUME_YES=false
@@ -57,8 +60,12 @@ Options:
   -y, --yes         Do not prompt, and pass the same to each tool
   -n, --dry-run     Print what each step would run, change nothing
       --ref REF     Branch, tag, pull request ref, or commit to run from, default main
-      --dir PATH    Where the tree is extracted, default ${XDG_CACHE_HOME:-~/.cache}/host-setup
+      --dir PATH    Where the tree is extracted, default ${XDG_CACHE_HOME:-~/.cache}/host-setup, or
+                    ${XDG_DATA_HOME:-~/.local/share}/host-setup for an action that installs the skills
       --keep        Leave the extracted tree in place, which is removed by default
+
+--host, --dev, and --skills keep their tree, at hub under that directory, because the Claude Code
+plugin they register loads it in place. The next such run replaces it, and a --dry-run leaves it.
 
 With no action on a terminal, the menu asks. With no action and no terminal, the report runs, since
 a pipe is not a place to answer a question.
@@ -98,27 +105,46 @@ resolve_ref() {
     return 0
 }
 
+# The actions that install the skills register a Claude Code marketplace that loads their tree in place, so that tree is kept.
+# A dry run changes nothing, so it takes a transient tree like any other action rather than replacing the one the plugin loads.
+keeps_tree() {
+    [[ $DRY_RUN != true ]] || return 1
+    [[ $MODE == "host" || $MODE == "dev" || $MODE == "skills" ]]
+}
+
+# A kept tree is data rather than cache, since removing it silently breaks the plugin registered against it.
+default_dir() {
+    if keeps_tree; then
+        printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/host-setup"
+    else
+        printf '%s\n' "${XDG_CACHE_HOME:-$HOME/.cache}/host-setup"
+    fi
+}
+
 # The paths this script creates under DIR, named in one place so the trap and the download agree.
 # DIR itself is never removed, since --dir may name a directory the caller owns and put other things in.
-tree_path() { printf '%s\n' "$DIR/tree"; }
-archive_path() { printf '%s\n' "$DIR/tree.tar.gz"; }
-marker_path() { printf '%s\n' "$DIR/tree/.bootstrap-owned"; }
+# A kept tree and a transient one take different names, so a report run sharing a --dir with a host run never removes the tree Claude Code loads.
+tree_name() {
+    if keeps_tree; then printf 'hub'; else printf 'tree'; fi
+}
+tree_path() { printf '%s\n' "$DIR/$(tree_name)"; }
+staging_path() { printf '%s\n' "$DIR/$(tree_name).new"; }
+archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
-# DIR is a caller-supplied path, so 'tree' under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-tree_is_ours() { [[ -e $(marker_path) ]]; }
+# DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+is_ours() { [[ -e $1/.bootstrap-owned ]]; }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
-remove_tree() {
-    local tree
-    tree=$(tree_path)
-    [[ -e $tree ]] || return 0
-    tree_is_ours || die "$tree exists and this loader did not create it, so it will not be removed. Choose another --dir."
-    rm -rf "$tree"
+remove_owned() {
+    local path="$1"
+    [[ -e $path ]] || return 0
+    is_ours "$path" || die "$path exists and this loader did not create it, so it will not be removed. Choose another --dir."
+    rm -rf "$path"
 }
 
 download_tree() {
-    local archive tree want="${RESOLVED:-$REF}"
+    local archive staging tree want="${RESOLVED:-$REF}"
     archive=$(archive_path)
 
     step "Fetching $REPO at $REF"
@@ -129,31 +155,36 @@ download_tree() {
         die "Could not download $REPO at $REF. Check the ref exists and that this host reaches codeload.github.com."
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # Extracting into a directory of our own keeps a second run from reading the first one's tree.
-    tree=$(tree_path)
-    remove_tree
-    mkdir -p "$tree"
-    touch "$(marker_path)"
-    tar -xzf "$archive" -C "$tree" --strip-components=1 ||
+    # It is extracted beside the tree and swapped in only once complete, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    staging=$(staging_path)
+    remove_owned "$staging"
+    mkdir -p "$staging"
+    touch "$staging/.bootstrap-owned"
+    tar -xzf "$archive" -C "$staging" --strip-components=1 ||
         die "Could not extract the downloaded archive"
     rm -f "$archive"
+    # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
+    [[ -n $RESOLVED ]] && printf '%s\n' "$RESOLVED" >"$staging/.bootstrap-commit"
+
+    tree=$(tree_path)
+    remove_owned "$tree"
+    mv "$staging" "$tree"
 
     TREE="$tree"
     info "Extracted to $TREE"
 }
 
 cleanup() {
-    [[ $KEEP == true ]] && return 0
-    # A tree that is not ours was already refused where it mattered, at the download.
-    # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
-    if [[ -e $(tree_path) ]] && ! tree_is_ours; then
-        rm -f "$(archive_path)"
-        return 0
-    fi
-    # Removes what this run created rather than what it finished, because TREE is set only once extraction has succeeded.
-    # A failed extract leaves both the archive and a part-written tree, so keying the cleanup on TREE left a tarball in the cache on every failed attempt.
-    remove_tree
+    # Removes what this run created rather than what it finished, because TREE is set only once the tree is in place.
+    # A failed extract leaves both the archive and a part-written staging tree, so keying the cleanup on TREE left a tarball in the cache on every failed attempt.
     rm -f "$(archive_path)"
+    # A path that is not ours was already refused where it mattered, at the download.
+    # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
+    is_ours "$(staging_path)" && rm -rf "$(staging_path)"
+    [[ $KEEP == true ]] && return 0
+    keeps_tree && return 0
+    is_ours "$(tree_path)" && rm -rf "$(tree_path)"
+    return 0
 }
 
 # --- Handoff ---
@@ -314,6 +345,9 @@ main() {
         fi
     fi
 
+    # Resolved only now, since the default depends on the action, which the menu may have just chosen.
+    [[ -n $DIR ]] || DIR=$(default_dir)
+
     trap cleanup EXIT
     resolve_ref
     download_tree
@@ -331,7 +365,11 @@ main() {
     esac
 
     step "Done"
-    [[ $KEEP == true ]] && info "The fetched tree is at $TREE"
+    if keeps_tree; then
+        info "The tree Claude Code loads the fleet skills from is kept at $TREE"
+    elif [[ $KEEP == true ]]; then
+        info "The fetched tree is at $TREE"
+    fi
     return 0
 }
 

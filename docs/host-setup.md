@@ -291,7 +291,7 @@ python3 scripts/skills_install.py            # or the scripts/skills_install.sh 
 python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
-A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] ends with the same installer, driven from the fetched tree by `install-skills.sh` or `install-skills.ps1`, and the `--skills` action runs that step on its own.
+A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] ends with the same installer, driven from the fetched tree by `install-skills.sh` or `install-skills.ps1`, and the `--skills` action runs that step on its own. Those runs keep their tree rather than removing it, since the Claude Code plugin loads it in place, and the [`host-setup/`][host-setup-dir] README's "Where the Tree Lives" says where it sits.
 
 The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is missing, still landing the overlay half, saying so, and recording the partial install in the stamp, where cataloging the CLI would instead fail every host that never wanted it.
 
