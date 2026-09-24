@@ -2,7 +2,7 @@
 
 - **Audited branch:** main (`9c16921`), the merge of the `develop` promotion ptr727/HomeAutomation-Config#441 (`develop` at `e8544a0`)
 - **Types:** source-only (from registry), release workflow model
-- **Verdict:** operational. No defect, mechanized or hand-judged. What remains is two drift findings tracked on the hub, the repository's own prose backlog, and one pending repository decision
+- **Verdict:** operational. No defect, mechanized or hand-judged. Two drift findings tracked on the hub remain, along with the repository's own prose backlog and one pending repository decision
 - **Date:** 2026-09-24
 - **Run stamp:** `audit run 2026-09-24T22:39:33Z | hub 03ed883`
 
