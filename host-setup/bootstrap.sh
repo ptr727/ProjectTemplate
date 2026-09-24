@@ -184,10 +184,10 @@ swap_in() {
     remove_owned "$retired"
     if [[ -e $tree ]]; then
         is_ours "$tree" || die "$tree exists and this loader did not create it, so it will not be replaced. Choose another --dir."
-        mv -T "$tree" "$retired"
+        mv "$tree" "$retired"
     fi
-    if ! mv -T "$staging" "$tree"; then
-        [[ -e $retired ]] && mv -T "$retired" "$tree"
+    if ! mv "$staging" "$tree"; then
+        [[ -e $retired ]] && mv "$retired" "$tree"
         die "Could not move the extracted tree into place at $tree"
     fi
     rm -rf "$retired"
@@ -203,7 +203,14 @@ cleanup() {
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
     is_ours "$(staging_path)" && rm -rf "$(staging_path)"
-    is_ours "$(retired_path)" && rm -rf "$(retired_path)"
+    # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
+    if is_ours "$(retired_path)"; then
+        if [[ -e $(tree_path) ]]; then
+            rm -rf "$(retired_path)"
+        else
+            mv "$(retired_path)" "$(tree_path)"
+        fi
+    fi
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0
     is_ours "$(tree_path)" && rm -rf "$(tree_path)"

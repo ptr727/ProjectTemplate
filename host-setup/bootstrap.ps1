@@ -335,9 +335,14 @@ function Invoke-Cleanup {
     Remove-Item -LiteralPath (Get-ArchivePath) -Force -ErrorAction SilentlyContinue
     $staging = Get-StagingPath
     if (Test-Ownership -Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
-        try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
+        if (-not (Test-Path -LiteralPath (Get-TreePath))) {
+            Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+        } else {
+            try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
+        }
     }
     if ($script:KEEP -or (Test-KeepsTree)) { return }
     $tree = Get-TreePath
