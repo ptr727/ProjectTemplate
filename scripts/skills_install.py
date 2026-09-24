@@ -44,6 +44,8 @@ from pathlib import Path
 
 import build_dist
 
+# A stalled child would hang a read-only report indefinitely, so every one gets a deadline.
+SUBPROCESS_TIMEOUT = 60
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
@@ -70,8 +72,9 @@ def git_in(root, *args):
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=SUBPROCESS_TIMEOUT,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
 
@@ -262,9 +265,10 @@ def live_channel():
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
         entries = None
     if not isinstance(entries, list):
         return {
@@ -307,23 +311,27 @@ def live_channel():
     }
 
 
+def no_snapshot(reason):
+    """Report a copy that cannot be read, still answering the live channel, which needs no stamp."""
+    snapshot = {"current": False, "reason": reason}
+    print(json.dumps({"stamp": None, "snapshot": snapshot, "live": live_channel()}, indent=2))
+    return 1
+
+
 def report(stamp_path, intended_rev=None):
     if not stamp_path.is_file():
-        print("Not installed on this machine (no stamp found).")
-        return 1
+        return no_snapshot("Not installed on this machine (no stamp found).")
     try:
         stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
-        return 1
+        return no_snapshot(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
     # A non-dict JSON value (an array, a bare string) is a shape this reader does not know.
     # So is an unrecognized stampVersion, not merely a plain missing/dirty install.
     if not isinstance(stamp, dict) or stamp.get("stampVersion") != STAMP_VERSION:
-        print(
+        return no_snapshot(
             f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
             "Re-run the installer."
         )
-        return 1
     # A dict-shaped stamp can still carry a non-dict "source" (a stray string, a number).
     # Calling .get("commit") on that would crash instead of reading as not current like every other unrecognized-shape case here does.
     stamp_source = stamp.get("source")

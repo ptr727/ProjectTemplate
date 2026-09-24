@@ -258,9 +258,14 @@ class ReportCase(unittest.TestCase):
             exit_code = skills_install.report(self.stamp, intended_rev)
         return exit_code, out.getvalue()
 
-    def test_no_stamp_reports_not_installed(self) -> None:
-        exit_code, _ = self.run_report()
+    def test_no_stamp_reports_not_installed_and_still_answers_the_live_channel(self) -> None:
+        """The live channel needs no stamp, and a machine with none is exactly where knowing what
+        Claude Code loads matters."""
+        exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
+        body = json.loads(out)
+        self.assertIn("no stamp found", body["snapshot"]["reason"])
+        self.assertEqual(body["live"]["branch"], "develop")
 
     def test_a_copy_from_the_intended_revision_is_current_whatever_the_checkout_serves(
         self,
@@ -344,6 +349,15 @@ class ReportCase(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
 
+class GitInCase(unittest.TestCase):
+    def test_a_stalled_git_reads_as_a_failure_rather_than_hanging(self) -> None:
+        with mock.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1)
+        ) as run:
+            self.assertIsNone(skills_install.git_in(Path("."), "status"))
+        self.assertEqual(run.call_args.kwargs["timeout"], skills_install.SUBPROCESS_TIMEOUT)
+
+
 class IntendedCommitCase(unittest.TestCase):
     """The default intended revision is the promoted main, remote-tracking ref first."""
 
@@ -422,6 +436,12 @@ class LiveChannelCase(unittest.TestCase):
     def test_an_unregistered_marketplace_reads_as_not_registered(self) -> None:
         self.listing(json.dumps([{"name": "someone-else", "installLocation": "/x"}]))
         self.assertEqual(skills_install.live_channel(), {"registered": False})
+
+    def test_a_stalled_listing_is_not_read_as_unregistered(self) -> None:
+        mock.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)
+        ).start()
+        self.assertIsNone(skills_install.live_channel()["registered"])
 
     def test_a_failed_listing_is_not_read_as_unregistered(self) -> None:
         self.listing("", returncode=1)
