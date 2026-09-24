@@ -95,6 +95,21 @@ class SourceRefCase(unittest.TestCase):
                 {"vcs": "archive", "commit": "cafe1234", "dirty": False},
             )
 
+    def test_a_bootstrap_tree_with_no_commit_is_an_archive_judged_by_nothing(self) -> None:
+        """A loader whose resolve failed writes no commit, and the tree is still no checkout, so
+        the intended revision must not be read from whatever repository encloses it."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False}
+            )
+            self.assertIsNone(skills_install.intended_commit()[0])
+
     def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
         """In a real checkout the environment variable is stray state, and the checkout is the truth."""
 

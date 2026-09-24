@@ -110,6 +110,9 @@ def source_ref():
         handed = os.environ.get("SKILLS_SOURCE_COMMIT") or bootstrap_tree_commit(ROOT)
         if handed:
             return {"vcs": "archive", "commit": handed, "dirty": False}
+        # A bootstrap tree whose loader could not resolve its ref is still an archive, and calling it "none" would send intended_commit to git.
+        if is_bootstrap_tree(ROOT):
+            return {"vcs": "archive", "commit": None, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     # Watches both paths this installer actually reads.
