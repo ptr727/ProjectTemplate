@@ -366,7 +366,9 @@ function Invoke-Cleanup {
     }
     if ($script:KEEP -or (Test-KeepsTree)) { return }
     $tree = Get-TreePath
-    if (Test-Ownership -Path $tree) { Remove-Tree -Path $tree }
+    if (Test-Ownership -Path $tree) {
+        try { Remove-Tree -Path $tree } catch { warn "Could not remove the fetched tree at ${tree}: $($_.Exception.Message)" }
+    }
 }
 
 # --- Handoff ---

@@ -230,7 +230,9 @@ cleanup() {
     fi
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0
-    is_ours "$(tree_path)" && remove_tree "$(tree_path)"
+    if is_ours "$(tree_path)"; then
+        remove_tree "$(tree_path)" || warn "Could not remove the fetched tree at $(tree_path)"
+    fi
     return 0
 }
 

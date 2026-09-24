@@ -678,6 +678,12 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Could not remove the previous tree", result.stderr)
 
+    def test_a_transient_tree_that_will_not_go_does_not_fail_a_successful_run(self) -> None:
+        self.locked_entry(self.owned_tree("tree", "fetched"))
+        result = self.run_loader("MODE=report\ntrap cleanup EXIT\nexit 0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Could not remove the fetched tree", result.stderr)
+
     def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
         self.owned_tree("skills-tree.old", "old")
         result = self.run_loader("cleanup")
