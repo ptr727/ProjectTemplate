@@ -295,7 +295,11 @@ function Invoke-SwapIn {
 
     if (Test-Path -LiteralPath $retired) {
         if (-not (Test-Ownership -Path $retired)) { die "$retired exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-        Remove-Retired -Path $retired
+        try {
+            Remove-Retired -Path $retired
+        } catch {
+            die "Could not remove the previous tree at $retired, which a process holding a file in it causes. Close it and run this again: $($_.Exception.Message)"
+        }
     }
     if (Test-Path -LiteralPath $tree) {
         if (-not (Test-Ownership -Path $tree)) { die "$tree exists and this loader did not create it, so it will not be replaced. Choose another -Dir." }
@@ -315,7 +319,7 @@ function Invoke-SwapIn {
         try {
             Remove-Retired -Path $retired
         } catch {
-            warn "Could not remove the previous tree at $retired, and the next run removes it: $($_.Exception.Message)"
+            warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it: $($_.Exception.Message)"
         }
     }
 
@@ -333,7 +337,7 @@ function Invoke-Cleanup {
     if (Test-Ownership -Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
-        try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and the next run removes it" }
+        try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
     }
     if ($script:KEEP -or (Test-KeepsTree)) { return }
     $tree = Get-TreePath

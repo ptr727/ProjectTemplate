@@ -220,22 +220,6 @@ def entry_location(entry):
     return location if isinstance(location, str) and location else None
 
 
-def replaceable_registration(location):
-    """Whether a registration naming `location` is one this run should point at this tree instead.
-
-    Only a run from a tree the bootstrap keeps re-points one naming another such tree. A run from a
-    checkout, or from the menu's own clone that it removes on exit, would otherwise take a working
-    registration over and leave it dangling.
-    """
-    if not location.is_dir():
-        return True
-    return (
-        is_bootstrap_tree(ROOT)
-        and is_bootstrap_tree(location)
-        and location.resolve() != ROOT.resolve()
-    )
-
-
 def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
@@ -244,24 +228,6 @@ def register_claude_marketplace():
     internal state, not a documented contract, so writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
     """
-    # Re-adding under a registered name reads "already" and changes nothing, so a registration to replace is removed first.
-    # A bootstrap's own tree, deleted or not, is the bootstrap's to replace, where one naming a checkout is somebody's choice, and it stands.
-    entry = marketplace_entry()
-    location = entry_location(entry) if entry else None
-    replaced = None
-    if location is not None and replaceable_registration(Path(location)):
-        replaced = location
-        remove = subprocess.run(
-            ["claude", "plugin", "marketplace", "remove", MARKETPLACE_NAME],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        if remove.returncode != 0:
-            print(remove.stdout, remove.stderr, file=sys.stderr)
-            return False
-
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
         capture_output=True,
@@ -277,15 +243,6 @@ def register_claude_marketplace():
         and "already" not in marketplace_add.stderr.lower()
     ):
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
-        # A working registration removed above is put back, so a failed add leaves the host no worse than it found it.
-        if replaced is not None and Path(replaced).is_dir():
-            subprocess.run(
-                ["claude", "plugin", "marketplace", "add", replaced],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-            )
         return False
 
     install = subprocess.run(
