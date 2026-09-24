@@ -580,6 +580,81 @@ class TestScriptPresence(unittest.TestCase):
             )
 
 
+def bootstrap_functions() -> str:
+    """`bootstrap.sh` without its closing `main "$@"`, so a test can source its functions alone."""
+    lines = BOOTSTRAP.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    if lines[-1] != 'main "$@"':
+        raise AssertionError(f"bootstrap.sh no longer ends with its main call: {lines[-1]!r}")
+    return "\n".join(lines[:-1]) + "\n"
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux loader's own functions")
+class TestKeptTreeHandling(unittest.TestCase):
+    """The Linux loader's removal and swap of the trees it owns, driven through its own functions."""
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.functions = self.dir / "functions.sh"
+        self.functions.write_text(bootstrap_functions(), encoding="utf-8")
+        self.addCleanup(self._unlock_all)
+
+    def _unlock_all(self) -> None:
+        for path in self.dir.rglob("*"):
+            if path.is_dir() and not path.is_symlink():
+                path.chmod(0o755)
+
+    def run_loader(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = f'source "{self.functions}"\nDIR="{self.dir}"\nMODE=skills\n{body}\n'
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+
+    def owned_tree(self, name: str, content: str) -> Path:
+        tree = self.dir / name
+        tree.mkdir()
+        (tree / ".bootstrap-owned").touch()
+        (tree / "content").write_text(content, encoding="utf-8")
+        return tree
+
+    def locked_entry(self, tree: Path) -> None:
+        """An entry `rm` cannot remove, standing in for a removal that stops part way."""
+        locked = tree / "locked"
+        locked.mkdir()
+        (locked / "file").touch()
+        locked.chmod(0o555)
+
+    def test_a_removal_that_stops_part_way_keeps_the_ownership_marker(self) -> None:
+        """A leftover without its marker is refused by every later swap, with a remedy that is wrong."""
+        tree = self.owned_tree("skills-tree.new", "new")
+        self.locked_entry(tree)
+        result = self.run_loader(f'remove_tree "{tree}" || true')
+        self.assertTrue((tree / ".bootstrap-owned").exists(), result.stderr)
+
+    def test_a_dangling_symlink_is_refused_with_the_loaders_own_message(self) -> None:
+        (self.dir / "skills-tree.new").symlink_to(self.dir / "nowhere")
+        result = self.run_loader('remove_owned "$(staging_path)"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("this loader did not create it", result.stderr)
+
+    def test_an_old_tree_beside_an_empty_name_does_not_stop_the_new_one_landing(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.locked_entry(self.owned_tree("skills-tree.old", "old"))
+        result = self.run_loader("swap_in")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "new")
+
+    def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader("cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "old")
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""

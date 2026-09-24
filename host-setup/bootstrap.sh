@@ -135,14 +135,23 @@ archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-is_ours() { [[ -e $1/.bootstrap-owned ]]; }
+is_ours() { [[ ! -L $1 && -e $1/.bootstrap-owned ]]; }
+
+exists() { [[ -e $1 || -L $1 ]]; }
+
+# Removes the ownership marker last, so a removal that stops part way leaves a directory the next run still recognizes as its own.
+remove_tree() {
+    # Returned on explicitly rather than left to set -e, which a caller testing the result suspends.
+    find "$1" -mindepth 1 -maxdepth 1 ! -name .bootstrap-owned -exec rm -rf {} + || return
+    rm -rf "$1"
+}
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
 remove_owned() {
     local path="$1"
-    [[ -e $path ]] || return 0
+    exists "$path" || return 0
     is_ours "$path" || die "$path exists and this loader did not create it, so it will not be removed. Choose another --dir."
-    rm -rf "$path"
+    remove_tree "$path"
 }
 
 download_tree() {
@@ -181,16 +190,18 @@ swap_in() {
     tree=$(tree_path)
     retired=$(retired_path)
 
-    remove_owned "$retired"
-    if [[ -e $tree ]]; then
+    if exists "$tree"; then
         is_ours "$tree" || die "$tree exists and this loader did not create it, so it will not be replaced. Choose another --dir."
+        remove_owned "$retired"
         mv "$tree" "$retired"
     fi
     if ! mv "$staging" "$tree"; then
         [[ -e $retired ]] && mv "$retired" "$tree"
         die "Could not move the extracted tree into place at $tree"
     fi
-    rm -rf "$retired"
+    if is_ours "$retired"; then
+        remove_tree "$retired" || warn "Could not remove the previous tree at $retired, and a later run removes it"
+    fi
 
     TREE="$tree"
     info "Extracted to $TREE"
@@ -201,18 +212,18 @@ cleanup() {
     rm -f "$(archive_path)"
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
-    is_ours "$(staging_path)" && rm -rf "$(staging_path)"
+    is_ours "$(staging_path)" && remove_tree "$(staging_path)"
     # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     if is_ours "$(retired_path)"; then
-        if [[ -e $(tree_path) ]]; then
-            rm -rf "$(retired_path)"
+        if exists "$(tree_path)"; then
+            remove_tree "$(retired_path)"
         else
             mv "$(retired_path)" "$(tree_path)"
         fi
     fi
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0
-    is_ours "$(tree_path)" && rm -rf "$(tree_path)"
+    is_ours "$(tree_path)" && remove_tree "$(tree_path)"
     return 0
 }
 
@@ -239,7 +250,7 @@ report() {
     run_tool setup-github.sh --status
     # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
     if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
-        info "The fleet skills install is missing or stale, and --host or --skills lands it"
+        info "The fleet skills copy is not current, and the report's reason says why: --host or --skills lands a missing or stale one, and re-installing does not settle one that cannot be judged"
     fi
 }
 

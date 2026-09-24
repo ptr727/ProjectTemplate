@@ -245,7 +245,7 @@ function Remove-Owned {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
     if (-not (Test-Ownership -Path $Path)) { die "$Path exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-    Remove-Item -LiteralPath $Path -Recurse -Force
+    Remove-Tree -Path $Path
 }
 
 function Get-Tree {
@@ -280,7 +280,7 @@ function Get-Tree {
 }
 
 # Removes the ownership marker last, so a removal that stops part way, on a file another process holds open, leaves a directory the next run still recognizes as its own.
-function Remove-Retired {
+function Remove-Tree {
     param([string]$Path)
     Get-ChildItem -LiteralPath $Path -Force | Where-Object { $_.Name -ne '.bootstrap-owned' } | Remove-Item -Recurse -Force
     Remove-Item -LiteralPath $Path -Recurse -Force
@@ -293,16 +293,16 @@ function Invoke-SwapIn {
     $tree = Get-TreePath
     $retired = Get-RetiredPath
 
-    if (Test-Path -LiteralPath $retired) {
-        if (-not (Test-Ownership -Path $retired)) { die "$retired exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-        try {
-            Remove-Retired -Path $retired
-        } catch {
-            die "Could not remove the previous tree at $retired, which a process holding a file in it causes. Close it and run this again: $($_.Exception.Message)"
-        }
-    }
     if (Test-Path -LiteralPath $tree) {
         if (-not (Test-Ownership -Path $tree)) { die "$tree exists and this loader did not create it, so it will not be replaced. Choose another -Dir." }
+        if (Test-Path -LiteralPath $retired) {
+            if (-not (Test-Ownership -Path $retired)) { die "$retired exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
+            try {
+                Remove-Tree -Path $retired
+            } catch {
+                die "Could not remove the previous tree at $retired, which a process holding a file in it causes. Close it and run this again: $($_.Exception.Message)"
+            }
+        }
         try {
             Move-Item -LiteralPath $tree -Destination $retired
         } catch {
@@ -322,9 +322,9 @@ function Invoke-SwapIn {
         }
         die "Could not move the extracted tree into place at ${tree}: $reason"
     }
-    if (Test-Path -LiteralPath $retired) {
+    if (Test-Ownership -Path $retired) {
         try {
-            Remove-Retired -Path $retired
+            Remove-Tree -Path $retired
         } catch {
             warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it: $($_.Exception.Message)"
         }
@@ -337,10 +337,9 @@ function Invoke-SwapIn {
 # Removes each path this run can create by its fixed name rather than through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
 # A path that is not ours was already refused where it mattered, at the download.
 # Refusing again from here would print the same error a second time, after the one that actually stopped the run.
+# The old tree is restored before the staging tree is removed, since the lock that failed the swap's rename can fail that removal too.
 function Invoke-Cleanup {
     Remove-Item -LiteralPath (Get-ArchivePath) -Force -ErrorAction SilentlyContinue
-    $staging = Get-StagingPath
-    if (Test-Ownership -Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
@@ -348,15 +347,19 @@ function Invoke-Cleanup {
             try {
                 Move-Item -LiteralPath $retired -Destination (Get-TreePath)
             } catch {
-                warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)"
+                if (Test-KeepsTree) { warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)" }
             }
         } else {
-            try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
+            try { Remove-Tree -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
         }
+    }
+    $staging = Get-StagingPath
+    if (Test-Ownership -Path $staging) {
+        try { Remove-Tree -Path $staging } catch { warn "Could not remove the extracted tree at $staging, and a later run removes it once nothing holds a file in it" }
     }
     if ($script:KEEP -or (Test-KeepsTree)) { return }
     $tree = Get-TreePath
-    if (Test-Ownership -Path $tree) { Remove-Item -LiteralPath $tree -Recurse -Force }
+    if (Test-Ownership -Path $tree) { Remove-Tree -Path $tree }
 }
 
 # --- Handoff ---
@@ -386,7 +389,7 @@ function Show-Report {
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Status'
     # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
     Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) { info 'The fleet skills install is missing or stale, and -Host or -Skills lands it' }
+    if ($LASTEXITCODE -ne 0) { info "The fleet skills copy is not current, and the report's reason says why: -Host or -Skills lands a missing or stale one, and re-installing does not settle one that cannot be judged" }
 }
 
 # The order is fixed rather than chosen.

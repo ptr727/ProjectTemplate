@@ -417,6 +417,10 @@ def main():
     args = parser.parse_args()
     if args.intended and not args.report:
         parser.error("--intended only applies with --report")
+    if args.intended and is_bootstrap_tree(ROOT):
+        parser.error(
+            "--intended needs a git checkout, and this is a bootstrap tree, which is judged against the commit its loader resolved"
+        )
 
     home = agents_home()
     stamp_path = home / "skills-install-stamp.json"

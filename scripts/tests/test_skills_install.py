@@ -649,6 +649,26 @@ class MainExitCodeCase(unittest.TestCase):
         self.assertIn("Claude Code marketplace registered: True.", lines)
 
 
+class IntendedInBootstrapTreeCase(unittest.TestCase):
+    """A named revision is resolved by git, which inside a bootstrap tree answers for whatever
+    repository encloses it, so the report would judge the copy against an unrelated commit."""
+
+    def test_intended_is_refused_in_a_bootstrap_tree(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        err = io.StringIO()
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch("sys.argv", ["skills_install.py", "--report", "--intended", "main"]),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            skills_install.main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("bootstrap tree", err.getvalue())
+
+
 LINUX_WRAPPER = (
     Path(__file__).resolve().parent.parent.parent / "host-setup" / "linux" / "install-skills.sh"
 )
