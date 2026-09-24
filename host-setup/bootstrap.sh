@@ -218,7 +218,9 @@ cleanup() {
     # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     if is_ours "$(retired_path)"; then
         if exists "$(tree_path)"; then
-            remove_tree "$(retired_path)" 2>/dev/null || :
+            if ! remove_tree "$(retired_path)"; then
+                keeps_tree && warn "Could not remove the previous tree at $(retired_path), and a later run removes it once nothing holds a file in it"
+            fi
         elif ! mv "$(retired_path)" "$(tree_path)"; then
             keeps_tree && warn "Could not put the previous tree back from $(retired_path), so move it to $(tree_path) by hand"
         fi
