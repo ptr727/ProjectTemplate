@@ -37,7 +37,7 @@ Three states look similar from inside a repository and take different procedures
 **Verify the host before running any hub tool.** The tools carry version floors, and a host below one does not fail cleanly: it answers `--version`, looks healthy, and produces a wrong answer. Both host defects this fleet has hit were version facts on a tool that was installed.
 
 ```shell
-python3 scripts/host_gate.py --repo <path-to-target-checkout>   # run from the hub, floors from spec/host-tools.json
+python3 scripts/host_gate.py --repo "<path-to-target-checkout>"   # run from the hub, floors from spec/host-tools.json
 ```
 
 A finding here is a **host** misconfiguration to fix on the machine, or to surface to the maintainer, and never something to patch per repository. [`docs/host-setup.md`][host-setup] is the contract it checks.
@@ -51,10 +51,10 @@ The identity and signing checks in [`STANDUP.md`][standup] section 0 apply to a 
 Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable. The first reports the findings. The second **runs its own audit** and renders those findings as an issue ready to file, so it is a second measurement rather than a view over the first, and the two can disagree if the repository moves between them. The third is a different tool answering a fleet-wide question. The rest of that file is the half no tool evaluates.
 
 ```shell
-python3 spec/audit.py <Repo>                    # the deterministic findings, read at main
-python3 spec/audit.py --branch <ref> <Repo>     # the same, read at a named ref, for convergence still in flight
-python3 spec/audit.py --issue <Repo>            # audits again and renders that run as an issue ready to file, so it can differ from the line above
-python3 spec/fidelity_honesty.py --report       # regenerate reports/divergences.md before using it as a work list
+python3 spec/audit.py "<Repo>"                    # the deterministic findings, read at main
+python3 spec/audit.py --branch "<ref>" "<Repo>"   # the same, read at a named ref, for convergence still in flight
+python3 spec/audit.py --issue "<Repo>"            # audits again and renders that run as an issue ready to file, so it can differ from the line above
+python3 spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
 ```
 
 **The branch is `main`, and the registry field naming it is not a choice a resync makes.** The runner reads the repository's `groundTruthBranch`, and [`AUDIT.md`][audit] section 1 owns what that value may be: `main` is the released and gated state for **both** workflow models, so a field naming `develop` contradicts the procedure rather than configuring it. Every cataloged repository declares `main` or omits the field and takes it as the default, so the first line above reads `main` in every case today.

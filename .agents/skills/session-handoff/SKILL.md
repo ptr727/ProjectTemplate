@@ -219,12 +219,12 @@ comments on whatever link that lane has, closing it too where it was open.
   already names it.
 
 ```sh
-python3 scripts/handoff.py current --repo OWNER/NAME --track <slug>
-python3 scripts/handoff.py resume  --repo OWNER/NAME --track <slug> --history 5
-python3 scripts/handoff.py chain   --repo OWNER/NAME --track <slug> --grep "an escaped regex"
-python3 scripts/handoff.py new     --repo OWNER/NAME --track <slug> --title "<subject>" \
-  --body-file <path> --dry-run
-python3 scripts/handoff.py link    --repo OWNER/NAME --new <successor> --previous <predecessor>
+python3 scripts/handoff.py current --repo OWNER/NAME --track "<slug>"
+python3 scripts/handoff.py resume  --repo OWNER/NAME --track "<slug>" --history 5
+python3 scripts/handoff.py chain   --repo OWNER/NAME --track "<slug>" --grep "an escaped regex"
+python3 scripts/handoff.py new     --repo OWNER/NAME --track "<slug>" --title "<subject>" \
+  --body-file "<path>" --dry-run
+python3 scripts/handoff.py link    --repo OWNER/NAME --new "<successor>" --previous "<predecessor>"
 python3 scripts/handoff.py tracks  --repo OWNER/NAME
 ```
 
