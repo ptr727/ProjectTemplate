@@ -142,7 +142,7 @@ exists() { [[ -e $1 || -L $1 ]]; }
 # Removes the ownership marker last, so a removal that stops part way leaves a directory the next run still recognizes as its own.
 remove_tree() {
     # Returned on explicitly rather than left to set -e, which a caller testing the result suspends.
-    find "$1" -mindepth 1 -maxdepth 1 ! -name .bootstrap-owned -exec rm -rf {} + || return
+    find "$1" -mindepth 1 -maxdepth 1 ! -name .bootstrap-owned -exec rm -rf {} + || return $?
     rm -rf "$1"
 }
 
@@ -203,7 +203,7 @@ swap_in() {
         die "Could not move the extracted tree into place at $tree"
     fi
     if is_ours "$retired"; then
-        remove_tree "$retired" || warn "Could not remove the previous tree at $retired, and a later run removes it"
+        remove_tree "$retired" || warn "Could not remove the previous tree at $retired, so remove it by hand before the next run"
     fi
 
     TREE="$tree"
@@ -219,14 +219,14 @@ cleanup() {
     if is_ours "$(retired_path)"; then
         if exists "$(tree_path)"; then
             if ! remove_tree "$(retired_path)"; then
-                keeps_tree && warn "Could not remove the previous tree at $(retired_path), and a later run removes it once nothing holds a file in it"
+                keeps_tree && warn "Could not remove the previous tree at $(retired_path), so remove it by hand before the next run"
             fi
         elif ! mv "$(retired_path)" "$(tree_path)"; then
             keeps_tree && warn "Could not put the previous tree back from $(retired_path), so move it to $(tree_path) by hand"
         fi
     fi
     if is_ours "$(staging_path)"; then
-        remove_tree "$(staging_path)" || warn "Could not remove the extracted tree at $(staging_path), and a later run removes it"
+        remove_tree "$(staging_path)" || warn "Could not remove the extracted tree at $(staging_path), so remove it by hand before the next run"
     fi
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0

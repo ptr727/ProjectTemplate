@@ -669,10 +669,12 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "old")
 
-    def test_cleanup_warns_where_a_leftover_old_tree_will_not_go(self) -> None:
+    def test_cleanup_from_a_successful_runs_exit_trap_warns_where_a_leftover_old_tree_will_not_go(
+        self,
+    ) -> None:
         self.owned_tree("skills-tree", "live")
         self.locked_entry(self.owned_tree("skills-tree.old", "old"))
-        result = self.run_loader("cleanup")
+        result = self.run_loader("trap cleanup EXIT\nexit 0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Could not remove the previous tree", result.stderr)
 
