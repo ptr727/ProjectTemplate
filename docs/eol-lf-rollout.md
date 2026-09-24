@@ -44,7 +44,7 @@ checked as **not applicable**, not as converted.
 ## Rollout Checklist
 
 Repos and their current `registry/repos.json` `workflowModel` / `lineEndings`, from the hub's own
-registry as of this doc's authorship.
+registry as of this doc's authorship, except where an entry records a later reclassification.
 
 - [x] **ProjectTemplate** (`release`): hub, converted in the pull request that added this doc
 - [ ] **Utilities** (`release`)
@@ -56,9 +56,10 @@ registry as of this doc's authorship.
 - [ ] **ESPHome-NonRoot** (`release`)
 - [ ] **VSCode-Server-DotNetCore** (`release`)
 - [ ] **NxWitness** (`release`)
-- [ ] **HomeAutomation-Config** (`operational`, `lineEndings: lf`): already on the new default's
-      value. Verify rather than convert, since its own `.editorconfig`/`.gitattributes` may still
-      carry the old redundant per-type LF pins the hub dropped.
+- [ ] **HomeAutomation-Config** (`release` since its 2026-09-24 reclassification from
+      `operational`, `lineEndings: lf`): already on the new default's value. Verify rather than
+      convert, since its own `.editorconfig`/`.gitattributes` may still carry the old redundant
+      per-type LF pins the hub dropped.
 - [ ] **KiCadLibrary** (`release`)
 - [ ] **EspDinIoT** (`release`)
 - [ ] **ESPHome-Config** (`operational`, `lineEndings: lf`): verify, same reasoning as
@@ -73,7 +74,7 @@ registry as of this doc's authorship.
 - [ ] **HolidayLights** (`release`)
 - [ ] **Blog** (`release`, `lineEndings: lf`): already on the new default's value, a documented
       release-repo exception before this rollout, per its `registry/repos.json` `driftNotes`.
-      Verify rather than convert, same reasoning as the three operational `lf` repos.
+      Verify rather than convert, same reasoning as the two operational `lf` repos.
 
 <!-- Repo -->
 
