@@ -312,8 +312,15 @@ function Invoke-SwapIn {
     try {
         Move-Item -LiteralPath $staging -Destination $tree
     } catch {
-        if (Test-Path -LiteralPath $retired) { Move-Item -LiteralPath $retired -Destination $tree }
-        die "Could not move the extracted tree into place at ${tree}: $($_.Exception.Message)"
+        $reason = $_.Exception.Message
+        if (Test-Path -LiteralPath $retired) {
+            try {
+                Move-Item -LiteralPath $retired -Destination $tree
+            } catch {
+                die "Could not move the extracted tree into place at ${tree} ($reason), and could not put the previous tree back from ${retired}: $($_.Exception.Message)"
+            }
+        }
+        die "Could not move the extracted tree into place at ${tree}: $reason"
     }
     if (Test-Path -LiteralPath $retired) {
         try {
@@ -338,7 +345,11 @@ function Invoke-Cleanup {
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
         if (-not (Test-Path -LiteralPath (Get-TreePath))) {
-            Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+            try {
+                Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+            } catch {
+                warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)"
+            }
         } else {
             try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
         }
