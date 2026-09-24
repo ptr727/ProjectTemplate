@@ -44,7 +44,7 @@ from pathlib import Path
 
 import build_dist
 
-# A stalled child would hang a read-only report indefinitely, so every one gets a deadline.
+# A stalled child would hang a read-only report indefinitely, so every git and claude child the report runs gets a deadline.
 SUBPROCESS_TIMEOUT = 60
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
