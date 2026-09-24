@@ -32,7 +32,7 @@ A skill surfaces at a trigger moment. A rule that binds every action all the tim
 5. **Apply the doc-packaging pattern below in the same change** when the skill packages a law doc or one of its sections.
 6. **Regenerate and commit all trees together**: `python3 scripts/build_dist.py`, then, once authorized, commit the source and both generated trees in one commit, per `git-commit-conventions`. CI runs `--check` on every pull request and fails a desynced distribution. `python3 scripts/tests/test_build_dist.py` covers the generator itself.
 7. **Record the surfacing**: annotate the `AGENTS.md` "Where the Rules Live" row when the skill packages a GOVERNANCE section, or its closing paragraph when the skill is new content, so the map stays the one place coverage is read from.
-8. **Refresh the machines after merge**: re-run `python3 scripts/skills_install.py` per machine, the cadence `docs/host-setup.md` "Fleet Skills Install" states. Until then every machine serves the previous skill set, which `--report` says.
+8. **Refresh the machines after promotion**: re-run `python3 scripts/skills_install.py` per machine, from a freshly fetched `main`, the cadence `docs/host-setup.md` "Fleet Skills Install" states. Until then each machine's Codex and opencode copy holds the previous skill set, which `--report` says, while Claude Code serves whatever the hub checkout holds.
 
 ## Changing or Retiring a Skill
 
