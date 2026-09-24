@@ -330,7 +330,9 @@ class ReportCase(unittest.TestCase):
         self.write_stamp({"commit": "old", "dirty": False})
         exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
-        self.assertFalse(json.loads(out)["snapshot"]["current"])
+        snapshot = json.loads(out)["snapshot"]
+        self.assertFalse(snapshot["current"])
+        self.assertIn("another revision", snapshot["reason"])
 
     def test_an_explicit_intended_revision_is_passed_through(self) -> None:
         self.write_stamp({"commit": "abc", "dirty": False})
@@ -361,8 +363,9 @@ class ReportCase(unittest.TestCase):
         """The stamp records dirty=True from install time, when the copied bytes matched no
         commit. The intended revision being that commit cannot make those bytes verifiable."""
         self.write_stamp({"commit": "abc", "dirty": True})
-        exit_code, _ = self.run_report()
+        exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
+        self.assertIn("dirty checkout", json.loads(out)["snapshot"]["reason"])
 
     def test_unreadable_stamp_reports_not_current_instead_of_crashing(self) -> None:
         self.stamp.write_text("not valid json {{{", encoding="utf-8")

@@ -400,6 +400,14 @@ def report(stamp_path, intended_rev=None):
     if not intended:
         # Re-installing cannot supply a revision to judge against, so this is not the stale case.
         snapshot["reason"] = "no intended revision resolves here, so the copy cannot be judged"
+    elif stamp_dirty:
+        snapshot["reason"] = (
+            "installed from a dirty checkout. Re-run the installer from a clean one."
+        )
+    elif not current:
+        snapshot["reason"] = (
+            "installed from another revision than the intended one. Re-run the installer."
+        )
     print(json.dumps({"stamp": stamp, "snapshot": snapshot, "live": live_channel()}, indent=2))
     return 0 if current else 1
 
