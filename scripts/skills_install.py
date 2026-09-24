@@ -53,6 +53,9 @@ CLAUDE_PLUGIN_DIR = ROOT / ".claude-plugin"
 MARKETPLACE_NAME = "projecttemplate-fleet"
 PLUGIN_NAME = "fleet-skills"
 STAMP_VERSION = 1
+# The markers the bootstrap writes into the tree it keeps, which is where the marketplace points on a bootstrapped host.
+BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
+BOOTSTRAP_COMMIT_MARKER = ".bootstrap-commit"
 
 
 def agents_home():
@@ -79,20 +82,37 @@ def git_in(root, *args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def is_bootstrap_tree(root):
+    """Whether `root` is a tree the bootstrap extracted, which carries the marker it writes."""
+    return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+
+
+def bootstrap_tree_commit(root):
+    """The commit the bootstrap resolved for the tree at `root`, or None where it wrote none."""
+    try:
+        return (root / BOOTSTRAP_COMMIT_MARKER).read_text(encoding="utf-8").strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty."""
 
     def git(*args):
         return git_in(ROOT, *args)
 
-    sha = git("rev-parse", "HEAD")
+    # A tree the bootstrap extracted is asked nothing of git, which would answer for whatever repository encloses it, as live_channel reads the same tree.
+    sha = None if is_bootstrap_tree(ROOT) else git("rev-parse", "HEAD")
     if not sha:
         # A bootstrap runs this from a fetched tarball tree, which has no .git to answer for it.
         # The loader resolved its ref to a commit before downloading and hands that in, keeping the stamp checkable instead of permanently stale.
         # A tarball of a resolved commit is clean by construction, which is what dirty=False records.
-        handed = os.environ.get("SKILLS_SOURCE_COMMIT")
+        handed = os.environ.get("SKILLS_SOURCE_COMMIT") or bootstrap_tree_commit(ROOT)
         if handed:
             return {"vcs": "archive", "commit": handed, "dirty": False}
+        # A bootstrap tree whose loader could not resolve its ref is still an archive, and calling it "none" would send intended_commit to git.
+        if is_bootstrap_tree(ROOT):
+            return {"vcs": "archive", "commit": None, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     # Watches both paths this installer actually reads.
@@ -176,6 +196,33 @@ def claude_available():
     return shutil.which("claude") is not None
 
 
+def marketplace_entry():
+    """This marketplace's entry in the CLI's listing, {} when it is not registered, None when there is no listing."""
+    try:
+        listing = subprocess.run(
+            ["claude", "plugin", "marketplace", "list", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        entries = None
+    if not isinstance(entries, list):
+        return None
+    return next(
+        (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), {}
+    )
+
+
+def entry_location(entry):
+    """The directory a listing entry names, or None where it names none."""
+    location = entry.get("installLocation") or entry.get("path")
+    return location if isinstance(location, str) and location else None
+
+
 def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
@@ -239,7 +286,12 @@ def intended_commit(rev=None):
     if not rev:
         source = source_ref()
         if source.get("vcs") == "archive":
-            return source["commit"], "SKILLS_SOURCE_COMMIT"
+            label = (
+                "SKILLS_SOURCE_COMMIT"
+                if os.environ.get("SKILLS_SOURCE_COMMIT")
+                else BOOTSTRAP_COMMIT_MARKER
+            )
+            return source["commit"], label
     candidates = [rev] if rev else ["refs/remotes/origin/main", "refs/heads/main"]
     for ref in candidates:
         sha = git_in(
@@ -258,30 +310,16 @@ def live_channel():
     """
     if not claude_available():
         return {"registered": None, "reason": "`claude` not found on PATH"}
-    try:
-        listing = subprocess.run(
-            ["claude", "plugin", "marketplace", "list", "--json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
-        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        entries = None
-    if not isinstance(entries, list):
+    entry = marketplace_entry()
+    if entry is None:
         return {
             "registered": None,
             "reason": "`claude plugin marketplace list --json` gave no listing",
         }
-    entry = next(
-        (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), None
-    )
-    if entry is None:
+    if not entry:
         return {"registered": False}
-    location = entry.get("installLocation") or entry.get("path")
-    if not isinstance(location, str) or not location:
+    location = entry_location(entry)
+    if location is None:
         return {"registered": True, "reason": "the listing names no location"}
     root = Path(location)
     if not root.is_dir():
@@ -289,6 +327,17 @@ def live_channel():
             "registered": True,
             "checkout": str(root),
             "reason": "the registered checkout does not exist, so this channel serves nothing",
+        }
+    # A tree the bootstrap keeps is a tarball rather than a checkout, so git has nothing to say about it.
+    # Asking anyway would answer for whatever repository encloses it, a home directory kept in git being the ordinary case.
+    if is_bootstrap_tree(root):
+        return {
+            "registered": True,
+            "checkout": str(root),
+            "vcs": "archive",
+            "branch": None,
+            "commit": bootstrap_tree_commit(root),
+            "dirty": None,
         }
     # Only the generated plugin tree is what this channel loads, so only it decides dirty here.
     # An ignored or untracked file there is loaded the same as a tracked one, so both count.

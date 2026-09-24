@@ -194,16 +194,16 @@
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only", "python", "cpp"],
-            "profiles": { "python": "lint-only", "cpp": "lint-only" },
+            "profiles": { "python": "build", "cpp": "lint-only" },
             "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime. Distinct from that Docker repo.", "First repo with a lint-only python codegen subtree (easystart/python: ruff and pyright config only, no tests, no uv.lock) and lint-only cpp (committed custom-component and template headers, formatted by a shared clang-format config)."]
+            "driftNotes": ["ESPHome device config YAML consumed by the cataloged ESPHome-NonRoot image at runtime. Distinct from that Docker repo.", "Python is a build-profile root uv workspace (root pyproject.toml, uv.lock, and tests/) whose members live under subtrees, easystart/python the first. The cpp is lint-only (committed custom-component and template headers, formatted by a shared clang-format config)."]
         },
         {
             "name": "HomeAssistant-Config",
