@@ -23,8 +23,7 @@ installed, and the hub commit it came from. `--report` answers each channel by n
 changing anything. For the snapshot, it says which commit the copy was taken from and whether that
 is the intended revision, the promoted `main` unless `--intended` names another. For the live
 channel, it says which branch and commit the registered checkout is serving now. The exit code is
-the snapshot's verdict alone, since the live channel following its checkout is the design: 0 when
-the copy is current, 1 when it is not, and 2 when no intended revision resolves to judge it by.
+the snapshot's verdict alone, since the live channel following its checkout is the design.
 
 Usage: python3 scripts/skills_install.py            (installs)
        python3 scripts/skills_install.py --report   (read-only: what does each channel hold?)
@@ -345,8 +344,6 @@ def report(stamp_path, intended_rev=None):
         # Re-installing cannot supply a revision to judge against, so this is not the stale case.
         snapshot["reason"] = "no intended revision resolves here, so the copy cannot be judged"
     print(json.dumps({"stamp": stamp, "snapshot": snapshot, "live": live_channel()}, indent=2))
-    if not intended:
-        return 2
     return 0 if current else 1
 
 

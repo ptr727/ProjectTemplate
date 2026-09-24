@@ -295,7 +295,7 @@ class ReportCase(unittest.TestCase):
     ) -> None:
         self.write_stamp({"commit": "abc", "dirty": False})
         exit_code, out = self.run_report(intended=(None, None), intended_rev="nope")
-        self.assertEqual(exit_code, 2)
+        self.assertEqual(exit_code, 1)
         snapshot = json.loads(out)["snapshot"]
         self.assertIsNone(snapshot["intended"])
         self.assertEqual(snapshot["intendedRef"], "nope")
@@ -304,8 +304,9 @@ class ReportCase(unittest.TestCase):
         """A tarball tree has no main to resolve. A missing commit on both sides must not
         compare equal, None == None, and pass as current."""
         self.write_stamp({"commit": None})
-        exit_code, _ = self.run_report(intended=(None, None))
-        self.assertEqual(exit_code, 2)
+        exit_code, out = self.run_report(intended=(None, None))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("cannot be judged", json.loads(out)["snapshot"]["reason"])
 
     def test_a_copy_installed_from_a_dirty_checkout_is_never_current(self) -> None:
         """The stamp records dirty=True from install time, when the copied bytes matched no
@@ -467,6 +468,29 @@ class LiveChannelCase(unittest.TestCase):
             },
         )
         self.assertEqual(set(roots), {Path("/hub/checkout")})
+
+    def test_the_dirty_check_counts_ignored_and_untracked_files(self) -> None:
+        """Claude Code loads an ignored or untracked file under the plugin tree the same as a
+        tracked one, so a status that hides either would call that content clean."""
+        self.listing(
+            json.dumps(
+                [{"name": skills_install.MARKETPLACE_NAME, "installLocation": "/hub/checkout"}]
+            )
+        )
+        calls = []
+
+        def fake(_root, *args):
+            calls.append(args)
+            return ""
+
+        with (
+            mock.patch("skills_install.git_in", side_effect=fake),
+            mock.patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            skills_install.live_channel()
+        status = next(c for c in calls if c[0] == "status")
+        self.assertIn("--ignored", status)
+        self.assertIn("--untracked-files=all", status)
 
     def test_a_failed_status_reads_as_unknown_rather_than_clean(self) -> None:
         self.listing(
