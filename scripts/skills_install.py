@@ -304,7 +304,7 @@ def live_channel():
     return {
         "registered": True,
         "checkout": str(root),
-        # None on a detached HEAD, which serves a commit rather than a branch.
+        # None on a detached HEAD, and also where git could not answer, which commit being None too tells apart.
         "branch": git_in(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
         "commit": git_in(root, "rev-parse", "HEAD"),
         "dirty": None if status is None else bool(status),
