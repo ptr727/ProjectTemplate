@@ -77,11 +77,11 @@ origin_slug() {
     printf '%s\n' "$slug"
 }
 
-# A marker sitting beside the clone rather than inside it, the same convention bootstrap.sh's tree_is_ours uses, so a --dir pointed at a directory this run does not own is never the one removed on exit.
+# A marker sitting beside the clone rather than inside it, so a --dir pointed at a directory this run does not own is never the one removed on exit.
 # Inside the clone it would be an untracked file, and carry.py's own hub-is-clean check would then refuse the tree this run just fetched for it.
 marker_path() { printf '%s\n' "$DIR/hub.owned"; }
 
-# Refuses to remove an existing $DIR/hub this run did not create, rather than trusting the name, mirroring bootstrap.sh's own remove_tree.
+# Refuses to remove an existing $DIR/hub this run did not create, rather than trusting the name.
 remove_unowned_hub_check() {
     [[ -e "$DIR/hub" || -L "$DIR/hub" ]] || return 0
     [[ -e "$(marker_path)" ]] && return 0

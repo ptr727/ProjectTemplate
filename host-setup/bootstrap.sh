@@ -64,8 +64,9 @@ Options:
                     ${XDG_DATA_HOME:-~/.local/share}/host-setup for an action that installs the skills
       --keep        Leave the extracted tree in place, which is removed by default
 
---host, --dev, and --skills keep their tree, at hub under that directory, because the Claude Code
-plugin they register loads it in place. The next such run replaces it, and a --dry-run leaves it.
+--host, --dev, and --skills keep their tree, at skills-tree under that directory, because the
+Claude Code plugin they register loads it in place. The next such run replaces it, and a --dry-run
+leaves it.
 
 With no action on a terminal, the menu asks. With no action and no terminal, the report runs, since
 a pipe is not a place to answer a question.
@@ -125,7 +126,7 @@ default_dir() {
 # DIR itself is never removed, since --dir may name a directory the caller owns and put other things in.
 # A kept tree and a transient one take different names, so a report run sharing a --dir with a host run never removes the tree Claude Code loads.
 tree_name() {
-    if keeps_tree; then printf 'hub'; else printf 'tree'; fi
+    if keeps_tree; then printf 'skills-tree'; else printf 'tree'; fi
 }
 tree_path() { printf '%s\n' "$DIR/$(tree_name)"; }
 staging_path() { printf '%s\n' "$DIR/$(tree_name).new"; }

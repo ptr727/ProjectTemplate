@@ -109,8 +109,9 @@ Options:
       -Dir PATH     Where the tree is extracted, default %LOCALAPPDATA%\host-setup
       -Keep         Leave the extracted tree in place, which is removed by default
 
--Host, -Dev, and -Skills keep their tree, at hub under that directory, because the Claude Code
-plugin they register loads it in place. The next such run replaces it, and a -DryRun leaves it.
+-Host, -Dev, and -Skills keep their tree, at skills-tree under that directory, because the
+Claude Code plugin they register loads it in place. The next such run replaces it, and a -DryRun
+leaves it.
 
 With no action on a console, the menu asks. With no action and no console, the report runs, since a
 redirected run is not a place to answer a question.
@@ -229,7 +230,7 @@ function Test-KeepsTree {
 # The paths this loader creates under DIR, named in one place so the cleanup and the download agree.
 # DIR itself is never removed, since -Dir may name a directory the caller owns and put other things in.
 # A kept tree and a transient one take different names, so a report run sharing a -Dir with a host run never removes the tree Claude Code loads.
-function Get-TreeName { if (Test-KeepsTree) { 'hub' } else { 'tree' } }
+function Get-TreeName { if (Test-KeepsTree) { 'skills-tree' } else { 'tree' } }
 function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
 function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
 function Get-RetiredPath { Join-Path $script:DIR "$(Get-TreeName).old" }
@@ -237,14 +238,14 @@ function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-function Test-Ownership { param([string]$Path) Test-Path (Join-Path $Path '.bootstrap-owned') }
+function Test-Ownership { param([string]$Path) Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned') }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
 function Remove-Owned {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
     if (-not (Test-Ownership -Path $Path)) { die "$Path exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-    Remove-Item -Recurse -Force $Path
+    Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
 function Get-Tree {
@@ -269,9 +270,9 @@ function Get-Tree {
     New-Item -ItemType File -Path (Join-Path $staging '.bootstrap-owned') -Force | Out-Null
     & tar -xzf $archive -C $staging --strip-components=1
     if ($LASTEXITCODE -ne 0) { die 'Could not extract the downloaded archive' }
-    Remove-Item -Force $archive -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
     # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
-    if ($script:RESOLVED) { Set-Content -Path (Join-Path $staging '.bootstrap-commit') -Value $script:RESOLVED -Encoding ascii }
+    if ($script:RESOLVED) { Set-Content -LiteralPath (Join-Path $staging '.bootstrap-commit') -Value $script:RESOLVED -Encoding ascii }
 
     $script:TREE = $staging
     # A kept tree is swapped in by the skills step itself, so a stand-up failing before it leaves the plugin loading what it loaded before.
@@ -292,11 +293,11 @@ function Invoke-SwapIn {
     $tree = Get-TreePath
     $retired = Get-RetiredPath
 
-    if (Test-Path $retired) {
+    if (Test-Path -LiteralPath $retired) {
         if (-not (Test-Ownership -Path $retired)) { die "$retired exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
         Remove-Retired -Path $retired
     }
-    if (Test-Path $tree) {
+    if (Test-Path -LiteralPath $tree) {
         if (-not (Test-Ownership -Path $tree)) { die "$tree exists and this loader did not create it, so it will not be replaced. Choose another -Dir." }
         try {
             Move-Item -LiteralPath $tree -Destination $retired
@@ -307,10 +308,10 @@ function Invoke-SwapIn {
     try {
         Move-Item -LiteralPath $staging -Destination $tree
     } catch {
-        if (Test-Path $retired) { Move-Item -LiteralPath $retired -Destination $tree }
+        if (Test-Path -LiteralPath $retired) { Move-Item -LiteralPath $retired -Destination $tree }
         die "Could not move the extracted tree into place at ${tree}: $($_.Exception.Message)"
     }
-    if (Test-Path $retired) {
+    if (Test-Path -LiteralPath $retired) {
         try {
             Remove-Retired -Path $retired
         } catch {
@@ -327,16 +328,16 @@ function Invoke-SwapIn {
 # A path that is not ours was already refused where it mattered, at the download.
 # Refusing again from here would print the same error a second time, after the one that actually stopped the run.
 function Invoke-Cleanup {
-    Remove-Item -Force (Get-ArchivePath) -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Get-ArchivePath) -Force -ErrorAction SilentlyContinue
     $staging = Get-StagingPath
-    if (Test-Ownership -Path $staging) { Remove-Item -Recurse -Force $staging }
+    if (Test-Ownership -Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
         try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and the next run removes it" }
     }
     if ($script:KEEP -or (Test-KeepsTree)) { return }
     $tree = Get-TreePath
-    if (Test-Ownership -Path $tree) { Remove-Item -Recurse -Force $tree }
+    if (Test-Ownership -Path $tree) { Remove-Item -LiteralPath $tree -Recurse -Force }
 }
 
 # --- Handoff ---
@@ -348,7 +349,7 @@ function Invoke-Tool {
     param([Parameter(Mandatory)][string]$Tool, [switch]$ToleratesFailure, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
 
     $path = "$TREE/host-setup/windows/$Tool"
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -LiteralPath $path)) {
         die "The fetched tree carries no $Tool at host-setup/windows, so this ref is not one to bootstrap from"
     }
 
