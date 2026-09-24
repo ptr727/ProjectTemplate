@@ -61,7 +61,7 @@ Options:
   -n, --dry-run     Print what each step would run, change nothing
       --ref REF     Branch, tag, pull request ref, or commit to run from, default main
       --dir PATH    Where the tree is extracted, default ${XDG_CACHE_HOME:-~/.cache}/host-setup, or
-                    ${XDG_DATA_HOME:-~/.local/share}/host-setup for a run that keeps its tree, below
+                    ${XDG_DATA_HOME:-~/.local/share}/host-setup for --host, --dev, --skills without --dry-run
       --keep        Leave the extracted tree in place, which is removed by default
 
 --host, --dev, and --skills keep their tree, at skills-tree under that directory, because the
