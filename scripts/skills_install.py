@@ -286,7 +286,12 @@ def intended_commit(rev=None):
     if not rev:
         source = source_ref()
         if source.get("vcs") == "archive":
-            return source["commit"], "SKILLS_SOURCE_COMMIT"
+            label = (
+                "SKILLS_SOURCE_COMMIT"
+                if os.environ.get("SKILLS_SOURCE_COMMIT")
+                else BOOTSTRAP_COMMIT_MARKER
+            )
+            return source["commit"], label
     candidates = [rev] if rev else ["refs/remotes/origin/main", "refs/heads/main"]
     for ref in candidates:
         sha = git_in(

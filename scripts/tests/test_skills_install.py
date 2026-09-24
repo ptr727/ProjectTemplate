@@ -110,6 +110,19 @@ class SourceRefCase(unittest.TestCase):
             )
             self.assertIsNone(skills_install.intended_commit()[0])
 
+    def test_a_commit_read_from_the_marker_is_labelled_by_the_marker(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.intended_commit(),
+                ("cafe1234", skills_install.BOOTSTRAP_COMMIT_MARKER),
+            )
+
     def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
         """In a real checkout the environment variable is stray state, and the checkout is the truth."""
 
@@ -418,6 +431,7 @@ class IntendedCommitCase(unittest.TestCase):
                 return_value={"vcs": "archive", "commit": "handed", "dirty": False},
             ),
             mock.patch("skills_install.git_in", return_value=None),
+            mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "handed"}),
         ):
             self.assertEqual(skills_install.intended_commit(), ("handed", "SKILLS_SOURCE_COMMIT"))
 
