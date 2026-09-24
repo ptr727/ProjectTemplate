@@ -2,7 +2,7 @@
 
 - **Audited branch:** main (`9c16921`), the merge of the `develop` promotion ptr727/HomeAutomation-Config#441 (`develop` at `e8544a0`)
 - **Types:** source-only (from registry), release workflow model
-- **Verdict:** operational. No defect, mechanized or hand-judged, and every remaining finding is drift the hub tracks
+- **Verdict:** operational. No defect, mechanized or hand-judged. The remaining findings are drift, two of them tracked on the hub and the rest the repository's own backlog
 - **Date:** 2026-09-24
 - **Run stamp:** `audit run 2026-09-24T22:39:33Z | hub 03ed883`
 
@@ -31,7 +31,7 @@ The two checks the runner cannot evaluate, `parity.hooks` and the nested Python 
 
 | Dimension | Letter | Intent | Verdict | Evidence (file:line) |
 | --- | --- | --- | --- | --- |
-| source-only (`sourceonly.release.tagonly`) | pass | pass | pass | `.github/workflows/publish-release.yml:35-53` reaches the hub `build-release-task.yml` (pinned at `d28ed04`, 2.0.657) with `github: true`, every `enable_*` input false, and `expect_release_assets: false`, so the release is the tag, the source archive, README, and LICENSE |
+| source-only (`sourceonly.release.tagonly`) | pass | pass | pass | `.github/workflows/publish-release.yml:38-56` reaches the hub `build-release-task.yml` (pinned at `d28ed04`, 2.0.657) with `github: true`, every `enable_*` input false, and `expect_release_assets: false`, so the release is the tag, the source archive, README, and LICENSE |
 | source-only (`sourceonly.nbgv.retained`) | pass | pass | pass | `version.json:1-10` is retained and byte-identical to the hub canonical. The pinned release task computes the version once through `get-version-task.yml`, the fleet's single NBGV run |
 | branch-model | pass | pass | pass | `repo-config/configure.sh check ptr727/HomeAutomation-Config release` from hub `main` reported "Configuration matches" on 2026-09-24 at hub `03ed883`: both rulesets match `repo-config/main.json` and the PR-gated `repo-config/develop.json`, whose required context `Check pull request workflow status job` (`repo-config/main.json:42`, `repo-config/develop.json:45`) is the aggregator's own name at `.github/workflows/test-pull-request.yml:31`. `branch.operational.lintci` and `branch.operational.prtriggers` are N/A on the release model |
 | carried-scope | drift | pass | drift | One `hub-only` hit, `PSScriptAnalyzerSettings.psd1`. It is the repository's own content at a path the hub also uses: its exclusion comments name the `host-install/windows/` scripts (`PSScriptAnalyzerSettings.psd1:3-8`) and it differs from the hub's copy. No `spec/divergences.json` entry triages it yet, tracked as hub #1718. See Drift Findings |
@@ -41,9 +41,9 @@ The two checks the runner cannot evaluate, `parity.hooks` and the nested Python 
 | recurring-violations | drift | pass | drift | LF throughout, paired defaults at `.editorconfig:19-21` and `.gitattributes:3`, CRLF only for `*.bat`/`*.cmd` (`.editorconfig:40-41`, `.gitattributes:6-7`), and `cspell.json:3` sets `en-US`. The CI prose gate is diff-scoped and green on ptr727/HomeAutomation-Config#440 and ptr727/HomeAutomation-Config#441. A whole-tree run finds a legacy backlog of 429 findings in 30 files, all of them in the repository's own files and none in carried content. Enumerated below |
 | readme-structure | pass | pass | pass | The mechanical run reports no README letter. Build and Distribution carries Build Status, Releases, and Release Notes (`README.md:5-28`), License is last (`README.md:1284`), and the tagline at `README.md:3` is one link-free sentence mirrored exactly by the GitHub About description and `HISTORY.md:3` |
 | agent-instruction-set | pass | pass | pass | The mechanical run reports no verbatim-section, verbatim-tree, or template-reference finding after ptr727/HomeAutomation-Config#434. `AGENTS.md` carries exactly the three declared sections (`AGENTS.md:9,31,76`), and `.github/copilot-instructions.md:35` carries the Disproved Claims heading with the canonical rules and no repository entries |
-| workflow (WORKFLOW.md 5A/5B) | pass | pass | pass | Enumerated below. Both entry points now declare `permissions: {}` at workflow level, which closes the previous run's least-privilege drift finding |
+| workflow (WORKFLOW.md 5A/5B) | pass | pass | pass | Enumerated below. Both entry points declare `permissions: {}` at workflow level |
 
-`csharp`, `nuget`, `pypi`, `console`, `docker`, `dotnet-publish`, `hugo`: N/A, since the repository ships no package, image, or site. `python`: N/A by the registry, which declares `source-only` alone, although the tree carries two Python projects (`CloudInit/pyproject.toml`, `Notify/pyproject.toml`). That classification question is raised under Proposed Registry / Spec Updates rather than resolved here.
+`csharp`, `nuget`, `pypi`, `console`, `docker`, `dotnet-publish`, `hugo`: N/A, since the repository ships no package, image, or site. `python`: N/A by the registry, which declares `source-only` alone, although the tree carries two Python projects (`CloudInit/pyproject.toml`, `Notify/pyproject.toml`). The maintainer keeps it undeclared, as recorded under Proposed Registry / Spec Updates.
 
 ## Workflow Assertions (5A and 5B)
 
@@ -70,7 +70,7 @@ None.
 
 - ptr727/HomeAutomation-Config#440 (merged into `develop` at `e8544a0`): the `Notify/` CI gate, the local hook, and `permissions: {}` in the two callers, closing ptr727/HomeAutomation-Config#368, ptr727/HomeAutomation-Config#436 and ptr727/HomeAutomation-Config#437. Reviewed by Copilot with the required aggregator green.
 - ptr727/HomeAutomation-Config#441 (merged as `9c16921`): the promotion this run reads, reviewed by Copilot with CI green. Its two findings claimed `uvx` has no `--directory` option and were declined with a constructed case showing it does. CodeRabbit runs on the Free plan here and posts a walkthrough only, so Copilot plus CI is the review gate.
-- ptr727/HomeAutomation-Config#438 (open): the tracking issue for the previous run's residual deltas. With this run grading `main` operational, what it still holds is the hub-side drift below.
+- ptr727/HomeAutomation-Config#438 (open): the tracking issue for the previous run's residual deltas. Its done condition is a re-audit grading `main` operational with the report re-committed on the hub, which this report meets, so it closes when this report merges. The hub-side drift above stays tracked on hub #1718 and hub #727.
 
 ## Proposed Registry / Spec Updates
 
@@ -78,7 +78,7 @@ None.
 - **`spec/divergences.json`: drop HomeAutomation-Config from the `.editorconfig-checker.json` entry.** Its reason says this repository carries a repo-specific `Exclude` list for a `Vantage/` subtree, but the repository's copy is now byte-identical to the canonical and the registry records that subtree as stripped, so the entry's claim about this repository describes finished work. The entry's other repository is outside this run. Not applied here.
 - **Registry: `python` stays undeclared, by the maintainer's decision** recorded on ptr727/HomeAutomation-Config#438. The entry keeps `source-only` alone, although the tree carries a build-profile project (`CloudInit/`) and a lint-only one (`Notify/`), and the repository hook gates both.
 - **Registry `driftNotes`: no change.** The three notes describe current facts, none asserts outstanding work, and none names a check id.
-- **Conformance matrix:** the `operational` row already records this repository's departure. No row covers `source-only` + `release` without a language, so this repository, now operational, is a candidate reference for that shape. Not applied here.
+- **Conformance matrix:** the `operational` row already records this repository's departure. No row covers `source-only` + `release` without a language, so this repository is a candidate reference for that shape. Not applied here.
 
 ## Escalations
 
