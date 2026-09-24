@@ -228,9 +228,15 @@ def intended_commit(rev=None):
     """The commit the snapshot is meant to hold, and the ref that named it.
 
     Step 7 of merge-and-release installs from the promoted `main`, so that is the default: the
-    remote-tracking ref first, since the refresh fetches it, then a local `main`. A tree with
-    neither, such as a fetched tarball, has no intended revision to judge against.
+    remote-tracking ref first, as last fetched, since that step fetches it just before
+    installing, then a local `main`. Nothing here fetches, so a caller whose `origin/main` may
+    have moved fetches first. A fetched tarball has no git to ask, and the commit its loader
+    resolved and handed in is the revision it was fetched to install.
     """
+    if not rev:
+        source = source_ref()
+        if source.get("vcs") == "archive":
+            return source["commit"], "SKILLS_SOURCE_COMMIT"
     candidates = [rev] if rev else ["refs/remotes/origin/main", "refs/heads/main"]
     for ref in candidates:
         sha = git_in(

@@ -346,6 +346,12 @@ class ReportCase(unittest.TestCase):
 class IntendedCommitCase(unittest.TestCase):
     """The default intended revision is the promoted main, remote-tracking ref first."""
 
+    def setUp(self) -> None:
+        self.addCleanup(mock.patch.stopall)
+        mock.patch(
+            "skills_install.source_ref", return_value={"vcs": "git", "commit": "x", "dirty": False}
+        ).start()
+
     def test_origin_main_is_preferred_over_a_local_main(self) -> None:
         answers = {
             "refs/remotes/origin/main^{commit}": "remote",
@@ -355,6 +361,29 @@ class IntendedCommitCase(unittest.TestCase):
             self.assertEqual(
                 skills_install.intended_commit(), ("remote", "refs/remotes/origin/main")
             )
+
+    def test_a_fetched_tarball_is_judged_against_the_commit_its_loader_resolved(self) -> None:
+        """A bootstrap reports from a tarball tree with no git to ask, handing in the commit it
+        resolved. Judging that host against a main it cannot resolve would fail every fresh host,
+        and one bootstrapped from another ref would be judged against the wrong revision."""
+        with (
+            mock.patch(
+                "skills_install.source_ref",
+                return_value={"vcs": "archive", "commit": "handed", "dirty": False},
+            ),
+            mock.patch("skills_install.git_in", return_value=None),
+        ):
+            self.assertEqual(skills_install.intended_commit(), ("handed", "SKILLS_SOURCE_COMMIT"))
+
+    def test_a_named_revision_is_not_replaced_by_a_tarball_commit(self) -> None:
+        with (
+            mock.patch(
+                "skills_install.source_ref",
+                return_value={"vcs": "archive", "commit": "handed", "dirty": False},
+            ),
+            mock.patch("skills_install.git_in", return_value=None),
+        ):
+            self.assertEqual(skills_install.intended_commit("v1"), (None, None))
 
     def test_a_local_main_is_the_fallback(self) -> None:
         answers = {"refs/heads/main^{commit}": "local"}

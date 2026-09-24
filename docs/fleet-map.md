@@ -139,7 +139,7 @@ Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][
 
 **Resolved: the install is global per user, and the work is closing its gaps, not adding a second model.** A per-repo pinned install was considered and rejected: it would let a repo's skills match its own state, but it forfeits coverage of ad-hoc sessions in no repo at all (which is where the incidents this fleet guards against actually happened), doubles the staleness surface, and adds a version-resolution mechanism the fleet does not need while the whole fleet tracks one hub.
 
-The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates `.github/skills/` and the Claude Code plugin, and [`scripts/skills_install.py`][skills-install] installs both host-scoped forms per machine. The installer stamps the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
+The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates `.github/skills/` and the Claude Code plugin, and [`scripts/skills_install.py`][skills-install] installs both host-scoped forms per machine. The installer stamps the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only check. It judges the copy against the promoted `main`, reports what the checkout Claude Code loads in place is serving, and exits non-zero when the copy is not current.
 
 Four wiring points close the model, and each is in place:
 

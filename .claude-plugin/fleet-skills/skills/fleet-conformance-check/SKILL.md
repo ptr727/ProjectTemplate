@@ -40,7 +40,8 @@ repo.
 
 ## What it is safe to fix on its own
 
-- **Re-run the installer**, `python3 scripts/skills_install.py`, when `--report` exits non-zero.
+- **Re-run the installer**, `python3 scripts/skills_install.py`, from that same `main` checkout,
+  when `--report` exits non-zero.
   This is a per-machine, local-only change, nothing in it touches this repo's git history or
   needs a review.
 
@@ -50,8 +51,10 @@ never a downstream repo acting on itself.
 
 ## Refresh cadence
 
-Re-run the installer when `--report` exits non-zero, and after any hub merge that touches
-`.agents/skills/`. Session entry runs no automatic check, by design: the trigger is suspicion,
+Re-run the installer from a hub checkout on a freshly fetched `main` when `--report` exits
+non-zero, and after any promotion to `main` that touches `.agents/skills/`. A copy taken from
+`develop` reads not current by design, since the snapshot is judged against the promoted
+revision. Session entry runs no automatic check, by design: the trigger is suspicion,
 and the restated-rule symptom below is the loudest form of it. `docs/host-setup.md`
 "Fleet Skills Install" in the hub states the same cadence for the host side, and an automated
 refresh stays out of scope until the fleet has evidence the manual cadence fails.
