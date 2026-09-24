@@ -146,7 +146,7 @@ remove_owned() {
 }
 
 download_tree() {
-    local archive staging tree want="${RESOLVED:-$REF}"
+    local archive staging want="${RESOLVED:-$REF}"
     archive=$(archive_path)
 
     step "Fetching $REPO at $REF"
@@ -197,8 +197,7 @@ swap_in() {
 }
 
 cleanup() {
-    # Removes what this run created rather than what it finished, because TREE is set only once the tree is in place.
-    # A failed extract leaves both the archive and a part-written staging tree, so keying the cleanup on TREE left a tarball in the cache on every failed attempt.
+    # Removes each path this run can create by its fixed name rather than through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
     rm -f "$(archive_path)"
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
