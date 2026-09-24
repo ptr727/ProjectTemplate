@@ -112,8 +112,8 @@ such a clone is never a push out of it: fork the upstream first, per the
 namespace above, under the name this one already has.
 
 ```sh
-git -C ~/repos/<Repo> fetch origin develop
-git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> -b <task-branch> origin/develop
+git -C ~/repos/"<Repo>" fetch origin develop
+git -C ~/repos/"<Repo>" worktree add ~/repos/worktrees/"<Repo>-<task-slug>" -b "<task-branch>" origin/develop
 ```
 
 The registered worktree above is the normal path. It keeps the task visible in `git worktree
@@ -161,10 +161,10 @@ and again in the handoff. Do not present work there as ordinarily reviewable fro
 workspace.
 
 ```sh
-TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"
-git clone --no-checkout "$TASK_ORIGIN" <temporary-root>/<Repo>-<task-slug>
-git -C <temporary-root>/<Repo>-<task-slug> fetch origin develop
-git -C <temporary-root>/<Repo>-<task-slug> switch -c <task-branch> origin/develop
+TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"
+git clone --no-checkout "$TASK_ORIGIN" "<temporary-root>/<Repo>-<task-slug>"
+git -C "<temporary-root>/<Repo>-<task-slug>" fetch origin develop
+git -C "<temporary-root>/<Repo>-<task-slug>" switch -c "<task-branch>" origin/develop
 ```
 
 Do not use a linked worktree under the temporary root when the base clone's Git metadata is
@@ -175,8 +175,8 @@ registered path and its approval route are unavailable.
 A continuation attaches the task's existing branch rather than forking a fresh one:
 
 ```sh
-git -C ~/repos/<Repo> fetch origin <task-branch>
-git -C ~/repos/<Repo> worktree add ~/repos/worktrees/<Repo>-<task-slug> <task-branch>
+git -C ~/repos/"<Repo>" fetch origin "<task-branch>"
+git -C ~/repos/"<Repo>" worktree add ~/repos/worktrees/"<Repo>-<task-slug>" "<task-branch>"
 ```
 
 When the base clone holds only the remote-tracking ref, the same command creates the local branch

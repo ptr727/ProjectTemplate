@@ -290,9 +290,9 @@ When pulling a public image fails on a Docker-Desktop/WSL credential-helper erro
 
 ```sh
 scratch="$(mktemp -d)"
-git -C /path/to/ProjectTemplate show <hub-sha>:.github/actions/prose-gate/prose_lint.py > "$scratch/prose_lint_pinned.py"
+git -C /path/to/ProjectTemplate show "<hub-sha>:.github/actions/prose-gate/prose_lint.py" > "$scratch/prose_lint_pinned.py"
 cd /path/to/target-worktree
-PROSE_GATE_PROVENANCE="reproducing ptr727/ProjectTemplate@<hub-sha>" python3 "$scratch/prose_lint_pinned.py" --diff <base> -- .
+PROSE_GATE_PROVENANCE="reproducing ptr727/ProjectTemplate@<hub-sha>" python3 "$scratch/prose_lint_pinned.py" --diff "<base>" -- .
 ```
 
 Where the reporting repository carries `.github/prose-gate-excludes`, pass each of its non-empty, non-comment lines as a `--exclude <path>` argument, trimmed of the surrounding whitespace the way the composite action trims it. An untrimmed value is a substring that matches no key, so it excludes nothing and says nothing about having failed. Omitting them widens the run past what CI read, and a finding on an excluded file is then a local artifact rather than the one being chased. Skip the blank lines rather than passing them, since an empty exclusion would match every path, and the gate refuses one rather than reporting the empty scan that follows as clean.
