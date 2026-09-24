@@ -188,7 +188,7 @@ The skills are the per-topic rules packaged so they surface in an agent session 
 
 ```shell
 python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
-python3 scripts/skills_install.py --report   # read-only: is this machine current?
+python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
 A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode, so a fresh machine finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.

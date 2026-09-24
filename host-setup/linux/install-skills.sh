@@ -32,13 +32,13 @@ Usage: install-skills.sh [options]
 Installs the fleet skills for the current user, by running scripts/skills_install.py from this
 tree. The installer copies the skills to ~/.agents/skills/ for Codex and opencode, registers the
 Claude Code plugin where the claude CLI is present and says so where it is not, and stamps what it
-installed so a later report can answer whether this machine is current.
+installed so a later report can answer whether that copy is current.
 
 Run it as yourself, never under sudo: it writes only under your own home, and under sudo it
 installs for root instead and says so nowhere.
 
 Actions, name one, default install:
-  -r, --report      Read-only: is this machine's skills install current against this tree?
+  -r, --report      Read-only: is the skills copy current, and what does Claude Code load?
   -h, --help        Show this help
 
 Options:
