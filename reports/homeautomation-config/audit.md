@@ -90,6 +90,6 @@ The two defects below are both outside what the runner evaluates, which is why a
 
 Raised rather than resolved, per AUDIT.md section 9.
 
-1. **`repo-config/settings.json` declares no default workflow token permission, so `configure.sh check` cannot see it.** The setting differs across the fleet (read on the hub and on Blog, write here and on PlexCleaner), and a stub that omits `permissions: {}` inherits whichever it is. Either the setting joins the declared settings, or the workflow-level block becomes a named check. Not yet filed.
+1. **`repo-config/settings.json` declares no default workflow token permission, so `configure.sh check` cannot see it.** The setting differs across the fleet (read on the hub and on Blog, write here and on PlexCleaner), and a stub that omits `permissions: {}` inherits whichever it is. Either the setting joins the declared settings, or the workflow-level block becomes a named check. Filed as hub #1783.
 2. **The four byte-identical intent advisories cannot be cleared**, which is hub #727, still open. Corroborated rather than opened.
 3. **The hub `validate-task.yml` detects Python at the root only**, so any repository with a nested Python tree needs a hook, and a hook that covers one tree silently leaves the next one ungated. That is part of hub #1134, still open. Corroborated rather than opened.
