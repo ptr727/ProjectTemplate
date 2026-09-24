@@ -32,7 +32,11 @@ repo.
    (`github.com/ptr727/ProjectTemplate`, `main` branch, fetched fresh) and run
    `python3 scripts/skills_install.py --report` from it. A snapshot not current, or no stamp, is very often
    the direct answer to "why isn't a fleet rule applying": the harness never loaded the current
-   content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that.
+   content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that. For a
+   Claude Code session, read `live` as well, since that channel loads the registered checkout in
+   place rather than the copy: a checkout that is missing, detached, or on an old branch is the
+   answer there, whatever the exit code says, and moving that checkout is the fix rather than
+   re-installing.
 2. **Does this repo's own carried content still match the hub.** Compare `AGENTS.md`'s
    "Where the Rules Live" pointer text, and any other verbatim `AGENTS.md`/`GOVERNANCE.md` section
    this repo carries, against the same hub checkout's current wording, by reading the text rather

@@ -295,7 +295,7 @@ class ReportCase(unittest.TestCase):
     ) -> None:
         self.write_stamp({"commit": "abc", "dirty": False})
         exit_code, out = self.run_report(intended=(None, None), intended_rev="nope")
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 2)
         snapshot = json.loads(out)["snapshot"]
         self.assertIsNone(snapshot["intended"])
         self.assertEqual(snapshot["intendedRef"], "nope")
@@ -305,7 +305,7 @@ class ReportCase(unittest.TestCase):
         compare equal, None == None, and pass as current."""
         self.write_stamp({"commit": None})
         exit_code, _ = self.run_report(intended=(None, None))
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 2)
 
     def test_a_copy_installed_from_a_dirty_checkout_is_never_current(self) -> None:
         """The stamp records dirty=True from install time, when the copied bytes matched no
@@ -426,6 +426,18 @@ class LiveChannelCase(unittest.TestCase):
         self.listing("", returncode=1)
         self.assertIsNone(skills_install.live_channel()["registered"])
 
+    def test_a_missing_registered_checkout_says_it_serves_nothing(self) -> None:
+        """A bootstrap registers the tree it extracted and then removes it. Reporting null
+        fields there would read like a checkout that merely could not be asked."""
+        self.listing(
+            json.dumps(
+                [{"name": skills_install.MARKETPLACE_NAME, "installLocation": "/no/such/tree"}]
+            )
+        )
+        live = skills_install.live_channel()
+        self.assertIn("does not exist", live["reason"])
+        self.assertNotIn("commit", live)
+
     def test_the_registered_checkout_is_the_one_measured(self) -> None:
         self.listing(
             json.dumps(
@@ -439,7 +451,10 @@ class LiveChannelCase(unittest.TestCase):
             roots.append(root)
             return answers[args[0]]
 
-        with mock.patch("skills_install.git_in", side_effect=fake):
+        with (
+            mock.patch("skills_install.git_in", side_effect=fake),
+            mock.patch("pathlib.Path.is_dir", return_value=True),
+        ):
             live = skills_install.live_channel()
         self.assertEqual(
             live,
@@ -460,7 +475,10 @@ class LiveChannelCase(unittest.TestCase):
             )
         )
         answers = {"symbolic-ref": None, "rev-parse": "sha", "status": None}
-        with mock.patch("skills_install.git_in", side_effect=lambda _r, *a: answers[a[0]]):
+        with (
+            mock.patch("skills_install.git_in", side_effect=lambda _r, *a: answers[a[0]]),
+            mock.patch("pathlib.Path.is_dir", return_value=True),
+        ):
             live = skills_install.live_channel()
         self.assertIsNone(live["dirty"])
         self.assertIsNone(live["branch"])

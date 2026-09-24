@@ -128,10 +128,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    locally-diverged `main` skips the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
    `python3 scripts/skills_install.py` to install, and confirm `--report`'s snapshot now reads
    current. The two channels hold different things. The Codex and opencode copy keeps the
-   revision it was taken from, the promoted `main` here. The Claude Code channel loads this
-   checkout in place and serves whatever it holds at read time, so once step 8 returns the clone
-   to `develop`, Claude Code sessions on this machine load `develop`. `--report` names that
-   branch and commit under `live` and exits on the snapshot alone. This step runs whether step 5
+   revision it was taken from, the promoted `main` here. The Claude Code channel loads the
+   registered checkout in place, the one `--report` names under `live`, and serves whatever it
+   holds at read time. Where that is this checkout, once step 8 returns it to `develop`, Claude
+   Code sessions on this machine load `develop`. `--report` exits on the snapshot alone. This step runs whether step 5
    or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
    never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or

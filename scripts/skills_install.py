@@ -23,7 +23,8 @@ installed, and the hub commit it came from. `--report` answers each channel by n
 changing anything. For the snapshot, it says which commit the copy was taken from and whether that
 is the intended revision, the promoted `main` unless `--intended` names another. For the live
 channel, it says which branch and commit the registered checkout is serving now. The exit code is
-the snapshot's verdict alone, since the live channel following its checkout is the design.
+the snapshot's verdict alone, since the live channel following its checkout is the design: 0 when
+the copy is current, 1 when it is not, and 2 when no intended revision resolves to judge it by.
 
 Usage: python3 scripts/skills_install.py            (installs)
        python3 scripts/skills_install.py --report   (read-only: what does each channel hold?)
@@ -280,9 +281,22 @@ def live_channel():
     if not isinstance(location, str) or not location:
         return {"registered": True, "reason": "the listing names no location"}
     root = Path(location)
+    if not root.is_dir():
+        return {
+            "registered": True,
+            "checkout": str(root),
+            "reason": "the registered checkout does not exist, so this channel serves nothing",
+        }
     # Only the generated plugin tree is what this channel loads, so only it decides dirty here.
+    # An ignored or untracked file there is loaded the same as a tracked one, so both count.
     status = git_in(
-        root, "status", "--porcelain", "--", CLAUDE_PLUGIN_DIR.relative_to(ROOT).as_posix()
+        root,
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+        "--",
+        CLAUDE_PLUGIN_DIR.relative_to(ROOT).as_posix(),
     )
     return {
         "registered": True,
@@ -327,7 +341,12 @@ def report(stamp_path, intended_rev=None):
         "intendedRef": intended_ref if intended else intended_rev,
         "current": current,
     }
+    if not intended:
+        # Re-installing cannot supply a revision to judge against, so this is not the stale case.
+        snapshot["reason"] = "no intended revision resolves here, so the copy cannot be judged"
     print(json.dumps({"stamp": stamp, "snapshot": snapshot, "live": live_channel()}, indent=2))
+    if not intended:
+        return 2
     return 0 if current else 1
 
 
