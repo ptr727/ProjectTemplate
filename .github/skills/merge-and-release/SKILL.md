@@ -126,9 +126,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    exactly the case a bare "up to date" would hide. `skills_install.py` stamps and installs from
    whatever this checkout's HEAD already is, so running it against a stale, unrefreshed, or
    locally-diverged `main` skips the refresh silently. Only then run `python3 scripts/skills_install.py --report`, then
-   `python3 scripts/skills_install.py` to install, and confirm `--report` now reads current,
-   regardless of whether step 5 or 6 dispatched, skipped, or failed a release, this step is gated
-   only on the chosen scope, never on the release outcome. This refreshes only the machine running
+   `python3 scripts/skills_install.py` to install, and confirm `--report`'s snapshot now reads
+   current. The two channels hold different things. The Codex and opencode copy keeps the
+   revision it was taken from, the promoted `main` here. The Claude Code channel loads this
+   checkout in place and serves whatever it holds at read time, so once step 8 returns the clone
+   to `develop`, Claude Code sessions on this machine load `develop`. `--report` names that
+   branch and commit under `live` and exits on the snapshot alone. This step runs whether step 5
+   or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
+   never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 8. Run cleanup regardless of how steps 5 through 7 ended, no release configured, a dispatch

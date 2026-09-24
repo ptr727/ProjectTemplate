@@ -30,7 +30,7 @@ repo.
 1. **Is the Skills install current on this machine.** `scripts/` is hub-hosted and reached rather
    than carried, per GOVERNANCE.md "Hub-Hosted Tooling", so fetch a hub checkout
    (`github.com/ptr727/ProjectTemplate`, `main` branch, fetched fresh) and run
-   `python3 scripts/skills_install.py --report` from it. A stale or missing stamp is very often
+   `python3 scripts/skills_install.py --report` from it. A snapshot not current, or no stamp, is very often
    the direct answer to "why isn't a fleet rule applying": the harness never loaded the current
    content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that.
 2. **Does this repo's own carried content still match the hub.** Compare `AGENTS.md`'s
@@ -40,7 +40,7 @@ repo.
 
 ## What it is safe to fix on its own
 
-- **Re-run the installer**, `python3 scripts/skills_install.py`, when the stamp reports stale.
+- **Re-run the installer**, `python3 scripts/skills_install.py`, when `--report` exits non-zero.
   This is a per-machine, local-only change, nothing in it touches this repo's git history or
   needs a review.
 

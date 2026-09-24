@@ -14,13 +14,20 @@ differently (see AGENTS.md "Fleet Bootstrap" for why):
 
 Both wrappers (skills_install.sh, skills_install.ps1) call this, so every OS runs one tested code path.
 
+The two channels hold different things. The Codex and opencode copy is a snapshot, so it keeps the
+revision it was taken from. The Claude Code marketplace is a directory source that loads the hub
+checkout in place, so it serves whatever that checkout holds at read time and holds no revision.
+
 Every run records a stamp at ~/.agents/skills-install-stamp.json naming the machine, what was
-installed, and the hub commit it came from, so staleness is checkable later without re-running the
-install. `--report` reads that stamp against this checkout and answers whether the machine is
-current, without changing anything.
+installed, and the hub commit it came from. `--report` answers each channel by name, without
+changing anything. For the snapshot, it says which commit the copy was taken from and whether that
+is the intended revision, the promoted `main` unless `--intended` names another. For the live
+channel, it says which branch and commit the registered checkout is serving now. The exit code is
+the snapshot's verdict alone, since the live channel following its checkout is the design.
 
 Usage: python3 scripts/skills_install.py            (installs)
-       python3 scripts/skills_install.py --report   (read-only: is this machine current?)
+       python3 scripts/skills_install.py --report   (read-only: what does each channel hold?)
+       python3 scripts/skills_install.py --report --intended <rev>   (judge the snapshot against <rev>)
        AGENTS_HOME=/x python3 scripts/skills_install.py   (override the global skills target, for testing)
 """
 
@@ -54,21 +61,26 @@ def agents_home():
     return Path(override).expanduser() if override else Path.home() / ".agents"
 
 
+def git_in(root, *args):
+    """Run git against `root`, returning stripped stdout, or None on any failure."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
 def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty."""
 
     def git(*args):
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(ROOT), *args],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-            )
-        except OSError:
-            return None
-        return r.stdout.strip() if r.returncode == 0 else None
+        return git_in(ROOT, *args)
 
     sha = git("rev-parse", "HEAD")
     if not sha:
@@ -212,7 +224,71 @@ def build_stamp(claude_registered):
     }
 
 
-def report(stamp_path):
+def intended_commit(rev=None):
+    """The commit the snapshot is meant to hold, and the ref that named it.
+
+    Step 7 of merge-and-release installs from the promoted `main`, so that is the default: the
+    remote-tracking ref first, since the refresh fetches it, then a local `main`. A tree with
+    neither, such as a fetched tarball, has no intended revision to judge against.
+    """
+    candidates = [rev] if rev else ["refs/remotes/origin/main", "refs/heads/main"]
+    for ref in candidates:
+        sha = git_in(
+            ROOT, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{ref}^{{commit}}"
+        )
+        if sha:
+            return sha, ref
+    return None, None
+
+
+def live_channel():
+    """What the Claude Code channel serves now, read from the checkout the marketplace names.
+
+    The checkout running this report is not necessarily the one registered, a worktree or a fresh
+    clone being the ordinary cases, so the registered path is read back from the CLI.
+    """
+    if not claude_available():
+        return {"registered": None, "reason": "`claude` not found on PATH"}
+    try:
+        listing = subprocess.run(
+            ["claude", "plugin", "marketplace", "list", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
+    except (OSError, json.JSONDecodeError):
+        entries = None
+    if not isinstance(entries, list):
+        return {
+            "registered": None,
+            "reason": "`claude plugin marketplace list --json` gave no listing",
+        }
+    entry = next(
+        (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), None
+    )
+    if entry is None:
+        return {"registered": False}
+    location = entry.get("installLocation") or entry.get("path")
+    if not isinstance(location, str) or not location:
+        return {"registered": True, "reason": "the listing names no location"}
+    root = Path(location)
+    # Only the generated plugin tree is what this channel loads, so only it decides dirty here.
+    status = git_in(
+        root, "status", "--porcelain", "--", CLAUDE_PLUGIN_DIR.relative_to(ROOT).as_posix()
+    )
+    return {
+        "registered": True,
+        "checkout": str(root),
+        # None on a detached HEAD, which serves a commit rather than a branch.
+        "branch": git_in(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
+        "commit": git_in(root, "rev-parse", "HEAD"),
+        "dirty": None if status is None else bool(status),
+    }
+
+
+def report(stamp_path, intended_rev=None):
     if not stamp_path.is_file():
         print("Not installed on this machine (no stamp found).")
         return 1
@@ -229,45 +305,45 @@ def report(stamp_path):
             "Re-run the installer."
         )
         return 1
-    current = source_ref()
-    current_commit = current.get("commit")
     # A dict-shaped stamp can still carry a non-dict "source" (a stray string, a number).
-    # Calling .get("commit") on that would crash instead of reading as stale like every other unrecognized-shape case here does.
+    # Calling .get("commit") on that would crash instead of reading as not current like every other unrecognized-shape case here does.
     stamp_source = stamp.get("source")
     stamp_commit = stamp_source.get("commit") if isinstance(stamp_source, dict) else None
     stamp_dirty = stamp_source.get("dirty") if isinstance(stamp_source, dict) else None
-    # A dirty checkout cannot be asserted current.
-    # The commit it names is not what is actually on disk.
-    # A caller trusting "current" here would trust bytes that were never installed.
-    # Checked on both sides.
-    # The current checkout's own dirty flag catches a machine that has since gone dirty at the recorded commit.
-    # The stamp's recorded dirty flag catches the install itself having happened from a dirty checkout, whose bytes a later-clean tree at the same commit can never actually reproduce or verify.
-    # Wrapped in bool() rather than left as a bare "or" chain.
-    # A missing current_commit (a non-git checkout) reads as stale this way.
-    # A plain "or" chain would leave `stale` as the None that produces there instead, and `if stale else` treats that as falsy the same as an actual False.
-    # A missing "dirty" key by itself reads as not-dirty, since get() returns None there, which is falsy.
-    # That is not the same as reading as stale.
-    # A call to source_ref() always sets "dirty" whenever it sets "commit", so the two are missing together only in the vcs=="none" case, which current_commit is None already catches.
-    stale = bool(
-        current_commit is None
-        or stamp_commit != current_commit
-        or current.get("dirty")
-        or stamp_dirty
-    )
-    print(json.dumps({"stamp": stamp, "currentCommit": current_commit, "stale": stale}, indent=2))
-    return 1 if stale else 0
+    intended, intended_ref = intended_commit(intended_rev)
+    # A copy installed from a dirty checkout holds bytes no commit reproduces, so it is never current.
+    # Wrapped in bool() so a missing commit on either side reads as False rather than as a falsy None.
+    current = bool(intended and stamp_commit == intended and not stamp_dirty)
+    snapshot = {
+        "installedFrom": stamp_commit,
+        "installedDirty": stamp_dirty,
+        "intended": intended,
+        "intendedRef": intended_ref if intended else intended_rev,
+        "current": current,
+    }
+    print(json.dumps({"stamp": stamp, "snapshot": snapshot, "live": live_channel()}, indent=2))
+    return 0 if current else 1
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", action="store_true", help="read-only: is this machine current?")
+    parser.add_argument(
+        "--report", action="store_true", help="read-only: what does each channel hold?"
+    )
+    parser.add_argument(
+        "--intended",
+        metavar="REV",
+        help="with --report: the revision the snapshot should hold (default: the promoted main)",
+    )
     args = parser.parse_args()
+    if args.intended and not args.report:
+        parser.error("--intended only applies with --report")
 
     home = agents_home()
     stamp_path = home / "skills-install-stamp.json"
 
     if args.report:
-        return report(stamp_path)
+        return report(stamp_path, args.intended)
 
     try:
         materialize_global_skills(home / "skills")

@@ -282,13 +282,13 @@ opencode does not read Codex's `config.toml`. Keep its permission mode in openco
 
 ## Fleet Skills Install
 
-The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`, and `--report` reads that stamp against the checkout and exits non-zero where the machine is behind it.
+The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`, The copy keeps the revision it was taken from, while the Claude Code plugin loads the hub checkout in place and serves whatever it holds at read time. `--report` answers each by name: which commit the copy came from, judged against the promoted `main` (or `--intended <rev>`), and which branch and commit the registered checkout is serving now. It exits non-zero when the copy is not current, and the live channel following its checkout is the design rather than a fault.
 
 Install from a hub checkout, once per machine:
 
 ```shell
 python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
-python3 scripts/skills_install.py --report   # read-only: is this machine current?
+python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
 A bootstrapped host does not run this by hand: the `--host` mode of [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] ends with the same installer, driven from the fetched tree by `install-skills.sh` or `install-skills.ps1`, and the `--skills` action runs that step on its own.
@@ -301,7 +301,7 @@ The `claude` CLI is deliberately absent from the tool catalog in [`spec/host-too
 
 ```shell
 python3 scripts/host_gate.py           # presence and version floors, from spec/host-tools.json
-python3 scripts/skills_install.py --report   # the skills install stamp is current
+python3 scripts/skills_install.py --report   # the skills snapshot is current
 git config --global --list | grep -E "user\.|signing|gpg\."
 # One physical line, not backslash-joined, so the whole probe copy-pastes cleanly into a shell.
 d=$(mktemp -d "${TMPDIR:-/tmp}/sign-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; email=$(git config --global --get user.email) && git init -q "$d" && git -C "$d" commit --allow-empty -q -m check && out=$(git -C "$d" log -1 --format='sig=%G? author=%an <%ae> committer=%cn <%ce>') && echo "$out" && ae=$(git -C "$d" log -1 --format='%ae') && ce=$(git -C "$d" log -1 --format='%ce') && case "$out" in sig=G\ *|sig=U\ *) true ;; *) false ;; esac && case "$email" in *@users.noreply.github.com) true ;; *) false ;; esac && [ "$ae" = "$email" ] && [ "$ce" = "$email" ] )
@@ -316,7 +316,7 @@ The gate replaced a line that ran `--version` on each tool and read only whether
 
 ```powershell
 python3 scripts/host_gate.py                 # presence and version floors, from spec/host-tools.json
-python3 scripts/skills_install.py --report   # the skills install stamp is current
+python3 scripts/skills_install.py --report   # the skills snapshot is current
 git config --global --list | Select-String "user\.|signing|gpg\."
 $d = Join-Path $env:TEMP ([guid]::NewGuid())
 try {
@@ -350,7 +350,7 @@ Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `python3 scri
 | Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the host-safety kit is installed |
-| Have the fleet skills surface in every agent session | the skills install stamp is current per `skills_install.py --report` |
+| Have the fleet skills surface in every agent session | the skills snapshot is current per `skills_install.py --report` |
 
 A host that fails any row is not ready for the procedure that row names, and the fix belongs on the host rather than in a repo.
 

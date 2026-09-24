@@ -233,146 +233,208 @@ class MaterializeCase(unittest.TestCase):
 
 
 class ReportCase(unittest.TestCase):
+    """--report answers the snapshot copy and the live checkout separately, and exits on the
+    snapshot's verdict alone, since the live channel following its checkout is the design."""
+
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.stamp = self.tmp / "stamp.json"
+        self.addCleanup(mock.patch.stopall)
+        self.live = mock.patch(
+            "skills_install.live_channel",
+            return_value={"registered": True, "branch": "develop", "commit": "dev", "dirty": True},
+        ).start()
+
+    def write_stamp(self, source) -> None:
+        self.stamp.write_text(
+            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": source}),
+            encoding="utf-8",
+        )
+
+    def run_report(self, intended=("abc", "refs/remotes/origin/main"), intended_rev=None):
+        mock.patch("skills_install.intended_commit", return_value=intended).start()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            exit_code = skills_install.report(self.stamp, intended_rev)
+        return exit_code, out.getvalue()
 
     def test_no_stamp_reports_not_installed(self) -> None:
-        with mock.patch("builtins.print"):
-            exit_code = skills_install.report(self.tmp / "missing-stamp.json")
+        exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
 
-    def test_matching_commit_reports_current(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        with mock.patch(
-            "skills_install.source_ref",
-            return_value={"vcs": "git", "commit": "abc", "dirty": False},
-        ):
-            stamp.write_text(
-                json.dumps(
-                    {"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}
-                ),
-                encoding="utf-8",
-            )
-            exit_code = skills_install.report(stamp)
-        self.assertEqual(exit_code, 0)
-
-    def test_mismatched_commit_reports_stale(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "old"}}),
-            encoding="utf-8",
-        )
-        with mock.patch(
-            "skills_install.source_ref",
-            return_value={"vcs": "git", "commit": "new", "dirty": False},
-        ):
-            exit_code = skills_install.report(stamp)
-        self.assertEqual(exit_code, 1)
-
-    def test_unreadable_stamp_reports_stale_instead_of_crashing(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text("not valid json {{{", encoding="utf-8")
-        with mock.patch("builtins.print"):
-            exit_code = skills_install.report(stamp)
-        self.assertEqual(exit_code, 1)
-
-    def test_matching_commit_but_dirty_checkout_reports_stale(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": "abc"}}),
-            encoding="utf-8",
-        )
-        with mock.patch(
-            "skills_install.source_ref", return_value={"vcs": "git", "commit": "abc", "dirty": True}
-        ):
-            exit_code = skills_install.report(stamp)
-        self.assertEqual(exit_code, 1)
-
-    def test_installed_from_dirty_but_now_clean_at_the_same_commit_still_reports_stale(
+    def test_a_copy_from_the_intended_revision_is_current_whatever_the_checkout_serves(
         self,
     ) -> None:
-        """The stamp records dirty=True from install time, when the actual materialized bytes
-        did not match any clean commit. A checkout going clean at the same commit afterward
-        cannot make that install "current": the bytes it produced are still unverifiable
-        against anything, since nothing about the current clean state proves what was on disk
-        at install time."""
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
-            json.dumps(
-                {
-                    "stampVersion": skills_install.STAMP_VERSION,
-                    "source": {"commit": "abc", "dirty": True},
-                }
-            ),
-            encoding="utf-8",
-        )
-        with (
-            mock.patch(
-                "skills_install.source_ref",
-                return_value={"vcs": "git", "commit": "abc", "dirty": False},
-            ),
-            mock.patch("builtins.print"),
-        ):
-            exit_code = skills_install.report(stamp)
+        """merge-and-release step 7 installs from main and step 8 returns the
+        clone to develop. The copy is exactly right and the live channel serves develop, dirty
+        even, and neither of those is the snapshot's fault."""
+        self.write_stamp({"commit": "abc", "dirty": False})
+        exit_code, out = self.run_report()
+        self.assertEqual(exit_code, 0)
+        body = json.loads(out)
+        self.assertTrue(body["snapshot"]["current"])
+        self.assertEqual(body["snapshot"]["installedFrom"], "abc")
+        self.assertEqual(body["snapshot"]["intendedRef"], "refs/remotes/origin/main")
+        self.assertEqual(body["live"]["branch"], "develop")
+
+    def test_a_copy_from_another_revision_is_not_current(self) -> None:
+        self.write_stamp({"commit": "old", "dirty": False})
+        exit_code, out = self.run_report()
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(json.loads(out)["snapshot"]["current"])
+
+    def test_an_explicit_intended_revision_is_passed_through(self) -> None:
+        self.write_stamp({"commit": "abc", "dirty": False})
+        intended = mock.patch("skills_install.intended_commit", return_value=("abc", "v1")).start()
+        with contextlib.redirect_stdout(io.StringIO()):
+            skills_install.report(self.stamp, "v1")
+        intended.assert_called_once_with("v1")
+
+    def test_an_unresolvable_intended_revision_is_not_current_and_names_what_was_asked(
+        self,
+    ) -> None:
+        self.write_stamp({"commit": "abc", "dirty": False})
+        exit_code, out = self.run_report(intended=(None, None), intended_rev="nope")
+        self.assertEqual(exit_code, 1)
+        snapshot = json.loads(out)["snapshot"]
+        self.assertIsNone(snapshot["intended"])
+        self.assertEqual(snapshot["intendedRef"], "nope")
+
+    def test_no_intended_revision_at_all_is_not_current_rather_than_a_falsy_none(self) -> None:
+        """A tarball tree has no main to resolve. A missing commit on both sides must not
+        compare equal, None == None, and pass as current."""
+        self.write_stamp({"commit": None})
+        exit_code, _ = self.run_report(intended=(None, None))
         self.assertEqual(exit_code, 1)
 
-    def test_a_valid_json_non_dict_stamp_reports_stale_instead_of_crashing(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
-        with mock.patch("builtins.print"):
-            exit_code = skills_install.report(stamp)
+    def test_a_copy_installed_from_a_dirty_checkout_is_never_current(self) -> None:
+        """The stamp records dirty=True from install time, when the copied bytes matched no
+        commit. The intended revision being that commit cannot make those bytes verifiable."""
+        self.write_stamp({"commit": "abc", "dirty": True})
+        exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
 
-    def test_a_dict_stamp_with_a_non_dict_source_reports_stale_instead_of_crashing(self) -> None:
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": "oops"}),
-            encoding="utf-8",
-        )
-        with (
-            mock.patch(
-                "skills_install.source_ref",
-                return_value={"vcs": "git", "commit": "abc", "dirty": False},
-            ),
-            mock.patch("builtins.print"),
-        ):
-            exit_code = skills_install.report(stamp)
+    def test_unreadable_stamp_reports_not_current_instead_of_crashing(self) -> None:
+        self.stamp.write_text("not valid json {{{", encoding="utf-8")
+        exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
 
-    def test_an_unrecognized_stamp_version_reports_stale(self) -> None:
+    def test_a_valid_json_non_dict_stamp_reports_not_current_instead_of_crashing(self) -> None:
+        self.stamp.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
+        exit_code, _ = self.run_report()
+        self.assertEqual(exit_code, 1)
+
+    def test_a_dict_stamp_with_a_non_dict_source_reports_not_current_instead_of_crashing(
+        self,
+    ) -> None:
+        self.write_stamp("oops")
+        exit_code, _ = self.run_report()
+        self.assertEqual(exit_code, 1)
+
+    def test_an_unrecognized_stamp_version_reports_not_current(self) -> None:
         """A future format bump must not have an old-shaped stamp read as current."""
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
+        self.stamp.write_text(
             json.dumps(
                 {"stampVersion": skills_install.STAMP_VERSION + 1, "source": {"commit": "abc"}}
             ),
             encoding="utf-8",
         )
-        with (
-            mock.patch(
-                "skills_install.source_ref",
-                return_value={"vcs": "git", "commit": "abc", "dirty": False},
-            ),
-            mock.patch("builtins.print"),
-        ):
-            exit_code = skills_install.report(stamp)
+        exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
 
-    def test_a_non_git_checkout_reports_stale_rather_than_current(self) -> None:
-        """source_ref() returns {"vcs": "none"} with no "commit" key at all outside a git
-        checkout. A bare equality/or chain could leave `stale` as None (falsy, same as False)
-        instead of asserting staleness when there is no commit to compare against at all."""
-        stamp = self.tmp / "stamp.json"
-        stamp.write_text(
-            json.dumps({"stampVersion": skills_install.STAMP_VERSION, "source": {"commit": None}}),
-            encoding="utf-8",
+
+class IntendedCommitCase(unittest.TestCase):
+    """The default intended revision is the promoted main, remote-tracking ref first."""
+
+    def test_origin_main_is_preferred_over_a_local_main(self) -> None:
+        answers = {
+            "refs/remotes/origin/main^{commit}": "remote",
+            "refs/heads/main^{commit}": "local",
+        }
+        with mock.patch("skills_install.git_in", side_effect=lambda _root, *a: answers.get(a[-1])):
+            self.assertEqual(
+                skills_install.intended_commit(), ("remote", "refs/remotes/origin/main")
+            )
+
+    def test_a_local_main_is_the_fallback(self) -> None:
+        answers = {"refs/heads/main^{commit}": "local"}
+        with mock.patch("skills_install.git_in", side_effect=lambda _root, *a: answers.get(a[-1])):
+            self.assertEqual(skills_install.intended_commit(), ("local", "refs/heads/main"))
+
+    def test_a_named_revision_replaces_the_defaults_and_is_not_read_as_an_option(self) -> None:
+        calls = []
+
+        def fake(_root, *args):
+            calls.append(args)
+
+        with mock.patch("skills_install.git_in", side_effect=fake):
+            self.assertEqual(skills_install.intended_commit("--help"), (None, None))
+        self.assertEqual(len(calls), 1)
+        self.assertLess(calls[0].index("--end-of-options"), calls[0].index("--help^{commit}"))
+
+
+class LiveChannelCase(unittest.TestCase):
+    """The live channel is read from the checkout the marketplace names, which is not
+    necessarily the checkout running the report."""
+
+    def setUp(self) -> None:
+        self.addCleanup(mock.patch.stopall)
+        mock.patch("skills_install.claude_available", return_value=True).start()
+
+    def listing(self, stdout: str, returncode: int = 0) -> None:
+        result = mock.Mock(returncode=returncode, stdout=stdout)
+        mock.patch("subprocess.run", return_value=result).start()
+
+    def test_claude_absent_says_so(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=False).start()
+        self.assertIsNone(skills_install.live_channel()["registered"])
+
+    def test_an_unregistered_marketplace_reads_as_not_registered(self) -> None:
+        self.listing(json.dumps([{"name": "someone-else", "installLocation": "/x"}]))
+        self.assertEqual(skills_install.live_channel(), {"registered": False})
+
+    def test_a_failed_listing_is_not_read_as_unregistered(self) -> None:
+        self.listing("", returncode=1)
+        self.assertIsNone(skills_install.live_channel()["registered"])
+
+    def test_the_registered_checkout_is_the_one_measured(self) -> None:
+        self.listing(
+            json.dumps(
+                [{"name": skills_install.MARKETPLACE_NAME, "installLocation": "/hub/checkout"}]
+            )
         )
-        with (
-            mock.patch("skills_install.source_ref", return_value={"vcs": "none"}),
-            mock.patch("builtins.print"),
-        ):
-            exit_code = skills_install.report(stamp)
-        self.assertEqual(exit_code, 1)
+        answers = {"symbolic-ref": "develop", "rev-parse": "dev", "status": ""}
+        roots = []
+
+        def fake(root, *args):
+            roots.append(root)
+            return answers[args[0]]
+
+        with mock.patch("skills_install.git_in", side_effect=fake):
+            live = skills_install.live_channel()
+        self.assertEqual(
+            live,
+            {
+                "registered": True,
+                "checkout": str(Path("/hub/checkout")),
+                "branch": "develop",
+                "commit": "dev",
+                "dirty": False,
+            },
+        )
+        self.assertEqual(set(roots), {Path("/hub/checkout")})
+
+    def test_a_failed_status_reads_as_unknown_rather_than_clean(self) -> None:
+        self.listing(
+            json.dumps(
+                [{"name": skills_install.MARKETPLACE_NAME, "installLocation": "/hub/checkout"}]
+            )
+        )
+        answers = {"symbolic-ref": None, "rev-parse": "sha", "status": None}
+        with mock.patch("skills_install.git_in", side_effect=lambda _r, *a: answers[a[0]]):
+            live = skills_install.live_channel()
+        self.assertIsNone(live["dirty"])
+        self.assertIsNone(live["branch"])
 
 
 class MainExitCodeCase(unittest.TestCase):
