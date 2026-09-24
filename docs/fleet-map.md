@@ -139,14 +139,14 @@ Owned by [`AUDIT.md`][audit] section 10, [`GOVERNANCE.md` "Hub-Hosted Tooling"][
 
 **Resolved: the install is global per user, and the work is closing its gaps, not adding a second model.** A per-repo pinned install was considered and rejected: it would let a repo's skills match its own state, but it forfeits coverage of ad-hoc sessions in no repo at all (which is where the incidents this fleet guards against actually happened), doubles the staleness surface, and adds a version-resolution mechanism the fleet does not need while the whole fleet tracks one hub.
 
-The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates `.github/skills/` and the Claude Code plugin, and [`scripts/skills_install.py`][skills-install] installs both host-scoped forms per machine. The installer stamps the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only staleness check and exits non-zero when the machine is behind the checkout.
+The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`][skills-readme], [`scripts/build_dist.py`][build-dist] generates `.github/skills/` and the Claude Code plugin, and [`scripts/skills_install.py`][skills-install] installs both host-scoped forms per machine. The installer stamps the hub commit into `~/.agents/skills-install-stamp.json`. `skills_install.py --report` is the read-only check. It judges the copy against the promoted `main`, reports what the checkout Claude Code loads in place is serving, and exits non-zero when the copy is not current.
 
 Four wiring points close the model, and each is in place:
 
 1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install). Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
 2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section, and the [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
 3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
-4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer when `--report` exits non-zero, and after any hub merge that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
+4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer from a freshly fetched `main` when `--report` exits non-zero, and after any promotion to `main` that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
 
 ## Gap Register
 
@@ -210,7 +210,7 @@ flowchart LR
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
 
 - **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
-- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer when `--report` exits non-zero and after any hub merge touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
+- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced (Closed)
 
