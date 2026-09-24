@@ -79,6 +79,50 @@ class SourceRefCase(unittest.TestCase):
             with mock.patch.dict("os.environ", {}, clear=True):
                 self.assertEqual(skills_install.source_ref(), {"vcs": "none"})
 
+    def test_a_bootstrap_tree_is_never_asked_of_git(self) -> None:
+        """A kept tree inside a home directory kept in git would otherwise stamp that repository's
+        commit, and read dirty for every path it does not track."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.source_ref(),
+                {"vcs": "archive", "commit": "cafe1234", "dirty": False},
+            )
+
+    def test_a_bootstrap_tree_with_no_commit_is_an_archive_judged_by_nothing(self) -> None:
+        """A loader whose resolve failed writes no commit, and the tree is still no checkout, so
+        the intended revision must not be read from whatever repository encloses it."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False}
+            )
+            self.assertIsNone(skills_install.intended_commit()[0])
+
+    def test_a_commit_read_from_the_marker_is_labelled_by_the_marker(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(
+                skills_install.intended_commit(),
+                ("cafe1234", skills_install.BOOTSTRAP_COMMIT_MARKER),
+            )
+
     def test_a_git_answer_outranks_a_handed_in_commit(self) -> None:
         """In a real checkout the environment variable is stray state, and the checkout is the truth."""
 
@@ -387,6 +431,7 @@ class IntendedCommitCase(unittest.TestCase):
                 return_value={"vcs": "archive", "commit": "handed", "dirty": False},
             ),
             mock.patch("skills_install.git_in", return_value=None),
+            mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "handed"}),
         ):
             self.assertEqual(skills_install.intended_commit(), ("handed", "SKILLS_SOURCE_COMMIT"))
 
@@ -526,6 +571,45 @@ class LiveChannelCase(unittest.TestCase):
             live = skills_install.live_channel()
         self.assertIsNone(live["dirty"])
         self.assertIsNone(live["branch"])
+
+    def test_a_tree_the_bootstrap_keeps_reads_its_commit_marker_rather_than_git(self) -> None:
+        """A kept tree is a tarball, and git asked about it answers for whatever encloses it."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
+        self.listing(
+            json.dumps([{"name": skills_install.MARKETPLACE_NAME, "installLocation": str(tree)}])
+        )
+        with mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")):
+            live = skills_install.live_channel()
+        self.assertEqual(
+            live,
+            {
+                "registered": True,
+                "checkout": str(tree),
+                "vcs": "archive",
+                "branch": None,
+                "commit": "cafe1234",
+                "dirty": None,
+            },
+        )
+
+    def test_an_undecodable_commit_marker_names_no_commit_rather_than_crashing(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_bytes(b"\xff\xfe")
+        self.assertIsNone(skills_install.bootstrap_tree_commit(tree))
+
+    def test_a_kept_tree_with_no_commit_marker_names_no_commit(self) -> None:
+        """A loader that could not resolve its ref writes no commit, which is not a checkout to ask."""
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        self.listing(
+            json.dumps([{"name": skills_install.MARKETPLACE_NAME, "installLocation": str(tree)}])
+        )
+        with mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")):
+            live = skills_install.live_channel()
+        self.assertIsNone(live["commit"])
+        self.assertEqual(live["vcs"], "archive")
 
 
 class MainExitCodeCase(unittest.TestCase):

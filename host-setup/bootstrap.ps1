@@ -5,6 +5,9 @@
 # A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
+# A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
+# That tree is replaced whole by the next such run and is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+#
 # An unverified loader is worse than none, which is why this one does more than its Linux peer before it trusts anything.
 # It pins TLS 1.2 itself rather than assume a fresh host's default reaches GitHub, it checks a fetched tree for the marker it wrote before removing anything under -Dir, and it hands off to PowerShell 7 explicitly rather than assume the console it started in already carries it.
 #
@@ -105,6 +108,10 @@ Options:
       -Ref REF      Branch, tag, pull request ref, or commit to run from, default main
       -Dir PATH     Where the tree is extracted, default %LOCALAPPDATA%\host-setup
       -Keep         Leave the extracted tree in place, which is removed by default
+
+-Host, -Dev, and -Skills keep their tree, at skills-tree under that directory, because the
+Claude Code plugin they register loads it in place. The next such run replaces it, and a -DryRun
+leaves it.
 
 With no action on a console, the menu asks. With no action and no console, the report runs, since a
 redirected run is not a place to answer a question.
@@ -213,22 +220,32 @@ function Resolve-Ref {
     $script:RESOLVED = ''
 }
 
+# The actions that install the skills register a Claude Code marketplace that loads their tree in place, so that tree is kept.
+# A dry run changes nothing, so it takes a transient tree like any other action rather than replacing the one the plugin loads.
+function Test-KeepsTree {
+    if ($script:DRY_RUN) { return $false }
+    return $script:MODE -in @('host', 'dev', 'skills')
+}
+
 # The paths this loader creates under DIR, named in one place so the cleanup and the download agree.
 # DIR itself is never removed, since -Dir may name a directory the caller owns and put other things in.
-function Get-TreePath { Join-Path $script:DIR 'tree' }
-function Get-ArchivePath { Join-Path $script:DIR 'tree.tar.gz' }
-function Get-MarkerPath { Join-Path (Get-TreePath) '.bootstrap-owned' }
+# A kept tree and a transient one take different names, so a report run sharing a -Dir with a host run never removes the tree Claude Code loads.
+function Get-TreeName { if (Test-KeepsTree) { 'skills-tree' } else { 'tree' } }
+function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
+function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
+function Get-RetiredPath { Join-Path $script:DIR "$(Get-TreeName).old" }
+function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
-# DIR is a caller-supplied path, so 'tree' under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-function Test-TreeOwnership { Test-Path (Get-MarkerPath) }
+# DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+function Test-Ownership { param([string]$Path) Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned') }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
-function Remove-Tree {
-    $tree = Get-TreePath
-    if (-not (Test-Path $tree)) { return }
-    if (-not (Test-TreeOwnership)) { die "$tree exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
-    Remove-Item -Recurse -Force $tree
+function Remove-Owned {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    if (-not (Test-Ownership -Path $Path)) { die "$Path exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
+    Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
 function Get-Tree {
@@ -246,32 +263,100 @@ function Get-Tree {
     }
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # Extracting into a directory of our own keeps a second run from reading the first one's tree.
-    $tree = Get-TreePath
-    Remove-Tree
-    New-Item -ItemType Directory -Path $tree -Force | Out-Null
-    New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
-    & tar -xzf $archive -C $tree --strip-components=1
+    # It is extracted beside the tree rather than over it, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    $staging = Get-StagingPath
+    Remove-Owned -Path $staging
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $staging '.bootstrap-owned') -Force | Out-Null
+    & tar -xzf $archive -C $staging --strip-components=1
     if ($LASTEXITCODE -ne 0) { die 'Could not extract the downloaded archive' }
-    Remove-Item -Force $archive -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+    # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
+    if ($script:RESOLVED) { Set-Content -LiteralPath (Join-Path $staging '.bootstrap-commit') -Value $script:RESOLVED -Encoding ascii }
+
+    $script:TREE = $staging
+    # A kept tree is swapped in by the skills step itself, so a stand-up failing before it leaves the plugin loading what it loaded before.
+    if (-not (Test-KeepsTree)) { Invoke-SwapIn }
+}
+
+# Removes the ownership marker last, so a removal that stops part way, on a file another process holds open, leaves a directory the next run still recognizes as its own.
+function Remove-Retired {
+    param([string]$Path)
+    Get-ChildItem -LiteralPath $Path -Force | Where-Object { $_.Name -ne '.bootstrap-owned' } | Remove-Item -Recurse -Force
+    Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+# Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
+# A rename of a directory in use fails whole on Windows, where a delete fails part way, which is why the old tree is renamed rather than deleted in place.
+function Invoke-SwapIn {
+    $staging = Get-StagingPath
+    $tree = Get-TreePath
+    $retired = Get-RetiredPath
+
+    if (Test-Path -LiteralPath $retired) {
+        if (-not (Test-Ownership -Path $retired)) { die "$retired exists and this loader did not create it, so it will not be removed. Choose another -Dir." }
+        try {
+            Remove-Retired -Path $retired
+        } catch {
+            die "Could not remove the previous tree at $retired, which a process holding a file in it causes. Close it and run this again: $($_.Exception.Message)"
+        }
+    }
+    if (Test-Path -LiteralPath $tree) {
+        if (-not (Test-Ownership -Path $tree)) { die "$tree exists and this loader did not create it, so it will not be replaced. Choose another -Dir." }
+        try {
+            Move-Item -LiteralPath $tree -Destination $retired
+        } catch {
+            die "Could not move the previous tree at $tree aside, which a process holding a file in it causes: $($_.Exception.Message)"
+        }
+    }
+    try {
+        Move-Item -LiteralPath $staging -Destination $tree
+    } catch {
+        $reason = $_.Exception.Message
+        if (Test-Path -LiteralPath $retired) {
+            try {
+                Move-Item -LiteralPath $retired -Destination $tree
+            } catch {
+                die "Could not move the extracted tree into place at ${tree} ($reason), and could not put the previous tree back from ${retired}: $($_.Exception.Message)"
+            }
+        }
+        die "Could not move the extracted tree into place at ${tree}: $reason"
+    }
+    if (Test-Path -LiteralPath $retired) {
+        try {
+            Remove-Retired -Path $retired
+        } catch {
+            warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it: $($_.Exception.Message)"
+        }
+    }
 
     $script:TREE = $tree
     info "Extracted to $script:TREE"
 }
 
-# A tree that is not ours was already refused where it mattered, at the download.
+# Removes each path this run can create by its fixed name rather than through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
+# A path that is not ours was already refused where it mattered, at the download.
 # Refusing again from here would print the same error a second time, after the one that actually stopped the run.
-# Removes what this run created rather than what it finished, because TREE is set only once extraction has succeeded.
-# A failed extract leaves both the archive and a part-written tree, so keying this on TREE left a tarball in the cache on every failed attempt.
 function Invoke-Cleanup {
-    if ($script:KEEP) { return }
-    $tree = Get-TreePath
-    if ((Test-Path $tree) -and -not (Test-TreeOwnership)) {
-        Remove-Item -Force (Get-ArchivePath) -ErrorAction SilentlyContinue
-        return
+    Remove-Item -LiteralPath (Get-ArchivePath) -Force -ErrorAction SilentlyContinue
+    $staging = Get-StagingPath
+    if (Test-Ownership -Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
+    $retired = Get-RetiredPath
+    if (Test-Ownership -Path $retired) {
+        if (-not (Test-Path -LiteralPath (Get-TreePath))) {
+            try {
+                Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+            } catch {
+                warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)"
+            }
+        } else {
+            try { Remove-Retired -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
+        }
     }
-    Remove-Tree
-    Remove-Item -Force (Get-ArchivePath) -ErrorAction SilentlyContinue
+    if ($script:KEEP -or (Test-KeepsTree)) { return }
+    $tree = Get-TreePath
+    if (Test-Ownership -Path $tree) { Remove-Item -LiteralPath $tree -Recurse -Force }
 }
 
 # --- Handoff ---
@@ -283,7 +368,7 @@ function Invoke-Tool {
     param([Parameter(Mandatory)][string]$Tool, [switch]$ToleratesFailure, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
 
     $path = "$TREE/host-setup/windows/$Tool"
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -LiteralPath $path)) {
         die "The fetched tree carries no $Tool at host-setup/windows, so this ref is not one to bootstrap from"
     }
 
@@ -318,6 +403,12 @@ function Invoke-StandUp {
         Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install'
     }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
+    Invoke-SkillsInstall
+}
+
+# The installer registers the directory it runs from, so the kept tree has to hold its name before it runs.
+function Invoke-SkillsInstall {
+    if (Test-KeepsTree) { Invoke-SwapIn }
     Invoke-Tool -Tool 'install-skills.ps1'
 }
 
@@ -449,7 +540,7 @@ function main {
             'upgrade' { Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Packages' }
             'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
             'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
-            'skills' { Invoke-Tool -Tool 'install-skills.ps1' }
+            'skills' { Invoke-SkillsInstall }
             # Only setup-wsl.ps1's -Status runs here: its -Install needs a distribution name, which no flag here collects, so choosing a default distro nobody asked for is exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
             # Installing one by name is a checkout away, once this run has fetched it.
             'wsl' { Invoke-Tool -Tool 'setup-wsl.ps1' -Arguments '-Status' }
@@ -461,7 +552,11 @@ function main {
     }
 
     step 'Done'
-    if ($script:KEEP) { info "The fetched tree is at $script:TREE" }
+    if (Test-KeepsTree) {
+        info "The fleet skills tree is kept at $script:TREE"
+    } elseif ($script:KEEP) {
+        info "The fetched tree is at $script:TREE"
+    }
 }
 
 main
