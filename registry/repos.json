@@ -156,14 +156,14 @@
             "status": "cataloged",
             "types": ["source-only"],
             "groundTruthBranch": "main",
-            "workflowModel": "operational",
+            "workflowModel": "release",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer config/ops repo (docker-compose stacks, lifecycle scripts, Firewalla configs); Linux-consumed on the Proxmox host, so lineEndings lf.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped."]
+            "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model; Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425); the -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped."]
         },
         {
             "name": "KiCadLibrary",

@@ -495,7 +495,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Widen the operational lint trigger to `develop` on four repos.** Each triggers on a pull request to `main` only and therefore runs nothing at all on a pull request into `develop`.
   - **Hub state** - Done, verified `develop` at `b82c1a3` on 2026-08-05, where the change is prose and spec, so it fixes no downstream repo by itself.
-  - **Outstanding** - Four repos, HomeAutomation-Config, ESPHome-Config, HomeAssistant-Config and Vantage-Config, one line each.
+  - **Outstanding** - Three repos, ESPHome-Config, HomeAssistant-Config and Vantage-Config, one line each. HomeAutomation-Config already triggers on `develop` and left the operational model on 2026-09-24.
   - **Issue** - [#585][issue-585].
   - **Rides with** - Nothing, since an operational repo takes its changes direct to `develop`.
   - **Detail** - Confirm the workflow really does trigger on `main` alone before editing, because a repo already naming both is conformant and needs no change.

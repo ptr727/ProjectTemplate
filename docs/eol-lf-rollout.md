@@ -56,7 +56,7 @@ registry as of this doc's authorship.
 - [ ] **ESPHome-NonRoot** (`release`)
 - [ ] **VSCode-Server-DotNetCore** (`release`)
 - [ ] **NxWitness** (`release`)
-- [ ] **HomeAutomation-Config** (`operational`, `lineEndings: lf`): already on the new default's
+- [ ] **HomeAutomation-Config** (`release`, `lineEndings: lf`): already on the new default's
       value. Verify rather than convert, since its own `.editorconfig`/`.gitattributes` may still
       carry the old redundant per-type LF pins the hub dropped.
 - [ ] **KiCadLibrary** (`release`)
