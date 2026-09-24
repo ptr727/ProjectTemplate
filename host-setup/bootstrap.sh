@@ -197,7 +197,9 @@ swap_in() {
         moved=true
     fi
     if ! mv "$staging" "$tree"; then
-        [[ $moved == true ]] && mv "$retired" "$tree"
+        if [[ $moved == true ]] && ! mv "$retired" "$tree"; then
+            die "Could not move the extracted tree into place at $tree, and could not put the previous tree back from $retired"
+        fi
         die "Could not move the extracted tree into place at $tree"
     fi
     if is_ours "$retired"; then
@@ -213,14 +215,16 @@ cleanup() {
     rm -f "$(archive_path)"
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
-    is_ours "$(staging_path)" && remove_tree "$(staging_path)"
     # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     if is_ours "$(retired_path)"; then
         if exists "$(tree_path)"; then
-            remove_tree "$(retired_path)"
-        else
-            mv "$(retired_path)" "$(tree_path)"
+            remove_tree "$(retired_path)" 2>/dev/null || :
+        elif ! mv "$(retired_path)" "$(tree_path)"; then
+            keeps_tree && warn "Could not put the previous tree back from $(retired_path), so move it to $(tree_path) by hand"
         fi
+    fi
+    if is_ours "$(staging_path)"; then
+        remove_tree "$(staging_path)" || warn "Could not remove the extracted tree at $(staging_path), and a later run removes it"
     fi
     [[ $KEEP == true ]] && return 0
     keeps_tree && return 0

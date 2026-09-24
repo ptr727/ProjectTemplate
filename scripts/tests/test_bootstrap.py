@@ -662,6 +662,13 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertTrue(foreign.is_dir())
         self.assertFalse((self.dir / "skills-tree").exists())
 
+    def test_cleanup_restores_the_old_tree_even_where_the_staging_tree_will_not_go(self) -> None:
+        self.locked_entry(self.owned_tree("skills-tree.new", "new"))
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader("cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "old")
+
     def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
         self.owned_tree("skills-tree.old", "old")
         result = self.run_loader("cleanup")
