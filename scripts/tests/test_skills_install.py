@@ -565,6 +565,11 @@ class LiveChannelCase(unittest.TestCase):
             },
         )
 
+    def test_an_undecodable_commit_marker_names_no_commit_rather_than_crashing(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_bytes(b"\xff\xfe")
+        self.assertIsNone(skills_install.bootstrap_tree_commit(tree))
+
     def test_a_kept_tree_with_no_commit_marker_names_no_commit(self) -> None:
         """A loader that could not resolve its ref writes no commit, which is not a checkout to ask."""
         tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -616,11 +621,41 @@ class RegisterCase(unittest.TestCase):
     def test_a_registration_naming_another_bootstrap_tree_is_replaced(self) -> None:
         """An earlier loader's kept tree, under another --dir or the old cache path, is not a
         checkout anybody chose, and leaving it registered leaves the new tree unloaded."""
-        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        (other / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        other = self.bootstrap_tree()
+        mock.patch("skills_install.ROOT", self.bootstrap_tree()).start()
         self.registered_at(str(other))
         self.assertTrue(skills_install.register_claude_marketplace())
         self.assertTrue(self.removes())
+
+    def test_a_run_from_a_checkout_leaves_a_working_bootstrap_registration_alone(self) -> None:
+        """The menu installs from a clone it removes on exit, so re-pointing from there would
+        leave the registration dangling the moment the menu finished."""
+        self.registered_at(str(self.bootstrap_tree()))
+        mock.patch(
+            "skills_install.ROOT", Path(self.enterContext(tempfile.TemporaryDirectory()))
+        ).start()
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertFalse(self.removes())
+
+    def test_a_failed_add_restores_the_working_registration_it_replaced(self) -> None:
+        other = self.bootstrap_tree()
+        mock.patch("skills_install.ROOT", self.bootstrap_tree()).start()
+        self.registered_at(str(other))
+
+        def failing_add(args, **kwargs):
+            self.calls.append(args)
+            code = 1 if args[3:] == ["add", str(skills_install.ROOT)] else 0
+            return mock.Mock(returncode=code, stdout="", stderr="boom")
+
+        mock.patch("subprocess.run", side_effect=failing_add).start()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertFalse(skills_install.register_claude_marketplace())
+        self.assertEqual(self.calls[-1][3:], ["add", str(other)])
+
+    def bootstrap_tree(self) -> Path:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        return tree
 
     def test_a_registration_naming_this_bootstrap_tree_is_left_alone(self) -> None:
         mock.patch("skills_install.is_bootstrap_tree", return_value=True).start()
