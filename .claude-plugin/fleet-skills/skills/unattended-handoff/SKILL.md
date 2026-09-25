@@ -202,8 +202,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
-5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
-   after one retry, which is parked as ready to merge rather than routed around.
+5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
+   parking comment so the comment can name it. That includes a merge the harness refuses after one
+   retry, which is parked as ready to merge rather than routed around.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options,
