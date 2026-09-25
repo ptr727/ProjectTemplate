@@ -3965,6 +3965,7 @@ def _selftest():
     vl = [
         ("a release number is flagged", "Pinned at hub release `2.0.657`.\n", set(), ["2.0.657"]),
         ("a full SHA is flagged", f"uses: o/r/x.yml@{sha} # 2.0.1\n", set(), ["2.0.1", sha]),
+        ("an uppercase SHA is flagged", f"Pinned at {sha.upper()}.\n", set(), [sha.upper()]),
         ("the mechanism alone is clean", "SHA-pinned to a hub release.\n", set(), []),
         ("a dotted quad is not a version", "Host 192.168.1.10 serves it.\n", set(), []),
         ("a two-part version is not a pin", "Python 3.13 and 3.14.\n", set(), []),
@@ -5918,7 +5919,7 @@ def main(argv=None):
     print(f"audit run {run_utc} | hub {hub_sha}{override}")
     if not HUB_NAME_FROM_REMOTE:
         print(
-            f"warning: no git remote; template-reference check falls back to the directory name '{HUB_NAME}' and may miss",
+            f"warning: no git remote; hub-identity checks (template reference, copied version) fall back to the directory name '{HUB_NAME}' and may miss",
             file=sys.stderr,
         )
     print()

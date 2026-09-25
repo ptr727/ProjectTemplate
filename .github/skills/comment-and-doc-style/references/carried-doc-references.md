@@ -33,7 +33,7 @@ Three things, in the files above:
    a three-part version or a full SHA in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or
    `WORKFLOW.md`, outside their verbatim sections downstream and across the whole file in the hub.
    `.github/copilot-instructions.md` is left out of that scan, since its disproved-claims records
-   name a revision by design, which the revision exception below permits.
+   name a revision by design, which the revision carve-out in `GOVERNANCE.md` "References" permits.
 
 ## The two exceptions
 
