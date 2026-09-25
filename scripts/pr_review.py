@@ -2737,7 +2737,8 @@ def digest(
     ]
     if refusal:
         # Printed whole for the reason the comment below is, as the wording carries the remedy.
-        # A file-count refusal is cleared by splitting the pull request and a quota one by waiting.
+        # A file-count refusal is cleared by splitting the pull request.
+        # A quota refusal is account-level state nothing here clears, so the caller proceeds on the other reviewers' coverage.
         # This reads neither cause, only that the round declined.
         lines.append(
             "  COPILOT REFUSED THIS ROUND: the review carrying the head says it did "
