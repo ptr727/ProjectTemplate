@@ -1597,8 +1597,8 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
     """The helper is wired into both ledger loops, which no test of the helper alone can show.
 
     Deleting either call site, or handing the `dispositions` loop the `gap` label, leaves every helper
-    test green and `spec/validate.py` green too, since the live ledger holds no non-compliant
-    `investigate` row. So this runs the real script against a scratch tree whose ledger defers in both arrays.
+    test green, and `spec/validate.py` green too whenever the live ledger is compliant.
+    So this runs the real script against a scratch tree whose ledger defers in both arrays.
     """
 
     MESSAGE = "disposition 'investigate' requires a non-empty tracking value"
