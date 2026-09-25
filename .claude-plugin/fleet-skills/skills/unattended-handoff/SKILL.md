@@ -98,7 +98,10 @@ Each round runs:
 
 The run ends at `NONE`, at `STOP`, at the round cap, or at the repeat stop above. Its final message
 lists every round's outcome line, then the count of parked handoffs, and names the attended session
-(`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else.
+(`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else, and it
+asks nothing in prose. A question for a maintainer who is present, one raised by a subagent report
+arriving after the run ended included, goes through the interface's prompt mechanism with the
+recommended answer first, per `GOVERNANCE.md` "Communicating with the User".
 
 ### The Briefs
 
