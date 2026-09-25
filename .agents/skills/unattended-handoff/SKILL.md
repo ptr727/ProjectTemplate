@@ -149,11 +149,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   lacks.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --track auto-<issue> --limit 1` answers with its refusal naming no
+  which `handoff.py chain --track "auto-<issue>" --limit 1` answers with its refusal naming no
   handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
   request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
-  names it anywhere in its body, since a fix merged to develop leaves its issue open until
-  promotion whoever merged it. No open handoff on any track names it in its next steps, and no
+  names it anywhere in its body, since a fix merged to develop leaves its issue open until it is
+  promoted, whoever merged it. No open handoff on any track names it in its next steps, and no
   comment on it claims it for a `backlog-burndown` group, since both mark work that has no pull
   request yet.
 
@@ -176,7 +176,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
    page size, since `gh issue list` returns 30 rows unless told otherwise.
-5. **Create its handoff** with `handoff.py new --track auto-<issue>`, `--dry-run` first. The body
+5. **Create its handoff** with `handoff.py new --track "auto-<issue>"`, `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
    the issue and what done looks like. That skill's rules on the body bind it.
 6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
@@ -185,12 +185,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Worker
 
-1. **Resume the handoff** with `handoff.py resume --track <track>`, then read its comments with `gh
-   issue view <n> --comments`, since `resume` prints only the body and a parked lane's state is in
-   its parking comment. A lane handed back by an attended session has a closed predecessor holding
-   that comment, so read the predecessor's comments too. Where either names a decision issue, read
-   the answer recorded there and follow it, since it is what unblocked the lane. Re-derive live state rather than trusting
-   any of them, per `session-handoff` "Resuming".
+1. **Resume the handoff** with `handoff.py resume --track "<track>"`, then read its comments with
+   `gh issue view "<n>" --comments`, since `resume` prints only the body and a parked lane's state
+   is in its parking comment. A lane handed back by an attended session has a closed predecessor
+   holding that comment, so read the predecessor's comments too. Where either names a decision
+   issue, read the answer recorded there and follow it, since it is what unblocked the lane.
+   Re-derive live state rather than trusting any of them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
@@ -202,13 +202,23 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
-5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
-   after one retry, which is parked as ready to merge rather than routed around.
-6. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
-   what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
-   complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no successor.
-7. **Save no memory**, since state lives in the chain where any session on any machine reads it,
-   and a lesson goes in the closing comment for the attended session to judge. Reply with one line.
+5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
+   parking comment so the comment can name it. That includes a merge the harness refuses after one
+   retry, which is parked as ready to merge rather than routed around.
+6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
+   the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
+   `decision`, stating the proposed rule and where it would go, with the choices as its options in
+   the form `GOVERNANCE.md` "Communicating with the User" sets for any choice put to the maintainer.
+   The picker never takes a `decision` issue, so the loop cannot write a rule nobody has judged.
+   Once answered, the label comes off per `GOVERNANCE.md` "Communicating with the User". A declined
+   rule's issue closes, and an adopted one stays open as ordinary work, which the loop may then
+   take, since the maintainer has judged it.
+7. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
+   what it filed along the way, the lesson issue included, then close it. An `auto-*` lane holds one
+   issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
+   needing no successor.
+8. **Save no memory**, since state lives in the chain where any session on any machine reads it.
+   Reply with one line.
 
 ## Parking
 
@@ -219,18 +229,18 @@ interruption part way leaves the work findable rather than lost.
    branch and any pull request open. Where the push cannot run, leave the worktree exactly as it
    stands and name it in the comment below.
 2. **File the question** as an issue carrying `decision`, per `GOVERNANCE.md` "Communicating with
-   the User". It states the question, the choices as the options, the recommended one first with
-   its reason, what each choice would do to the parked work, the handoff it belongs to, and every
-   pull request the decision blocks, the open promotion included where it blocks that, which is
-   what lets a picker find a promotion already waiting on one. Where an open `decision` issue
-   already asks the same question about the same pull request, name that one instead of filing
-   another, commenting onto it this handoff, the effect on its work, and every pull request the
-   decision now blocks. It
-   holds nothing but the question, so it closes once answered.
-3. **Comment the state on the handoff**: what is done, the branch and pull request, whether the
-   worktree was left standing, what remains, and the decision issue it now waits on. This comment
-   is what the next session on the lane resumes from, so it is complete enough to continue with no
-   other context.
+   the User". It states the question, the choices as its options in the form that section sets for
+   any choice put to the maintainer, what each choice would do to the parked work, the handoff it
+   belongs to, and every pull request the decision blocks, the open promotion included where it
+   blocks that, which is what lets a picker find a promotion already waiting on one. Where an open
+   `decision` issue already asks the same question about the same pull request, name that one
+   instead of filing another, commenting onto it this handoff, the effect on its work, and every
+   pull request the decision now blocks. It holds nothing but the question, so it closes once
+   answered.
+3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
+   can name it: what is done, the branch and pull request, whether the worktree was left standing,
+   what remains, and the decision issue it now waits on. This comment is what the next session on
+   the lane resumes from, so it is complete enough to continue with no other context.
 4. **Label the handoff `blocked`**, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
    The picker skips it from then on, and the attended session takes it first.
 
