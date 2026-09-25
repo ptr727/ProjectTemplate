@@ -349,63 +349,23 @@ _GIT_GLOBAL_VALUE_OPTS = {
 # The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
+_LITERAL_QUOTE_TOKEN = re.compile(
+    f"[{re.escape(_PUNCTUATION_CHARS)}]+|[^ \\t\\r{re.escape(_PUNCTUATION_CHARS)}]+"
+)
 
 
-def _operator_tokens(text):
-    """Tokenize one line of text as `_shell_tokens` does, isolating operator runs, including where
-    its quoting cannot be parsed. An unterminated quote is read as a literal character there rather
-    than raising, since an apostrophe in a trailing `#` comment is the ordinary way to reach one.
+def _operator_tokens(line):
+    """Tokenize one line as the primary path does, isolating operator runs. Where the line's own
+    quoting does not parse, every quote is read as a literal character instead, so no quote
+    pairing bash does not share can hide a command it runs, and only the operators are split out.
     """
-    toks = []
-    word = None
-    i = 0
-    n = len(text)
-    while i < n:
-        c = text[i]
-        if c in _SHELL_OP_CHARS:
-            if word is not None:
-                toks.append(word)
-                word = None
-            j = i
-            while j < n and text[j] in _SHELL_OP_CHARS:
-                j += 1
-            toks.append(text[i:j])
-            i = j
-            continue
-        if c.isspace():
-            if word is not None:
-                toks.append(word)
-                word = None
-            i += 1
-            continue
-        word = word or ""
-        if c == "\\" and i + 1 < n:
-            word += text[i + 1]
-            i += 2
-        elif c == "'" and "'" in text[i + 1 :]:
-            j = text.index("'", i + 1)
-            word += text[i + 1 : j]
-            i = j + 1
-        elif c == '"':
-            j = i + 1
-            quoted = ""
-            while j < n and text[j] != '"':
-                if text[j] == "\\" and j + 1 < n and text[j + 1] in '"\\':
-                    j += 1
-                quoted += text[j]
-                j += 1
-            if j < n:
-                word += quoted
-                i = j + 1
-            else:
-                word += c
-                i += 1
-        else:
-            word += c
-            i += 1
-    if word is not None:
-        toks.append(word)
-    return toks
+    try:
+        lex = shlex.shlex(line, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        return list(lex)
+    except (ValueError, TypeError):
+        return _LITERAL_QUOTE_TOKEN.findall(line)
 
 
 def _shell_tokens(cmd):
@@ -2329,6 +2289,11 @@ def classify(
 _CASES = [
     # (command, expected_decision, label)
     (
+        'echo "$(echo "\'")"; gh issue comment 1 --repo stranger/x --body hi; echo "\'"  # it\'s',
+        "deny",
+        "a line whose quoting does not parse reads each quote literally, so no pairing hides the write bash runs",
+    ),
+    (
         'gh api graphql -f query=\'mutation($t:ID!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:"x"}){comment{id}}}\' -F t="PRRT_kwDODvuuzM6SFvx0" >/dev/null 2>&1 || true',
         "deny",
         "the incident: suppressed + literal id",
@@ -3799,6 +3764,11 @@ _WAIT_CASES = [
         "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'  # the PR's checks",
         "allow",
         "a bounded loop stays accepted beside an apostrophe in a trailing comment",
+    ),
+    (
+        'echo "$(echo "\'")"; while true; do sleep 5; done; echo "\'"  # it\'s',
+        "deny",
+        "a quote pairing bash does not share cannot hide the loop on a line whose quoting does not parse",
     ),
     (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
