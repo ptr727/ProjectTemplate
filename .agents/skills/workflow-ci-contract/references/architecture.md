@@ -55,7 +55,7 @@ The diagram writes `BRANCH` and `TARGET` where the prose writes `<branch>` and `
 
 ### Reusable-Task Parameter Contract
 
-Every leaf and the release task take `ref`, `branch` (the **logical** branch that drives config/tags/prerelease), and where relevant `smoke`. Branch-derived config keys off `inputs.branch` (the logical branch the caller passes). Artifact names are branch-suffixed.
+Every leaf and the release task take `ref`, `branch` (the **logical** branch that drives config/tags/prerelease), and where relevant `smoke`. Branch-derived config keys off `inputs.branch` (the logical branch the caller passes). Artifact names carry the branch.
 
 ### Versioning
 
