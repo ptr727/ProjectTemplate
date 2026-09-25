@@ -235,7 +235,8 @@ queue in the same act". Three more state the form the questions take, the one op
 question through the interface's prompt, never in prose", which also names the numbered list as the
 fallback where no prompt exists, the one opening "Raise work blocked on the user as a direct
 interactive prompt", which shapes the options, and the one opening "Lead every choice with a
-recommendation and its reason", which binds every question put either way. A reader who stops after the obligation has it with no shape to put it in.
+recommendation and its reason", which binds every question put either way. A reader who stops after
+the obligation has it with no shape to put it in.
 
 Recording the queue is not asking it. The handoff's "The parked decision queue" section is the
 recording half, and what the other half is depends on what the session can reach: a prompt where one

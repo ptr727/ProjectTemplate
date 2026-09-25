@@ -99,12 +99,7 @@ Each round runs:
 The run ends at `NONE`, at `STOP`, at the round cap, or at the repeat stop above. Its final message
 lists every round's outcome line, then the count of parked handoffs, and names the attended session
 (`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else, and it
-asks nothing in prose. Where the maintainer is present, the message closes with a prompt through the
-interface's own mechanism, per `GOVERNANCE.md` "Communicating with the User", whose options are next
-actions this seat can name without reading anything, with starting `session-handoff` on the parked
-handoffs first and recommended wherever any are parked. A subagent report arriving after the run
-ended is put the same way. The prompt never asks a parked decision itself, since its choices and
-recommendation live on its issue and `session-handoff` is what records the answer there.
+asks nothing in prose.
 
 ### The Briefs
 
