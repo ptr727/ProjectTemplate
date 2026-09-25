@@ -202,8 +202,8 @@ the whole procedure below. Run every step without being reminded of any of them.
    decision queue in the same act, per "The Parked Decision Queue". An `auto-*` lane is the
    exception, since it holds one issue. Where that issue is done, comment the outcome on the link
    and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
-   remains, write its next link on the same track without `blocked`, which hands it back to the
-   unattended loop. Either way the `blocked` label left on in step 3 goes with the link it was on.
+   remains, write its next link on the same track without `blocked`, its next steps naming the
+   decision issue and the answer, which hands it back to the unattended loop. Either way the `blocked` label left on in step 3 goes with the link it was on.
 7. **Save memories last.** Where the host keeps a per-user memory, record what this session learned
    that neither the chain nor the tree records, as the final act of the session, so no later step
    can change what a memory claims. A memory holds lessons about how to work, never the round's

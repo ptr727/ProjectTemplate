@@ -52,7 +52,7 @@ The maintainer names the scope when invoking the skill, and the scope is the who
 | Scope | A worker may merge |
 | --- | --- |
 | `develop`, the default | its feature -> develop pull request |
-| `main` | that, then the develop -> main promotion pull request carrying it |
+| `main` | that, then the develop -> main promotion pull request that follows it |
 | `release` | both, then dispatch the release that promotion unblocks |
 
 The default keeps every main merge the maintainer's. `main` promotes each fix alone, since many
@@ -122,16 +122,11 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 | either | `STOP <reason>` | a condition no later round can clear, so the run ends |
 
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
-an exhausted reviewer quota, a push the executor refuses, or under `main` or `release` a develop
-failing the lane-only test at the start of a round, since promoting then would merge changes nobody
-in this run named.
+an exhausted reviewer quota, or a push the executor refuses.
 
-**The lane-only test** passes when develop's content differs from main's by exactly this lane's own
-change. After a fetch, `git diff origin/main origin/develop` is empty where the lane has not merged
-to develop yet, and produces the same patch as `git diff <merge>^ <merge>` for the lane's own squash
-merge commit where it has. Content rather than commit count is the test, because a change merged to
-both branches in parallel leaves commits in the range and no difference in content, and content
-rather than file names, because another change to a file this lane also touched shares its name.
+A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
+Under `main` or `release` every round promotes, so each one ordinarily carries one fix, and a change
+another session merged to develop meanwhile rides along with it. Naming the scope accepts that.
 
 ## Auto-Resolvable
 
@@ -182,30 +177,27 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 1. **Resume the handoff** with `handoff.py resume --track <track>`, then read its comments with `gh
    issue view <n> --comments`, since `resume` prints only the body and a parked lane's state is in
-   its parking comment. Where that comment names a decision issue, read the answer recorded there
-   and follow it, since it is what unblocked the lane. Re-derive live state rather than trusting
+   its parking comment. A lane handed back by an attended session has a closed predecessor holding
+   that comment, so read the predecessor's comments too. Where either names a decision issue, read
+   the answer recorded there and follow it, since it is what unblocked the lane. Re-derive live state rather than trusting
    any of them, per `session-handoff` "Resuming".
-2. **Check the scope's precondition.** Under `main` or `release`, a develop failing the lane-only
-   test is a `STOP`, before any edit, per "Return Lines".
-3. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
+2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
-4. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
+3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
    `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Under `main` or
-   `release`, continue to the promotion pull request, its body carrying `Fixes #<issue>`, and hand it
-   to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
-   Every Merge Gate item other than the permission still has to hold. Immediately before opening
-   the promotion and again before merging it, fetch and run the lane-only test. Anything else
-   merged into develop while the review loop ran would ride along, so a failure is a decision and
-   the promotion is parked, per "Parking", rather than merged.
-5. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
+   `release`, continue to the promotion pull request, its body carrying a `Fixes` line for every
+   issue develop fixes, assembled per `backlog-burndown` "Assembling the Promotion Body", and hand
+   it to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
+   Every Merge Gate item other than the permission still has to hold.
+4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
-6. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
+5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
    after one retry, which is parked as ready to merge rather than routed around.
-7. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
+6. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
    what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
    complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no successor.
-8. **Save no memory**, since state lives in the chain where any session on any machine reads it,
+7. **Save no memory**, since state lives in the chain where any session on any machine reads it,
    and a lesson goes in the closing comment for the attended session to judge. Reply with one line.
 
 ## Parking
