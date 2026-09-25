@@ -214,7 +214,7 @@ flowchart LR
   finding -->|"one repo"| s10["10: Converge, branch + fix + PR"]
   s10 --> review["review loop to green"]
   review --> merge["maintainer merges"]
-  merge --> reaudit["re-audit, commit the report"]
+  merge --> reaudit["re-audit, the hub commits the report"]
   s9 --> reaudit
 ```
 

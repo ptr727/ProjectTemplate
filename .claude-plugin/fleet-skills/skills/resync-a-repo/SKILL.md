@@ -91,6 +91,7 @@ rather than leaving it standing.
 One focused pull request per drift class, branched from the target's `develop`, never a direct
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
-maintainer merges, the agent drives to green and stops. Re-run the audit after the merge and
-commit the report once authorized, per `git-commit-conventions`, done means measured, not
-applied.
+maintainer merges, the agent drives to green and stops. Re-run the audit after the merge and,
+from the hub checkout, commit the report under the hub's own `reports/` once authorized, per
+`AUDIT.md` section 8 and `git-commit-conventions`. A session resyncing its own repository
+leaves the report to a hub-side audit instead. Done means measured, not applied.

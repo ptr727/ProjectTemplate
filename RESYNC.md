@@ -122,7 +122,7 @@ The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a proj
 - **The maintainer merges.** The agent drives to green and stops.
 - **Fix systemic drift in the hub instead.** Where many repositories share a drift, fix the rule or add a check here and let a re-audit re-flag it, rather than hand-patching each repository for a shared cause.
 
-**Done means measured, not applied.** Re-run the audit after the merge and commit the report, because a convergence asserted without a report is a convergence nobody can check.
+**Done means measured, not applied.** Re-run the audit after the merge, because a convergence asserted without a report is a convergence nobody can check. The hub commits that report under its own `reports/` per [`AUDIT.md`][audit] section 8, so a session resyncing its own repository leaves the report to a hub-side audit.
 
 <!-- Repo -->
 
