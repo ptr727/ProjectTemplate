@@ -829,7 +829,7 @@ def main():
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
             hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
-    end_group = next((g for g in ends if "matcher" not in g), None)
+    end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
     if end_group is None:
         end_group = {"hooks": []}
         ends.append(end_group)

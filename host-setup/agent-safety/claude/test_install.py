@@ -389,6 +389,25 @@ class TestRegistration(StampCase):
         ]
         self.assertEqual(len(entries), 1)
 
+    def test_reinstalling_reuses_a_sweep_group_covering_every_reason(self):
+        """`*` and `""` cover every reason the same as absent, so reinstalling must reuse that group
+        rather than read only the matcherless shape and leave a second, empty one behind."""
+        self.install()
+        for matcher in ("*", ""):
+            with self.subTest(matcher=matcher):
+                data = self._settings()
+                data["hooks"]["SessionEnd"][0]["matcher"] = matcher
+                self._write(data)
+                self.install()
+                groups = self._settings()["hooks"]["SessionEnd"]
+                owning = [
+                    g
+                    for g in groups
+                    if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+                ]
+                self.assertEqual(len(owning), 1, groups)
+                self.assertEqual(owning[0].get("matcher"), matcher)
+
     def test_a_wrong_hooks_shape_is_reported_as_itself(self):
         """Iterating a dict yields keys and a string yields characters, so a wrong shape read as
         zero registrations and sent a reader to the wrong fix."""
