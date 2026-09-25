@@ -50,8 +50,8 @@ repo.
   needs a review.
 
 Nothing else. This skill never re-vendors a carried file, never deletes one, and never applies a
-setting or ruleset. Those are `resync-a-repo`'s job, driven from the hub with a named target,
-never a downstream repo acting on itself.
+setting or ruleset. Converging that drift is a resync, a separate change on its own branch, run
+per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from a hub checkout.
 
 ## Refresh cadence
 
@@ -67,9 +67,8 @@ refresh stays out of scope until the fleet has evidence the manual cadence fails
 
 - **A carried section that differs from the hub in a way that reads as a genuine local addition**
   rather than plain staleness, the exact case `carried-instruction-file-guard` exists to protect.
-  Report precisely what differs and stop there. Per AUDIT.md, a downstream repo does not write its
-  own audit report, it names what it found and points at
-  `resync-a-repo`, run from a hub checkout, as the next step.
+  Report precisely what differs and stop there, naming a resync as the next step, where
+  `carried-instruction-file-guard` decides the merge.
 - **Anything the installer alone cannot resolve**, a broken `claude` CLI marketplace
   registration, a settings or ruleset drift, a workflow interface mismatch. Name it and hand it to
   the maintainer or a hub-driven resync rather than patching around it locally.
