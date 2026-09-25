@@ -5919,7 +5919,7 @@ def main(argv=None):
     print(f"audit run {run_utc} | hub {hub_sha}{override}")
     if not HUB_NAME_FROM_REMOTE:
         print(
-            f"warning: no git remote; the hub name falls back to the directory name '{HUB_NAME}', so the template-reference scan may miss in every repo and the hub-scoped checks may raise false findings on the hub's own entry",
+            f"warning: no git remote; the hub name falls back to the directory name '{HUB_NAME}', so every check that depends on the hub's identity is unreliable in this run",
             file=sys.stderr,
         )
     print()
