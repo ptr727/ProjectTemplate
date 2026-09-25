@@ -149,13 +149,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   lacks.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --track auto-<issue> --limit 1` answers with its refusal naming no
+  which `handoff.py chain --track "auto-<issue>" --limit 1` answers with its refusal naming no
   handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
   request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
-  names it anywhere in its body, since a fix merged to develop leaves its issue open until
-  promotion whoever merged it. No open handoff on any track names it in its next steps, and no
-  comment on it claims it for a `backlog-burndown` group, since both mark work that has no pull
-  request yet.
+  names it anywhere in its body, since a fix merged to develop leaves its issue open until promotion
+  whoever merged it. No open handoff on any track names it in its next steps, and no comment on it
+  claims it for a `backlog-burndown` group, since both mark work that has no pull request yet.
 
 ## The Picker
 
@@ -176,7 +175,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
    page size, since `gh issue list` returns 30 rows unless told otherwise.
-5. **Create its handoff** with `handoff.py new --track auto-<issue>`, `--dry-run` first. The body
+5. **Create its handoff** with `handoff.py new --track "auto-<issue>"`, `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
    the issue and what done looks like. That skill's rules on the body bind it.
 6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
@@ -185,12 +184,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Worker
 
-1. **Resume the handoff** with `handoff.py resume --track <track>`, then read its comments with `gh
-   issue view <n> --comments`, since `resume` prints only the body and a parked lane's state is in
-   its parking comment. A lane handed back by an attended session has a closed predecessor holding
-   that comment, so read the predecessor's comments too. Where either names a decision issue, read
-   the answer recorded there and follow it, since it is what unblocked the lane. Re-derive live state rather than trusting
-   any of them, per `session-handoff` "Resuming".
+1. **Resume the handoff** with `handoff.py resume --track "<track>"`, then read its comments with
+   `gh issue view "<n>" --comments`, since `resume` prints only the body and a parked lane's state
+   is in its parking comment. A lane handed back by an attended session has a closed predecessor
+   holding that comment, so read the predecessor's comments too. Where either names a decision
+   issue, read the answer recorded there and follow it, since it is what unblocked the lane.
+   Re-derive live state rather than trusting any of them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with

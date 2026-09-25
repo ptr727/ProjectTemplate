@@ -143,7 +143,7 @@ section is the pointer to what to read rather than the answer, and `AGENTS.md` "
 already says stale context is worse than absent. A handoff is context by construction, so this is
 that rule applied to the one artifact built to outlive the session that wrote it.
 
-Read the current link's comments too, with `gh issue view <n> --comments`, since `resume` prints
+Read the current link's comments too, with `gh issue view "<n>" --comments`, since `resume` prints
 only the body, and a parking comment or a closing session's answers land in the comments.
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
