@@ -1222,7 +1222,10 @@ def coverage_statements(body: str) -> list[str]:
     reported no coverage at all over a round that stated it in full.
 
     A line indented four or more columns is the fourth convention, an indented code block, and a
-    marker on one is dropped from the line rather than the line being dropped whole. `CCR_OVERVIEW`
+    marker on one is dropped from the line rather than the line being dropped whole. The indent
+    opens a code block only where nothing runs on into it, since an indented line under paragraph
+    text is that paragraph's lazy continuation and renders as part of it, while a heading is
+    complete on its own line and a code line carries its block on to the next. `CCR_OVERVIEW`
     and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
     being read within its line, takes that bound here instead of in its pattern. The rest of the
     line is still read, the bullet and the sentence being left to their own readers as before, and
@@ -1232,13 +1235,17 @@ def coverage_statements(body: str) -> list[str]:
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     found = []
     quoted = False
+    continues = False
     for ln in plain.splitlines():
         stripped = ln.lstrip()
         if not ln.strip():
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
+            continues = False
             continue
         indented = code_indented(ln)
+        code = indented and not continues
+        continues = not code and not re.match(r"#{1,6}(?:\s|$)", stripped)
         # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
@@ -1247,7 +1254,7 @@ def coverage_statements(body: str) -> list[str]:
         if not indented and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
-        if indented:
+        if code:
             ln = FLEET_REVIEW.sub(" ", ln)
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
         if quoted or not is_coverage_line(ln):

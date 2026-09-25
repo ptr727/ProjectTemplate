@@ -1961,6 +1961,9 @@ class TestCoverage(GqlCase):
 
         The kept line is stripped, so the marker has to be off it before any reader sees it. Left
         on an indented bullet, it read as the round's own figure once the indent was gone.
+
+        An indented line under paragraph text is that paragraph's lazy continuation rather than a
+        code block, so a marker there is still stated, and dropping it read no coverage at all.
         """
         for label, line in (
             ("four spaces", f"    {MARKER}"),
@@ -1989,6 +1992,16 @@ class TestCoverage(GqlCase):
         self.assertIn(
             "coverage=unstated", self.digest_for(review(body=f"{OVERVIEW}\n    {MARKER}"))
         )
+        for label, body, state in (
+            ("under paragraph text", f"The changes are consistent, with\n    {MARKER}", "FULL"),
+            ("under a list item", f"- The changes are consistent.\n    {MARKER}", "FULL"),
+            ("under a heading", f"## Overview\n    {MARKER}", "UNSTATED"),
+            ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
+            ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
+        ):
+            with self.subTest(case=label):
+                expected = getattr(pr_review, state)
+                self.assertEqual(expected, pr_review.coverage_of({"body": body})[0])
 
     def test_a_line_stating_both_readings_and_disagreeing_is_refused(self) -> None:
         """Reading the marker within its line is what lets one line carry both readings.
