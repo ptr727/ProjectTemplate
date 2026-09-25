@@ -1,17 +1,14 @@
 ---
 name: agent-conduct
 description: >-
-  Surfaces the ptr727/ProjectTemplate fleet's conduct rules at the five decision moments they are
-  violated: about to claim work is done, verified, green, or fixed, about to proceed on an
-  assumption the user could cheaply confirm, a failure or review finding just surfaced a durable
-  lesson, about to write a handoff, which owes an account of every question parked rather than
-  asked, and work here waiting on a fix in another repository. Use this whenever about to claim
-  work is done, verified, green, or fixed, whenever about to pick a default, guess an intent, or
-  resolve an ambiguity without asking, whenever work is blocked on a decision or authorization
-  only the user can give, whenever about to ask the user anything or offer them more work, a
-  closing "want me to...?" line included, whenever about to file a question as an issue instead
-  of asking it, whenever writing a handoff, whenever work here waits on a fix in another repository, and
-  whenever an incident, a wrong answer, or a repeated correction just taught something a future
+  Surfaces the ptr727/ProjectTemplate fleet's conduct rules at the decision moments they are
+  violated. Use this whenever about to claim work is done, verified, green, or fixed, whenever
+  about to pick a default, guess an intent, or resolve an ambiguity without asking, whenever work
+  is blocked on a decision or authorization only the user can give, whenever about to ask the
+  user anything or offer them more work, a closing "want me to...?" line included, whenever about
+  to file a question as an issue instead of asking it, whenever writing a handoff, which owes an
+  account of every question parked rather than asked, whenever work here waits on a fix in
+  another repository, and whenever an incident, a wrong answer, or a repeated correction just taught something a future
   session must honor. Deliberately narrow: the carried AGENTS.md "Context and Delegation
   Discipline" section is the always-on layer, so do not load this skill as general background.
   Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
