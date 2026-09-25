@@ -9,14 +9,14 @@ description: >-
   none, which stands for the whole attended procedure this skill states, and whenever about to
   re-attempt something a previous round may already have tried, the moment that earns this skill,
   since a session that does not know a chain exists never goes looking for one. Every session
-  writing one ends in the same order: the parked decision queue presented, the link, then memories
-  saved last. Triggers even when the session feels too short to be worth a handoff, because the
-  rounds that produce nothing worth writing down are exactly the rounds a later session repeats.
-  The rule is `AGENTS.md` "Session Scope" and the mechanics are the hub's `scripts/handoff.py`.
-  Where a sibling skill owns the moment, it wins: `backlog-burndown` owns a multi-round run's
-  reporting, `unattended-handoff` owns a run with no maintainer present, and `repo-worktree` owns
-  the worktree the handoff names. `agent-conduct` co-fires at the parked-decision obligation and
-  neither defers to the other.
+  writing one ends in the same order: lessons committed, the link, the parked decision queue
+  presented, then memories saved last. Triggers even when the session feels too short to be worth
+  a handoff, because the rounds that produce nothing worth writing down are exactly the rounds a
+  later session repeats. The rule is `AGENTS.md` "Session Scope" and the mechanics are the hub's
+  `scripts/handoff.py`. Where a sibling skill owns the moment, it wins: `backlog-burndown` owns a
+  multi-round run's reporting, `unattended-handoff` owns a run with no maintainer present, and
+  `repo-worktree` owns the worktree the handoff names. `agent-conduct` co-fires at the
+  parked-decision obligation and neither defers to the other.
 ---
 
 # Session Handoff
@@ -194,8 +194,8 @@ the whole procedure below. Run every step without being reminded of any of them.
    its own question with its answers as the options, the recommended one first and every one
    carrying its reason, per "The Parked Decision Queue" below. The numbered list is the fallback
    where no prompt exists.
-6. **Close the session** per "Closing a Session" below, which presents the parked decision queue,
-   writes the next link with `new`, and saves memories last. An `auto-*` lane is the
+6. **Close the session** per "Closing a Session" below, which commits lessons, writes the next link
+   with `new`, presents the parked decision queue, and saves memories last. An `auto-*` lane is the
    exception, since it holds one issue. Where that issue is done, comment the outcome on the link
    and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
    remains, write its next link on the same track without `blocked`, its next steps naming the
@@ -205,19 +205,23 @@ the whole procedure below. Run every step without being reminded of any of them.
 
 ## Closing a Session
 
-Every session that writes a handoff, attended or not, ends in this order, each step recording what
-the one before it settled.
+Every session that writes a handoff, attended or not, ends in this order. Each step leaves the
+chain whole if the session is interrupted after it.
 
-1. **Present the parked decision queue**, per "The Parked Decision Queue" below, and record each
-   answer on its issue.
-2. **Write the link** in the same act, per "Running the Chain" below, its parked-decision account
-   reflecting the answers just given, or close the lane out where its work is done.
-3. **Save memories last.** A lesson a future agent must honor is committed to the tree or filed as
-   an issue first, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", since memory does
-   not travel with the repository. Where the host keeps a per-user memory, what goes there is the
-   environment-specific nuance and in-flight state that rule leaves to memory, saved as the
-   session's final act so no later step can change what it claims. Every `unattended-handoff` seat
-   skips this step, since that skill keeps its state in the chain alone.
+1. **Record what was learned.** A lesson a future agent must honor is committed to the tree or filed
+   as an issue, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", so the link's "New
+   learnings" section has somewhere real to point.
+2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
+   The link is written before any question is put, since a prompt blocks until someone answers and
+   an unanswered one must not cost the round its handoff.
+3. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
+   Record each answer on its issue, and comment the answers onto the link just written, so its
+   parked-decision account is current without a second link.
+4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
+   environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, such as a
+   quirk of this machine or this account, saved as the session's final act. Never the round's
+   state, which the link holds, and never a lesson, which step 1 already committed. Every
+   `unattended-handoff` seat skips this step.
 
 ## The Parked Decision Queue
 
