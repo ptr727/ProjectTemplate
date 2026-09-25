@@ -11,9 +11,10 @@ description: >-
   this file is out of date," since the fleet's mechanical audit checks this file, at intent
   fidelity, for file presence and each named section's heading, never for content drift inside a
   section, so nothing else notices a stale section here except a live check like this one. An
-  `audit-a-repo` run measures only this file's presence and headings, so content drift in it stays
-  this skill's, and a resync fires it beside `resync-a-repo` and `carried-instruction-file-guard`,
-  which guards the other four carried files.
+  `audit-a-repo` run checks this file's presence, headings, and a date-based staleness hint
+  without judging its content, so content drift in it stays this skill's, and a resync fires it
+  beside `resync-a-repo` and `carried-instruction-file-guard`, which guards the other four carried
+  files.
 ---
 
 # Copilot Instructions Keeper

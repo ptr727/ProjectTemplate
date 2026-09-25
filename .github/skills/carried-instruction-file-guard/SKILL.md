@@ -10,8 +10,8 @@ description: >-
   resyncing a repo's docs, because that phrasing is exactly how a real incident happened, where a
   downstream repo's local rules were silently deleted by a full-file overwrite. Do not skip this
   just because the task looks mechanical. It applies only when a write is about to happen, so a
-  read-only `audit-a-repo` run does not fire it, it co-fires with `resync-a-repo` and a
-  self-applying `check-this-repo` rather than replacing either, and
+  read-only `audit-a-repo` run does not fire it, it co-fires with `resync-a-repo` rather than
+  replacing it, `check-this-repo` never writes these files and escalates instead, and
   `.github/copilot-instructions.md` is `copilot-instructions-keeper`'s.
 ---
 

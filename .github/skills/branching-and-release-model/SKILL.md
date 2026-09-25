@@ -16,7 +16,7 @@ description: >-
   a promotion merge or a release dispatch is `merge-and-release`, which wins where both fire.
 ---
 
-# Operational vs. Release Workflow
+# Branching and Release Model
 
 ## Why this exists
 
