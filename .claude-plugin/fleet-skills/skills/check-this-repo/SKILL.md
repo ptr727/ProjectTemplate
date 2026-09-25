@@ -19,8 +19,8 @@ description: >-
 
 ## Why this exists
 
-A downstream repo today only finds out it has drifted when someone runs a hub-driven resync
-against it by name. Nothing notices from the inside on its own. This skill is that inside check,
+A downstream repo today only finds out it has drifted when someone runs an audit or a resync
+against it. Nothing notices from the inside on its own. This skill is that inside check,
 run with no hub-side operator watching, so a stale Skills install or an out-of-date `AGENTS.md`
 pointer gets noticed and fixed without waiting for a fleet-wide sweep to reach this particular
 repo.
@@ -71,7 +71,7 @@ refresh stays out of scope until the fleet has evidence the manual cadence fails
   `carried-instruction-file-guard` decides the merge.
 - **Anything the installer alone cannot resolve**, a broken `claude` CLI marketplace
   registration, a settings or ruleset drift, a workflow interface mismatch. Name it and hand it to
-  the maintainer or a hub-driven resync rather than patching around it locally.
+  the maintainer or a resync per the hub's `RESYNC.md` rather than patching around it locally.
 
 ## Answering "why isn't a fleet rule applying"
 
