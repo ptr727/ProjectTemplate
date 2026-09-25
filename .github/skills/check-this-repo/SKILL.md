@@ -68,7 +68,7 @@ refresh stays out of scope until the fleet has evidence the manual cadence fails
 - **A carried section that differs from the hub in a way that reads as a genuine local addition**
   rather than plain staleness, the exact case `carried-instruction-file-guard` exists to protect.
   Report precisely what differs and stop there. Per AUDIT.md, a downstream repo does not write its
-  own audit report or resync itself against the hub, it names what it found and points at
+  own audit report, it names what it found and points at
   `resync-a-repo`, run from a hub checkout, as the next step.
 - **Anything the installer alone cannot resolve**, a broken `claude` CLI marketplace
   registration, a settings or ruleset drift, a workflow interface mismatch. Name it and hand it to
