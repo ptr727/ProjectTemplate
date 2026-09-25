@@ -215,8 +215,8 @@ it.
    says where a lesson goes, before the link is written, so its "New learnings" section points at a
    record that exists.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
-   The link is written before any question is put, since a prompt blocks until someone answers and
-   an unanswered one must not cost the round its handoff.
+   The link is written before the closing questions are put, since a prompt blocks until someone
+   answers and an unanswered one must not cost the round its handoff.
 3. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
    Record each answer given on its issue, where one was asked and answered. Where a link was
    written, comment those answers onto it together with the queue's count and list after them,
