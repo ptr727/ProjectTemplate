@@ -127,6 +127,18 @@ def matcher_sees_bash(matcher):
         return False
 
 
+def matcher_covers_every_exit_reason(matcher):
+    """Whether a SessionEnd matcher's shape runs on every exit reason rather than naming specific ones.
+
+    A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool: an
+    absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
+    the three is a defect. Unlike `matcher_sees_bash`, there is no single reason to test regex
+    membership against, since the sweep must fire on every exit reason rather than one particular
+    one, so this classifies the shape rather than evaluating a pattern.
+    """
+    return matcher is None or matcher in ("", "*")
+
+
 def owns(entry, prefix):
     """Whether an allow rule names the script the prefix identifies, rather than a longer path.
 
@@ -510,12 +522,12 @@ def registration_problems(claude_home):
                 )
                 continue
             swept += 1
-            # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
+            # A matcher naming specific exit reasons runs the sweep on those reasons alone.
             # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
-            if "matcher" in group:
+            if not matcher_covers_every_exit_reason(group.get("matcher")):
                 report(
                     f"the SessionEnd sweep is registered under a matcher "
-                    f"({group['matcher']!r}), so it runs on that exit reason alone"
+                    f"({group.get('matcher')!r}), so it runs on that exit reason alone"
                 )
     if ends is None:
         pass  # likewise reported as a shape error above
@@ -811,13 +823,13 @@ def main():
     done = ["PreToolUse/Bash hook registered"]
 
     # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
-    # The group carries no matcher, so it fires on every exit reason rather than on one.
+    # The chosen or newly created group covers every exit reason, so the sweep fires on all of them.
     ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
     for g in ends:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
             hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
-    end_group = next((g for g in ends if "matcher" not in g), None)
+    end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
     if end_group is None:
         end_group = {"hooks": []}
         ends.append(end_group)
