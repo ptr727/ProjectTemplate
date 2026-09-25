@@ -217,6 +217,7 @@ import subprocess
 import sys
 import tarfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -399,7 +400,28 @@ COVERAGE_COUNTS = re.compile(
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
-FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
+FENCE = re.compile(
+    r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)(?:\n.*?)??"
+    r"(?:(?P<close>\n {0,3}(?:\1`*|\2~*)[ \t]*\r?(?=\n|\Z))|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def strip_fences(
+    body: str, repl: Callable[[re.Match[str]], str] = lambda m: "", to_end: bool = False
+) -> str:
+    """The body with each fenced block replaced by `repl`, the unclosed one kept unless `to_end`.
+
+    Markdown runs an unclosed fence to the end of the body, so for the coverage reader everything
+    after one is a quotation, and masking it there reads as no coverage, which blocks. Every other
+    reader looks for something that blocks, such as a suppressed finding or an unrecognized shape,
+    and masking the rest of the body there would hide it, so those keep reading it.
+    """
+    return FENCE.sub(
+        lambda m: repl(m) if to_end or m.group("close") is not None else m.group(), body
+    )
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
@@ -1169,7 +1191,7 @@ def review_effort(pr: dict) -> tuple[str, str]:
     newest = newest_of(head_reviews(pr))
     if newest is None:
         return "unknown", "unknown"
-    plain = FENCE.sub("", newest.get("body") or "")
+    plain = strip_fences(newest.get("body") or "")
     for line in plain.splitlines():
         match = EFFORT_LINE.fullmatch(line)
         if match:
@@ -1233,7 +1255,7 @@ def coverage_statements(body: str) -> list[str]:
     the marker comes off before the line is kept, because every reader downstream reads the
     kept line with its indentation already stripped.
     """
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or "", to_end=True))
     found = []
     quoted = False
     continues = False
@@ -1521,7 +1543,7 @@ def second_format(body: str) -> bool:
     Quotations are dropped first for the reason a coverage line's are: this change puts the marker
     into the diff, and a round quoting it is not a round written in that format.
     """
-    return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", FENCE.sub("", body or ""))))
+    return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", strip_fences(body or ""))))
 
 
 def findings_on(tail: str) -> int | None:
@@ -1579,7 +1601,7 @@ def stated_total(body: str) -> int | None:
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it.
     """
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
@@ -1674,7 +1696,7 @@ def file_table(body: str) -> list[str]:
     table later in the body is read as a second table rather than as more of the first.
     """
     paths, reading = [], False
-    for line in FENCE.sub("", body or "").splitlines():
+    for line in strip_fences(body or "").splitlines():
         if TABLE_HEADER.match(line):
             reading = True
         elif (row := TABLE_ROW.match(line)) is None:
@@ -1850,7 +1872,7 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
@@ -2281,7 +2303,7 @@ def mask_quotations(body: str) -> str:
     """
     return CODE_SPAN.sub(
         lambda m: QUOTED_CHAR.sub(" ", m.group()),
-        FENCE.sub(lambda m: QUOTED_CHAR.sub(" ", m.group()), body or ""),
+        strip_fences(body or "", lambda m: QUOTED_CHAR.sub(" ", m.group())),
     )
 
 
@@ -2446,7 +2468,7 @@ def qodo_open_findings(body: str) -> list[str]:
         return []
     return [
         s.strip()
-        for s in SUMMARY.findall(CODE_SPAN.sub(" ", FENCE.sub("", body)))
+        for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(body)))
         if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
     ]
 
