@@ -2681,7 +2681,7 @@ def audit_repo(entry, spec, branch=None):
                     findings.append(
                         (
                             "DRIFT",
-                            f"carried: {path} names a three-part version or a commit SHA ({', '.join(literals)}); name a pin by its mechanism, never its value, and write a versioning example with a placeholder such as 1.0.N (GOVERNANCE.md, Documentation Style Conventions, References)",
+                            f"carried: {path} names a three-part version or a commit SHA, full or abbreviated ({', '.join(literals)}); name a pin by its mechanism, never its value, and write a versioning example with a placeholder such as 1.0.N (GOVERNANCE.md, Documentation Style Conventions, References)",
                         )
                     )
 
