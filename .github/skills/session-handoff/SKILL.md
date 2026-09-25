@@ -9,7 +9,7 @@ description: >-
   none, which stands for the whole attended procedure this skill states, and whenever about to
   re-attempt something a previous round may already have tried, the moment that earns this skill,
   since a session that does not know a chain exists never goes looking for one. Every session
-  writing one, except an `unattended-handoff` seat, ends in the same order: lessons committed, the
+  writing one, except an `unattended-handoff` seat, ends in the same order: lessons recorded, the
   link, the parked decision queue presented, then memories saved last. Triggers even when the
   session feels too short to be worth a handoff, because the rounds that produce nothing worth
   writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
@@ -194,7 +194,7 @@ the whole procedure below. Run every step without being reminded of any of them.
    its own question with its answers as the options, the recommended one first and marked as the
    recommendation, and every one carrying its reason, per "The Parked Decision Queue" below. The
    numbered list is the fallback where no prompt exists.
-6. **Close the session** per "Closing a Session" below, which commits lessons, writes the next link
+6. **Close the session** per "Closing a Session" below, which records lessons, writes the next link
    with `new`, presents the parked decision queue, and saves memories last. An `auto-*` lane is the
    exception, since it holds one issue. Where that issue is done, comment the outcome on the link
    and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
@@ -209,12 +209,9 @@ Every session that writes a handoff ends in this order, except an `unattended-ha
 closes as that skill states. Each step leaves the chain whole if the session is interrupted after
 it.
 
-1. **Record what was learned.** A lesson a future agent must honor lands in the governing doc inside
-   the pull request whose work taught it, per `GOVERNANCE.md` "Durable Knowledge and
-   Self-Improvement", so by the close it is usually already merged. One found only at the close
-   becomes the first of the next link's next steps, a change to that doc, and one whose doc is
-   carried from a template this repo cannot edit is proposed upstream as an issue. Either way the
-   link's "New learnings" section has somewhere real to point.
+1. **Record what was learned** per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", which
+   says where a lesson goes, before the link is written, so its "New learnings" section points at a
+   record that exists.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.
@@ -224,7 +221,7 @@ it.
 4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, such as a
    quirk of this machine or this account, saved as the session's final act. Never the round's
-   state, which the link holds, and never a lesson, which step 1 already committed.
+   state, which the link holds, and never a lesson, which step 1 already recorded.
 
 ## The Parked Decision Queue
 
