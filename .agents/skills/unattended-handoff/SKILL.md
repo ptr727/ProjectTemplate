@@ -105,8 +105,8 @@ Pass these verbatim, filling the angle brackets. They name this skill rather tha
 which keeps the orchestrator's own context to the brief's length.
 
 ```text
-Load the `unattended-handoff` skill and act as its picker for <owner>/<repo>.
-Reply with exactly one line, in the picker return form that skill states.
+Load the `unattended-handoff` skill and act as its picker for <owner>/<repo>,
+scope <develop|main|release>. Reply with exactly one line, in the picker return form that skill states.
 ```
 
 ```text
@@ -158,25 +158,28 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Picker
 
-1. **Read the open handoffs** with labels and update times, `gh issue list --label handoff --state
+1. **Check the promotion first** under `main` or `release`. Where an open `decision` issue names
+   the open develop -> main pull request, return `STOP` before picking anything, since every worker
+   this run dispatched would meet that same decision after merging its own work to develop.
+2. **Read the open handoffs** with labels and update times, `gh issue list --label handoff --state
    open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py tracks` prints
    neither. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the
    Chain".
-2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
+3. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
    lanes and are never picked. A picker never takes `blocked` off a handoff, even where the decision
    issue it names has been answered, since an attended session may be working that lane and only
    the session handing the lane back removes the label, per `GOVERNANCE.md` "Durable Knowledge and
    Self-Improvement".
-3. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
+4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
    page size, since `gh issue list` returns 30 rows unless told otherwise.
-4. **Create its handoff** with `handoff.py new --track auto-<issue>`, `--dry-run` first. The body
+5. **Create its handoff** with `handoff.py new --track auto-<issue>`, `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
    the issue and what done looks like. That skill's rules on the body bind it.
-5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
-6. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
+6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
+7. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
    where a read it needs cannot run.
 
 ## The Worker
@@ -198,9 +201,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
-5. **Park at the first decision**, per "Parking" below. A decision on the promotion pull request
-   is first checked against the open `decision` issues, and one already filed for it returns
-   `STOP` rather than a second issue. That includes a merge the harness refuses
+5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
    after one retry, which is parked as ready to merge rather than routed around.
 6. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
    what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
@@ -218,7 +219,8 @@ interruption part way leaves the work findable rather than lost.
    stands and name it in the comment below.
 2. **File the question** as an issue carrying `decision`, per `GOVERNANCE.md` "Communicating with
    the User". It states the question, the choices as the options, the recommended one first with
-   its reason, what each choice would do to the parked work, and the handoff it belongs to. It
+   its reason, what each choice would do to the parked work, the handoff it belongs to, and the pull
+   request it concerns, which is what lets a picker find a promotion already waiting on one. It
    holds nothing but the question, so it closes once answered.
 3. **Comment the state on the handoff**: what is done, the branch and pull request, whether the
    worktree was left standing, what remains, and the decision issue it now waits on. This comment
