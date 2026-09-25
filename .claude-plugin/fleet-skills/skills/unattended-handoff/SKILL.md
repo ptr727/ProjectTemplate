@@ -98,8 +98,8 @@ Each round runs:
 
 The run ends at `NONE`, at `STOP`, at the round cap, or at the repeat stop above. Its final message
 lists every round's outcome line, then the count of parked handoffs, and names the attended session
-(`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else, and it
-asks nothing in prose.
+(`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else and asks
+nothing.
 
 ### The Briefs
 
