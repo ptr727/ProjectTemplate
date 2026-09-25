@@ -3,19 +3,20 @@ name: unattended-handoff
 description: >-
   Runs a ptr727/ProjectTemplate fleet repository's handoff chain with no maintainer present: a
   lean orchestrator loops, dispatching a picker subagent that returns one handoff whose work needs
-  no maintainer decision, creating that handoff from the open backlog where none is waiting, then a
-  worker subagent that resumes the handoff, fixes it, drives its pull request as far as the
-  invocation's scope allows, and closes the lane out, or parks it when a decision turns up, leaving
-  the branch open, a state comment on the handoff, a `decision` issue for the maintainer, and the
-  `blocked` label on the handoff. Use this whenever asked to run the handoff loop unattended, work
-  the auto-resolvable issues while the maintainer is away, keep going until nothing is left that
-  needs no decision, or run handoffs overnight. Triggers even when the backlog looks small, because
-  the failure it guards against is an orchestrator that reads issues, diffs, and review threads
-  itself and exhausts its context after a few rounds. Scope is named at invocation: develop by
-  default, main to also merge each promotion pull request, release to also dispatch the release.
-  Distinct from `backlog-burndown`, which runs parallel groups with the maintainer reachable, and
-  from `session-handoff`, which owns the chain's shape and the attended "resume the handoff"
-  session this loop's parked links return to.
+  no maintainer decision, creating that handoff from the open backlog where none is waiting, then
+  a worker subagent that resumes the handoff, fixes it, drives its pull request as far as the
+  invocation's scope allows, and closes the lane out, or parks it when a decision turns up,
+  leaving the branch open, a state comment on the handoff, a `decision` issue for the maintainer,
+  and the `blocked` label on the handoff. Use this whenever asked to run the handoff loop
+  unattended, work the auto-resolvable issues while the maintainer is away, keep going until
+  nothing is left that needs no decision, or run handoffs overnight. Triggers even when the
+  backlog looks small, because the failure it guards against is an orchestrator that reads issues,
+  diffs, and review threads itself and exhausts its context after a few rounds. Scope is named at
+  invocation: develop by default, main to also merge each promotion pull request, release to also
+  dispatch the release. Distinct from `backlog-burndown`, which runs parallel groups with the
+  maintainer reachable, and from `session-handoff`, which owns the chain's shape and the attended
+  "resume the handoff" session this loop's parked links return to. Its invocation scope is the
+  explicit go-ahead `merge-and-release` otherwise asks for.
 ---
 
 # Unattended Handoff

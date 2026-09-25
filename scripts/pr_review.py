@@ -115,7 +115,7 @@ Subcommands
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
            None stated its file coverage the first format's way, in either the bulleted spelling
-           or the bare one, so the `fleet-review` marker the fleet's own carried `code-review`
+           or the bare one, so the `fleet-review` marker the fleet's own carried `fleet-code-review`
            instructions ask for is the only coverage statement this format has been seen to make.
            Five of the ten carry it, on heads carrying those same instructions, so its absence is
            intermittent rather than structural. Both absences measured on one drive were
@@ -1967,7 +1967,7 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "means one of three things, and the digest above says which: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current code-review skill and Copilot instructions, then request another "
+            "the current fleet-code-review skill and Copilot instructions, then request another "
             "review. Merging without coverage is the maintainer's decision, not the agent's."
         )
         return 45

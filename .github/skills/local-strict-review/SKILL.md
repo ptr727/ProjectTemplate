@@ -9,7 +9,7 @@ description: >-
   PR-bound work. Triggers even when the change looks small or the same session already judged its
   own diff ready, because a self-review pass judging its own diff inherits its own blind spots,
   the exact gap this skill exists to close before a PR-hosted reviewer closes it instead. Reuses
-  `code-review`'s "Review the Change" criteria rather than restating them, and owns only this
+  `fleet-code-review`'s "Review the Change" criteria rather than restating them, and owns only this
   local, pre-PR moment. Once a pull request exists, `pr-review-conduct` and `drive-pr` own
   triaging and disposing of what a PR-hosted reviewer finds. Also triggers whenever the periodic
   canonical sweep is worked, which names the carried units whose text has moved past the pass
@@ -33,7 +33,7 @@ Dispatches one read-only subagent against this branch's full diff since it forke
 
 The subagent reads the full content of every file the diff and the untracked-file list touch, not just the hunks, since cross-file and whole-file context is exactly what incremental review misses. It reports findings only. It never fixes, stages, or commits anything.
 
-Review criteria are `code-review`'s "Review the Change" section, reused rather than restated here, plus three traps worth calling out explicitly for a pass that runs before a human or a PR-hosted reviewer ever sees the diff: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. `code-review`'s separate "Publish Every Finding" section does not apply here: this skill has no PR to post a comment on and no coverage marker to close a review with, so its own report contract below replaces that section rather than extending it.
+Review criteria are `fleet-code-review`'s "Review the Change" section, reused rather than restated here, plus three traps worth calling out explicitly for a pass that runs before a human or a PR-hosted reviewer ever sees the diff: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. `fleet-code-review`'s separate "Publish Every Finding" section does not apply here: this skill has no PR to post a comment on and no coverage marker to close a review with, so its own report contract below replaces that section rather than extending it.
 
 ## Running It
 
@@ -45,9 +45,9 @@ Task: adversarial review of this branch's diff against its merge-base with its t
 Paths: the files `git diff --name-only "$(git merge-base origin/<target> HEAD)"` and
   `git ls-files --others --exclude-standard` list, mandatory floor. Reading a specific
   unchanged caller or consumer beyond that list is in bounds only where a candidate finding's
-  proof actually depends on it, per code-review's own "follow data and control flow beyond the
+  proof actually depends on it, per fleet-code-review's own "follow data and control flow beyond the
   edited lines" instruction below, never as an open-ended exploration.
-Rules that bind this task: quote `code-review`'s "Review the Change" section into the prompt,
+Rules that bind this task: quote `fleet-code-review`'s "Review the Change" section into the prompt,
   plus flag unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior
   differences explicitly. Do not quote "Publish Every Finding", this task's report contract is
   the Return line below, not a PR comment or a coverage marker.
@@ -102,7 +102,7 @@ Task: adversarial review of one canonical unit, read as a repository carrying it
   time reads it, whole, knowing nothing about what this branch changed in it.
 Paths: <the unit key, substituted here>, read in full out of the file that key names.
   Read the whole unit, never a diff of it.
-Rules that bind this task: <quote code-review's "Review the Change" section>, and judge the text
+Rules that bind this task: <quote fleet-code-review's "Review the Change" section>, and judge the text
   as a reader who has only this unit: a claim it makes about a tool, a path, a command, or
   another rule is a defect wherever that claim is false, stale, or unverifiable from the unit
   itself, and an instruction it gives is a defect wherever following it literally fails.
@@ -134,7 +134,7 @@ Each bullet is a rule down to its `Why:` line, which is rationale rather than ru
   - `Why:` a local finding and a PR-hosted one deserve the same dispositions, and one home for the list is what stops two copies of it drifting apart.
 - **The agent disposing of a pass's findings classes each one `style`, `introduced`, or `pre-existing`, in that order.** `style` is a preference between defensible forms. `introduced` is any other finding on text this change wrote, rewrote, or removed, on text this change should have written, on a precondition this change left false elsewhere, or load-bearing for a decision this change puts to the maintainer. `pre-existing` is every other finding.
   - `Why:` the reviewer is asked to omit preferences and returns some anyway, and `style` is classed first so that a preference on text this change wrote is not owed a fix.
-- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed within the budget below, or escalated where `pr-review-conduct` "Escalate to the maintainer when" says so, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined with evidence, per `pr-review-conduct` "Every finding ends in one of five outcomes", the evidence being `code-review` "Review the Change"'s own rule to omit preferences.
+- **Another round is owed only while an `introduced` finding is open.** Unless evidence disproves it, an `introduced` finding is fixed within the budget below, or escalated where `pr-review-conduct` "Escalate to the maintainer when" says so, a `pre-existing` one is filed once and blocks nothing, and a `style` one is declined with evidence, per `pr-review-conduct` "Every finding ends in one of five outcomes", the evidence being `fleet-code-review` "Review the Change"'s own rule to omit preferences.
   - `Why:` a finding count over prose never reaches zero, so a loop closing on "did it find anything" does not close, where one closing on the false claim, the unfollowable instruction, or the wrong behavior this change put there does.
 - **Two rounds of edits answer a pass, one budget per push and one per sweep issue.** Where an `introduced` finding is still open after the second round, editing stops and what remains goes to the maintainer with its counts per class, per `pr-review-conduct` "Escalate to the maintainer when".
   - `Why:` past the second round nearly every finding is against text the previous round's fix wrote, so the rounds are producing the defects they find rather than removing them.
@@ -164,7 +164,7 @@ This table is the fleet's one enumeration of these, and every other surface stat
 
 ## Mechanics Live Elsewhere
 
-- Review criteria: `code-review`.
+- Review criteria: `fleet-code-review`.
 - Delegation shape and model-tier discipline: `AGENTS.md` "Context and Delegation Discipline".
 - Branch base rule (`develop` unless the task is explicitly `main`-only): `repo-worktree`.
 - Finding disposition once a pull request exists, the Merge Gate, `scripts/pr_review.py`: `pr-review-conduct`, `drive-pr`.

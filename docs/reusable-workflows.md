@@ -202,7 +202,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 
 ### Stage 5: The Type-Specific Tasks
 
-Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, `deploy-site-task.yml` with a `deploy` hook, and `run-codegen-pull-request-task.yml` with a `codegen` hook. `build-datebadge-task.yml` is retired rather than hosted, TODO.md already tracks deleting the retired badge from its one remaining carrier. The `operational-vs-release-workflow` skill's note that the target list stays per repo is retired here, once the release-chain stage that makes it true has shipped.
+Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `check-upstream-version-task.yml` with a `resolve-upstream` hook and an `auto-merge` input, `deploy-site-task.yml` with a `deploy` hook, and `run-codegen-pull-request-task.yml` with a `codegen` hook. `build-datebadge-task.yml` is retired rather than hosted, TODO.md already tracks deleting the retired badge from its one remaining carrier. The `branching-and-release-model` skill's note that the target list stays per repo is retired here, once the release-chain stage that makes it true has shipped.
 
 - [x] Hub pull request on `develop` in #761.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`.

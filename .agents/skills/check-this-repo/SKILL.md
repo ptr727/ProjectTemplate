@@ -1,5 +1,5 @@
 ---
-name: fleet-conformance-check
+name: check-this-repo
 description: >-
   Checks, from inside a downstream repo's own session, whether this repo and this machine are
   current against the ptr727/ProjectTemplate hub, and safely self-applies what it can. Use this
@@ -15,7 +15,7 @@ description: >-
   out first.
 ---
 
-# Fleet Conformance Check
+# Check This Repo
 
 ## Why this exists
 

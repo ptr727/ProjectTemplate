@@ -7,9 +7,11 @@ description: >-
   with the hub, or to run a conformance sweep against a named repo and apply what it finds. Needs
   a hub checkout and a named target repo to mean anything, so it does not usefully trigger from
   inside a downstream repo's own session with no target named and no hub checkout present, that
-  case is fleet-conformance-check instead. Triggers even when the request sounds routine, such as
-  "just copy AGENTS.md over" or "make repo X match the hub," because that phrasing is exactly how
-  the AGENTS.md-overwrite incident happened.
+  case is check-this-repo instead. Triggers even when the request sounds routine, such as "just
+  copy AGENTS.md over" or "make repo X match the hub," because that phrasing is exactly how the
+  AGENTS.md-overwrite incident happened. It co-fires with `carried-instruction-file-guard` and
+  `copilot-instructions-keeper`, which guard each carried file's merge, rather than replacing
+  them.
 ---
 
 # Resync a Repo

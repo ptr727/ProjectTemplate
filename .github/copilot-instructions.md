@@ -2,7 +2,7 @@
 
 Repository-wide instructions for GitHub Copilot.
 
-Read [AGENTS.md](../AGENTS.md) first. It routes every standing repository rule to its canonical document. When performing code review, load and follow the `code-review` skill in `.github/skills/code-review/SKILL.md`, then load every language, documentation, or workflow skill that it selects for the changed files. GitHub Copilot reads these files from the pull request's head branch, so review the instructions in that tree.
+Read [AGENTS.md](../AGENTS.md) first. It routes every standing repository rule to its canonical document. When performing code review, load and follow the `fleet-code-review` skill in `.github/skills/fleet-code-review/SKILL.md`, then load every language, documentation, or workflow skill that it selects for the changed files. GitHub Copilot reads these files from the pull request's head branch, so review the instructions in that tree.
 
 Do not duplicate rules from `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` here. This file contains only Copilot-specific bootstrap and output requirements.
 
@@ -21,10 +21,10 @@ Follow the fidelity declared for the file. A byte-locked reference to shared inf
 For every review:
 
 1. Read the full pull request diff and count its changed files.
-2. Follow `.github/skills/code-review/SKILL.md` and every skill it selects.
+2. Follow `.github/skills/fleet-code-review/SKILL.md` and every skill it selects.
 3. Publish every supported finding. Never suppress a finding or place it in a low-confidence or hidden findings block.
 4. Use an inline comment when a changed line can anchor the finding. Use the review body only when no valid inline anchor exists.
-5. End the review body with the exact machine-readable marker required by the `code-review` skill.
+5. End the review body with the exact machine-readable marker required by the `fleet-code-review` skill.
 
 The review automation is `scripts/pr_review.py`, run from a hub checkout. Use its `status`, `wait`, `comment`, and `reply --resolve` commands instead of reconstructing GraphQL queries or copying review identifiers by hand. Use `comment` for a suppressed-finding answer in the pull request conversation. Its status gate verifies the current head, diff coverage, output shape, inline threads, body-only findings, and required checks.
 

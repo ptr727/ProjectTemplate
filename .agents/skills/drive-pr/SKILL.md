@@ -57,7 +57,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
   Authorizes" keeps tied to something the maintainer actually said.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation, confirm whether a promotion PR is even wanted before opening
-  one, per operational-vs-release-workflow's "Operational repositories (the complete delta)"
+  one, per branching-and-release-model's "Operational repositories (the complete delta)"
   section.
 
 ## What Invoking This Skill Authorizes
@@ -202,7 +202,7 @@ instance's outcome is context for the new one, never a standing answer to reuse 
 
 - Review loop mechanics, the Merge Gate, and `scripts/pr_review.py`: pr-review-conduct.
 - Branch rules, never delete develop, the EOL-only conflict, issue-closing keywords belonging on
-  the promotion PR: operational-vs-release-workflow.
+  the promotion PR: branching-and-release-model.
 - Worktree isolation and post-merge cleanup: repo-worktree.
 
 ## Stop and Ask, Beyond the How-Far Question
