@@ -1249,7 +1249,7 @@ def coverage_statements(body: str) -> list[str]:
         continues = not code and not re.match(
             r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
         )
-        # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
+        # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
             quoted = True
