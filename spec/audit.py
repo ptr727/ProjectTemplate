@@ -738,7 +738,7 @@ VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFL
 VERSION_LITERAL = re.compile(
     r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
     r"|\b[0-9a-fA-F]{40}\b"
-    r"|(?<![0-9A-Za-z#_-])(?=[0-9a-f]{7,12}(?![0-9A-Za-z_-]))(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?![0-9A-Za-z_-])"
+    r"|(?<![0-9A-Za-z#_])(?=[0-9a-f]{7,12}(?![0-9A-Za-z_-]))(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?![0-9A-Za-z_-])"
 )
 
 
@@ -3975,6 +3975,7 @@ def _selftest():
         ("an all-letter hex word is not a SHA", "A facade over deadbeef.\n", set(), []),
         ("a hex color is not a SHA", "Color #1f2937ff.\n", set(), []),
         ("an identifier suffix is not a SHA", "Name foo_1a2b3c4d and 123e4567-e89b.\n", set(), []),
+        ("an image tag SHA is flagged", "Image app:sha-1a2b3c4.\n", set(), ["1a2b3c4"]),
         ("a hex constant is not a SHA", "Mask 0x7fffffff.\n", set(), []),
         (
             "a worked example is flagged",
