@@ -1224,9 +1224,9 @@ def coverage_statements(body: str) -> list[str]:
     A line indented four or more columns is the fourth convention, an indented code block, and a
     marker on one is dropped from the line rather than the line being dropped whole. The indent
     opens a code block only where nothing runs on into it, since an indented line under paragraph
-    text is that paragraph's lazy continuation and renders as part of it. Only paragraph text
-    runs on that way. A heading, a setext underline, a thematic break, and a line opening an HTML
-    comment each end their own block, and a code line carries its block on to the next line. `CCR_OVERVIEW`
+    text is that paragraph's lazy continuation and renders as part of it, and a list item's own
+    text runs on the same way. A heading, a setext underline, a thematic break, and a line opening
+    an HTML comment each end their own block, and a code line carries its block on to the next. `CCR_OVERVIEW`
     and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
     being read within its line, takes that bound here instead of in its pattern. The rest of the
     line is still read, the bullet and the sentence being left to their own readers as before, and
