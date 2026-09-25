@@ -169,16 +169,21 @@ A maintainer resuming work says little, often only "resume the handoff", and tha
 the whole procedure below. Run every step without being reminded of any of them.
 
 1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
-   `tracks` and take the open handoff updated most recently, whatever its track. A link carrying
-   `blocked` is taken like any other, since its blocker is a decision only the maintainer can make
-   and the maintainer is now present. Say which link was picked in one line before anything else,
-   so a wrong pick costs one reply rather than a round.
-2. **Resume it** per "Resuming" above, re-deriving live state rather than trusting the body.
+   `gh issue list --label handoff --state open --limit 100 --json number,title,labels,updatedAt`,
+   since `tracks` prints neither labels nor exact update times, and take the one updated most
+   recently. A link carrying `blocked` is taken like any other, since its blocker is a decision
+   only the maintainer can make and the maintainer is now present. An `auto-*` link not carrying
+   `blocked` is skipped unless named, since an `unattended-handoff` worker may hold it right now.
+   Say which link was picked in one line before anything else, so a wrong pick costs one reply
+   rather than a round.
+2. **Resume it** per "Resuming" above, re-deriving live state rather than trusting the body, and
+   read its comments with `gh issue view <n> --comments` too, since `resume` prints only the body
+   and a parked link's state is in its parking comment.
 3. **Ask what it is blocked on first.** Where the link carries `blocked`, the parking comment names
    a `decision` issue, and that question goes to the maintainer before any work starts, since the
    rest of the link waits on it. Once answered, record the answer on the decision issue, take its
-   `decision` label off, and take `blocked` off the handoff, per `GOVERNANCE.md` "Durable Knowledge
-   and Self-Improvement".
+   `decision` label off, close it where it held nothing but the question, and take `blocked` off
+   the handoff, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
 4. **Work the next steps** in a worktree of the session's own, per `repo-worktree`, and drive each
    pull request with `drive-pr` to a mergeable develop -> main promotion pull request. The phrase
    already states that target, so `drive-pr` does not ask how far. Merging that promotion pull

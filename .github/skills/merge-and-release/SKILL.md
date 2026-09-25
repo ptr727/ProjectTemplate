@@ -46,6 +46,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead to merge the promotion PR and to perform the scope chosen, for the one repo and PR in
   front of the agent. It is never a standing mode carried to the next PR.
+- The one standing grant is an `unattended-handoff` run the maintainer invoked with scope `main`
+  or `release`, which names in advance each promotion that run's workers make, in that session
+  only. A worker handing a promotion here under it asks no how-far question, since the scope
+  states it, and the Merge Gate is still re-verified per promotion.
 - It is never permission to merge a PR that fails the Merge Gate. Re-verify the gate at
   invocation time, a check from earlier in the session can be stale.
 
