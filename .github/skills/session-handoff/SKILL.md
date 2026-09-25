@@ -217,8 +217,8 @@ it.
    an unanswered one must not cost the round its handoff.
 3. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
    Record each answer given on its issue, where one was asked and answered. Where a link was
-   written, comment those answers onto it, so its parked-decision count and list are current
-   without a second link.
+   written, comment those answers onto it together with the queue's count and list after them,
+   since the body keeps the count it was written with and a resume reads the link's comments.
 4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, such as a
    quirk of this machine or this account, saved as the session's final act. Never the round's
