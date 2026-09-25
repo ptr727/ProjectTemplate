@@ -208,7 +208,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options,
-   the recommended one first with its reason. The picker never takes a `decision` issue, so the loop
+   the recommended one first and marked as the recommendation, and every option carrying its
+   reason. The picker never takes a `decision` issue, so the loop
    cannot write a rule nobody has judged. Once answered, the label comes off per `GOVERNANCE.md`
    "Communicating with the User". A declined rule's issue closes, and an adopted one stays open as
    ordinary work, which the loop may then take, since the maintainer has judged it.
