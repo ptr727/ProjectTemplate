@@ -210,9 +210,10 @@ closes as that skill states. Each step leaves the chain whole if the session is 
 it.
 
 1. **Record what was learned.** A lesson a future agent must honor is recorded in the governing doc
-   as part of the change, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement". Where that
-   doc is carried from a template this repo cannot edit, or the session changed nothing to carry it,
-   the lesson is proposed as an issue instead, upstream for a carried doc, so the link's "New
+   as part of the change while that change is still open, per `GOVERNANCE.md` "Durable Knowledge
+   and Self-Improvement". Where that doc is carried from a template this repo cannot edit, the
+   round's change has already merged, or the session changed nothing, the lesson is proposed as an
+   issue instead, upstream for a carried doc, so the link's "New
    learnings" section has somewhere real to point.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
    The link is written before any question is put, since a prompt blocks until someone answers and
