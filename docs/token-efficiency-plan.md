@@ -80,8 +80,8 @@ closes it.
 | # | Gap | Evidence | Phase |
 | --- | --- | --- | --- |
 | G1 | The Copilot Review Runbook embeds hand-run mechanics that duplicate the hub-hosted helper | The runbook section is 47,624 B of the 53,188 B file, 90%, while [`scripts/pr_review.py`][pr-review-script] already implements status, wait, reply, and resolve | [3](#phase-3-copilot-runbook-reduction) |
-| G2 | Twelve of eighteen skills carry no `references/`, and four bodies remain over 11 KB | `comment-and-doc-style` 14,726 B, `operational-vs-release-workflow` 12,340 B, `git-commit-conventions` 11,869 B, `dotnet-codestyle` 11,562 B, with `pr-review-conduct` next at 9,801 B | [2](#phase-2-skill-body-progressive-disclosure) |
-| G3 | Skill descriptions carry rationale, history, and mechanics instead of routing only | 19,232 B across 18 descriptions, averaging 1,068 B, with the longest at 1,375 B (`operational-vs-release-workflow`) | [5](#phase-5-skill-description-compression) |
+| G2 | Twelve of eighteen skills carry no `references/`, and four bodies remain over 11 KB | `comment-and-doc-style` 14,726 B, `branching-and-release-model` 12,340 B, `git-commit-conventions` 11,869 B, `dotnet-codestyle` 11,562 B, with `pr-review-conduct` next at 9,801 B | [2](#phase-2-skill-body-progressive-disclosure) |
+| G3 | Skill descriptions carry rationale, history, and mechanics instead of routing only | 19,232 B across 18 descriptions, averaging 1,068 B, with the longest at 1,375 B (`branching-and-release-model`) | [5](#phase-5-skill-description-compression) |
 | G4 | `Why This Exists` narratives repeat as runtime cost on every activation | Incident history in `agent-conduct`, `repo-worktree`, `comment-and-doc-style`, and the language skills, per finding 3 of [issue #766][issue-766] | [2](#phase-2-skill-body-progressive-disclosure) |
 | G5 | No behavioral benchmark exists to veto a reduction | The evaluation set proposed in [issue #766][issue-766] is specified but not authored, and no routing record exists | [1](#phase-1-baseline-and-benchmark) |
 | G6 | No repeatable per-layer measurement of the instruction set itself | The tables in this doc were hand-derived once, with no `scripts/` inventory tool to re-run per phase | [1](#phase-1-baseline-and-benchmark) |
@@ -173,7 +173,7 @@ append the metrics row.
       rules, the comment rules, and the PR-title rules in the body. Move the extended Markdown
       lint mechanics, the spelling-gate scoping, and the sentence-structure background into
       `references/`.
-- [ ] `operational-vs-release-workflow` (12,340 B): keep the model-selection rule, the branching
+- [ ] `branching-and-release-model` (12,340 B): keep the model-selection rule, the branching
       and promotion summary, and the two publish traps in the body. Move the complete operational
       delta and the release-model detail into a further `references/` file.
 - [ ] `git-commit-conventions` (11,869 B): keep staging authorization, the signed-commit and
@@ -191,7 +191,7 @@ append the metrics row.
       the existing `references/` trees.
 - [ ] Narrative trim umbrella, one change per skill: `agent-conduct` (6,680 B), `skill-lifecycle`
       (8,105 B), `copilot-instructions-keeper` (6,140 B), `audit-a-repo` (5,907 B),
-      `resync-a-repo` (5,151 B), `standup-a-repo` (6,150 B), `fleet-conformance-check`
+      `resync-a-repo` (5,151 B), `standup-a-repo` (6,150 B), `check-this-repo`
       (4,367 B), `upstream-contribution-workflow` (5,672 B), `shell-codestyle` (3,584 B), and
       `workflow-ci-contract` (8,201 B). Shorten each `Why This Exists` to the rationale that
       changes interpretation, and move any mechanics a rare path needs into `references/`. Check
@@ -266,7 +266,7 @@ which adjacent skill must not activate, per finding 2 of [issue #766][issue-766]
 history, and mechanics live in the body. The target is 50-75% off where routing holds, and the
 benchmark's negative cases decide, run before and after each change.
 
-- [ ] `operational-vs-release-workflow` (1,375 B)
+- [ ] `branching-and-release-model` (1,375 B)
 - [ ] `pr-review-conduct` (1,324 B)
 - [ ] `comment-and-doc-style` (1,271 B)
 - [ ] `dotnet-codestyle` (1,252 B)
@@ -275,7 +275,7 @@ benchmark's negative cases decide, run before and after each change.
 - [ ] `git-commit-conventions` (1,105 B)
 - [ ] `upstream-contribution-workflow` (1,099 B)
 - [ ] `agent-conduct` (1,071 B)
-- [ ] `fleet-conformance-check` (1,039 B)
+- [ ] `check-this-repo` (1,039 B)
 - [ ] `shell-codestyle` (1,010 B)
 - [ ] `python-codestyle` (999 B)
 - [ ] `copilot-instructions-keeper` (984 B)
@@ -328,7 +328,7 @@ sibling disambiguations in the same change.
       carried-file guard with the ledger rules as a `references/` file, or two skills with
       sharpened boundaries, on the measured activation overlap.
 - [ ] Confirm the deliberate non-folds: `standup-a-repo`, `resync-a-repo`, `audit-a-repo`, and
-      `fleet-conformance-check` stay separate because each names which session it is in, and
+      `check-this-repo` stay separate because each names which session it is in, and
       `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
 
 Exit criteria: every boundary decision is recorded in the fleet-map Decision Ledger with its

@@ -33,7 +33,7 @@ import pr_review
 REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
-CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "code-review" / "SKILL.md"
+CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"
 REVIEWER_REFERENCE = REPO / "docs" / "pr-reviewer-reference.md"
 
 
@@ -5524,7 +5524,7 @@ class TestContract(unittest.TestCase):
     def test_the_runbook_bootstraps_the_review_skill(self) -> None:
         """Copilot reaches the provider-independent review contract from its always-on file."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(".github/skills/code-review/SKILL.md", text)
+        self.assertIn(".github/skills/fleet-code-review/SKILL.md", text)
 
     def test_the_runbook_forbids_suppressed_findings(self) -> None:
         """A finding without a thread cannot participate in the ordinary reply loop."""

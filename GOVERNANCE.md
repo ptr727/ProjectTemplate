@@ -64,8 +64,8 @@ first one (never delete `develop`, resolve an EOL-only conflict by taking `devel
 **Operational** repos differ substantially (direct-to-`develop`, advisory CI, dispatch-only
 release), covered as a delta rather than a separate model.
 
-This is packaged as the `operational-vs-release-workflow` Skill at
-`.agents/skills/operational-vs-release-workflow/SKILL.md` in the hub, not a repo-relative link
+This is packaged as the `branching-and-release-model` Skill at
+`.agents/skills/branching-and-release-model/SKILL.md` in the hub, not a repo-relative link
 since that path is hub-local and not carried into every fleet repo. The summary above sketches
 the contract. Read the skill for the full rules, including branch protection configuration, the
 dual-target bot wiring, and the operational-repo delta in full.
@@ -79,8 +79,8 @@ weekly schedule (Docker), and versioning is semantic and maintainer-controlled (
 the maintainer owns the `major.minor` floor). **Operational** repos differ, with a dispatch-only
 release and no auto-publish bots. See "Operational Repositories" below.
 
-This is packaged as part of the `operational-vs-release-workflow` Skill at
-`.agents/skills/operational-vs-release-workflow/SKILL.md` in the hub, not a repo-relative link
+This is packaged as part of the `branching-and-release-model` Skill at
+`.agents/skills/branching-and-release-model/SKILL.md` in the hub, not a repo-relative link
 since that path is hub-local and not carried into every fleet repo. The summary above sketches
 the contract. Read the skill for the full rules, including the release-target build layer, the
 no-op republish guarantee, the recovery routes for a package push that fails after the release is
@@ -95,8 +95,8 @@ directly to `develop`, CI runs on the push as advisory feedback only, a PR still
 change worth reviewing, the `main` promotion gate is unchanged, and release happens only by manual
 dispatch.
 
-This is packaged as part of the `operational-vs-release-workflow` Skill at
-`.agents/skills/operational-vs-release-workflow/SKILL.md` in the hub, not a repo-relative link
+This is packaged as part of the `branching-and-release-model` Skill at
+`.agents/skills/branching-and-release-model/SKILL.md` in the hub, not a repo-relative link
 since that path is hub-local and not carried into every fleet repo. The summary above sketches
 the contract. Read the skill for the full rules, including when a config change still earns a
 pull request.

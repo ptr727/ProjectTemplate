@@ -1,7 +1,22 @@
 ---
 name: agent-conduct
 description: >-
-  Surfaces the ptr727/ProjectTemplate fleet's conduct rules at the five decision moments they are violated: about to claim work is done, verified, green, or fixed, about to proceed on an assumption the user could cheaply confirm, a failure or review finding just surfaced a durable lesson, about to write a handoff, which owes an account of every question parked rather than asked, and work here waiting on a fix in another repository. Use this whenever about to report success or completion of any task, whenever about to pick a default, guess an intent, or resolve an ambiguity without asking, whenever work is blocked on a decision or authorization only the user can give, whenever about to file a question as an issue instead of asking it, whenever writing a handoff, whenever work here waits on a fix in another repository, and whenever an incident, a wrong answer, or a repeated correction just taught something a future session must honor. Deliberately narrow: the carried AGENTS.md "Context and Delegation Discipline" section is the always-on layer, and this skill fires at the moments rather than duplicating that section, so do not load this skill as general background. Where a sibling skill owns the moment, it wins: git-commit-conventions for committing, pr-review-conduct for review and merge claims, local-strict-review for the review passes a push owes, comment-and-doc-style for prose. The GOVERNANCE.md sections this skill surfaces keep the full rules, and the skill carries each of them whole as a generated include rather than as a summary.
+  Surfaces the ptr727/ProjectTemplate fleet's conduct rules at the five decision moments they are
+  violated: about to claim work is done, verified, green, or fixed, about to proceed on an
+  assumption the user could cheaply confirm, a failure or review finding just surfaced a durable
+  lesson, about to write a handoff, which owes an account of every question parked rather than
+  asked, and work here waiting on a fix in another repository. Use this whenever about to claim
+  work is done, verified, green, or fixed, whenever about to pick a default, guess an intent, or
+  resolve an ambiguity without asking, whenever work is blocked on a decision or authorization
+  only the user can give, whenever about to file a question as an issue instead of asking it,
+  whenever writing a handoff, whenever work here waits on a fix in another repository, and
+  whenever an incident, a wrong answer, or a repeated correction just taught something a future
+  session must honor. Deliberately narrow: the carried AGENTS.md "Context and Delegation
+  Discipline" section is the always-on layer, so do not load this skill as general background.
+  Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
+  pr-review-conduct for review and merge claims, local-strict-review for the passes a push owes,
+  comment-and-doc-style for prose. The GOVERNANCE.md sections it surfaces keep the full rules,
+  carried here whole as generated includes.
 ---
 
 # Agent Conduct
@@ -88,7 +103,7 @@ Where a lesson lands, when it earns a mechanical hook, and where work blocked on
 
 <!-- /include -->
 
-Two rules that bind at this moment have their homes elsewhere. A review flags an instance, so a fix covers the class, bounded to what the change touched or broke, stated under "Before Claiming Done" above. And a rule that keeps needing to be restated is a stale or missing skills install before it is a missing rule, per `AGENTS.md` "Where the Rules Live", with the `fleet-conformance-check` Skill as the check.
+Two rules that bind at this moment have their homes elsewhere. A review flags an instance, so a fix covers the class, bounded to what the change touched or broke, stated under "Before Claiming Done" above. And a rule that keeps needing to be restated is a stale or missing skills install before it is a missing rule, per `AGENTS.md` "Where the Rules Live", with the `check-this-repo` Skill as the check.
 
 ## When Work Stops on Another Repository
 

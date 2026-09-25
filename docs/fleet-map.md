@@ -145,7 +145,7 @@ Four wiring points close the model, and each is in place:
 
 1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install). Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
 2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section, and the [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
-3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `fleet-conformance-check` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
+3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `check-this-repo` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
 4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer from a freshly fetched `main` when `--report` exits non-zero, and after any promotion to `main` that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
 
 ## Gap Register
@@ -210,7 +210,7 @@ flowchart LR
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
 
 - **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
-- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `fleet-conformance-check` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
+- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `check-this-repo` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced (Closed)
 
@@ -260,13 +260,13 @@ Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skil
 - **Scope** - Read-only measurement of a named repo ending in a committed report: the [`AUDIT.md`][audit] flow, the verdict taxonomy, what the deterministic runner covers and what stays hand-judged, and the rule that measuring never edits.
 - **Trigger** - Asked to audit, measure, or verify conformance of a named repo, or to judge a conformance claim.
 - **Packages** - [`AUDIT.md`][audit], which keeps authority.
-- **Overlap** - Completes the triangle: `standup-a-repo` creates, `resync-a-repo` applies, and this measures. `fleet-conformance-check` stays the in-repo self-check with no named target. Each description disambiguates against the others, in the style the existing three already use.
+- **Overlap** - Completes the triangle: `standup-a-repo` creates, `resync-a-repo` applies, and this measures. `check-this-repo` stays the in-repo self-check with no named target. Each description disambiguates against the others, in the style the existing three already use.
 
 ### workflow-ci-contract
 
 - **Scope** - The [`WORKFLOW.md`][workflow] behavioral contract: the D-guarantees, the seam contract, artifact lifecycle, NBGV versioning, and validate-at-entry, with the architecture, the guarantee catalog, and the test methodology carried as references.
 - **Trigger** - Writing or editing workflow YAML, adding or dropping a release target, or reasoning about why a publish did or did not fire.
-- **Packages** - The YAML half of the pipeline. `operational-vs-release-workflow` keeps the git half (branching, promotion, publish policy), and the two descriptions state the split.
+- **Packages** - The YAML half of the pipeline. `branching-and-release-model` keeps the git half (branching, promotion, publish policy), and the two descriptions state the split.
 - **Overlap** - The source doc is large, so the skill is a summary with `references/` splits, the shape `comment-and-doc-style` already uses. Sections 3, 4, and 5 are each carried whole as a generated include.
 
 ### skill-lifecycle

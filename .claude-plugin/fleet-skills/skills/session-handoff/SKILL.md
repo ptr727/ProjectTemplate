@@ -1,25 +1,20 @@
 ---
 name: session-handoff
 description: >-
-  Writes and resumes the ptr727/ProjectTemplate fleet's session handoff, which is a link in a chain
-  of issues rather than a file: one open issue per track per repository, carrying the `handoff`
-  label, naming its predecessor in its own body, with a forward-link comment posted onto that
-  predecessor and the predecessor then closed. Use this whenever
-  ending a session or a round of work, whenever starting or resuming one, whenever asked for a
-  handoff or for what the previous round did, whenever the maintainer says only "resume the
-  handoff" or names none, which stands for the whole attended procedure this skill states, and
-  whenever about to re-attempt something a previous
-  round may already have tried. That last moment is the one that earns this skill, since a session
-  that does not know a chain exists never goes looking for one, and the whole point of a chain is
-  that it holds what has already been attempted and what it cost. Triggers even when the session
-  feels too short to be worth a handoff, because the rounds that produce nothing worth writing down
-  are exactly the rounds a later session repeats. The rule itself is `AGENTS.md` "Session Scope",
-  which keeps it, and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns
-  the moment, it wins: `backlog-burndown` owns a multi-round run's own reporting,
-  `unattended-handoff` owns a run with no maintainer present, and
-  `repo-worktree` owns the worktree the handoff names. `agent-conduct` is not such a sibling. It
-  fires at the same parked-decision obligation this skill carries, so the two co-fire and neither
-  defers to the other, and a session loading only one of them still owes that queue.
+  Writes and resumes the ptr727/ProjectTemplate fleet's session handoff, a link in a chain of
+  issues rather than a file: one open issue per track per repository, carrying the `handoff` label
+  and naming its predecessor, which is then commented on and closed. Use this whenever ending a
+  session or a round of work, whenever starting or resuming one, whenever asked for a handoff or
+  for what the previous round did, whenever the maintainer says only "resume the handoff", which
+  stands for the whole attended procedure this skill states, and whenever about to re-attempt
+  something a previous round may already have tried, the moment that earns this skill, since a
+  session that does not know a chain exists never goes looking for one. Triggers even when the
+  session feels too short to be worth a handoff, because the rounds that produce nothing worth
+  writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
+  Scope" and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns the
+  moment, it wins: `backlog-burndown` owns a multi-round run's reporting, `unattended-handoff`
+  owns a run with no maintainer present, and `repo-worktree` owns the worktree the handoff names.
+  `agent-conduct` co-fires at the parked-decision obligation and neither defers to the other.
 ---
 
 # Session Handoff
