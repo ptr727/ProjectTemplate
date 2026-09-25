@@ -217,11 +217,11 @@ cleanup() {
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
     # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
     if is_ours "$(retired_path)"; then
-        if exists "$(tree_path)"; then
+        if is_ours "$(tree_path)"; then
             if ! remove_tree "$(retired_path)"; then
                 keeps_tree && warn "Could not remove the previous tree at $(retired_path), so remove it by hand before the next run"
             fi
-        elif ! mv "$(retired_path)" "$(tree_path)"; then
+        elif ! exists "$(tree_path)" && ! mv "$(retired_path)" "$(tree_path)"; then
             keeps_tree && warn "Could not put the previous tree back from $(retired_path), so move it to $(tree_path) by hand"
         fi
     fi

@@ -684,6 +684,15 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Could not remove the fetched tree", result.stderr)
 
+    def test_cleanup_keeps_the_old_tree_where_the_name_holds_something_not_ours(self) -> None:
+        (self.dir / "skills-tree").symlink_to(self.dir / "elsewhere")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader("cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.dir / "skills-tree.old" / "content").read_text(encoding="utf-8"), "old"
+        )
+
     def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
         self.owned_tree("skills-tree.old", "old")
         result = self.run_loader("cleanup")

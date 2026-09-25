@@ -356,7 +356,7 @@ function Invoke-Cleanup {
             } catch {
                 if (Test-KeepsTree) { warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)" }
             }
-        } else {
+        } elseif (Test-Ownership -Path (Get-TreePath)) {
             try { Remove-Tree -Path $retired } catch { warn "Could not remove the previous tree at $retired, and a later run removes it once nothing holds a file in it" }
         }
     }
