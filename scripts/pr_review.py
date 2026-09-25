@@ -399,7 +399,11 @@ COVERAGE_COUNTS = re.compile(
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
-FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
+FENCE = re.compile(
+    r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)(?:\n.*?)??"
+    r"(?:\n {0,3}(?:\1`*|\2~*)[ \t]*\r?(?=\n|\Z)|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.

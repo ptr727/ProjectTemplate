@@ -1952,6 +1952,29 @@ class TestCoverage(GqlCase):
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
 
+    def test_a_tilde_or_unclosed_fence_quotes_a_marker(self) -> None:
+        """Markdown fences with tildes as well as backticks, and runs an unclosed fence to the end.
+
+        Stripping only a closed backtick fence read a marker quoted in either of the others as this
+        round's stated coverage, the failure direction that reports coverage nobody claimed.
+        """
+        for label, body in (
+            ("in a tilde fence", f"~~~text\n{MARKER}\n~~~"),
+            ("in an unclosed backtick fence", f"```text\n{MARKER}"),
+            ("in an unclosed tilde fence", f"~~~\n{MARKER}\n"),
+            ("after a closer of the other character", f"```text\nx\n~~~\n{MARKER}"),
+            ("after a closer shorter than the opener", f"````\n```\n{MARKER}\n````\n"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual((pr_review.UNSTATED, ""), pr_review.coverage_of({"body": body}))
+        for label, body in (
+            ("after a closed backtick fence", f"```text\nx\n```\n{MARKER}"),
+            ("after a closed tilde fence", f"~~~\nx\n~~~\n{MARKER}"),
+            ("after a CRLF fence", f"```\r\nx\r\n```\r\n{MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
+
     def test_a_marker_indented_into_a_code_block_is_a_quotation(self) -> None:
         """Four columns of indentation open a Markdown code block, so a marker there is quoted.
 
