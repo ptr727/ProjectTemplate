@@ -208,9 +208,9 @@ and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODES
 `GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
 `.github/copilot-instructions.md`. A tracker, a history, a plan, and a README outside those trees
 are the repository's own narrative and keep their references, as do a commit message and a pull
-request body, which are the surfaces a reference belongs on. An instruction document also carries
-no version literal and no commit SHA, full or abbreviated, whether a pin's value, an example, a
-minimum version, or a fixed constant, since a pin's copy goes stale at the next Dependabot bump and
+request body, which are the surfaces a reference belongs on. `AGENTS.md`, `GOVERNANCE.md`,
+`CODESTYLE.md`, and `WORKFLOW.md` also carry no three-part version and no commit SHA, full or
+abbreviated, whether a pin's value, an example, a minimum version, or a fixed constant, since a pin's copy goes stale at the next Dependabot bump and
 every other kind reads exactly like one. Item 3 of this skill's carried-doc-references reference
 says what to write instead of each and carries the audit that flags a literal.
 
@@ -271,9 +271,10 @@ since an author met by the bare form's finding is otherwise pointed at respellin
 rather than at removing it. On every other surface the gate reads the bare form alone, so a banned
 URL is banned there and goes unreported.
 
-A bare commit reference is not a shape a gate can read, since a short SHA carries the same shape as
-a blob id, a version fragment, and a fixture hash. The URL spelling of one is readable and is read
-by nothing here, so the text above is the whole of what covers a commit either way. A reference in a
+A bare commit reference is not a shape the prose gate can read, since a short SHA carries the same
+shape as a blob id, a version fragment, and a fixture hash. The audit's version-literal scan reads it
+in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md`, bare or inside a URL, and
+elsewhere the text above is the whole of what covers a commit. A reference in a
 string literal is not read either: a test builds the numbers it asserts against, and reading those
 would report a fixture rather than a claim about this repository.
 

@@ -728,7 +728,7 @@ TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructi
 # The undeclared-H2 scan reads the same set.
 UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
-# The pinned-version scan reads the instruction documents a repo owns prose in.
+# The version-literal scan reads the four instruction documents a repo owns prose in.
 # .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
 VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
 
@@ -738,7 +738,7 @@ VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFL
 VERSION_LITERAL = re.compile(
     r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
     r"|\b[0-9a-fA-F]{40}\b"
-    r"|(?<![0-9A-Za-z#])(?=[0-9a-f]{7,12}(?![0-9A-Za-z]))(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?![0-9A-Za-z])"
+    r"|(?<![0-9A-Za-z#_-])(?=[0-9a-f]{7,12}(?![0-9A-Za-z_-]))(?=[a-f]*[0-9])(?=[0-9]*[a-f])[0-9a-f]{7,12}(?![0-9A-Za-z_-])"
 )
 
 
@@ -770,7 +770,7 @@ def strip_sections(text, names, keep_pins=False):
 
 
 def version_literals_outside_verbatim(text, verbatim_names):
-    """Every pinned-version literal in `text` outside its verbatim sections, sorted and deduplicated.
+    """Every version literal or commit SHA in `text` outside its verbatim sections, sorted and deduplicated.
 
     A pin lives in the workflow or manifest that uses it, where Dependabot moves it, so a copy in prose is
     stale at the next bump and sends an agent to edit governance for a change that needed none.
@@ -2664,7 +2664,7 @@ def audit_repo(entry, spec, branch=None):
                     )
                 )
 
-        # --- Instruction documents must not copy a pin's value ---
+        # --- Instruction documents carry no version literal or commit SHA ---
         # The hub is scanned whole, verbatim sections included, since those are the copies every repo carries and no other run can see a literal inside them.
         if path in VERSION_LITERAL_SCANNED:
             if text is None:
@@ -3965,7 +3965,7 @@ def _selftest():
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
         )
 
-    # A pinned version copied into an instruction document, outside its verbatim sections.
+    # A version literal or commit SHA in an instruction document, outside its verbatim sections.
     sha = "0123456789abcdef0123456789abcdef01234567"
     vl = [
         ("a release number is flagged", "Pinned at hub release `2.0.657`.\n", set(), ["2.0.657"]),
@@ -3973,7 +3973,8 @@ def _selftest():
         ("an uppercase SHA is flagged", f"Pinned at {sha.upper()}.\n", set(), [sha.upper()]),
         ("an abbreviated SHA is flagged", "Pinned at `f3b4cc9`.\n", set(), ["f3b4cc9"]),
         ("an all-letter hex word is not a SHA", "A facade over deadbeef.\n", set(), []),
-        ("a hex color is not a SHA", "Color #1f2937.\n", set(), []),
+        ("a hex color is not a SHA", "Color #1f2937ff.\n", set(), []),
+        ("an identifier suffix is not a SHA", "Name foo_1a2b3c4d and 123e4567-e89b.\n", set(), []),
         ("a hex constant is not a SHA", "Mask 0x7fffffff.\n", set(), []),
         (
             "a worked example is flagged",
