@@ -205,8 +205,9 @@ the whole procedure below. Run every step without being reminded of any of them.
 
 ## Closing a Session
 
-Every session that writes a handoff, attended or not, ends in this order. Each step leaves the
-chain whole if the session is interrupted after it.
+Every session that writes a handoff ends in this order, except an `unattended-handoff` seat, which
+closes as that skill states. Each step leaves the chain whole if the session is interrupted after
+it.
 
 1. **Record what was learned.** A lesson a future agent must honor is committed to the tree or filed
    as an issue, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", so the link's "New
@@ -215,13 +216,12 @@ chain whole if the session is interrupted after it.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.
 3. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
-   Record each answer on its issue, and comment the answers onto the link just written, so its
-   parked-decision account is current without a second link.
+   Record each answer on its issue. Where a link was written and names one of the answered
+   decisions, comment that answer onto it, so its account is current without a second link.
 4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, such as a
    quirk of this machine or this account, saved as the session's final act. Never the round's
-   state, which the link holds, and never a lesson, which step 1 already committed. Every
-   `unattended-handoff` seat skips this step.
+   state, which the link holds, and never a lesson, which step 1 already committed.
 
 ## The Parked Decision Queue
 
