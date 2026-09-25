@@ -223,7 +223,8 @@ interruption part way leaves the work findable rather than lost.
    pull request the decision blocks, the open promotion included where it blocks that, which is
    what lets a picker find a promotion already waiting on one. Where an open `decision` issue
    already asks the same question about the same pull request, name that one instead of filing
-   another. It
+   another, commenting onto it this handoff, the effect on its work, and every pull request the
+   decision now blocks. It
    holds nothing but the question, so it closes once answered.
 3. **Comment the state on the handoff**: what is done, the branch and pull request, whether the
    worktree was left standing, what remains, and the decision issue it now waits on. This comment
