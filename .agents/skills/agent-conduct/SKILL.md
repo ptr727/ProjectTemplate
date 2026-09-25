@@ -9,8 +9,8 @@ description: >-
   work is done, verified, green, or fixed, whenever about to pick a default, guess an intent, or
   resolve an ambiguity without asking, whenever work is blocked on a decision or authorization
   only the user can give, whenever about to ask the user anything or offer them more work, a
-  closing "want me to...?" line included, whenever about to file a question as an issue instead of asking it,
-  whenever writing a handoff, whenever work here waits on a fix in another repository, and
+  closing "want me to...?" line included, whenever about to file a question as an issue instead
+  of asking it, whenever writing a handoff, whenever work here waits on a fix in another repository, and
   whenever an incident, a wrong answer, or a repeated correction just taught something a future
   session must honor. Deliberately narrow: the carried AGENTS.md "Context and Delegation
   Discipline" section is the always-on layer, so do not load this skill as general background.

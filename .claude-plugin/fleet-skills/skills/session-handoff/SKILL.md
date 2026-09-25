@@ -231,11 +231,11 @@ it.
 The rules below are `GOVERNANCE.md` "Communicating with the User", carried whole so this skill works
 in isolation. Two of them state the obligation: the one opening "A question filed as an issue is
 parked rather than asked" and the one opening "The session that writes a handoff presents the parked
-queue in the same act". Three more state the form the questions take, the one opening "Raise work
-blocked on the user as a direct interactive prompt" and the one opening "Ask for input as a numbered
-list", the first superseding the second wherever a prompt is available and naming it as the fallback
-where none is, and the one opening "Lead every choice with a recommendation and its reason", which
-binds both. A reader who stops after the obligation has it with no shape to put it in.
+queue in the same act". Three more state the form the questions take, the one opening "Ask every
+question through the interface's prompt, never in prose", which also names the numbered list as the
+fallback where no prompt exists, the one opening "Raise work blocked on the user as a direct
+interactive prompt", which shapes the options, and the one opening "Lead every choice with a
+recommendation and its reason", which binds every question put either way. A reader who stops after the obligation has it with no shape to put it in.
 
 Recording the queue is not asking it. The handoff's "The parked decision queue" section is the
 recording half, and what the other half is depends on what the session can reach: a prompt where one
