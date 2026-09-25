@@ -26,14 +26,15 @@ Three things, in the files above:
    Y's adoption"), which couples the repos and rots as they diverge. To point at a current good
    example, name it in the onboarding or conformance issue, never in a carried doc.
 3. **A value a pin holds**, the release number or commit SHA a pinned workflow, action, or tool
-   currently points at ("SHA-pinned at hub release 2.0.657"). The pin lives in the workflow or
-   manifest that uses it, where Dependabot moves it, so the copy in prose is stale at the next bump
-   and sends the next agent to edit governance for a change that needed none. Name the mechanism
-   instead ("SHA-pinned to a hub release, with the release in a trailing comment"). The audit flags
-   a three-part version or a full SHA in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or
-   `WORKFLOW.md`, outside their verbatim sections downstream and across the whole file in the hub.
-   `.github/copilot-instructions.md` is left out of that scan, since its disproved-claims records
-   name a revision by design, which the revision carve-out in `GOVERNANCE.md` "References" permits.
+   currently points at ("SHA-pinned at hub release 2.0.x", with a real number in place of the x).
+   The pin lives in the workflow or manifest that uses it, where Dependabot moves it, so the copy in
+   prose is stale at the next bump and sends the next agent to edit governance for a change that
+   needed none. Name the mechanism instead ("SHA-pinned to a hub release, with the release in a
+   trailing comment"). The audit flags a three-part version or a full SHA in `AGENTS.md`,
+   `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md`, outside their verbatim sections downstream and
+   across the whole file in the hub. `.github/copilot-instructions.md` is left out of that scan,
+   since its disproved-claims records name a revision by design, which the revision carve-out in
+   `GOVERNANCE.md` "References" permits.
 
 ## The two exceptions
 

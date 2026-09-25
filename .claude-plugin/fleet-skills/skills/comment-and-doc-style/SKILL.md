@@ -211,7 +211,7 @@ are the repository's own narrative and keep their references, as do a commit mes
 request body, which are the surfaces a reference belongs on. An instruction document also names no
 value a pin holds, a release number or a commit SHA, since the copy goes stale at the next
 Dependabot bump. It names the mechanism instead, such as a reference SHA-pinned to a hub release,
-and `references/carried-doc-references.md` item 3 carries the audit that flags a copy.
+and item 3 of this skill's carried-doc-references reference carries the audit that flags a copy.
 
 Two carve-outs, each stated as a single case. Whatever neither of them affirmatively permits is
 banned by the paragraph above, which is the whole of the test and is why no list of banned cases
