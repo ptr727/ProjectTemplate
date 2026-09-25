@@ -207,9 +207,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options,
-   the recommended one first with its reason. Unlike a parking question, it stays open once
-   answered, as the work item for writing the rule. The picker never takes a `decision` issue, so
-   the loop cannot write the rule itself.
+   the recommended one first with its reason. Where the answer adopts the rule, the issue stays open
+   as the work item for writing it, and where the answer declines it, the issue closes. The picker
+   never takes a `decision` issue, so the loop cannot write the rule itself.
 7. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
    what it filed along the way, the lesson issue included, then close it. An `auto-*` lane holds one
    issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
