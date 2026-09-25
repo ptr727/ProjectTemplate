@@ -2002,6 +2002,8 @@ class TestCoverage(GqlCase):
             ("under an HTML comment", f"<!-- ccr-overview-v2 -->\n    {MARKER}", "UNSTATED"),
             ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
             ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
+            ("under text opening on NBSP", f"{chr(0xA0)}## Overview\n    {MARKER}", "FULL"),
+            ("under a line of only NBSP", f"Prose.\n{chr(0xA0)}\n    {MARKER}", "FULL"),
         ):
             with self.subTest(case=label):
                 expected = getattr(pr_review, state)

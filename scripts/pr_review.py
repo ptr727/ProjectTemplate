@@ -1238,8 +1238,8 @@ def coverage_statements(body: str) -> list[str]:
     quoted = False
     continues = False
     for ln in plain.splitlines():
-        stripped = ln.lstrip()
-        if not ln.strip():
+        stripped = ln.lstrip(" \t")
+        if not stripped:
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
             continues = False
