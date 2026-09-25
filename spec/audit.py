@@ -728,9 +728,20 @@ TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructi
 # The undeclared-H2 scan reads the same set.
 UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
+# The pinned-version scan reads the instruction documents a repo owns prose in.
+# .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
+VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
 
-def strip_sections(text, names):
+# A three-part release number or a full commit SHA, the two forms a pin takes.
+# The lookarounds keep a dotted quad, such as an address, from matching as a version.
+VERSION_LITERAL = re.compile(r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)|\b[0-9a-fA-F]{40}\b")
+
+
+def strip_sections(text, names, keep_pins=False):
     """`text` with each named `## <heading>` region removed, located by position rather than by content.
+
+    The result is normalized, which reduces an action pin to `<pin>`, unless `keep_pins` asks for the
+    line endings alone to be neutralized, which is what a scan for the pin's own value needs.
 
     Region rules match extract_section (a fenced `## ` is not a boundary, a sibling H2 ends the region), so
     the two agree on where a section starts and stops.
@@ -740,7 +751,8 @@ def strip_sections(text, names):
     """
     want = {n.strip().lower() for n in names}
     out, dropping, marker, marker_len = [], False, None, 0
-    for ln in normalize(text).split("\n"):
+    base = text.replace("\r\n", "\n").replace("\r", "\n") if keep_pins else normalize(text)
+    for ln in base.split("\n"):
         stripped = ln.strip()
         marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
         if not boundary and marker is None and stripped.startswith("## "):
@@ -750,6 +762,21 @@ def strip_sections(text, names):
         if not dropping:
             out.append(ln)
     return "\n".join(out)
+
+
+def version_literals_outside_verbatim(text, verbatim_names):
+    """Every pinned-version literal in `text` outside its verbatim sections, sorted and deduplicated.
+
+    A pin lives in the workflow or manifest that uses it, where Dependabot moves it, so a copy in prose is
+    stale at the next bump and sends an agent to edit governance for a change that needed none.
+    Verbatim sections are excised downstream for the reason template_ref_outside_verbatim gives: their
+    bytes are the hub's, so a literal there is the hub's defect to fix once rather than each repo's. The
+    hub's own run passes no sections, which is where that defect is caught.
+    Fenced code is scanned too, since a pinned `uses:` line in a sample goes stale the same way.
+    """
+    return sorted(
+        set(VERSION_LITERAL.findall(strip_sections(text, verbatim_names, keep_pins=True)))
+    )
 
 
 def undeclared_h2_headings(text, declared):
@@ -2632,6 +2659,27 @@ def audit_repo(entry, spec, branch=None):
                     )
                 )
 
+        # --- Instruction documents must not copy a pin's value ---
+        # The hub is scanned whole, verbatim sections included, since those are the copies every repo carries and no other run can see a literal inside them.
+        if path in VERSION_LITERAL_SCANNED:
+            if text is None:
+                findings.append(
+                    (
+                        "DRIFT",
+                        f"carried: could not read {path} content on {ground} to scan for a copied version (no inline content returned); verify by hand",
+                    )
+                )
+            else:
+                excised = set() if entry.get("name") == HUB_NAME else verbatim_secs[path]
+                literals = version_literals_outside_verbatim(text, excised)
+                if literals:
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"carried: {path} names a three-part version or a commit SHA ({', '.join(literals)}); name a pin by its mechanism, never its value, and state a version only where it will not go stale (GOVERNANCE.md, Documentation Style Conventions, References)",
+                        )
+                    )
+
     # --- Manifest-owned verbatim trees ---
     # carried_entries was read once above, where the coverage applicability check needed it first.
     if carried_entries is None:
@@ -3911,6 +3959,37 @@ def _selftest():
         print(
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
         )
+
+    # A pinned version copied into an instruction document, outside its verbatim sections.
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    vl = [
+        ("a release number is flagged", "Pinned at hub release `2.0.657`.\n", set(), ["2.0.657"]),
+        ("a full SHA is flagged", f"uses: o/r/x.yml@{sha} # 2.0.1\n", set(), ["2.0.1", sha]),
+        ("an uppercase SHA is flagged", f"Pinned at {sha.upper()}.\n", set(), [sha.upper()]),
+        ("the mechanism alone is clean", "SHA-pinned to a hub release.\n", set(), []),
+        ("a dotted quad is not a version", "Host 192.168.1.10 serves it.\n", set(), []),
+        ("a two-part version is not a pin", "Python 3.13 and 3.14.\n", set(), []),
+        (
+            "a literal inside a verbatim section is the hub's",
+            "# W\n\n## Locked\n\nPinned at 2.0.1.\n\n## Mine\n\nClean.\n",
+            {"Locked"},
+            [],
+        ),
+        (
+            "a literal outside the verbatim section is flagged",
+            "# W\n\n## Locked\n\nClean.\n\n## Mine\n\nPinned at 2.0.2.\n",
+            {"Locked"},
+            ["2.0.2"],
+        ),
+    ]
+    vl_ok = True
+    for label, doc, verb, want in vl:
+        got = version_literals_outside_verbatim(doc, verb)
+        if got != sorted(want):
+            ok = vl_ok = False
+            print(f"  FAIL version-literal: {label} (expected {sorted(want)}, got {got})")
+    if vl_ok:
+        print(f"  ok   version-literal: {len(vl)} cases, pins outside verbatim sections flagged")
 
     # An H2 the manifest does not declare, in AGENTS.md, GOVERNANCE.md, or .github/copilot-instructions.md.
     # Fence-aware, so a heading syntax example or a shell comment inside a code sample is not misread as a real section.
@@ -5840,7 +5919,7 @@ def main(argv=None):
     print(f"audit run {run_utc} | hub {hub_sha}{override}")
     if not HUB_NAME_FROM_REMOTE:
         print(
-            f"warning: no git remote; template-reference check falls back to the directory name '{HUB_NAME}' and may miss",
+            f"warning: no git remote; the hub name falls back to the directory name '{HUB_NAME}', so every check that depends on the hub's identity is unreliable in this run",
             file=sys.stderr,
         )
     print()
