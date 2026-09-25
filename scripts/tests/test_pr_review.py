@@ -1953,7 +1953,7 @@ class TestCoverage(GqlCase):
         )
 
     def test_a_tilde_or_unclosed_fence_quotes_a_marker(self) -> None:
-        """Markdown fences with tildes as well as backticks, and runs an unclosed fence to the end.
+        """Markdown opens a fence with tildes as well as backticks, and runs an unclosed one to the end.
 
         Stripping only a closed backtick fence read a marker quoted in either of the others as this
         round's stated coverage, the failure direction that reports coverage nobody claimed.
