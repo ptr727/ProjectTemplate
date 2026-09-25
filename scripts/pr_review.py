@@ -1179,9 +1179,30 @@ def review_effort(pr: dict) -> tuple[str, str]:
     return "unknown", "unknown"
 
 
+def code_indented(line: str) -> bool:
+    """Whether the line opens four or more columns in, which Markdown renders as a code block.
+
+    Measured in columns rather than characters, a tab being four of them and so an indented code
+    block on its own, which a character count reads as one column.
+    """
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip()) >= 4
+
+
+def stated_marker(line: str) -> re.Match[str] | None:
+    """The coverage marker this line states, or None where it carries none or only quotes one.
+
+    A line indented into a code block is a quotation, so a marker on it is one the round quoted
+    rather than stated. `CCR_OVERVIEW` and `CCR_FINDINGS` bound their openers to three spaces for
+    the same reason. The marker is read within its line rather than at its start, so the bound is
+    on the line here rather than in the pattern.
+    """
+    return None if code_indented(line) else FLEET_REVIEW.search(line)
+
+
 def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
-    if FLEET_REVIEW.search(line):
+    if stated_marker(line):
         return True
     if COVERAGE_BULLET.match(line):
         return True
@@ -1220,9 +1241,7 @@ def coverage_statements(body: str) -> list[str]:
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
             continue
-        # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
-        expanded = ln.expandtabs(4)
-        indented = len(expanded) - len(expanded.lstrip()) >= 4
+        indented = code_indented(ln)
         # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
@@ -1252,7 +1271,7 @@ def read_coverage(line: str) -> tuple[int, int] | None:
     line able to carry both, and settling such a line on the marker alone would clear the gate for a
     round whose own prose says it read part of the diff.
     """
-    marker = FLEET_REVIEW.search(line)
+    marker = stated_marker(line)
     m = COVERAGE_COUNTS.search(line)
     prose = None
     if m:

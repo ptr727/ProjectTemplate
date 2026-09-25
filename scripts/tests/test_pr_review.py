@@ -1952,6 +1952,33 @@ class TestCoverage(GqlCase):
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
 
+    def test_a_marker_indented_into_a_code_block_is_a_quotation(self) -> None:
+        """Four columns of indentation open a Markdown code block, so a marker there is quoted.
+
+        The two sibling readers bound their openers to three spaces for this reason, and the marker
+        read an indented line as a stated coverage figure, the failure direction that reports
+        coverage nobody claimed.
+        """
+        for label, line in (
+            ("four spaces", f"    {MARKER}"),
+            ("eight spaces", f"        {MARKER}"),
+            ("a tab", f"\t{MARKER}"),
+            ("two spaces and a tab", f"  \t{MARKER}"),
+            ("indented prose ending on it", f"    Prose about the change. {MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertFalse(pr_review.is_coverage_line(line))
+                self.assertIsNone(pr_review.read_coverage(line))
+                self.assertEqual([], pr_review.coverage_statements(line))
+        for spaces in range(4):
+            line = f"{' ' * spaces}{MARKER}"
+            with self.subTest(spaces=spaces):
+                self.assertEqual([MARKER], pr_review.coverage_statements(line))
+                self.assertEqual((8, 8), pr_review.read_coverage(line))
+        self.assertIn(
+            "coverage=unstated", self.digest_for(review(body=f"{OVERVIEW}\n    {MARKER}"))
+        )
+
     def test_a_line_stating_both_readings_and_disagreeing_is_refused(self) -> None:
         """Reading the marker within its line is what lets one line carry both readings.
 
