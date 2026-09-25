@@ -74,6 +74,10 @@ exists because a merge to main with no release never exercises artifact creation
 
 A run may also be given a round cap. Where none is named, it is 20.
 
+**One run per repository at a time.** The picker reads an open `auto-*` handoff not carrying
+`blocked` as a lane whose worker died, which only holds while no other run is live, so the
+maintainer starts a second run on a repository only once the first has ended.
+
 ## The Loop
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
@@ -122,7 +126,8 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 | either | `STOP <reason>` | a condition no later round can clear, so the run ends |
 
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
-an exhausted reviewer quota, or a push the executor refuses.
+an exhausted reviewer quota, a push the executor refuses, or a promotion pull request already
+waiting on an open `decision` issue, since every later round would meet that same decision.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
 Under `main` or `release` every round promotes, so each one ordinarily carries one fix, and a change
@@ -135,7 +140,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 - **The right outcome is determined** by the issue together with the committed rules, and the issue
   leaves no choice open between alternatives it names.
-- **Nothing on it waits on the maintainer.** It carries none of `decision`, `blocked`, or `handoff`,
+- **Nothing on it waits on the maintainer.** It carries none of `decision`, `blocked`, `handoff`, or
+  `canonical-sweep`, the last being an issue a workflow owns rather than one a pull request closes,
   and no comment asks the maintainer something still unanswered.
 - **The fix stays inside this repository's tree.** It changes no repository setting, ruleset,
   visibility, secret, or release condition, and needs no credential, account, or host the session
@@ -192,7 +198,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
-5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
+5. **Park at the first decision**, per "Parking" below. A decision on the promotion pull request
+   is first checked against the open `decision` issues, and one already filed for it returns
+   `STOP` rather than a second issue. That includes a merge the harness refuses
    after one retry, which is parked as ready to merge rather than routed around.
 6. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
    what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
