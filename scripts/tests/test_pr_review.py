@@ -1996,6 +1996,10 @@ class TestCoverage(GqlCase):
             ("under paragraph text", f"The changes are consistent, with\n    {MARKER}", "FULL"),
             ("under a list item", f"- The changes are consistent.\n    {MARKER}", "FULL"),
             ("under a heading", f"## Overview\n    {MARKER}", "UNSTATED"),
+            ("under a setext underline", f"Overview\n===\n    {MARKER}", "UNSTATED"),
+            ("under a setext dash underline", f"Overview\n---\n    {MARKER}", "UNSTATED"),
+            ("under a thematic break", f"Prose.\n\n* * *\n    {MARKER}", "UNSTATED"),
+            ("under an HTML comment", f"<!-- ccr-overview-v2 -->\n    {MARKER}", "UNSTATED"),
             ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
             ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
         ):

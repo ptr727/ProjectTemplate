@@ -1224,8 +1224,9 @@ def coverage_statements(body: str) -> list[str]:
     A line indented four or more columns is the fourth convention, an indented code block, and a
     marker on one is dropped from the line rather than the line being dropped whole. The indent
     opens a code block only where nothing runs on into it, since an indented line under paragraph
-    text is that paragraph's lazy continuation and renders as part of it, while a heading is
-    complete on its own line and a code line carries its block on to the next. `CCR_OVERVIEW`
+    text is that paragraph's lazy continuation and renders as part of it. Only paragraph text
+    runs on that way. A heading, a setext underline, a thematic break, and a line opening an HTML
+    comment each end their own block, and a code line carries its block on to the next line. `CCR_OVERVIEW`
     and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
     being read within its line, takes that bound here instead of in its pattern. The rest of the
     line is still read, the bullet and the sentence being left to their own readers as before, and
@@ -1245,7 +1246,9 @@ def coverage_statements(body: str) -> list[str]:
             continue
         indented = code_indented(ln)
         code = indented and not continues
-        continues = not code and not re.match(r"#{1,6}(?:\s|$)", stripped)
+        continues = not code and not re.match(
+            r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
+        )
         # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
