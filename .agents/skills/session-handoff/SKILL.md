@@ -191,9 +191,9 @@ the whole procedure below. Run every step without being reminded of any of them.
    request and dispatching a release stay `merge-and-release`, each on an explicit go-ahead asked
    for as a prompt whose option names the action.
 5. **Ask every question as a dialog.** Where the interface has a prompt mechanism, each decision is
-   its own question with its answers as the options, the recommended one first and every one
-   carrying its reason, per "The Parked Decision Queue" below. The numbered list is the fallback
-   where no prompt exists.
+   its own question with its answers as the options, the recommended one first and marked as the
+   recommendation, and every one carrying its reason, per "The Parked Decision Queue" below. The
+   numbered list is the fallback where no prompt exists.
 6. **Close the session** per "Closing a Session" below, which commits lessons, writes the next link
    with `new`, presents the parked decision queue, and saves memories last. An `auto-*` lane is the
    exception, since it holds one issue. Where that issue is done, comment the outcome on the link
@@ -210,8 +210,10 @@ closes as that skill states. Each step leaves the chain whole if the session is 
 it.
 
 1. **Record what was learned.** A lesson a future agent must honor is recorded in the governing doc
-   as part of the change, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", so the
-   link's "New learnings" section has somewhere real to point.
+   as part of the change, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement". Where that
+   doc is carried from a template this repo cannot edit, or the session changed nothing to carry it,
+   the lesson is proposed as an issue instead, upstream for a carried doc, so the link's "New
+   learnings" section has somewhere real to point.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.
