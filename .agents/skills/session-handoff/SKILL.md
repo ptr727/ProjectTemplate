@@ -6,14 +6,17 @@ description: >-
   label, naming its predecessor in its own body, with a forward-link comment posted onto that
   predecessor and the predecessor then closed. Use this whenever
   ending a session or a round of work, whenever starting or resuming one, whenever asked for a
-  handoff or for what the previous round did, and whenever about to re-attempt something a previous
+  handoff or for what the previous round did, whenever the maintainer says only "resume the
+  handoff" or names none, which stands for the whole attended procedure this skill states, and
+  whenever about to re-attempt something a previous
   round may already have tried. That last moment is the one that earns this skill, since a session
   that does not know a chain exists never goes looking for one, and the whole point of a chain is
   that it holds what has already been attempted and what it cost. Triggers even when the session
   feels too short to be worth a handoff, because the rounds that produce nothing worth writing down
   are exactly the rounds a later session repeats. The rule itself is `AGENTS.md` "Session Scope",
   which keeps it, and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns
-  the moment, it wins: `backlog-burndown` owns a multi-round run's own reporting and
+  the moment, it wins: `backlog-burndown` owns a multi-round run's own reporting,
+  `unattended-handoff` owns a run with no maintainer present, and
   `repo-worktree` owns the worktree the handoff names. `agent-conduct` is not such a sibling. It
   fires at the same parked-decision obligation this skill carries, so the two co-fire and neither
   defers to the other, and a session loading only one of them still owes that queue.
@@ -159,6 +162,54 @@ rather than `resume`.
 Re-derive a count rather than copying one, and read it with an explicit page size. `gh issue list`
 returns 30 rows unless told otherwise, and a truncated count reads exactly like a repository with
 30 issues, which is worse than an absent count because it gets stated.
+
+## The Attended Session
+
+A maintainer resuming work says little, often only "resume the handoff", and that phrase stands for
+the whole procedure below. Run every step without being reminded of any of them.
+
+1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
+   `gh issue list --label handoff --state open --limit 100 --json number,title,labels,updatedAt`,
+   since `tracks` prints neither labels nor exact update times. Take a link carrying `blocked`
+   first, newest update first among them, since its blocker is a decision only the maintainer can
+   make and the maintainer is now present. Otherwise take the newest update among the rest. An
+   `auto-*` link not carrying `blocked` is skipped unless named, since an `unattended-handoff`
+   worker may hold it right now, and where one is named, confirm with the maintainer that no
+   unattended run is live before working it. Where every open link is skipped, say so and ask the
+   maintainer which to take. Say which link was picked in one line before anything else, so a wrong pick costs one reply
+   rather than a round.
+2. **Resume it** per "Resuming" above, re-deriving live state rather than trusting the body, and
+   read its comments with `gh issue view <n> --comments` too, since `resume` prints only the body
+   and a parked link's state is in its parking comment.
+3. **Ask what it is blocked on first.** Where the link carries `blocked`, the parking comment names
+   a `decision` issue. Read it first, since the maintainer may have answered it there already.
+   Otherwise that question goes to the maintainer before any work starts, since the rest of the
+   link waits on it. Once answered, record the answer on the decision issue, take its `decision`
+   label off, and close it where it held nothing but the question. Leave `blocked` on the handoff
+   while this session works the link, so a running `unattended-handoff` loop does not pick it up
+   underneath the session, and settle it in step 6.
+4. **Work the next steps** in a worktree of the session's own, per `repo-worktree`, and drive each
+   pull request with `drive-pr` to a mergeable develop -> main promotion pull request. The phrase
+   already states that target, so `drive-pr` does not ask how far. Merging that promotion pull
+   request and dispatching a release stay `merge-and-release`, each on an explicit go-ahead asked
+   for as a prompt whose option names the action.
+5. **Ask every question as a dialog.** Where the interface has a prompt mechanism, each decision is
+   its own question with its answers as the options. The recommended option comes first, labeled
+   as the recommendation, and every option's description states the reason for it, so a maintainer
+   who takes the recommendation reads one line. The numbered list is the fallback where no prompt
+   exists, carrying the same recommendation and reasons.
+6. **Write the next link** with `new`, per "Running the Chain" below, and present the parked
+   decision queue in the same act, per "The Parked Decision Queue". An `auto-*` lane is the
+   exception, since it holds one issue. Where that issue is done, comment the outcome on the link
+   and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
+   remains, write its next link on the same track without `blocked`, its next steps naming the
+   decision issue and the answer, which hands it back to the unattended loop. Either way the
+   `blocked` label left on in step 3 goes with the link it was on, and the parked decision queue
+   is still presented, since the exception covers only the link.
+7. **Save memories last.** Where the host keeps a per-user memory, record what this session learned
+   that neither the chain nor the tree records, as the final act of the session, so no later step
+   can change what a memory claims. A memory holds lessons about how to work, never the round's
+   state, which the link just written holds.
 
 ## The Parked Decision Queue
 
