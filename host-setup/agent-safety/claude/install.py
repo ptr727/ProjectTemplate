@@ -522,7 +522,7 @@ def registration_problems(claude_home):
                 )
                 continue
             swept += 1
-            # A SessionEnd matcher filters by exit reason, so a sweep under one runs on that reason alone.
+            # A matcher naming specific exit reasons runs the sweep on those reasons alone.
             # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
             if not matcher_covers_every_exit_reason(group.get("matcher")):
                 report(
@@ -823,7 +823,7 @@ def main():
     done = ["PreToolUse/Bash hook registered"]
 
     # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
-    # The group carries no matcher, so it fires on every exit reason rather than on one.
+    # The chosen or newly created group covers every exit reason, so the sweep fires on all of them.
     ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
     for g in ends:
         hooks_list = g.get("hooks")
