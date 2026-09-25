@@ -375,7 +375,6 @@ NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
 # The instruction it is emitted from asks only that the body end with it, and one of the two overview formats ends a prose sentence with it instead.
 # Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
 # The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
-# That refusal is `coverage_statements`, which drops a fenced block, an inline code span, and a blockquoted line, in that order, ahead of every reader here.
 # The digit runs are matched unbounded and judged in `read_coverage` rather than bounded here, which is the difference between a line this cannot believe and a line that is not a statement at all.
 # Bounded here, a marker stating a count longer than any review states stopped matching, so the line left the gate silently and a round carrying one read as full on whatever else it said.
 # `int` also raises on a run past 4300 digits, so the judgment has to happen somewhere, and the place that can answer `unvetted` is the reader rather than the pattern.
@@ -1179,6 +1178,17 @@ def review_effort(pr: dict) -> tuple[str, str]:
     return "unknown", "unknown"
 
 
+def code_indented(line: str) -> bool:
+    """Whether the line opens four or more columns in, the indentation of a Markdown code block.
+
+    Measured in columns rather than characters, a tab being four of them and so an indented code
+    block on its own, which a character count reads as one column. Only spaces and tabs indent,
+    so a line opening on any other whitespace is ordinary text.
+    """
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" ")) >= 4
+
+
 def is_coverage_line(line: str) -> bool:
     """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
     if FLEET_REVIEW.search(line):
@@ -1210,20 +1220,36 @@ def coverage_statements(body: str) -> list[str]:
     the quotation above it. Of the three spellings read here only the reviewer's own sentence is
     paragraph text, the bullet and the marker each opening a block, and treating those as quoted
     reported no coverage at all over a round that stated it in full.
+
+    A line indented four or more columns is the fourth convention, an indented code block, and a
+    marker on one is dropped from the line rather than the line being dropped whole. The indent
+    opens a code block only where nothing runs on into it, since an indented line under paragraph
+    text is that paragraph's lazy continuation and renders as part of it, and a list item's own
+    text runs on the same way. A heading, a setext underline, a thematic break, and a line opening
+    an HTML comment each end their own block, and a code line carries its block on to the next. `CCR_OVERVIEW`
+    and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
+    being read within its line, takes that bound here instead of in its pattern. The rest of the
+    line is still read, the bullet and the sentence being left to their own readers as before, and
+    the marker comes off before the line is kept, because every reader downstream reads the
+    kept line with its indentation already stripped.
     """
     plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
     found = []
     quoted = False
+    continues = False
     for ln in plain.splitlines():
-        stripped = ln.lstrip()
-        if not ln.strip():
+        stripped = ln.lstrip(" \t")
+        if not stripped:
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
+            continues = False
             continue
-        # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
-        expanded = ln.expandtabs(4)
-        indented = len(expanded) - len(expanded.lstrip()) >= 4
-        # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
+        indented = code_indented(ln)
+        code = indented and not continues
+        continues = not code and not re.match(
+            r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
+        )
+        # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
             quoted = True
@@ -1231,6 +1257,8 @@ def coverage_statements(body: str) -> list[str]:
         if not indented and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
+        if code:
+            ln = FLEET_REVIEW.sub(" ", ln)
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
         if quoted or not is_coverage_line(ln):
             continue
