@@ -209,12 +209,12 @@ Every session that writes a handoff ends in this order, except an `unattended-ha
 closes as that skill states. Each step leaves the chain whole if the session is interrupted after
 it.
 
-1. **Record what was learned.** A lesson a future agent must honor is recorded in the governing doc
-   as part of the change while that change is still open, per `GOVERNANCE.md` "Durable Knowledge
-   and Self-Improvement". Where that doc is carried from a template this repo cannot edit, the
-   round's change has already merged, or the session changed nothing, the lesson is proposed as an
-   issue instead, upstream for a carried doc, so the link's "New
-   learnings" section has somewhere real to point.
+1. **Record what was learned.** A lesson a future agent must honor lands in the governing doc inside
+   the pull request whose work taught it, per `GOVERNANCE.md` "Durable Knowledge and
+   Self-Improvement", so by the close it is usually already merged. One found only at the close
+   becomes the first of the next link's next steps, a change to that doc, and one whose doc is
+   carried from a template this repo cannot edit is proposed upstream as an issue. Either way the
+   link's "New learnings" section has somewhere real to point.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.
