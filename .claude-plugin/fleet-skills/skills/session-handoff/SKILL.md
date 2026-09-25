@@ -180,10 +180,12 @@ the whole procedure below. Run every step without being reminded of any of them.
    read its comments with `gh issue view <n> --comments` too, since `resume` prints only the body
    and a parked link's state is in its parking comment.
 3. **Ask what it is blocked on first.** Where the link carries `blocked`, the parking comment names
-   a `decision` issue, and that question goes to the maintainer before any work starts, since the
-   rest of the link waits on it. Once answered, record the answer on the decision issue, take its
-   `decision` label off, close it where it held nothing but the question, and take `blocked` off
-   the handoff, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
+   a `decision` issue. Read it first, since the maintainer may have answered it there already.
+   Otherwise that question goes to the maintainer before any work starts, since the rest of the
+   link waits on it. Once answered, record the answer on the decision issue, take its `decision`
+   label off, and close it where it held nothing but the question. Leave `blocked` on the handoff
+   while this session works the link, so a running `unattended-handoff` loop does not pick it up
+   underneath the session, and settle it in step 6.
 4. **Work the next steps** in a worktree of the session's own, per `repo-worktree`, and drive each
    pull request with `drive-pr` to a mergeable develop -> main promotion pull request. The phrase
    already states that target, so `drive-pr` does not ask how far. Merging that promotion pull
@@ -195,7 +197,11 @@ the whole procedure below. Run every step without being reminded of any of them.
    who takes the recommendation reads one line. The numbered list is the fallback where no prompt
    exists, carrying the same recommendation and reasons.
 6. **Write the next link** with `new`, per "Running the Chain" below, and present the parked
-   decision queue in the same act, per "The Parked Decision Queue".
+   decision queue in the same act, per "The Parked Decision Queue". An `auto-*` lane is the
+   exception, since it holds one issue. Where that issue is done, comment the outcome on the link
+   and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
+   remains, write its next link on the same track without `blocked`, which hands it back to the
+   unattended loop. Either way the `blocked` label left on in step 3 goes with the link it was on.
 7. **Save memories last.** Where the host keeps a per-user memory, record what this session learned
    that neither the chain nor the tree records, as the final act of the session, so no later step
    can change what a memory claims. A memory holds lessons about how to work, never the round's

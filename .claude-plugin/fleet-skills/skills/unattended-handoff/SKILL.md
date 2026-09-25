@@ -123,8 +123,10 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
 an exhausted reviewer quota, a push the executor refuses, or under `main` or `release` a develop
-already ahead of main at the start of a round, since promoting then would merge changes nobody in
-this run named.
+whose content already differs from main's at the start of a round, since promoting then would merge
+changes nobody in this run named. Content rather than commit count is the test, `git diff --quiet
+origin/main origin/develop` after a fetch, because a change merged to both branches in parallel
+leaves commits in the range and no difference in content.
 
 ## Auto-Resolvable
 
@@ -140,9 +142,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   lacks.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --track auto-<issue> --limit 1` answers. No open pull request names it,
-  and no pull request merged into develop names it on a `Closes on promotion:` line, since a fix
-  merged there leaves its issue open until promotion.
+  which `handoff.py chain --track auto-<issue> --limit 1` answers with its refusal naming no
+  handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
+  request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
+  names it anywhere in its body, since a fix merged to develop leaves its issue open until
+  promotion whoever merged it.
 
 ## The Picker
 
@@ -153,7 +157,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
-   lanes and are never picked.
+   lanes and are never picked. For an `auto-*` handoff carrying `blocked`, read the decision issue
+   its parking comment names. Where that issue no longer carries `decision`, the blocker has
+   cleared, so take `blocked` off the handoff and treat it as unblocked, per `GOVERNANCE.md`
+   "Durable Knowledge and Self-Improvement".
 3. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
    page size, since `gh issue list` returns 30 rows unless told otherwise.
@@ -170,15 +177,19 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    issue view <n> --comments`, since `resume` prints only the body and a parked lane's state is in
    its parking comment. Re-derive live state rather than trusting either, per `session-handoff`
    "Resuming".
-2. **Check the scope's precondition.** Under `main` or `release`, a develop already ahead of main
-   is a `STOP`, before any edit.
+2. **Check the scope's precondition.** Under `main` or `release`, a develop whose content differs
+   from main's is a `STOP`, before any edit, per "Return Lines".
 3. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 4. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
    `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Under `main` or
    `release`, continue to the promotion pull request, its body carrying `Fixes #<issue>`, and hand it
    to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
-   Every Merge Gate item other than the permission still has to hold.
+   Every Merge Gate item other than the permission still has to hold. Immediately before opening
+   the promotion and again before merging it, fetch and confirm `git diff --name-only origin/main
+   origin/develop` names only files this worker's pull request changed. Anything else merged into
+   develop while the review loop ran would ride along, so that is a decision and the promotion is
+   parked, per "Parking", rather than merged.
 5. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.

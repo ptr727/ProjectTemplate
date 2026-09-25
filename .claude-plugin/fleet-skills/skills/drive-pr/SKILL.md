@@ -33,7 +33,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 - Read the invocation for an explicit target first. "To develop" or "to dev" means stop once
   merged into develop. "To main", "through to main", or "all the way" means continue to a
-  mergeable promotion PR. Act on either without asking.
+  mergeable promotion PR. Act on either without asking. `session-handoff`'s attended session,
+  invoked by "resume the handoff", states the second, and naming that procedure names this skill.
 - When the request names no target ("drive this PR", "land it", "take this PR"), ask once,
   before the first push: develop only, or all the way to a mergeable main promotion PR. Recommend
   "all the way to main" as the default, a promotion PR left to go stale once develop is ready is
