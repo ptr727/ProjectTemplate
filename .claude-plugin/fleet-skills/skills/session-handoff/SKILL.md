@@ -8,13 +8,15 @@ description: >-
   for what the previous round did, whenever the maintainer says only "resume the handoff" or names
   none, which stands for the whole attended procedure this skill states, and whenever about to
   re-attempt something a previous round may already have tried, the moment that earns this skill,
-  since a session that does not know a chain exists never goes looking for one. Triggers even when
-  the session feels too short to be worth a handoff, because the rounds that produce nothing worth
-  writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
-  Scope" and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns the
-  moment, it wins: `backlog-burndown` owns a multi-round run's reporting, `unattended-handoff`
-  owns a run with no maintainer present, and `repo-worktree` owns the worktree the handoff names.
-  `agent-conduct` co-fires at the parked-decision obligation and neither defers to the other.
+  since a session that does not know a chain exists never goes looking for one. Every session
+  writing one ends in the same order: the link, the parked decision queue presented, then memories
+  saved last. Triggers even when the session feels too short to be worth a handoff, because the
+  rounds that produce nothing worth writing down are exactly the rounds a later session repeats.
+  The rule is `AGENTS.md` "Session Scope" and the mechanics are the hub's `scripts/handoff.py`.
+  Where a sibling skill owns the moment, it wins: `backlog-burndown` owns a multi-round run's
+  reporting, `unattended-handoff` owns a run with no maintainer present, and `repo-worktree` owns
+  the worktree the handoff names. `agent-conduct` co-fires at the parked-decision obligation and
+  neither defers to the other.
 ---
 
 # Session Handoff
@@ -189,32 +191,42 @@ the whole procedure below. Run every step without being reminded of any of them.
    request and dispatching a release stay `merge-and-release`, each on an explicit go-ahead asked
    for as a prompt whose option names the action.
 5. **Ask every question as a dialog.** Where the interface has a prompt mechanism, each decision is
-   its own question with its answers as the options. The recommended option comes first, labeled
-   as the recommendation, and every option's description states the reason for it, so a maintainer
-   who takes the recommendation reads one line. The numbered list is the fallback where no prompt
-   exists, carrying the same recommendation and reasons.
+   its own question with its answers as the options, the recommended one first and every one
+   carrying its reason, per "The Parked Decision Queue" below. The numbered list is the fallback
+   where no prompt exists.
 6. **Write the next link** with `new`, per "Running the Chain" below, and present the parked
-   decision queue in the same act, per "The Parked Decision Queue". An `auto-*` lane is the
+   decision queue in the same act, per "Closing a Session". An `auto-*` lane is the
    exception, since it holds one issue. Where that issue is done, comment the outcome on the link
    and close it with no successor, as `unattended-handoff` closes such a lane out. Where work
    remains, write its next link on the same track without `blocked`, its next steps naming the
    decision issue and the answer, which hands it back to the unattended loop. Either way the
    `blocked` label left on in step 3 goes with the link it was on, and the parked decision queue
    is still presented, since the exception covers only the link.
-7. **Save memories last.** Where the host keeps a per-user memory, record what this session learned
+7. **Close the session** per "Closing a Session" below, memories last.
+
+## Closing a Session
+
+Every session that writes a handoff, attended or not, ends in this order, so nothing it records is
+stale by the time the session stops.
+
+1. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
+2. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
+3. **Save memories last.** Where the host keeps a per-user memory, record what this session learned
    that neither the chain nor the tree records, as the final act of the session, so no later step
    can change what a memory claims. A memory holds lessons about how to work, never the round's
-   state, which the link just written holds.
+   state, which the link just written holds. A seat told to save no memory, an `unattended-handoff`
+   orchestrator or worker among them, skips this step.
 
 ## The Parked Decision Queue
 
 The rules below are `GOVERNANCE.md` "Communicating with the User", carried whole so this skill works
 in isolation. Two of them state the obligation: the one opening "A question filed as an issue is
 parked rather than asked" and the one opening "The session that writes a handoff presents the parked
-queue in the same act". Two more state the form the questions take, the one opening "Raise work
+queue in the same act". Three more state the form the questions take, the one opening "Raise work
 blocked on the user as a direct interactive prompt" and the one opening "Ask for input as a numbered
 list", the first superseding the second wherever a prompt is available and naming it as the fallback
-where none is. A reader who stops after the obligation has it with no shape to put it in.
+where none is, and the one opening "Lead every choice with a recommendation and its reason", which
+binds both. A reader who stops after the obligation has it with no shape to put it in.
 
 Recording the queue is not asking it. The handoff's "The parked decision queue" section is the
 recording half, and what the other half is depends on what the session can reach: a prompt where one
@@ -227,6 +239,7 @@ falls to the next session that has one. The rules below settle which case applie
 - **Reference every pull request as a clickable link.** When you mention a PR on a surface that renders Markdown (chat, a summary, a report), render it as a Markdown link to the PR (`[#N](https://github.com/OWNER/REPO/pull/N)`), never a bare `#N`. The same applies to issues and commits. **The form follows the surface.** Some surfaces link neither a Markdown link nor a bare URL, an interactive prompt's question and option text among them, and pasting a full URL into one of those does not rescue it, since the reader gets a string to copy, which is the outcome this rule exists to prevent. There the reference is a bare `#N`, and the clickable link goes in the message that comes **before** the prompt rather than merely alongside it, because the prompt blocks on an answer and a message emitted after it is read once that answer is already given, which is the one moment the link is no longer any use. The test is whether the reader can click it where it is read, not whether it was written in the syntax that works elsewhere.
 - **Ask for input as a numbered list.** When you need the user to decide or answer, present the questions, and any options, as a numbered list so they can reply per number. A single inline question is fine, and two or more are always numbered.
 - **Raise work blocked on the user as a direct interactive prompt.** When progress needs a decision, an authorization, or an answer only the user can give, ask for it through the interface's own prompt mechanism, at the point the work stops. Never leave it as prose in a summary: a handoff buried in a paragraph is a handoff that did not happen, because a summary reads as a report of finished work and the one line still waiting on the user is the easiest in it to skim past. The blocked item is the message, not a closing remark on a message about something else. **The options offered are the actions themselves**, and the one that unblocks the work names the action it authorizes ("squash and merge it"), so selecting it is the go-ahead rather than a note to act on later. Offering only ways to wait is the same failure in interactive clothing, since a prompt whose every choice is inaction reports the block rather than clearing it, and where the agent may not perform the authorized action itself, the option says who does it. This supersedes the numbered-list rule above wherever an interactive prompt is available, and the numbered list is the fallback where none is.
+- **Lead every choice with a recommendation and its reason.** Wherever the user is asked to choose, in a prompt or in a numbered list, the option the agent recommends comes first and is marked as the recommendation, and every option states the reason for it. A user who takes the recommendation then reads one line, and one who does not sees what the other options trade away. A question with no defensible recommendation says so rather than inventing one, and an open question with no options states the answer the agent would give and why.
 - **A question filed as an issue is parked rather than asked, and it stays owed.** Where the work cannot continue without the answer, the bullet above governs and the question is asked at the point the work stops. Wherever the question is recorded rather than asked, whether because the work can continue without the answer or because the question was asked once and deferred, recording it is the right thing to do and recording it is still not asking it, so the issue carries the fleet's `decision` label and, when the filing session knows the choices the question is between, states them, which is what lets a later session, one that was not there when the issue was filed, find the question and put it to the user without inventing its answers. **The parked queue is the failure, not the parking.** An issue holding a question the user has never seen reads to every later session as tracked work rather than as a block, so each session files correctly and moves on, and presenting the accumulation is the step nobody owns.
 - **The session that writes a handoff presents the parked queue in the same act.** This binds at the moment the session writes the handoff that `AGENTS.md` "Session Scope" defines, rather than at the moment the session ends, because a session also ends by interruption, where no agent acts at all and no rule reaches it. The session enumerates this repository's open issues carrying that label, states how many issues the queue holds, and puts the highest-ranked of them to the user as questions, **one question per parked decision, carrying that decision's own answers as its options**, which is the interactive-prompt bullet's own shape applied per decision rather than a single prompt whose options are topics. An issue that states no choices is put as the open question it is, never as invented options, since the label marks every decision waiting on the user rather than only the ones filed under this rule, and the issues that already carry the label predate the rule. Rank them longest-waited first. Every issue records how long it has waited, so any session can reproduce that order. Promote one ahead of that order where it blocks work in flight, and say in the handoff that it was promoted, since two sessions order the same queue differently where the key is subjective and nobody records it. Where more are parked than one round of questions can carry, the stated count still covers every one of them and the handoff names the remainder by issue number in that order, a list of numbers rather than of questions, which is what keeps the handoff inside the size rule that `AGENTS.md` "Session Scope" sets for it. **A count nobody states is a queue nobody can see**, which is how a backlog reported as healthy hides the questions inside it. Where a user is present but no prompt mechanism is available, the questions go as the numbered list the interactive-prompt bullet already names as its fallback, which reaches a reader who is there to read it. Where no user is present at all, the session asks nothing, names the whole queue by issue number in the handoff, and leaves the asking to the next session that has one. An item leaves the queue when the user answers it, and also at triage where a later change has already answered or overtaken its decision. Either way it leaves by losing the label, with the answer or the reason recorded on the issue, and the issue itself closes only where it held nothing but the question, since the queue holds issues that outlive their decision, and closing such an issue just to clear the queue discards the other work that issue tracks.
 
