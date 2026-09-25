@@ -734,7 +734,7 @@ VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFL
 
 # A three-part release number or a full commit SHA, the two forms a pin takes.
 # The lookarounds keep a dotted quad, such as an address, from matching as a version.
-VERSION_LITERAL = re.compile(r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)|\b[0-9a-f]{40}\b")
+VERSION_LITERAL = re.compile(r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)|\b[0-9a-fA-F]{40}\b")
 
 
 def strip_sections(text, names, keep_pins=False):
@@ -769,8 +769,9 @@ def version_literals_outside_verbatim(text, verbatim_names):
 
     A pin lives in the workflow or manifest that uses it, where Dependabot moves it, so a copy in prose is
     stale at the next bump and sends an agent to edit governance for a change that needed none.
-    Verbatim sections are excised for the reason template_ref_outside_verbatim gives: their bytes are the
-    hub's, so a literal there is the hub's defect to fix once rather than each repo's.
+    Verbatim sections are excised downstream for the reason template_ref_outside_verbatim gives: their
+    bytes are the hub's, so a literal there is the hub's defect to fix once rather than each repo's. The
+    hub's own run passes no sections, which is where that defect is caught.
     Fenced code is scanned too, since a pinned `uses:` line in a sample goes stale the same way.
     """
     return sorted(
@@ -2659,16 +2660,25 @@ def audit_repo(entry, spec, branch=None):
                 )
 
         # --- Instruction documents must not copy a pin's value ---
-        # The hub is scanned too, since its copies are what every repo carries.
-        if path in VERSION_LITERAL_SCANNED and text is not None:
-            literals = version_literals_outside_verbatim(text, verbatim_secs[path])
-            if literals:
+        # The hub is scanned whole, verbatim sections included, since those are the copies every repo carries and no other run can see a literal inside them.
+        if path in VERSION_LITERAL_SCANNED:
+            if text is None:
                 findings.append(
                     (
                         "DRIFT",
-                        f"carried: {path} names a pinned version outside its verbatim sections ({', '.join(literals)}); name the pin by its mechanism, never its value, since the value goes stale at the next bump (GOVERNANCE.md, Documentation Style Conventions, References)",
+                        f"carried: could not read {path} content on {ground} to scan for a copied version (no inline content returned); verify by hand",
                     )
                 )
+            else:
+                excised = set() if entry.get("name") == HUB_NAME else verbatim_secs[path]
+                literals = version_literals_outside_verbatim(text, excised)
+                if literals:
+                    findings.append(
+                        (
+                            "DRIFT",
+                            f"carried: {path} names a three-part version or a commit SHA ({', '.join(literals)}); name a pin by its mechanism, never its value, and state a version only where it will not go stale (GOVERNANCE.md, Documentation Style Conventions, References)",
+                        )
+                    )
 
     # --- Manifest-owned verbatim trees ---
     # carried_entries was read once above, where the coverage applicability check needed it first.

@@ -31,8 +31,9 @@ Three things, in the files above:
    and sends the next agent to edit governance for a change that needed none. Name the mechanism
    instead ("SHA-pinned to a hub release, with the release in a trailing comment"). The audit flags
    a three-part version or a full SHA in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or
-   `WORKFLOW.md` outside their verbatim sections. `.github/copilot-instructions.md` is left out of
-   that scan, since its disproved-claims records name a revision by design.
+   `WORKFLOW.md`, outside their verbatim sections downstream and across the whole file in the hub.
+   `.github/copilot-instructions.md` is left out of that scan, since its disproved-claims records
+   name a revision by design, which the revision exception below permits.
 
 ## The two exceptions
 
