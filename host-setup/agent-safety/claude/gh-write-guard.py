@@ -351,6 +351,63 @@ _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 
 
+def _operator_tokens(text):
+    """Tokenize one line of text as `_shell_tokens` does, isolating operator runs, including where
+    its quoting cannot be parsed. An unterminated quote is read as a literal character there rather
+    than raising, since an apostrophe in a trailing `#` comment is the ordinary way to reach one.
+    """
+    toks = []
+    word = None
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c in _SHELL_OP_CHARS:
+            if word is not None:
+                toks.append(word)
+                word = None
+            j = i
+            while j < n and text[j] in _SHELL_OP_CHARS:
+                j += 1
+            toks.append(text[i:j])
+            i = j
+            continue
+        if c.isspace():
+            if word is not None:
+                toks.append(word)
+                word = None
+            i += 1
+            continue
+        word = word or ""
+        if c == "\\" and i + 1 < n:
+            word += text[i + 1]
+            i += 2
+        elif c == "'" and "'" in text[i + 1 :]:
+            j = text.index("'", i + 1)
+            word += text[i + 1 : j]
+            i = j + 1
+        elif c == '"':
+            j = i + 1
+            quoted = ""
+            while j < n and text[j] != '"':
+                if text[j] == "\\" and j + 1 < n and text[j + 1] in '"\\':
+                    j += 1
+                quoted += text[j]
+                j += 1
+            if j < n:
+                word += quoted
+                i = j + 1
+            else:
+                word += c
+                i += 1
+        else:
+            word += c
+            i += 1
+    if word is not None:
+        toks.append(word)
+    return toks
+
+
 def _shell_tokens(cmd):
     """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
     their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
@@ -368,15 +425,11 @@ def _shell_tokens(cmd):
         )  # A newline is an operator above rather than a gap between words.
         return list(lex)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        # Neither fallback isolates an operator, so the lines are split here to keep the one thing this path must not lose, that a newline ends the command before it.
         toks = []
         for i, line in enumerate(cmd.split("\n")):
             if i:
                 toks.append("\n")
-            try:
-                toks.extend(shlex.split(line, posix=True))
-            except ValueError:
-                toks.extend(line.split())
+            toks.extend(_operator_tokens(line))
         return toks
 
 
@@ -3732,6 +3785,21 @@ _WAIT_CASES = [
         "a review wait whose condition can stay false forever",
     ),
     ("while true; do sleep 30; done", "deny", "the shape with no condition to become true at all"),
+    (
+        "while ! gh pr checks 5 --watch; do sleep 30; done  # the PR's checks",
+        "deny",
+        "an apostrophe in a trailing comment leaves the quoting unparseable, which must not hide the loop",
+    ),
+    (
+        "while ! gh pr checks 5 --watch; do sleep 30; done  # the PRs checks",
+        "deny",
+        "the same loop and comment with no apostrophe",
+    ),
+    (
+        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'  # the PR's checks",
+        "allow",
+        "a bounded loop stays accepted beside an apostrophe in a trailing comment",
+    ),
     (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
         "deny",
