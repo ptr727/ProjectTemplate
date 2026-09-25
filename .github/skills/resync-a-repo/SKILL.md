@@ -7,9 +7,11 @@ description: >-
   with the hub, or to run a conformance sweep against a named repo and apply what it finds. Needs
   a hub checkout and a named target repo to mean anything, so it does not usefully trigger from
   inside a downstream repo's own session with no target named and no hub checkout present, that
-  case is fleet-conformance-check instead. Triggers even when the request sounds routine, such as
-  "just copy AGENTS.md over" or "make repo X match the hub," because that phrasing is exactly how
-  the AGENTS.md-overwrite incident happened.
+  case is check-this-repo instead. Triggers even when the request sounds routine, such as "just
+  copy AGENTS.md over" or "make repo X match the hub," because that phrasing is exactly how the
+  AGENTS.md-overwrite incident happened. It co-fires with `carried-instruction-file-guard` and
+  `copilot-instructions-keeper`, which guard each carried file's merge, rather than replacing
+  them.
 ---
 
 # Resync a Repo
@@ -89,6 +91,7 @@ rather than leaving it standing.
 One focused pull request per drift class, branched from the target's `develop`, never a direct
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
-maintainer merges, the agent drives to green and stops. Re-run the audit after the merge and
-commit the report once authorized, per `git-commit-conventions`, done means measured, not
-applied.
+maintainer merges, the agent drives to green and stops. Re-run the audit after the merge and,
+from the hub checkout, commit the report under the hub's own `reports/` once authorized, per
+`AUDIT.md` section 8 and `git-commit-conventions`. A session resyncing its own repository
+leaves the report to a hub-side audit instead. Done means measured, not applied.

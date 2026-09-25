@@ -223,6 +223,13 @@ proof is true of one tree at one revision and an entry whose subject has moved i
 than edited to look current. The revision there is the record's own load-bearing field rather than a
 citation beside a claim, which is the distinction this rule turns on.
 
+Separately, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md` carry no three-part
+version and no commit SHA, full or abbreviated, whether a pin's value, an example, a minimum
+version, or a fixed constant, since a pin's copy goes stale at the next Dependabot bump and every
+other kind reads exactly like one. Neither carve-out above lifts this ban. Item 3 of this skill's
+carried-doc-references reference says what to write instead of each and carries the audit that flags
+a literal.
+
 Three reasons, and the first decides it.
 
 - **A reference is a second lookup, and the reader is already holding the file.** A comment earns
@@ -267,9 +274,10 @@ since an author met by the bare form's finding is otherwise pointed at respellin
 rather than at removing it. On every other surface the gate reads the bare form alone, so a banned
 URL is banned there and goes unreported.
 
-A bare commit reference is not a shape a gate can read, since a short SHA carries the same shape as
-a blob id, a version fragment, and a fixture hash. The URL spelling of one is readable and is read
-by nothing here, so the text above is the whole of what covers a commit either way. A reference in a
+A bare commit reference is not a shape the prose gate can read, since a short SHA carries the same
+shape as a blob id, a version fragment, and a fixture hash. The audit's version-literal scan reads it
+in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md`, bare or inside a URL, and
+elsewhere the text above is the whole of what covers a commit. A reference in a
 string literal is not read either: a test builds the numbers it asserts against, and reading those
 would report a fixture rather than a claim about this repository.
 

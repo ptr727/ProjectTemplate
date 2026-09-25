@@ -33,7 +33,7 @@ import pr_review
 REPO = Path(__file__).resolve().parent.parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
-CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "code-review" / "SKILL.md"
+CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"
 REVIEWER_REFERENCE = REPO / "docs" / "pr-reviewer-reference.md"
 
 
@@ -1951,6 +1951,95 @@ class TestCoverage(GqlCase):
             [f"Prose about the change. {MARKER}"],
             pr_review.coverage_statements(f"Prose about the change. {MARKER}"),
         )
+
+    def test_a_tilde_or_unclosed_fence_quotes_a_marker(self) -> None:
+        """Markdown opens a fence with tildes as well as backticks, and runs an unclosed one to the end.
+
+        Stripping only a closed backtick fence read a marker quoted in either of the others as this
+        round's stated coverage, the failure direction that reports coverage nobody claimed.
+        """
+        for label, body in (
+            ("in a tilde fence", f"~~~text\n{MARKER}\n~~~"),
+            ("in an unclosed backtick fence", f"```text\n{MARKER}"),
+            ("in an unclosed tilde fence", f"~~~\n{MARKER}\n"),
+            ("after a closer of the other character", f"```text\nx\n~~~\n{MARKER}"),
+            ("after a closer shorter than the opener", f"````\n```\n{MARKER}\n````\n"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual((pr_review.UNSTATED, ""), pr_review.coverage_of({"body": body}))
+        for label, body in (
+            ("after a closed backtick fence", f"```text\nx\n```\n{MARKER}"),
+            ("after a closed tilde fence", f"~~~\nx\n~~~\n{MARKER}"),
+            ("after a CRLF fence", f"```\r\nx\r\n```\r\n{MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
+
+    def test_an_unclosed_fence_hides_no_suppressed_section(self) -> None:
+        """Only the coverage reader runs an unclosed fence to the end of the body.
+
+        There masking reads as no coverage, which blocks. Run to the end for the suppressed-section
+        reader, a stray fence above the section hid the finding it holds, which reads as clean.
+        """
+        body = collapsed().replace("\n\n<details>", "\n\n```\n\n<details>")
+        self.assertEqual(1, len(pr_review.suppressed_blocks(body)))
+
+    def test_a_marker_indented_into_a_code_block_is_a_quotation(self) -> None:
+        """Four columns of indentation open a Markdown code block, so a marker there is quoted.
+
+        The two sibling readers bound their openers to three spaces for this reason, and the marker
+        read an indented line as a stated coverage figure, the failure direction that reports
+        coverage nobody claimed.
+
+        The kept line is stripped, so the marker has to be off it before any reader sees it. Left
+        on an indented bullet, it read as the round's own figure once the indent was gone.
+
+        An indented line under paragraph text is that paragraph's lazy continuation rather than a
+        code block, so a marker there is still stated, and dropping it read no coverage at all.
+        """
+        for label, line in (
+            ("four spaces", f"    {MARKER}"),
+            ("eight spaces", f"        {MARKER}"),
+            ("a tab", f"\t{MARKER}"),
+            ("two spaces and a tab", f"  \t{MARKER}"),
+            ("indented prose ending on it", f"    Prose about the change. {MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual([], pr_review.coverage_statements(line))
+                self.assertEqual(pr_review.UNSTATED, pr_review.coverage_of({"body": line})[0])
+        bullet = f"    - **Files reviewed:** 4/5 changed files {MARKER}"
+        self.assertEqual(
+            ["- **Files reviewed:** 4/5 changed files"], pr_review.coverage_statements(bullet)
+        )
+        self.assertEqual(pr_review.PARTIAL, pr_review.coverage_of({"body": bullet})[0])
+        for label, line in (
+            ("no indent", MARKER),
+            ("one space", f" {MARKER}"),
+            ("three spaces", f"   {MARKER}"),
+            ("non-breaking spaces", f"{chr(0xA0) * 4}{MARKER}"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual([MARKER], pr_review.coverage_statements(line))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": line})[0])
+        self.assertIn(
+            "coverage=unstated", self.digest_for(review(body=f"{OVERVIEW}\n    {MARKER}"))
+        )
+        for label, body, state in (
+            ("under paragraph text", f"The changes are consistent, with\n    {MARKER}", "FULL"),
+            ("under a list item", f"- The changes are consistent.\n    {MARKER}", "FULL"),
+            ("under a heading", f"## Overview\n    {MARKER}", "UNSTATED"),
+            ("under a setext underline", f"Overview\n===\n    {MARKER}", "UNSTATED"),
+            ("under a setext dash underline", f"Overview\n---\n    {MARKER}", "UNSTATED"),
+            ("under a thematic break", f"Prose.\n\n* * *\n    {MARKER}", "UNSTATED"),
+            ("under an HTML comment", f"<!-- ccr-overview-v2 -->\n    {MARKER}", "UNSTATED"),
+            ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
+            ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
+            ("under text opening on NBSP", f"{chr(0xA0)}## Overview\n    {MARKER}", "FULL"),
+            ("under a line of only NBSP", f"Prose.\n{chr(0xA0)}\n    {MARKER}", "FULL"),
+        ):
+            with self.subTest(case=label):
+                expected = getattr(pr_review, state)
+                self.assertEqual(expected, pr_review.coverage_of({"body": body})[0])
 
     def test_a_line_stating_both_readings_and_disagreeing_is_refused(self) -> None:
         """Reading the marker within its line is what lets one line carry both readings.
@@ -5524,7 +5613,7 @@ class TestContract(unittest.TestCase):
     def test_the_runbook_bootstraps_the_review_skill(self) -> None:
         """Copilot reaches the provider-independent review contract from its always-on file."""
         text = RUNBOOK.read_text(encoding="utf-8")
-        self.assertIn(".github/skills/code-review/SKILL.md", text)
+        self.assertIn(".github/skills/fleet-code-review/SKILL.md", text)
 
     def test_the_runbook_forbids_suppressed_findings(self) -> None:
         """A finding without a thread cannot participate in the ordinary reply loop."""

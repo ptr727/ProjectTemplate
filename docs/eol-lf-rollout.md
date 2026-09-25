@@ -29,7 +29,7 @@ new `.editorconfig`, confirm `.gitattributes` needs no change (it doesn't, per t
 renormalize every tracked file the new default now covers from CRLF to LF (skip anything with
 a genuine reason to stay CRLF, there is none known outside `Vantage-Config`, see below), run
 `editorconfig-checker` clean, and open the PR through the repo's normal branching model
-([`operational-vs-release-workflow`][operational-vs-release-workflow] Skill). Isolate the
+([`branching-and-release-model`][branching-and-release-model] Skill). Isolate the
 renormalization from any content edit in its own commit, verified with
 `git diff --ignore-cr-at-eol`, per [`references/line-endings.md`][line-endings] "Editing
 discipline". After merge, check the box below and reconcile the repo's `registry/repos.json`
@@ -82,4 +82,4 @@ registry as of this doc's authorship, except where an entry records a later recl
 [governance-line-endings]: ../GOVERNANCE.md#line-endings
 [governance-onboarding]: ../GOVERNANCE.md#repository-onboarding-and-conformance
 [line-endings]: ../.agents/skills/comment-and-doc-style/references/line-endings.md
-[operational-vs-release-workflow]: ../.agents/skills/operational-vs-release-workflow/SKILL.md
+[branching-and-release-model]: ../.agents/skills/branching-and-release-model/SKILL.md

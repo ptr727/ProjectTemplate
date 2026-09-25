@@ -115,7 +115,7 @@ Subcommands
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
            None stated its file coverage the first format's way, in either the bulleted spelling
-           or the bare one, so the `fleet-review` marker the fleet's own carried `code-review`
+           or the bare one, so the `fleet-review` marker the fleet's own carried `fleet-code-review`
            instructions ask for is the only coverage statement this format has been seen to make.
            Five of the ten carry it, on heads carrying those same instructions, so its absence is
            intermittent rather than structural. Both absences measured on one drive were
@@ -217,6 +217,7 @@ import subprocess
 import sys
 import tarfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -375,7 +376,6 @@ NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
 # The instruction it is emitted from asks only that the body end with it, and one of the two overview formats ends a prose sentence with it instead.
 # Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
 # The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
-# That refusal is `coverage_statements`, which drops a fenced block, an inline code span, and a blockquoted line, in that order, ahead of every reader here.
 # The digit runs are matched unbounded and judged in `read_coverage` rather than bounded here, which is the difference between a line this cannot believe and a line that is not a statement at all.
 # Bounded here, a marker stating a count longer than any review states stopped matching, so the line left the gate silently and a round carrying one read as full on whatever else it said.
 # `int` also raises on a run past 4300 digits, so the judgment has to happen somewhere, and the place that can answer `unvetted` is the reader rather than the pattern.
@@ -400,7 +400,28 @@ COVERAGE_COUNTS = re.compile(
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
-FENCE = re.compile(r"^ {0,3}```.*?^ {0,3}```[^\n]*", re.DOTALL | re.MULTILINE)
+FENCE = re.compile(
+    r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)(?:\n.*?)??"
+    r"(?:(?P<close>\n {0,3}(?:\1`*|\2~*)[ \t]*\r?(?=\n|\Z))|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def strip_fences(
+    body: str, repl: Callable[[re.Match[str]], str] = lambda m: "", to_end: bool = False
+) -> str:
+    """The body with each fenced block replaced by `repl`, the unclosed one kept unless `to_end`.
+
+    Markdown runs an unclosed fence to the end of the body, so for the coverage reader everything
+    after one is a quotation, and masking it there reads as no coverage, which blocks. Every other
+    reader looks for something that blocks, such as a suppressed finding or an unrecognized shape,
+    and masking the rest of the body there would hide it, so those keep reading it.
+    """
+    return FENCE.sub(
+        lambda m: repl(m) if to_end or m.group("close") is not None else m.group(), body
+    )
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
@@ -1170,13 +1191,24 @@ def review_effort(pr: dict) -> tuple[str, str]:
     newest = newest_of(head_reviews(pr))
     if newest is None:
         return "unknown", "unknown"
-    plain = FENCE.sub("", newest.get("body") or "")
+    plain = strip_fences(newest.get("body") or "")
     for line in plain.splitlines():
         match = EFFORT_LINE.fullmatch(line)
         if match:
             source = "default" if match.group(1) else "explicit"
             return (match.group(2) or match.group(3)).lower(), source
     return "unknown", "unknown"
+
+
+def code_indented(line: str) -> bool:
+    """Whether the line opens four or more columns in, the indentation of a Markdown code block.
+
+    Measured in columns rather than characters, a tab being four of them and so an indented code
+    block on its own, which a character count reads as one column. Only spaces and tabs indent,
+    so a line opening on any other whitespace is ordinary text.
+    """
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" ")) >= 4
 
 
 def is_coverage_line(line: str) -> bool:
@@ -1210,20 +1242,36 @@ def coverage_statements(body: str) -> list[str]:
     the quotation above it. Of the three spellings read here only the reviewer's own sentence is
     paragraph text, the bullet and the marker each opening a block, and treating those as quoted
     reported no coverage at all over a round that stated it in full.
+
+    A line indented four or more columns is the fourth convention, an indented code block, and a
+    marker on one is dropped from the line rather than the line being dropped whole. The indent
+    opens a code block only where nothing runs on into it, since an indented line under paragraph
+    text is that paragraph's lazy continuation and renders as part of it, and a list item's own
+    text runs on the same way. A heading, a setext underline, a thematic break, and a line opening
+    an HTML comment each end their own block, and a code line carries its block on to the next. `CCR_OVERVIEW`
+    and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
+    being read within its line, takes that bound here instead of in its pattern. The rest of the
+    line is still read, the bullet and the sentence being left to their own readers as before, and
+    the marker comes off before the line is kept, because every reader downstream reads the
+    kept line with its indentation already stripped.
     """
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or "", to_end=True))
     found = []
     quoted = False
+    continues = False
     for ln in plain.splitlines():
-        stripped = ln.lstrip()
-        if not ln.strip():
+        stripped = ln.lstrip(" \t")
+        if not stripped:
             # A blank line is what ends a blockquote, so the next line starts outside one again.
             quoted = False
+            continues = False
             continue
-        # Measured in columns rather than characters, a tab being four of them and so an indented code block on its own, which a character count reads as one column.
-        expanded = ln.expandtabs(4)
-        indented = len(expanded) - len(expanded.lstrip()) >= 4
-        # An indented line is a code block, whose `>` is text rather than a quotation's own marker.
+        indented = code_indented(ln)
+        code = indented and not continues
+        continues = not code and not re.match(
+            r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
+        )
+        # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
         if not indented and BLOCKQUOTE.match(stripped):
             quoted = True
@@ -1231,6 +1279,8 @@ def coverage_statements(body: str) -> list[str]:
         if not indented and STARTS_BLOCK.match(stripped):
             # A line opening its own block is not continuation text, so the quotation ends above it.
             quoted = False
+        if code:
+            ln = FLEET_REVIEW.sub(" ", ln)
         # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
         if quoted or not is_coverage_line(ln):
             continue
@@ -1493,7 +1543,7 @@ def second_format(body: str) -> bool:
     Quotations are dropped first for the reason a coverage line's are: this change puts the marker
     into the diff, and a round quoting it is not a round written in that format.
     """
-    return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", FENCE.sub("", body or ""))))
+    return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", strip_fences(body or ""))))
 
 
 def findings_on(tail: str) -> int | None:
@@ -1551,7 +1601,7 @@ def stated_total(body: str) -> int | None:
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it.
     """
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     opener = DETAILS_OPEN.search(plain)
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
@@ -1646,7 +1696,7 @@ def file_table(body: str) -> list[str]:
     table later in the body is read as a second table rather than as more of the first.
     """
     paths, reading = [], False
-    for line in FENCE.sub("", body or "").splitlines():
+    for line in strip_fences(body or "").splitlines():
         if TABLE_HEADER.match(line):
             reading = True
         elif (row := TABLE_ROW.match(line)) is None:
@@ -1822,7 +1872,7 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = CODE_SPAN.sub(" ", FENCE.sub("", body or ""))
+    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
@@ -1967,7 +2017,7 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "means one of three things, and the digest above says which: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current code-review skill and Copilot instructions, then request another "
+            "the current fleet-code-review skill and Copilot instructions, then request another "
             "review. Merging without coverage is the maintainer's decision, not the agent's."
         )
         return 45
@@ -2253,7 +2303,7 @@ def mask_quotations(body: str) -> str:
     """
     return CODE_SPAN.sub(
         lambda m: QUOTED_CHAR.sub(" ", m.group()),
-        FENCE.sub(lambda m: QUOTED_CHAR.sub(" ", m.group()), body or ""),
+        strip_fences(body or "", lambda m: QUOTED_CHAR.sub(" ", m.group())),
     )
 
 
@@ -2418,7 +2468,7 @@ def qodo_open_findings(body: str) -> list[str]:
         return []
     return [
         s.strip()
-        for s in SUMMARY.findall(CODE_SPAN.sub(" ", FENCE.sub("", body)))
+        for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(body)))
         if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
     ]
 

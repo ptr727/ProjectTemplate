@@ -76,6 +76,7 @@ The order is load-bearing. Each step below either changes the rules the later st
 2. **Deletions second, before any re-vendor.** A `hub-only:` finding names a file the hub hosts rather than carries, and its remedy removes the file. Doing it after the re-vendors means refreshing a copy that is about to be deleted, which is wasted work that also reads as a deliberate update in the diff. See section 4, which is the whole of what deletion means here.
 3. **Verbatim re-vendors.** Copy the current hub canonical down, whole file or the one named `## heading` region. A finding classified **stale** matches a past hub revision and needs no judgment. One classified **modified** matches no revision, so the repository changed fixed content and the change is read before it is overwritten, since it may be an improvement the hub should adopt instead.
    Run `python3 scripts/carry.py check <Repo> --target /path/to/worktree` for manifest-owned trees. Read each modified-file diff and every extra path before running the same command with `apply`. The tree declaration supplies the prune authority, so the carried-instruction-file guard does not apply to this fully owned content.
+   **A skill path lands with the instruction file that names it.** Where this re-vendor adds, removes, or renames a `.github/skills` directory that `.github/copilot-instructions.md` names, edit that path in the instruction file in the same change, ahead of step 6. Copilot reads both from the pull request head, so a path naming a pruned directory leaves it reviewing without its skill, and it then posts no coverage marker.
 4. **Interface workflows.** Honor the named contract (required jobs, the ruleset-bound check name, the artifact-name handoff) rather than copying bytes. The body is the repository's own.
 5. **Settings, rulesets, and secrets.** From a hub checkout at `main`, run `repo-config/configure.sh check <owner>/<repo> release|operational`, then `apply` for what it reports. Pass the model explicitly. Delete each target-repository path under `repo-config/` that the audit classified `retire`. Inspect every untriaged path collision before deciding its disposition.
 6. **Intent files last, and by hand.** See section 5, which states why these carry no mechanical signal at all.
@@ -121,7 +122,7 @@ The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a proj
 - **The maintainer merges.** The agent drives to green and stops.
 - **Fix systemic drift in the hub instead.** Where many repositories share a drift, fix the rule or add a check here and let a re-audit re-flag it, rather than hand-patching each repository for a shared cause.
 
-**Done means measured, not applied.** Re-run the audit after the merge and commit the report, because a convergence asserted without a report is a convergence nobody can check.
+**Done means measured, not applied.** Re-run the audit after the merge, because a convergence asserted without a report is a convergence nobody can check. The hub commits that report under its own `reports/` per [`AUDIT.md`][audit] section 8, so a session resyncing its own repository leaves the report to a hub-side audit.
 
 <!-- Repo -->
 

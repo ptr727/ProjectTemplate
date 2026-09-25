@@ -33,7 +33,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 
 - Read the invocation for an explicit target first. "To develop" or "to dev" means stop once
   merged into develop. "To main", "through to main", or "all the way" means continue to a
-  mergeable promotion PR. Act on either without asking.
+  mergeable promotion PR. Act on either without asking. `session-handoff`'s attended session,
+  invoked by "resume the handoff", states the second, and naming that procedure names this skill.
 - When the request names no target ("drive this PR", "land it", "take this PR"), ask once,
   before the first push: develop only, or all the way to a mergeable main promotion PR. Recommend
   "all the way to main" as the default, a promotion PR left to go stale once develop is ready is
@@ -56,7 +57,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
   Authorizes" keeps tied to something the maintainer actually said.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation, confirm whether a promotion PR is even wanted before opening
-  one, per operational-vs-release-workflow's "Operational repositories (the complete delta)"
+  one, per branching-and-release-model's "Operational repositories (the complete delta)"
   section.
 
 ## What Invoking This Skill Authorizes
@@ -201,7 +202,7 @@ instance's outcome is context for the new one, never a standing answer to reuse 
 
 - Review loop mechanics, the Merge Gate, and `scripts/pr_review.py`: pr-review-conduct.
 - Branch rules, never delete develop, the EOL-only conflict, issue-closing keywords belonging on
-  the promotion PR: operational-vs-release-workflow.
+  the promotion PR: branching-and-release-model.
 - Worktree isolation and post-merge cleanup: repo-worktree.
 
 ## Stop and Ask, Beyond the How-Far Question

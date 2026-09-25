@@ -2,22 +2,20 @@
 name: pr-review-conduct
 description: >-
   Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate
-  fleet repo: requesting a review after a push, triaging findings (including suppressed
-  low-confidence ones), replying and resolving threads, and deciding whether a PR is actually
-  mergeable. Use this whenever about to open a PR, immediately after creating one, about to merge
-  a PR, enable auto-merge, ask the maintainer for merge permission, push a fix and move on without
-  re-checking review state, or judge a PR "green" or "clean" from CI or mergeStateStatus alone.
-  Triggers even when the request sounds routine, such as "open a PR," "merge this," or "it's all
-  green, go ahead," because PR creation starts the review loop and mergeStateStatus: CLEAN
-  can go clean once checks pass and every known thread is resolved, while still saying nothing
-  about whether the review that resolved those threads covered the current head SHA, read the
-  full diff, or left a suppressed low-confidence finding, which opens no thread at all,
-  unanswered. Also triggers when a review loop looks stuck
-  (no review landing, findings that keep reappearing) or when deciding a finding is real, false,
-  deferred, or a deliberate decline, or when a reviewer looks missing or skipped.
-  Provider-specific mechanics are implemented by
-  scripts/pr_review.py and bootstrapped by .github/copilot-instructions.md. This skill is the
-  contract those surfaces implement, not a replacement for them.
+  fleet repo: requesting a review after a push, triaging findings, replying and resolving threads,
+  and deciding whether a PR is actually mergeable. Use this whenever about to open a PR,
+  immediately after creating one, about to merge a PR, enable auto-merge, ask the maintainer for
+  merge permission, push a fix and move on without re-checking review state, or judge a PR "green"
+  or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds routine,
+  such as "open a PR," "merge this," or "it's all green, go ahead," because mergeStateStatus:
+  CLEAN can go clean once checks pass and every known thread is resolved, while still saying
+  nothing about whether the review covered the current head SHA, read the full diff, or left a
+  suppressed low-confidence finding, which opens no thread at all, unanswered. Also triggers when
+  a review loop looks stuck (no review landing, findings that keep reappearing) or when deciding a
+  finding is real, false, deferred, or a deliberate decline, or when a reviewer looks missing or
+  skipped. This skill is the contract that `scripts/pr_review.py`, `drive-pr`, and
+  `merge-and-release` implement: running the loop hands-off is `drive-pr` and merging main is
+  `merge-and-release`, each winning for its own action while this skill still binds the gate.
 ---
 
 # PR Review Conduct
@@ -303,5 +301,5 @@ shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-c
 answer after it reads the PR node ID. `reply` answers a thread by matching the finding's own
 words instead of a line number a fix push can move, and resolves it only when `--resolve` is
 given. The repository's
-`.github/copilot-instructions.md` bootstraps Copilot into the `code-review` skill and its stable
+`.github/copilot-instructions.md` bootstraps Copilot into the `fleet-code-review` skill and its stable
 coverage marker. Do not reconstruct the API operations by hand.
