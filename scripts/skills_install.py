@@ -400,6 +400,10 @@ def report(stamp_path, intended_rev=None):
     if not intended:
         # Re-installing cannot supply a revision to judge against, so this is not the stale case.
         snapshot["reason"] = "no intended revision resolves here, so the copy cannot be judged"
+    elif stamp_dirty:
+        snapshot["reason"] = "the stamp records a dirty checkout"
+    elif not current:
+        snapshot["reason"] = "the stamp does not record the intended revision"
     print(json.dumps({"stamp": stamp, "snapshot": snapshot, "live": live_channel()}, indent=2))
     return 0 if current else 1
 
@@ -417,6 +421,10 @@ def main():
     args = parser.parse_args()
     if args.intended and not args.report:
         parser.error("--intended only applies with --report")
+    if args.intended and is_bootstrap_tree(ROOT):
+        parser.error(
+            "--intended needs a git checkout, and this is a bootstrap tree, which is judged against the commit its loader resolved"
+        )
 
     home = agents_home()
     stamp_path = home / "skills-install-stamp.json"
