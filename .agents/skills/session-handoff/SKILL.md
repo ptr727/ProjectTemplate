@@ -9,14 +9,14 @@ description: >-
   none, which stands for the whole attended procedure this skill states, and whenever about to
   re-attempt something a previous round may already have tried, the moment that earns this skill,
   since a session that does not know a chain exists never goes looking for one. Every session
-  writing one ends in the same order: lessons committed, the link, the parked decision queue
-  presented, then memories saved last. Triggers even when the session feels too short to be worth
-  a handoff, because the rounds that produce nothing worth writing down are exactly the rounds a
-  later session repeats. The rule is `AGENTS.md` "Session Scope" and the mechanics are the hub's
-  `scripts/handoff.py`. Where a sibling skill owns the moment, it wins: `backlog-burndown` owns a
-  multi-round run's reporting, `unattended-handoff` owns a run with no maintainer present, and
-  `repo-worktree` owns the worktree the handoff names. `agent-conduct` co-fires at the
-  parked-decision obligation and neither defers to the other.
+  writing one, except an `unattended-handoff` seat, ends in the same order: lessons committed, the
+  link, the parked decision queue presented, then memories saved last. Triggers even when the
+  session feels too short to be worth a handoff, because the rounds that produce nothing worth
+  writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
+  Scope" and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns the
+  moment, it wins: `backlog-burndown` owns a multi-round run's reporting, `unattended-handoff`
+  owns a run with no maintainer present, and `repo-worktree` owns the worktree the handoff names.
+  `agent-conduct` co-fires at the parked-decision obligation and neither defers to the other.
 ---
 
 # Session Handoff
