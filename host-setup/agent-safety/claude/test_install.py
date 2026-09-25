@@ -572,6 +572,22 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("under a matcher", r.stdout)
 
+    def test_a_sweep_matcher_covering_every_reason_is_not_a_defect(self):
+        """An absent, empty, or `*` SessionEnd matcher runs on every exit reason, same as PreToolUse."""
+        self.install()
+        for matcher in ("*", ""):
+            with self.subTest(matcher=matcher):
+                data = self._settings()
+                data["hooks"]["SessionEnd"][0]["matcher"] = matcher
+                self._write(data)
+                problems = install.registration_problems(self.home)
+                self.assertEqual([p for p in problems if "under a matcher" in p], [], matcher)
+        data = self._settings()
+        data["hooks"]["SessionEnd"][0].pop("matcher", None)
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertEqual([p for p in problems if "under a matcher" in p], [])
+
     def test_an_unregistered_sweep_reports_stale_rather_than_current(self):
         self.install()
         data = self._settings()
