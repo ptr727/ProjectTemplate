@@ -152,9 +152,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   which `handoff.py chain --track "auto-<issue>" --limit 1` answers with its refusal naming no
   handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
   request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
-  names it anywhere in its body, since a fix merged to develop leaves its issue open until promotion
-  whoever merged it. No open handoff on any track names it in its next steps, and no comment on it
-  claims it for a `backlog-burndown` group, since both mark work that has no pull request yet.
+  names it anywhere in its body, since a fix merged to develop leaves its issue open until it is
+  promoted, whoever merged it. No open handoff on any track names it in its next steps, and no
+  comment on it claims it for a `backlog-burndown` group, since both mark work that has no pull
+  request yet.
 
 ## The Picker
 
