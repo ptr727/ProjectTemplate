@@ -3975,6 +3975,7 @@ def _selftest():
         ("an uppercase abbreviated SHA is flagged", "Pinned at `F3B4CC9`.\n", set(), ["F3B4CC9"]),
         ("an all-letter hex word is not a SHA", "A facade over deadbeef.\n", set(), []),
         ("a hex color is not a SHA", "Color #1f2937ff.\n", set(), []),
+        ("a hash-prefixed hex token is not a SHA", "See #f3b4cc9.\n", set(), []),
         ("an identifier suffix is not a SHA", "Name foo_1a2b3c4d and 123e4567-e89b.\n", set(), []),
         ("an image tag SHA is flagged", "Image app:sha-1a2b3c4.\n", set(), ["1a2b3c4"]),
         ("a hex constant is not a SHA", "Mask 0x7fffffff.\n", set(), []),
