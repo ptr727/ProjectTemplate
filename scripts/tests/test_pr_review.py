@@ -1958,6 +1958,9 @@ class TestCoverage(GqlCase):
         The two sibling readers bound their openers to three spaces for this reason, and the marker
         read an indented line as a stated coverage figure, the failure direction that reports
         coverage nobody claimed.
+
+        The kept line is stripped, so the marker has to be off it before any reader sees it. Left
+        on an indented bullet, it read as the round's own figure once the indent was gone.
         """
         for label, line in (
             ("four spaces", f"    {MARKER}"),
@@ -1967,14 +1970,22 @@ class TestCoverage(GqlCase):
             ("indented prose ending on it", f"    Prose about the change. {MARKER}"),
         ):
             with self.subTest(case=label):
-                self.assertFalse(pr_review.is_coverage_line(line))
-                self.assertIsNone(pr_review.read_coverage(line))
                 self.assertEqual([], pr_review.coverage_statements(line))
-        for spaces in range(4):
-            line = f"{' ' * spaces}{MARKER}"
-            with self.subTest(spaces=spaces):
+                self.assertEqual(pr_review.UNSTATED, pr_review.coverage_of({"body": line})[0])
+        bullet = f"    - **Files reviewed:** 4/5 changed files {MARKER}"
+        self.assertEqual(
+            ["- **Files reviewed:** 4/5 changed files"], pr_review.coverage_statements(bullet)
+        )
+        self.assertEqual(pr_review.PARTIAL, pr_review.coverage_of({"body": bullet})[0])
+        for label, line in (
+            ("no indent", MARKER),
+            ("one space", f" {MARKER}"),
+            ("three spaces", f"   {MARKER}"),
+            ("non-breaking spaces", f"{chr(0xA0) * 4}{MARKER}"),
+        ):
+            with self.subTest(case=label):
                 self.assertEqual([MARKER], pr_review.coverage_statements(line))
-                self.assertEqual((8, 8), pr_review.read_coverage(line))
+                self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": line})[0])
         self.assertIn(
             "coverage=unstated", self.digest_for(review(body=f"{OVERVIEW}\n    {MARKER}"))
         )
