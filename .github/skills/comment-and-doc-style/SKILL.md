@@ -208,10 +208,7 @@ and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODES
 `GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
 `.github/copilot-instructions.md`. A tracker, a history, a plan, and a README outside those trees
 are the repository's own narrative and keep their references, as do a commit message and a pull
-request body, which are the surfaces a reference belongs on. An instruction document also names no
-value a pin holds, a release number or a commit SHA, since the copy goes stale at the next
-Dependabot bump. It names the mechanism instead, such as a reference SHA-pinned to a hub release,
-and item 3 of this skill's carried-doc-references reference carries the audit that flags a copy.
+request body, which are the surfaces a reference belongs on.
 
 Two carve-outs, each stated as a single case. Whatever neither of them affirmatively permits is
 banned by the paragraph above, which is the whole of the test and is why no list of banned cases
@@ -225,6 +222,13 @@ entry in `.github/copilot-instructions.md` names the revision its proof was read
 proof is true of one tree at one revision and an entry whose subject has moved is deleted rather
 than edited to look current. The revision there is the record's own load-bearing field rather than a
 citation beside a claim, which is the distinction this rule turns on.
+
+Separately, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md` carry no three-part
+version and no commit SHA, full or abbreviated, whether a pin's value, an example, a minimum
+version, or a fixed constant, since a pin's copy goes stale at the next Dependabot bump and every
+other kind reads exactly like one. Neither carve-out above lifts this ban. Item 3 of this skill's
+carried-doc-references reference says what to write instead of each and carries the audit that flags
+a literal.
 
 Three reasons, and the first decides it.
 
@@ -270,9 +274,10 @@ since an author met by the bare form's finding is otherwise pointed at respellin
 rather than at removing it. On every other surface the gate reads the bare form alone, so a banned
 URL is banned there and goes unreported.
 
-A bare commit reference is not a shape a gate can read, since a short SHA carries the same shape as
-a blob id, a version fragment, and a fixture hash. The URL spelling of one is readable and is read
-by nothing here, so the text above is the whole of what covers a commit either way. A reference in a
+A bare commit reference is not a shape the prose gate can read, since a short SHA carries the same
+shape as a blob id, a version fragment, and a fixture hash. The audit's version-literal scan reads it
+in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md`, bare or inside a URL, and
+elsewhere the text above is the whole of what covers a commit. A reference in a
 string literal is not read either: a test builds the numbers it asserts against, and reading those
 would report a fixture rather than a claim about this repository.
 

@@ -728,13 +728,18 @@ TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructi
 # The undeclared-H2 scan reads the same set.
 UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
-# The pinned-version scan reads the instruction documents a repo owns prose in.
+# The version-literal scan reads the four instruction documents a repo owns prose in.
 # .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
 VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
 
-# A three-part release number or a full commit SHA, the two forms a pin takes.
+# A three-part version, a full commit SHA, or an abbreviated one standing alone as a token.
 # The lookarounds keep a dotted quad, such as an address, from matching as a version.
-VERSION_LITERAL = re.compile(r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)|\b[0-9a-fA-F]{40}\b")
+# An abbreviated SHA must mix a digit and a letter, so an all-letter word such as "facade" is not one.
+VERSION_LITERAL = re.compile(
+    r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
+    r"|\b[0-9a-fA-F]{40}\b"
+    r"|(?<![0-9A-Za-z#_])(?=[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-]))(?=[a-fA-F]*[0-9])(?=[0-9]*[a-fA-F])[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-])"
+)
 
 
 def strip_sections(text, names, keep_pins=False):
@@ -765,7 +770,7 @@ def strip_sections(text, names, keep_pins=False):
 
 
 def version_literals_outside_verbatim(text, verbatim_names):
-    """Every pinned-version literal in `text` outside its verbatim sections, sorted and deduplicated.
+    """Every version literal or commit SHA in `text` outside its verbatim sections, sorted and deduplicated.
 
     A pin lives in the workflow or manifest that uses it, where Dependabot moves it, so a copy in prose is
     stale at the next bump and sends an agent to edit governance for a change that needed none.
@@ -2659,14 +2664,14 @@ def audit_repo(entry, spec, branch=None):
                     )
                 )
 
-        # --- Instruction documents must not copy a pin's value ---
+        # --- Instruction documents carry no version literal or commit SHA ---
         # The hub is scanned whole, verbatim sections included, since those are the copies every repo carries and no other run can see a literal inside them.
         if path in VERSION_LITERAL_SCANNED:
             if text is None:
                 findings.append(
                     (
                         "DRIFT",
-                        f"carried: could not read {path} content on {ground} to scan for a copied version (no inline content returned); verify by hand",
+                        f"carried: could not read {path} content on {ground} to scan for a version literal (no inline content returned); verify by hand",
                     )
                 )
             else:
@@ -2676,7 +2681,7 @@ def audit_repo(entry, spec, branch=None):
                     findings.append(
                         (
                             "DRIFT",
-                            f"carried: {path} names a three-part version or a commit SHA ({', '.join(literals)}); name a pin by its mechanism, never its value, and state a version only where it will not go stale (GOVERNANCE.md, Documentation Style Conventions, References)",
+                            f"carried: {path} names a three-part version or a commit SHA, full or abbreviated ({', '.join(literals)}); name a pin by its mechanism, never its value, and write a versioning example with a placeholder such as 1.0.N (GOVERNANCE.md, Documentation Style Conventions, References)",
                         )
                     )
 
@@ -3960,12 +3965,27 @@ def _selftest():
             f"  ok   template-ref: {len(tref)} cases, verbatim regions excised before the hub-name scan"
         )
 
-    # A pinned version copied into an instruction document, outside its verbatim sections.
+    # A version literal or commit SHA in an instruction document, outside its verbatim sections.
     sha = "0123456789abcdef0123456789abcdef01234567"
     vl = [
         ("a release number is flagged", "Pinned at hub release `2.0.657`.\n", set(), ["2.0.657"]),
         ("a full SHA is flagged", f"uses: o/r/x.yml@{sha} # 2.0.1\n", set(), ["2.0.1", sha]),
         ("an uppercase SHA is flagged", f"Pinned at {sha.upper()}.\n", set(), [sha.upper()]),
+        ("an abbreviated SHA is flagged", "Pinned at `f3b4cc9`.\n", set(), ["f3b4cc9"]),
+        ("an uppercase abbreviated SHA is flagged", "Pinned at `F3B4CC9`.\n", set(), ["F3B4CC9"]),
+        ("an all-letter hex word is not a SHA", "A facade over deadbeef.\n", set(), []),
+        ("a hex color is not a SHA", "Color #1f2937ff.\n", set(), []),
+        ("a hash-prefixed hex token is not a SHA", "See #f3b4cc9.\n", set(), []),
+        ("an identifier suffix is not a SHA", "Name foo_1a2b3c4d and 123e4567-e89b.\n", set(), []),
+        ("an image tag SHA is flagged", "Image app:sha-1a2b3c4.\n", set(), ["1a2b3c4"]),
+        ("a hex constant is not a SHA", "Mask 0x7fffffff.\n", set(), []),
+        (
+            "a worked example is flagged",
+            "1.0.12 publishes as 1.0.13.\n",
+            set(),
+            ["1.0.12", "1.0.13"],
+        ),
+        ("a placeholder example is clean", "`1.0.N` publishes as `1.0.(N+1)`.\n", set(), []),
         ("the mechanism alone is clean", "SHA-pinned to a hub release.\n", set(), []),
         ("a dotted quad is not a version", "Host 192.168.1.10 serves it.\n", set(), []),
         ("a two-part version is not a pin", "Python 3.13 and 3.14.\n", set(), []),
