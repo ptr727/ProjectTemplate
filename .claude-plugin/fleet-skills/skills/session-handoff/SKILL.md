@@ -5,11 +5,11 @@ description: >-
   issues rather than a file: one open issue per track per repository, carrying the `handoff` label
   and naming its predecessor, which is then commented on and closed. Use this whenever ending a
   session or a round of work, whenever starting or resuming one, whenever asked for a handoff or
-  for what the previous round did, whenever the maintainer says only "resume the handoff", which
-  stands for the whole attended procedure this skill states, and whenever about to re-attempt
-  something a previous round may already have tried, the moment that earns this skill, since a
-  session that does not know a chain exists never goes looking for one. Triggers even when the
-  session feels too short to be worth a handoff, because the rounds that produce nothing worth
+  for what the previous round did, whenever the maintainer says only "resume the handoff" or names
+  none, which stands for the whole attended procedure this skill states, and whenever about to
+  re-attempt something a previous round may already have tried, the moment that earns this skill,
+  since a session that does not know a chain exists never goes looking for one. Triggers even when
+  the session feels too short to be worth a handoff, because the rounds that produce nothing worth
   writing down are exactly the rounds a later session repeats. The rule is `AGENTS.md` "Session
   Scope" and the mechanics are the hub's `scripts/handoff.py`. Where a sibling skill owns the
   moment, it wins: `backlog-burndown` owns a multi-round run's reporting, `unattended-handoff`

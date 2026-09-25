@@ -11,11 +11,11 @@ description: >-
   CLEAN can go clean once checks pass and every known thread is resolved, while still saying
   nothing about whether the review covered the current head SHA, read the full diff, or left a
   suppressed low-confidence finding, which opens no thread at all, unanswered. Also triggers when
-  a review loop looks stuck or when deciding a finding is real, false, deferred, or a deliberate
-  decline, or when a reviewer looks missing or skipped. This skill is the contract that
-  `scripts/pr_review.py`, `drive-pr`, and `merge-and-release` implement: running the loop
-  hands-off is `drive-pr` and merging main is `merge-and-release`, each winning for its own action
-  while this skill still binds the gate.
+  a review loop looks stuck (no review landing, findings that keep reappearing) or when deciding a
+  finding is real, false, deferred, or a deliberate decline, or when a reviewer looks missing or
+  skipped. This skill is the contract that `scripts/pr_review.py`, `drive-pr`, and
+  `merge-and-release` implement: running the loop hands-off is `drive-pr` and merging main is
+  `merge-and-release`, each winning for its own action while this skill still binds the gate.
 ---
 
 # PR Review Conduct
