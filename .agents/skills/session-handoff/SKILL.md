@@ -209,9 +209,9 @@ Every session that writes a handoff ends in this order, except an `unattended-ha
 closes as that skill states. Each step leaves the chain whole if the session is interrupted after
 it.
 
-1. **Record what was learned.** A lesson a future agent must honor is committed to the tree or filed
-   as an issue, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", so the link's "New
-   learnings" section has somewhere real to point.
+1. **Record what was learned.** A lesson a future agent must honor is recorded in the governing doc
+   as part of the change, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement", so the
+   link's "New learnings" section has somewhere real to point.
 2. **Write the link**, per "Running the Chain" below, or close the lane out where its work is done.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.

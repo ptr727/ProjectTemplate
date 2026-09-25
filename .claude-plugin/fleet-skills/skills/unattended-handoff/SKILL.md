@@ -204,12 +204,16 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    monitor or a background task never wakes it.
 5. **Park at the first decision**, per "Parking" below. That includes a merge the harness refuses
    after one retry, which is parked as ready to merge rather than routed around.
-6. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
-   what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
-   complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no successor.
-7. **Save no memory**, since state lives in the chain where any session on any machine reads it,
-   and a lesson a future agent must honor is filed as an issue, per `GOVERNANCE.md` "Durable
-   Knowledge and Self-Improvement", since a closed lane's comment is read by no later session. Reply with one line.
+6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
+   the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
+   `decision`, stating the proposed rule and where it would go. The picker never takes a `decision`
+   issue, so the loop cannot write the rule itself.
+7. **Close the lane out on done.** Comment on the handoff what merged, which issues it fixed, and
+   what it filed along the way, the lesson issue included, then close it. An `auto-*` lane holds one
+   issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
+   needing no successor.
+8. **Save no memory**, since state lives in the chain where any session on any machine reads it.
+   Reply with one line.
 
 ## Parking
 
@@ -228,10 +232,10 @@ interruption part way leaves the work findable rather than lost.
    another, commenting onto it this handoff, the effect on its work, and every pull request the
    decision now blocks. It
    holds nothing but the question, so it closes once answered.
-3. **Comment the state on the handoff**: what is done, the branch and pull request, whether the
-   worktree was left standing, what remains, and the decision issue it now waits on. This comment
-   is what the next session on the lane resumes from, so it is complete enough to continue with no
-   other context.
+3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
+   can name it: what is done, the branch and pull request, whether the worktree was left standing,
+   what remains, and the decision issue it now waits on. This comment is what the next session on
+   the lane resumes from, so it is complete enough to continue with no other context.
 4. **Label the handoff `blocked`**, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
    The picker skips it from then on, and the attended session takes it first.
 
