@@ -635,7 +635,9 @@ class TestKeptTreeHandling(unittest.TestCase):
         """A leftover without its marker is refused by every later swap, with a remedy that is wrong."""
         tree = self.owned_tree("skills-tree.new", "new")
         self.locked_entry(tree)
-        result = self.run_loader(f'remove_tree "{tree}" || true')
+        result = self.run_loader(f'remove_tree "{tree}"')
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((tree / "content").exists(), result.stderr)
         self.assertTrue((tree / ".bootstrap-owned").exists(), result.stderr)
 
     def test_a_dangling_symlink_is_refused_with_the_loaders_own_message(self) -> None:
