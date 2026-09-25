@@ -402,6 +402,7 @@ main() {
 
     # Resolved only now, since the default depends on the action, which the menu may have just chosen.
     [[ -n $DIR ]] || DIR=$(default_dir)
+    [[ $DIR == /* ]] || DIR="./$DIR"
 
     trap cleanup EXIT
     resolve_ref
