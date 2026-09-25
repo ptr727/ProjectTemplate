@@ -1,6 +1,6 @@
 [
     { "name": "agents", "color": "f86915", "description": "Agents instructions" },
-    { "name": "blocked", "color": "d93f0b", "description": "Blocked on an issue in another repository, named in the body" },
+    { "name": "blocked", "color": "d93f0b", "description": "Blocked on an issue named in the body, in another repository or a decision issue here" },
     { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
     { "name": "canonical-sweep", "color": "0e8a16", "description": "The periodic canonical content review sweep, one open issue while any carried unit owes a read" },
     { "name": "chore", "color": "c2e0c6", "description": "Registry, labels, rollout, and other fleet housekeeping" },
