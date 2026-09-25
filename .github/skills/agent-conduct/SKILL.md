@@ -10,7 +10,8 @@ description: >-
   account of every question parked rather than asked, whenever work here waits on a fix in
   another repository, and whenever an incident, a wrong answer, or a repeated correction just
   taught something a future session must honor. Deliberately narrow: the carried AGENTS.md
-  "Context and Delegation Discipline" section is the always-on layer, so do not load this skill as general background.
+  "Context and Delegation Discipline" section is the always-on layer, so do not load this skill
+  as general background.
   Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
   pr-review-conduct for review and merge claims, local-strict-review for the passes a push owes,
   comment-and-doc-style for prose. The GOVERNANCE.md sections it surfaces keep the full rules,
