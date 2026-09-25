@@ -1770,6 +1770,21 @@ def python_comments(raw: str) -> list[Comment] | None:
     return out
 
 
+PARAMETER_HASH = ("$", "${")
+
+
+def line_marker(line: str, masked: str, marker: str, pos: int) -> int:
+    """Where the first line comment marker at or after `pos` sits, or -1 when there is none.
+
+    A `#` right after `$` or `${` names a parameter, as in `$#` or `${#items[@]}`, not a comment.
+    The prefix is read off the raw line, since an escaped `$` is blanked in the masked one.
+    """
+    where = masked.find(marker, pos)
+    while marker == "#" and where >= 0 and line[:where].endswith(PARAMETER_HASH):
+        where = masked.find(marker, where + 1)
+    return where
+
+
 def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None) -> list[Comment]:
     """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
 
@@ -1837,7 +1852,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             found: str | tuple[str, str] | None = None
             at = len(line)
             for marker in spec["line"]:
-                where = masked.find(marker, pos)
+                where = line_marker(line, masked, marker, pos)
                 if 0 <= where < at:
                     at, found = where, marker
             for opener, closer in spec["block"]:
