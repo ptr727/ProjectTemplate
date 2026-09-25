@@ -216,8 +216,8 @@ it.
    The link is written before any question is put, since a prompt blocks until someone answers and
    an unanswered one must not cost the round its handoff.
 3. **Present the parked decision queue** in the same act, per "The Parked Decision Queue" below.
-   Record each answer on its issue. Where a link was written and names one of the answered
-   decisions, comment that answer onto it, so its account is current without a second link.
+   Record each answer on its issue. Where a link was written, comment the answers onto it, so its
+   parked-decision count and list are current without a second link.
 4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, such as a
    quirk of this machine or this account, saved as the session's final act. Never the round's

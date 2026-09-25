@@ -208,7 +208,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    what it filed along the way, then close it. An `auto-*` lane holds one issue, so its work is
    complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no successor.
 7. **Save no memory**, since state lives in the chain where any session on any machine reads it,
-   and a lesson goes in the closing comment for the attended session to judge. Reply with one line.
+   and a lesson a future agent must honor is filed as an issue, per `GOVERNANCE.md` "Durable
+   Knowledge and Self-Improvement", since a closed lane's comment is read by no later session. Reply with one line.
 
 ## Parking
 
