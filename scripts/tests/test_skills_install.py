@@ -330,7 +330,9 @@ class ReportCase(unittest.TestCase):
         self.write_stamp({"commit": "old", "dirty": False})
         exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
-        self.assertFalse(json.loads(out)["snapshot"]["current"])
+        snapshot = json.loads(out)["snapshot"]
+        self.assertFalse(snapshot["current"])
+        self.assertIn("does not record the intended revision", snapshot["reason"])
 
     def test_an_explicit_intended_revision_is_passed_through(self) -> None:
         self.write_stamp({"commit": "abc", "dirty": False})
@@ -361,8 +363,9 @@ class ReportCase(unittest.TestCase):
         """The stamp records dirty=True from install time, when the copied bytes matched no
         commit. The intended revision being that commit cannot make those bytes verifiable."""
         self.write_stamp({"commit": "abc", "dirty": True})
-        exit_code, _ = self.run_report()
+        exit_code, out = self.run_report()
         self.assertEqual(exit_code, 1)
+        self.assertIn("records a dirty checkout", json.loads(out)["snapshot"]["reason"])
 
     def test_unreadable_stamp_reports_not_current_instead_of_crashing(self) -> None:
         self.stamp.write_text("not valid json {{{", encoding="utf-8")
@@ -647,6 +650,26 @@ class MainExitCodeCase(unittest.TestCase):
         lines = out.getvalue().splitlines()
         self.assertIn(f"Skills materialized to {self.tmp / 'skills'}.", lines)
         self.assertIn("Claude Code marketplace registered: True.", lines)
+
+
+class IntendedInBootstrapTreeCase(unittest.TestCase):
+    """A named revision is resolved by git, which inside a bootstrap tree answers for whatever
+    repository encloses it, so the report would judge the copy against an unrelated commit."""
+
+    def test_intended_is_refused_in_a_bootstrap_tree(self) -> None:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
+        err = io.StringIO()
+        with (
+            mock.patch("skills_install.ROOT", tree),
+            mock.patch("skills_install.git_in", side_effect=AssertionError("git was asked")),
+            mock.patch("sys.argv", ["skills_install.py", "--report", "--intended", "main"]),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            skills_install.main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("bootstrap tree", err.getvalue())
 
 
 LINUX_WRAPPER = (
