@@ -229,14 +229,14 @@ interruption part way leaves the work findable rather than lost.
    branch and any pull request open. Where the push cannot run, leave the worktree exactly as it
    stands and name it in the comment below.
 2. **File the question** as an issue carrying `decision`, per `GOVERNANCE.md` "Communicating with
-   the User". It states the question, the choices as the options, the recommended one first with
-   its reason, what each choice would do to the parked work, the handoff it belongs to, and every
-   pull request the decision blocks, the open promotion included where it blocks that, which is
-   what lets a picker find a promotion already waiting on one. Where an open `decision` issue
-   already asks the same question about the same pull request, name that one instead of filing
-   another, commenting onto it this handoff, the effect on its work, and every pull request the
-   decision now blocks. It
-   holds nothing but the question, so it closes once answered.
+   the User". It states the question, the choices as its options in the form that section sets for
+   any choice put to the maintainer, what each choice would do to the parked work, the handoff it
+   belongs to, and every pull request the decision blocks, the open promotion included where it
+   blocks that, which is what lets a picker find a promotion already waiting on one. Where an open
+   `decision` issue already asks the same question about the same pull request, name that one
+   instead of filing another, commenting onto it this handoff, the effect on its work, and every
+   pull request the decision now blocks. It holds nothing but the question, so it closes once
+   answered.
 3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
    can name it: what is done, the branch and pull request, whether the worktree was left standing,
    what remains, and the decision issue it now waits on. This comment is what the next session on
