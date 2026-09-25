@@ -170,13 +170,12 @@ the whole procedure below. Run every step without being reminded of any of them.
 
 1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
    `gh issue list --label handoff --state open --limit 100 --json number,title,labels,updatedAt`,
-   since `tracks` prints neither labels nor exact update times, and take the one updated most
-   recently. A link carrying `blocked` is taken like any other, since its blocker is a decision
-   only the maintainer can make and the maintainer is now present. An `auto-*` link not carrying
-   `blocked` is skipped unless named, since an `unattended-handoff` worker may hold it right now,
-   and where one is named, confirm with the maintainer that no unattended run is live before
-   working it.
-   Say which link was picked in one line before anything else, so a wrong pick costs one reply
+   since `tracks` prints neither labels nor exact update times, and walk it newest update first,
+   taking the first link not skipped here. An `auto-*` link not carrying `blocked` is skipped
+   unless named, since an `unattended-handoff` worker may hold it right now, and where one is
+   named, confirm with the maintainer that no unattended run is live before working it. A link
+   carrying `blocked` is taken like any other, since its blocker is a decision only the maintainer
+   can make and the maintainer is now present. Say which link was picked in one line before anything else, so a wrong pick costs one reply
    rather than a round.
 2. **Resume it** per "Resuming" above, re-deriving live state rather than trusting the body, and
    read its comments with `gh issue view <n> --comments` too, since `resume` prints only the body
