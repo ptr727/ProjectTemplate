@@ -1975,6 +1975,15 @@ class TestCoverage(GqlCase):
             with self.subTest(case=label):
                 self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
 
+    def test_an_unclosed_fence_hides_no_suppressed_section(self) -> None:
+        """Only the coverage reader runs an unclosed fence to the end of the body.
+
+        There masking reads as no coverage, which blocks. Run to the end for the suppressed-section
+        reader, a stray fence above the section hid the finding it holds, which reads as clean.
+        """
+        body = collapsed().replace("\n\n<details>", "\n\n```\n\n<details>")
+        self.assertEqual(1, len(pr_review.suppressed_blocks(body)))
+
     def test_a_marker_indented_into_a_code_block_is_a_quotation(self) -> None:
         """Four columns of indentation open a Markdown code block, so a marker there is quoted.
 
