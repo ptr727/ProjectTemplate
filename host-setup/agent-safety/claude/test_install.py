@@ -24,9 +24,15 @@ sys.path.insert(0, str(HERE))
 import install
 
 
-def run(home, *args):
-    """Invoke the installer as a subprocess, the way a host actually runs it."""
-    env = dict(os.environ, CLAUDE_HOME=str(home))
+def run(home, *args, dirty=False):
+    """Invoke the installer as a subprocess, the way a host actually runs it.
+
+    dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
+    live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE, so a verdict this suite asserts
+    depends on the fixture rather than on whether host-setup happens to be mid-edit while the
+    suite runs. The default is clean, since that is what every case but one below needs.
+    """
+    env = dict(os.environ, CLAUDE_HOME=str(home), AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0")
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],
         capture_output=True,
@@ -45,8 +51,8 @@ class StampCase(unittest.TestCase):
         self.stamp = self.home / "agent-safety-stamp.json"
         self.md = self.home / "CLAUDE.md"
 
-    def install(self):
-        r = run(self.home)
+    def install(self, dirty=False):
+        r = run(self.home, dirty=dirty)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -65,6 +71,13 @@ class TestReportVerdicts(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("CURRENT", r.stdout)
+
+    def test_installing_from_a_dirty_checkout_reports_stale(self):
+        """The bytes on disk are not this commit's, whatever this checkout's real state is."""
+        self.install(dirty=True)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("installed from a dirty checkout", r.stdout)
 
     def test_a_changed_payload_reports_stale(self):
         self.install()
