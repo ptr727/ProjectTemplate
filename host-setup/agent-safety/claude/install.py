@@ -771,9 +771,14 @@ def report(claude_home):
     if unset and not capable:
         print(f"Note: agent commands on this host run uncontained ({reason}).")
     if foreign is not None:
+        remedy = (
+            "Remove that value and re-run the installer for this kit to contain them."
+            if capable
+            else f"This kit cannot contain them here now ({reason})."
+        )
         print(
-            f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so agent commands run "
-            "uncontained. Remove it and re-run the installer to contain them."
+            f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so this kit does not "
+            f"contain agent commands. {remedy}"
         )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
@@ -1001,7 +1006,7 @@ def main():
     ours = held is not None and kit_prefix(held)
     if held is not None and not ours:
         done.append(
-            f"{PREFIX_VAR} left as {held!r}, which this kit does not own, so no containment"
+            f"{PREFIX_VAR} left as {held!r}, which this kit does not own, so this kit does not contain agent commands"
         )
     elif capable:
         env[PREFIX_VAR] = prefix_value(contain_dst)
