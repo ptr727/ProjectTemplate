@@ -143,8 +143,9 @@ section is the pointer to what to read rather than the answer, and `AGENTS.md` "
 already says stale context is worse than absent. A handoff is context by construction, so this is
 that rule applied to the one artifact built to outlive the session that wrote it.
 
-Read the current link's comments too, with `gh issue view "<n>" --repo OWNER/NAME --comments`,
-since `resume` prints only the body, and a parking comment or a closing session's answers land in the comments.
+Read the current link's comments too, with `gh issue view "<n>" --repo OWNER/NAME --comments`, since
+`resume` prints only the body, and a parking comment or a closing session's answers land in the
+comments.
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
 closed links behind it, and `chain --grep` searches the bodies it walks for a regular expression,
@@ -172,14 +173,14 @@ the whole procedure below. Run every step without being reminded of any of them.
    `gh issue list --repo OWNER/NAME --label handoff --state open --limit 100 --json
    number,title,labels,updatedAt`, since `tracks` prints neither labels nor exact update times.
    Where it returns as many rows as the limit, the list may be truncated, so raise the limit and
-   read again until it returns fewer, rather than picking from a partial list. Take a link carrying `blocked`
-   first, newest update first among them, since its blocker is a decision only the maintainer can
-   make and the maintainer is now present. Otherwise take the newest update among the rest. An
-   `auto-*` link not carrying `blocked` is skipped unless named, since an `unattended-handoff`
-   worker may hold it right now, and where one is named, confirm with the maintainer that no
-   unattended run is live before working it. Where every open link is skipped, say so and ask the
-   maintainer which to take. Say which link was picked in one line before anything else, so a wrong pick costs one reply
-   rather than a round.
+   read again until it returns fewer, rather than picking from a partial list. Take a link carrying
+   `blocked` first, newest update first among them, since its blocker is a decision only the
+   maintainer can make and the maintainer is now present. Otherwise take the newest update among the
+   rest. An `auto-*` link not carrying `blocked` is skipped unless named, since an
+   `unattended-handoff` worker may hold it right now, and where one is named, confirm with the
+   maintainer that no unattended run is live before working it. Where every open link is skipped,
+   say so and ask the maintainer which to take. Say which link was picked in one line before
+   anything else, so a wrong pick costs one reply rather than a round.
 2. **Resume it** per "Resuming" above, comments included, re-deriving live state rather than
    trusting the body.
 3. **Ask what it is blocked on first.** Where the link carries `blocked`, the parking comment names

@@ -150,13 +150,13 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   lacks.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with
-  its refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
-  request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
-  names it anywhere in its body, since a fix merged to develop leaves its issue open until it is
-  promoted, whoever merged it. No open handoff on any track names it in its next steps, and no
-  comment on it claims it for a `backlog-burndown` group, since both mark work that has no pull
-  request yet.
+  which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
+  refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes.
+  No open pull request names it, and no pull request whose squash commit is in
+  `origin/main..origin/develop` names it anywhere in its body, since a fix merged to develop leaves
+  its issue open until it is promoted, whoever merged it. No open handoff on any track names it in
+  its next steps, and no comment on it claims it for a `backlog-burndown` group, since both mark
+  work that has no pull request yet.
 
 ## The Picker
 
@@ -164,11 +164,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    the open develop -> main pull request, return `STOP` before picking anything, since every worker
    this run dispatched would meet that same decision after merging its own work to develop.
 2. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
-   --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since
-   `handoff.py tracks` prints neither. Where it returns as many rows as the limit, the list may be
-   truncated, so raise the limit and read again until it returns fewer, rather than ranking a
-   partial list. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the
-   Chain".
+   --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py
+   tracks` prints neither. Where it returns as many rows as the limit, the list may be truncated, so
+   raise the limit and read again until it returns fewer, rather than ranking a partial list. Reach
+   `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the Chain".
 3. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
@@ -177,14 +176,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    the session handing the lane back removes the label, per `GOVERNANCE.md` "Durable Knowledge and
    Self-Improvement".
 4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
-   criteria, keep the auto-resolvable ones, and take the top one. Read the list with
-   `gh issue list --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it
-   returns 30 rows unless told otherwise, and apply step 2's full-page check to it.
+   criteria, keep the auto-resolvable ones, and take the top one. Read the list with `gh issue list
+   --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it returns 30 rows unless
+   told otherwise, and apply step 2's full-page check to it.
 5. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
-   adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the
-   Chain" shows, and `--dry-run` first. The body
-   carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
-   the issue and what done looks like. That skill's rules on the body bind it.
+   adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the Chain"
+   shows, and `--dry-run` first. The body carries the sections `session-handoff` "What Goes in the
+   Body" names, with the next steps naming the issue and what done looks like. That skill's rules on
+   the body bind it.
 6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
 7. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
    where a read it needs cannot run.
@@ -192,11 +191,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 ## The Worker
 
 1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
-   read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume` prints only the body and a parked lane's state
-   is in its parking comment. A lane handed back by an attended session has a closed predecessor
-   holding that comment, so read the predecessor's comments too. Where either names a decision
-   issue, read the answer recorded there and follow it, since it is what unblocked the lane.
-   Re-derive live state rather than trusting any of them, per `session-handoff` "Resuming".
+   read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
+   prints only the body and a parked lane's state is in its parking comment. A lane handed back by
+   an attended session has a closed predecessor holding that comment, so read the predecessor's
+   comments too. Where either names a decision issue, read the answer recorded there and follow it,
+   since it is what unblocked the lane. Re-derive live state rather than trusting any of them, per
+   `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
