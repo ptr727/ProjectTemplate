@@ -1016,21 +1016,24 @@ gh() {
 
         A bare checkout of the workflow repository fetches github.sha, and a reusable workflow reads
         its caller's github context, so the bare form is what validates the exact commit a publisher
-        pins rather than a separate input threading the same value through.
+        pins. No step in the task carries a ref: at all, which is asserted file-wide so that neither
+        a step leading with uses: nor one ordering with: first can carry one past the check.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        checkouts = re.findall(r"(?m)^ *uses: actions/checkout@.*\n((?: {8,}.*\n)*)", workflow)
-        self.assertTrue(checkouts)
-        for block in checkouts:
-            with self.subTest(block=block):
-                self.assertNotRegex(block, r"(?m)^ +ref:")
+        self.assertIn("actions/checkout@", workflow)
+        self.assertNotRegex(workflow, r"(?m)^[ \t-]*ref:")
 
-    @unittest.skipUnless(shutil.which("bash"), "bash is what the step under test runs")
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "the step runs under bash against a stand-in dotnet that only a POSIX host can execute",
+    )
     def test_validator_dotnet_leg_fails_when_no_report_was_written(self) -> None:
         """The best-effort upload reads an empty directory exactly as it reads a healthy run.
 
         The step's whole script is run against a stand-in dotnet, since a presence check on the
-        assertion would stay green if its condition were inverted.
+        assertion would stay green if its condition were inverted. Every case starts from a tree
+        already holding a renamed report, which is what a committed one looks like, so a check that
+        counted it would pass a run that measured nothing.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
@@ -1048,11 +1051,12 @@ gh() {
         script = "\n".join(lines)
 
         writers = {
-            "report": 'mkdir -p ./coverage && : > "./coverage/0f1e2d3c.cobertura.xml"',
+            "report": 'mkdir -p ./coverage && echo "<coverage/>" > "./coverage/0f1e2d3c.cobertura.xml"',
+            "empty report": 'mkdir -p ./coverage && : > "./coverage/0f1e2d3c.cobertura.xml"',
             "nothing": "mkdir -p ./coverage",
             "no directory": ":",
         }
-        expected = {"report": 0, "nothing": 1, "no directory": 1}
+        expected = {"report": 0, "empty report": 1, "nothing": 1, "no directory": 1}
         for case, writer in writers.items():
             with self.subTest(case=case), tempfile.TemporaryDirectory() as scratch:
                 bin_dir = Path(scratch) / "bin"
@@ -1061,7 +1065,10 @@ gh() {
                 stand_in.write_text(f"#!/usr/bin/env bash\n{writer}\n", encoding="utf-8")
                 stand_in.chmod(0o755)
                 work = Path(scratch) / "work"
-                work.mkdir()
+                (work / "coverage").mkdir(parents=True)
+                (work / "coverage/coverage-committed.cobertura.xml").write_text(
+                    "<coverage/>", encoding="utf-8"
+                )
                 verdict = run(
                     ["bash", "-c", script],
                     cwd=work,
