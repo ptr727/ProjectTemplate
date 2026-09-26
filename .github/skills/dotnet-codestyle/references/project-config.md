@@ -3,7 +3,9 @@
 1. **Target framework**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`).
 2. **AOT compatibility**: `<IsAotCompatible>true</IsAotCompatible>` unconditionally, and
    `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>` only in a
-   `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`. Reference verification reports
+   `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`, placed in the `.csproj` after it sets
+   `PublishAot` or in `Directory.Build.targets`, never in `Directory.Build.props`, which is imported
+   before the project body and so sees `PublishAot` empty. Reference verification reports
    `IL3058` for every dependency not built AOT-compatible, and `TreatWarningsAsErrors` turns that
    into a failed build on ordinary dependencies such as `System.CommandLine` and the Serilog
    sinks, so it runs only where an AOT publish needs it.
