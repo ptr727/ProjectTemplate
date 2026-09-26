@@ -61,6 +61,18 @@ registry="$script_dir/../registry/repos.json"
 # The registry key is the entry name rather than the owner/repo identity parsed from its url.
 # Reviewers keep proposing the switch, and the answer is that a name resolves to at most one entry: spec/resolve_description.py raises on a duplicate or a case-only near-miss and exits this script below, and spec/validate.py refuses both when it is run.
 name="${repo##*/}"
+
+if [ -f "$registry" ]; then
+    if ! archived_status="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .status) // empty' "$registry" | sed $'s/\r$//')"; then
+        echo "Failed to read status from $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+    if [ "$archived_status" = archived ]; then
+        echo "$repo is archived in $registry. GitHub rejects a write to an archived repository, so $cmd makes none and stops here."
+        exit 0
+    fi
+fi
+
 if [ -z "$model" ]; then
     if [ -f "$registry" ]; then
         # Fail fast on a jq or parse error (a malformed registry) rather than silently applying the release default.
