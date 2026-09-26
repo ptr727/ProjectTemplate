@@ -366,7 +366,7 @@ class TestRegistration(StampCase):
         self.assertEqual(entries[0]["timeout"], install.SWEEP_TIMEOUT_SECONDS)
 
     def test_the_sweep_group_carries_no_matcher(self):
-        """A matcher would narrow SessionEnd to one exit reason, and a quit is not the only one."""
+        """A matcher naming exit reasons would narrow SessionEnd to those, and a quit is not the only one."""
         self.install()
         groups = self._settings()["hooks"]["SessionEnd"]
         owning = [

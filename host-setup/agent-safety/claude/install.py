@@ -527,7 +527,7 @@ def registration_problems(claude_home):
             if not matcher_covers_every_exit_reason(group.get("matcher")):
                 report(
                     f"the SessionEnd sweep is registered under a matcher "
-                    f"({group.get('matcher')!r}), so it runs on that exit reason alone"
+                    f"({group.get('matcher')!r}), so it runs only on the exit reasons it names"
                 )
     if ends is None:
         pass  # likewise reported as a shape error above
