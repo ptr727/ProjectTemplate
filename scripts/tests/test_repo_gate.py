@@ -506,6 +506,13 @@ class TestQuotedNames(GitTreeCase):
         self.assertEqual(1, rc)
         self.assertIn(b"run-\\udcff-tool: tracked shebang path", out.buffer.getvalue())
 
+    def test_a_missing_root_named_in_bytes_that_are_not_utf8_fails_without_raising(self) -> None:
+        missing = self.tmp / self.NAME / "gone"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual([], repo_gate.tracked(missing))
+        self.assertIn("git ls-files failed", err.getvalue())
+
 
 class TestQuotedPlainNames(GitTreeCase):
     def test_a_name_quoted_for_a_quote_or_backslash_decodes_to_itself(self) -> None:

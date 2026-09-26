@@ -132,12 +132,20 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     Additive only: an empty or absent `exclude` scans exactly what it always has.
 
     Git's quoting is pinned on, so the listing is ASCII whatever a config inherits and each quoted
-    name reaches `unquote_path` in the one form it decodes.
+    name reaches `unquote_path` in the one form it decodes. Git's stderr carries no such quoting, and
+    a failure naming a root that is not UTF-8 echoes that name raw, so the decode tolerates it.
     """
     args = ["git", "-C", str(root), "-c", "core.quotePath=true", "ls-files"]
     if exclude:
         args += ["--", *(f":!{pattern}" for pattern in exclude)]
-    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", check=False)
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=False,
+    )
     if result.returncode != 0:
         # A failed command's stdout is never trusted, even where it is non-empty.
         # A partial listing read as complete is a scan that missed files and said nothing.
