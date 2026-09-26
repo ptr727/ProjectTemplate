@@ -162,7 +162,9 @@ rather than `resume`.
 
 Re-derive a count rather than copying one, and read it with an explicit page size. `gh issue list`
 returns 30 rows unless told otherwise, and a truncated count reads exactly like a repository with
-30 issues, which is worse than an absent count because it gets stated.
+30 issues, which is worse than an absent count because it gets stated. The same holds at any page
+size, so where a read returns as many rows as its limit, raise the limit and read again until it
+returns fewer.
 
 ## The Attended Session
 
