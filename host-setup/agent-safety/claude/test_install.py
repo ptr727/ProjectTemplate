@@ -75,6 +75,9 @@ class TestReportVerdicts(StampCase):
     def test_installing_from_a_dirty_checkout_reports_stale(self):
         """The bytes on disk are not this commit's, whatever this checkout's real state is."""
         self.install(dirty=True)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        if stamp["source"].get("vcs") != "git":
+            self.skipTest("this checkout is not a git tree, so there is no dirty signal to force")
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("installed from a dirty checkout", r.stdout)
@@ -153,6 +156,37 @@ class TestBlocksPresent(StampCase):
 
     def test_an_absent_file_yields_no_blocks_rather_than_raising(self):
         self.assertEqual(install.blocks_present(self.home / "nothing.md"), {})
+
+
+class TestSourceRef(unittest.TestCase):
+    """Calls install.source_ref() directly, with AGENT_SAFETY_DIRTY_OVERRIDE unset.
+
+    Every StampCase test above forces that override through run(), so none of them exercises
+    the git status read this class alone still calls. Skips rather than fails when this
+    checkout cannot supply a clean baseline itself, the same case TestDegradedEnvironments
+    covers by removing PATH: a tarball with no git, or a real edit already sitting in a
+    payload file while the suite runs.
+    """
+
+    def setUp(self):
+        saved_override = os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+        if saved_override is None:
+            self.addCleanup(os.environ.pop, "AGENT_SAFETY_DIRTY_OVERRIDE", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "AGENT_SAFETY_DIRTY_OVERRIDE", saved_override)
+        baseline = install.source_ref()
+        if baseline.get("vcs") != "git":
+            self.skipTest("this checkout is not a git tree, so source_ref() reads no status")
+        if baseline.get("dirty"):
+            self.skipTest("a payload file is already dirty in this checkout")
+
+    def test_dirtying_a_payload_file_is_detected(self):
+        """Proves the git-status branch itself, which the override lets every other test skip."""
+        target = HERE / install.GUARD_NAME
+        original = target.read_bytes()
+        self.addCleanup(target.write_bytes, original)
+        target.write_bytes(original + b"\n# dirtied by TestSourceRef, restored by addCleanup\n")
+        self.assertTrue(install.source_ref()["dirty"])
 
 
 class TestInstalledContent(StampCase):

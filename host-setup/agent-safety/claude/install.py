@@ -216,10 +216,12 @@ def source_ref():
     installed are not that commit's, and a stamp that claims otherwise is the thing this exists
     to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
 
-    AGENT_SAFETY_DIRTY_OVERRIDE, set to "0" or "1", replaces the git-derived dirty signal with a
-    fixed one. It exists so a test can assert a verdict without depending on whether this very
-    kit happens to be mid-edit while the suite runs; it never widens what a real, unset-env
-    install reports.
+    AGENT_SAFETY_DIRTY_OVERRIDE, read as exactly "0" or "1", replaces the git-derived dirty
+    signal with a fixed one, and honoring it prints a warning below. Any other value, unset
+    included, falls through to the git status read below, so a stray or misspelled setting
+    cannot silently force a verdict. This exists so a test can assert a verdict without
+    depending on whether this very kit happens to be mid-edit while the suite runs. It never
+    changes what a real, unset-env install reports.
     """
 
     def git(*args):
@@ -245,8 +247,13 @@ def source_ref():
     if branch and branch != "HEAD":
         ref["branch"] = branch
     override = os.environ.get("AGENT_SAFETY_DIRTY_OVERRIDE")
-    if override is not None:
-        ref["dirty"] = override != "0"
+    if override in ("0", "1"):
+        ref["dirty"] = override == "1"
+        print(
+            f"source_ref: AGENT_SAFETY_DIRTY_OVERRIDE={override} in effect, "
+            "ignoring this checkout's real git status",
+            file=sys.stderr,
+        )
     else:
         status = git("status", "--porcelain", "--", *PAYLOAD_FILES)
         ref["dirty"] = bool(status)
