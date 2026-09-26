@@ -4,14 +4,17 @@
 Registered as `CLAUDE_CODE_SHELL_PREFIX` in the user settings.json `env`. Claude Code then runs each
 Bash tool call, each hook command, and each stdio MCP server launch as `<this file> '<command string>'`,
 one argument holding the whole string. For a tool call this file starts a transient systemd user scope
-carrying `TasksMax` and `MemoryMax`, and runs the string under a shell inside it.
+carrying `TasksMax`, `MemoryMax`, and `MemorySwapMax=0`, the last so a runaway at the memory ceiling is
+killed rather than spilled into the host's swap, and runs the string under a shell inside it.
 
 Everything else runs under its shell directly, with no scope. The write guard is a hook, and a
 PreToolUse hook that exits 1 is a non-blocking error, so a scope that failed to start would let the very
 command the guard denies go ahead. An MCP server is long-lived and started outside any session, so a
 scope would bound it for its whole life and outlive the session that named it. A tool call is told
-apart by the Claude Code shell snapshot it sources first. Where a later Claude Code stops sourcing one,
-tool calls run bare too, and the SessionEnd sweep's report of surviving processes is what remains.
+apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last,
+either one enough. Where a later Claude Code drops both, tool calls run bare too, and the SessionEnd
+sweep's report of surviving processes is what remains. A `claude` session started from a tool call
+runs its own tool calls in scopes of its own, named for it, each under its own ceiling.
 
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
 host has to be reset. The ceiling belongs to the scope's cgroup rather than to the foreground wait, so
@@ -93,21 +96,12 @@ def is_tool_call(command):
     session whose snapshot failed is still contained.
     """
     tail = command.rstrip().rsplit("&&", 1)[-1].strip()
-    cwd_tail = tail.startswith("pwd -P >| ") and "claude-" in tail and tail.endswith("-cwd")
+    if not tail.startswith("pwd -P >| "):
+        return snapshot_shell(command) is not None
+    # A sandboxed session writes `<sandbox tmp>/cwd-<id>`, and the path may arrive shell-quoted.
+    name = tail[len("pwd -P >| ") :].strip().strip("'\"").rsplit("/", 1)[-1]
+    cwd_tail = name.startswith("cwd-") or (name.startswith("claude-") and name.endswith("-cwd"))
     return snapshot_shell(command) is not None or cwd_tail
-
-
-def in_tool_scope(read=None):
-    """Whether this process already runs inside a tool-call scope, as a nested Claude Code session does."""
-    try:
-        if read:
-            text = read("/proc/self/cgroup")
-        else:
-            with open("/proc/self/cgroup", encoding="utf-8") as f:
-                text = f.read()
-    except OSError:
-        return False
-    return any(line.rsplit("/", 1)[-1].startswith(f"{TOOL_UNIT}-") for line in text.splitlines())
 
 
 def pick_shell(command, which=which):
@@ -253,15 +247,8 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
     return argv, extra, notices
 
 
-def decide(command, env, suffix, runtime, is_delegated, nested=lambda: False, which=which):
-    """`plan` for this host.
-
-    A tool call already inside a tool-call scope runs directly, since the outer scope's ceiling bounds
-    it, and a fresh scope would escape that ceiling and outlive the session that stops the outer one. A
-    tool call under a manager lacking the controllers runs bare, and says why.
-    """
-    if is_tool_call(command) and nested():
-        return [pick_shell(command, which), "-c", command], {}, []
+def decide(command, env, suffix, runtime, is_delegated, which=which):
+    """`plan` for this host: a tool call under a manager lacking the controllers runs bare, and says why."""
     why = UNREACHABLE
     if runtime and is_tool_call(command) and not is_delegated():
         runtime, why = None, UNDELEGATED
@@ -295,7 +282,7 @@ def main(argv):
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
     run, extra, notices = decide(
-        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated, in_tool_scope
+        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated
     )
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
@@ -420,23 +407,15 @@ def _selftest():
             "a hook command never reads the controllers",
         ),
         (
-            decide(tool, env, "56", RUN, lambda: True, lambda: True, fake_which)
-            == (["/usr/bin/bash", "-c", tool], {}, []),
-            "a tool call already inside a tool-call scope runs within it rather than escaping it",
-        ),
-        (
-            in_tool_scope(read=lambda p: "0::/user.slice/app.slice/claude-tool-a-1-ff.scope\n")
-            and not in_tool_scope(read=lambda p: "0::/user.slice/app.slice/session-3.scope\n"),
-            "a nested session is recognised by the scope it runs in",
-        ),
-        (
             "--property=MemorySwapMax=0" in argv,
             "a runaway at the memory ceiling is killed rather than spilled into swap",
         ),
         (
             is_tool_call("eval 'ls' < /dev/null && pwd -P >| /tmp/claude-9d32-cwd")
+            and is_tool_call("eval 'ls' < /dev/null && pwd -P >| '/tmp/sandbox dir/cwd-9d32'")
+            and not is_tool_call("eval 'ls' && pwd -P >| /tmp/elsewhere.txt")
             and not is_tool_call(mcp),
-            "a tool call without its snapshot is still recognised by its cwd bookkeeping",
+            "a tool call without its snapshot is still recognised by its cwd bookkeeping, sandboxed or quoted",
         ),
         (
             delegated(1000, read=lambda p: "cpu memory pids\n")
