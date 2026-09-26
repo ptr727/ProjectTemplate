@@ -771,9 +771,14 @@ def report(claude_home):
     if unset and not capable:
         print(f"Note: agent commands on this host run uncontained ({reason}).")
     if foreign is not None:
+        remedy = (
+            "Remove that value and re-run the installer for this kit to contain them."
+            if capable
+            else f"This host cannot contain them either way ({reason})."
+        )
         print(
             f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so this kit does not "
-            "contain agent commands. Remove it and re-run the installer to have it do so."
+            f"contain agent commands. {remedy}"
         )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.

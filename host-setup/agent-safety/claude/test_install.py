@@ -801,6 +801,19 @@ class TestContainmentPrefix(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("does not run the deployed prefix", r.stdout)
 
+    def test_the_foreign_note_claims_only_what_this_kit_does(self):
+        """Another wrapper may contain commands, and a host that cannot contain gets no remedy it cannot use."""
+        self.home.mkdir(parents=True)
+        self._write({"env": {install.PREFIX_VAR: "/usr/local/bin/audit-log"}})
+        self.install()
+        capable = run(self.home, "--report")
+        self.assertIn("this kit does not contain agent commands", capable.stdout)
+        self.assertIn("re-run the installer for this kit to contain them", capable.stdout)
+        self.assertNotIn("run uncontained", capable.stdout)
+        incapable = run(self.home, "--report", contain=False)
+        self.assertIn("cannot contain them either way", incapable.stdout)
+        self.assertNotIn("re-run the installer for this kit", incapable.stdout)
+
     def test_a_wrapper_merely_containing_the_prefix_name_is_foreign(self):
         """Someone else's wrapper is neither overwritten nor reported as a stale copy of ours."""
         self.home.mkdir(parents=True)
