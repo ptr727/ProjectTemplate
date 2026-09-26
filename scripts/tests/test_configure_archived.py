@@ -143,9 +143,9 @@ class ArchivedRepositoryCase(unittest.TestCase):
 
 
 class EndToEndCase(unittest.TestCase):
-    """The real script, copied whole, exits before any `gh` call when given the repository by name.
+    """Run on an archived repository given by name, the real script exits before any `gh` call.
 
-    Both apply and check are covered.
+    The script is copied whole, and both apply and check are covered.
     """
 
     def run_configure(self, status: str, cmd: str) -> subprocess.CompletedProcess[str]:
