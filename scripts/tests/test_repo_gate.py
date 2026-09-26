@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -465,6 +466,81 @@ class TestEolCoverage(GitTreeCase):
         self.assertTrue(
             any("resolved 9 representative path(s)" in note for note in repo_gate.NOTES)
         )
+
+
+class TestQuotedNames(GitTreeCase):
+    """A tracked name git quotes reaches every check as the name on disk.
+
+    The constructed name holds a byte that is not valid UTF-8, the case that both crashed the
+    listing under `core.quotePath=false` and, at the default, left an escaped spelling no file
+    answers to.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        try:
+            self.NAME = os.fsdecode(b"run-\xff-tool")
+            (self.tmp / self.NAME).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        except (OSError, ValueError):
+            self.skipTest("this filesystem refuses a name that is not valid UTF-8")
+
+    def test_an_inherited_quote_path_false_lists_the_real_name_rather_than_raising(self) -> None:
+        self.git("config", "core.quotePath", "false")
+        self.git("add", "-A")
+        self.assertEqual([self.NAME], repo_gate.tracked(self.tmp))
+
+    def test_a_quoted_shebang_name_is_still_checked(self) -> None:
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        hits = self.coverage(gitattributes, {})
+        self.assertIn(self.NAME, repo_gate.tracked(self.tmp))
+        self.assertTrue(any(f"{self.NAME}: tracked shebang path" in hit for hit in hits), hits)
+
+    def test_the_run_prints_such_a_name_under_a_strict_output_encoding(self) -> None:
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        self.coverage(gitattributes, {})
+        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = repo_gate.main(["--root", str(self.tmp), "--check", "eol-coverage"])
+        out.flush()
+        self.assertEqual(1, rc)
+        self.assertIn(b"run-\\udcff-tool: tracked shebang path", out.buffer.getvalue())
+
+    def test_a_missing_root_named_in_bytes_that_are_not_utf8_fails_without_raising(self) -> None:
+        missing = self.tmp / self.NAME / "gone"
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        with contextlib.redirect_stderr(err):
+            self.assertEqual([], repo_gate.tracked(missing))
+        err.flush()
+        self.assertIn(b"git ls-files failed", err.buffer.getvalue())
+        self.assertIn(b"run-\\udcff-tool", err.buffer.getvalue())
+
+
+class TestQuotedPlainNames(GitTreeCase):
+    def test_a_name_quoted_for_a_quote_or_backslash_decodes_to_itself(self) -> None:
+        odd = 'say "hi"\\now'
+        try:
+            (self.tmp / odd).write_text("x\n", encoding="utf-8")
+        except OSError:
+            self.skipTest("this filesystem refuses a quote or a backslash in a name")
+        self.git("add", "-A")
+        self.assertIn(odd, repo_gate.tracked(self.tmp))
+
+    def test_a_control_character_in_a_name_prints_escaped_rather_than_raw(self) -> None:
+        name = "run\n[ok  ] forged\x1b[2J"
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        try:
+            (self.tmp / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        except OSError:
+            self.skipTest("this filesystem refuses a control character in a name")
+        self.coverage(gitattributes, {})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = repo_gate.main(["--root", str(self.tmp), "--check", "eol-coverage"])
+        self.assertEqual(1, rc)
+        self.assertIn("run\\x0a[ok  ] forged\\x1b[2J: tracked shebang path", out.getvalue())
+        self.assertNotIn("\x1b", out.getvalue())
+        self.assertFalse(any(l.startswith("[ok  ] forged") for l in out.getvalue().splitlines()))
 
 
 class TestGovernanceCoupling(unittest.TestCase):
