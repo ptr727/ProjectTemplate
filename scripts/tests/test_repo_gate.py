@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -465,6 +466,41 @@ class TestEolCoverage(GitTreeCase):
         self.assertTrue(
             any("resolved 9 representative path(s)" in note for note in repo_gate.NOTES)
         )
+
+
+class TestQuotedNames(GitTreeCase):
+    """A tracked name git quotes reaches every check as the name on disk.
+
+    The constructed name holds a byte that is not valid UTF-8, the case that both crashed the
+    listing under `core.quotePath=false` and, at the default, left an escaped spelling no file
+    answers to.
+    """
+
+    NAME = os.fsdecode(b"run-\xff-tool")
+
+    def setUp(self) -> None:
+        super().setUp()
+        try:
+            (self.tmp / self.NAME).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        except (OSError, UnicodeEncodeError):
+            self.skipTest("this filesystem refuses a name that is not valid UTF-8")
+
+    def test_an_inherited_quote_path_false_lists_the_real_name_rather_than_raising(self) -> None:
+        self.git("config", "core.quotePath", "false")
+        self.git("add", "-A")
+        self.assertEqual([self.NAME], repo_gate.tracked(self.tmp))
+
+    def test_a_quoted_shebang_name_is_still_checked(self) -> None:
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        hits = self.coverage(gitattributes, {})
+        self.assertIn(self.NAME, repo_gate.tracked(self.tmp))
+        self.assertTrue(any(f"{self.NAME}: tracked shebang path" in hit for hit in hits), hits)
+
+    def test_a_name_quoted_for_a_quote_or_backslash_decodes_to_itself(self) -> None:
+        odd = 'say "hi"\\now'
+        (self.tmp / odd).write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assertIn(odd, repo_gate.tracked(self.tmp))
 
 
 class TestGovernanceCoupling(unittest.TestCase):

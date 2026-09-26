@@ -62,7 +62,12 @@ NOTES: list[str] = []
 
 def sh(*args: str) -> str:
     return subprocess.run(
-        args, capture_output=True, text=True, encoding="utf-8", check=False
+        args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=False,
     ).stdout
 
 
@@ -125,8 +130,11 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     A caller vendoring a subtree it does not author, per GOVERNANCE.md's carry-versus-reach test,
     can scope every check out of that subtree this way. No check itself needs to change.
     Additive only: an empty or absent `exclude` scans exactly what it always has.
+
+    Git's quoting is pinned on, so the listing is ASCII whatever a config inherits and each quoted
+    name reaches `unquote_path` in the one form it decodes.
     """
-    args = ["git", "-C", str(root), "ls-files"]
+    args = ["git", "-C", str(root), "-c", "core.quotePath=true", "ls-files"]
     if exclude:
         args += ["--", *(f":!{pattern}" for pattern in exclude)]
     result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", check=False)
@@ -136,7 +144,29 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
         reason = result.stderr.strip() or f"exit {result.returncode}, no stderr"
         print(f"git ls-files failed: {reason}", file=sys.stderr)
         return []
-    return [l for l in result.stdout.split("\n") if l]
+    return [unquote_path(l) for l in result.stdout.split("\n") if l]
+
+
+def unquote_path(name: str) -> str:
+    """The real name behind one `git ls-files` line, which git quotes when the name needs it.
+
+    Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
+    or a control character, escaping it the way C does. Read as a literal path, the quoted form
+    names no file on disk, so a check reading the file would pass over it and report clean.
+
+    The caller pins `core.quotePath=true`, which is what makes a quoted line ASCII and so what
+    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
+    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
+    raw inside the quotes, which this decode cannot carry.
+
+    A byte that is not valid UTF-8 comes back as a surrogate escape, the form `Path` and
+    `resolved_eol` both encode back to the original byte. Latin-1 carries each unescaped byte
+    through unchanged on the way there.
+    """
+    if name.startswith('"') and name.endswith('"') and len(name) > 1:
+        unescaped = name[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
+        return unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
+    return name
 
 
 def workflow_files(files: list[str]) -> list[str]:
