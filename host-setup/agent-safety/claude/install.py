@@ -191,7 +191,7 @@ def containment_capable(prefix, env=None, system=None, uid=None, controllers=Non
     if override in ("0", "1"):
         return override == "1", "forced by AGENT_SAFETY_CONTAINMENT_OVERRIDE"
     if not system.startswith("linux"):
-        return False, f"{platform.system()} has no systemd user manager"
+        return False, f"{system} has no systemd user manager"
     if not shutil.which("systemd-run"):
         return False, "systemd-run is not installed"
     # WSLg, `su -`, cron, and `docker exec` shells point elsewhere or nowhere, while the manager listens here.

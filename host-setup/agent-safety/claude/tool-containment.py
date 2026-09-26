@@ -87,8 +87,27 @@ def snapshot_shell(command):
 
 
 def is_tool_call(command):
-    """Whether Claude Code runs `command` as a Bash tool call rather than as a hook or an MCP server."""
-    return snapshot_shell(command) is not None
+    """Whether Claude Code runs `command` as a Bash tool call rather than as a hook or an MCP server.
+
+    Either sign is enough: the shell snapshot sourced first, or the cwd bookkeeping appended last, so a
+    session whose snapshot failed is still contained.
+    """
+    tail = command.rstrip().rsplit("&&", 1)[-1].strip()
+    cwd_tail = tail.startswith("pwd -P >| ") and "claude-" in tail and tail.endswith("-cwd")
+    return snapshot_shell(command) is not None or cwd_tail
+
+
+def in_tool_scope(read=None):
+    """Whether this process already runs inside a tool-call scope, as a nested Claude Code session does."""
+    try:
+        if read:
+            text = read("/proc/self/cgroup")
+        else:
+            with open("/proc/self/cgroup", encoding="utf-8") as f:
+                text = f.read()
+    except OSError:
+        return False
+    return any(line.rsplit("/", 1)[-1].startswith(f"{TOOL_UNIT}-") for line in text.splitlines())
 
 
 def pick_shell(command, which=which):
@@ -214,6 +233,8 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
         "--description=Claude Code command",
         f"--property=TasksMax={tasks}",
         f"--property=MemoryMax={memory}",
+        # Without it a runaway at the memory ceiling spills into the host's swap rather than being killed.
+        "--property=MemorySwapMax=0",
         f"--property=TimeoutStopSec={STOP_TIMEOUT}",
         "--",
         sys.executable,
@@ -232,8 +253,15 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
     return argv, extra, notices
 
 
-def decide(command, env, suffix, runtime, is_delegated, which=which):
-    """`plan` for this host: a tool call under a manager lacking the controllers runs bare, and says why."""
+def decide(command, env, suffix, runtime, is_delegated, nested=lambda: False, which=which):
+    """`plan` for this host.
+
+    A tool call already inside a tool-call scope runs directly, since the outer scope's ceiling bounds
+    it, and a fresh scope would escape that ceiling and outlive the session that stops the outer one. A
+    tool call under a manager lacking the controllers runs bare, and says why.
+    """
+    if is_tool_call(command) and nested():
+        return [pick_shell(command, which), "-c", command], {}, []
     why = UNREACHABLE
     if runtime and is_tool_call(command) and not is_delegated():
         runtime, why = None, UNDELEGATED
@@ -267,7 +295,7 @@ def main(argv):
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
     run, extra, notices = decide(
-        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated
+        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated, in_tool_scope
     )
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
@@ -374,7 +402,7 @@ def _selftest():
             "a manager lacking the controllers is named as the reason, per command",
         ),
         (
-            decide(tool, env, "53", RUN, lambda: False, fake_which)
+            decide(tool, env, "53", RUN, lambda: False, which=fake_which)
             == (
                 ["/usr/bin/bash", "-c", tool],
                 {},
@@ -384,12 +412,31 @@ def _selftest():
         ),
         (
             "--unit=claude-tool-0a1b-2c3d-54"
-            in decide(tool, env, "54", RUN, lambda: True, fake_which)[0],
+            in decide(tool, env, "54", RUN, lambda: True, which=fake_which)[0],
             "a manager holding them contains it",
         ),
         (
-            decide(hook, hook_env, "55", RUN, lambda: 1 / 0, fake_which)[2] == [],
+            decide(hook, hook_env, "55", RUN, lambda: 1 / 0, which=fake_which)[2] == [],
             "a hook command never reads the controllers",
+        ),
+        (
+            decide(tool, env, "56", RUN, lambda: True, lambda: True, fake_which)
+            == (["/usr/bin/bash", "-c", tool], {}, []),
+            "a tool call already inside a tool-call scope runs within it rather than escaping it",
+        ),
+        (
+            in_tool_scope(read=lambda p: "0::/user.slice/app.slice/claude-tool-a-1-ff.scope\n")
+            and not in_tool_scope(read=lambda p: "0::/user.slice/app.slice/session-3.scope\n"),
+            "a nested session is recognised by the scope it runs in",
+        ),
+        (
+            "--property=MemorySwapMax=0" in argv,
+            "a runaway at the memory ceiling is killed rather than spilled into swap",
+        ),
+        (
+            is_tool_call("eval 'ls' < /dev/null && pwd -P >| /tmp/claude-9d32-cwd")
+            and not is_tool_call(mcp),
+            "a tool call without its snapshot is still recognised by its cwd bookkeeping",
         ),
         (
             delegated(1000, read=lambda p: "cpu memory pids\n")

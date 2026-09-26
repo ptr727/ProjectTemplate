@@ -883,7 +883,9 @@ class TestContainmentCapable(unittest.TestCase):
         self.assertIn("no systemd user manager", reason)
 
     def test_a_non_linux_host_cannot_contain(self):
-        self.assertFalse(self._judge(system="darwin")[0])
+        capable, reason = self._judge(system="darwin")
+        self.assertFalse(capable)
+        self.assertIn("darwin", reason)
 
 
 class TestPreexistingCorruption(StampCase):
