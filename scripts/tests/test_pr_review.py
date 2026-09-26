@@ -5259,6 +5259,8 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         for code_point, ascii_form in expected_folds.items():
             char = chr(code_point)
             with self.subTest(char=repr(char)):
+                self.out.seek(0)
+                self.out.truncate(0)
                 self.wire(page([rthread("t1", body=f"The finding reads foo{char}bar plainly.")]))
                 self.assertEqual(0, self.run_reply("--resolve", "--match", f"foo{ascii_form}bar"))
                 self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
