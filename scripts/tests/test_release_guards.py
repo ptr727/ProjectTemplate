@@ -1016,12 +1016,12 @@ gh() {
 
         A bare checkout of the workflow repository fetches github.sha, and a reusable workflow reads
         its caller's github context, so the bare form is what validates the exact commit a publisher
-        pins. No step in the task carries a ref: at all, which is asserted file-wide so that neither
-        a step leading with uses: nor one ordering with: first can carry one past the check.
+        pins. No step in the task carries a ref: at all, asserted file-wide over block, flow, and
+        quoted keys, so no step shape or mapping style carries one past the check.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         self.assertIn("actions/checkout@", workflow)
-        self.assertNotRegex(workflow, r"(?m)^[ \t-]*ref:")
+        self.assertNotRegex(workflow, r"(?m)(^[ \t-]*|[{,][ \t]*)[\"']?ref[\"']?[ \t]*:")
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
