@@ -522,12 +522,12 @@ def registration_problems(claude_home):
                 )
                 continue
             swept += 1
-            # A matcher naming specific exit reasons runs the sweep on those reasons alone.
+            # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
             # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
             if not matcher_covers_every_exit_reason(group.get("matcher")):
                 report(
                     f"the SessionEnd sweep is registered under a matcher "
-                    f"({group.get('matcher')!r}), so it runs only on the exit reasons it names"
+                    f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
                 )
     if ends is None:
         pass  # likewise reported as a shape error above
