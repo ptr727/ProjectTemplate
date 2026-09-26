@@ -150,8 +150,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   lacks.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --track "auto-<issue>" --limit 1` answers with its refusal naming no
-  handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
+  which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with
+  its refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes. No open pull
   request names it, and no pull request whose squash commit is in `origin/main..origin/develop`
   names it anywhere in its body, since a fix merged to develop leaves its issue open until it is
   promoted, whoever merged it. No open handoff on any track names it in its next steps, and no
@@ -163,9 +163,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 1. **Check the promotion first** under `main` or `release`. Where an open `decision` issue names
    the open develop -> main pull request, return `STOP` before picking anything, since every worker
    this run dispatched would meet that same decision after merging its own work to develop.
-2. **Read the open handoffs** with labels and update times, `gh issue list --label handoff --state
-   open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py tracks` prints
-   neither. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the
+2. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
+   --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since
+   `handoff.py tracks` prints neither. Where it returns as many rows as the limit, the list may be
+   truncated, so raise the limit and read again until it returns fewer, rather than ranking a
+   partial list. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the
    Chain".
 3. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
@@ -177,7 +179,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
    page size, since `gh issue list` returns 30 rows unless told otherwise.
-5. **Create its handoff** with `handoff.py new --track "auto-<issue>"`, `--dry-run` first. The body
+5. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
+   `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
    the issue and what done looks like. That skill's rules on the body bind it.
 6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
@@ -186,8 +189,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Worker
 
-1. **Resume the handoff** with `handoff.py resume --track "<track>"`, then read its comments with
-   `gh issue view "<n>" --comments`, since `resume` prints only the body and a parked lane's state
+1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
+   read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume` prints only the body and a parked lane's state
    is in its parking comment. A lane handed back by an attended session has a closed predecessor
    holding that comment, so read the predecessor's comments too. Where either names a decision
    issue, read the answer recorded there and follow it, since it is what unblocked the lane.
