@@ -3,9 +3,10 @@
 
 The shell is lifted out of the file rather than restated here, so an edit that removes the
 behavior fails these tests instead of leaving a reimplementation to agree with itself. The
-region under test makes no `gh` call of its own, and the harness assigns every variable it reads.
-So the cases running the lifted region need no `gh` stub: a cataloged or absent registry falls
-through to a marker printed just after that region, and an archived one exits before reaching it.
+region under test makes no `gh` call of its own, and the harness assigns every variable the
+region reads. So the cases running the lifted region need no `gh` stub: a cataloged or absent
+registry falls through to a marker printed just after that region, and an archived one exits
+before reaching it.
 """
 
 from __future__ import annotations
