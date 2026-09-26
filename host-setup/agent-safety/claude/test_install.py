@@ -469,6 +469,16 @@ class TestRegistration(StampCase):
         data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
         self._write(data)
         problems = install.registration_problems(self.home)
+        sweep_defect = "a SessionEnd entry names the sweep but does not run the deployed one"
+        matcher_defect = "so that group never fires"
+        self.assertTrue(
+            any(sweep_defect in p for p in problems),
+            f"the planted SessionEnd type defect was not reported: {problems!r}",
+        )
+        self.assertTrue(
+            any(matcher_defect in p for p in problems),
+            f"the planted PreToolUse matcher defect was not reported: {problems!r}",
+        )
         self.assertEqual([p for p in problems if "is not registered" in p], [], problems)
         self.assertEqual([p for p in problems if "never runs" in p], [], problems)
 
