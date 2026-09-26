@@ -55,9 +55,10 @@ depend on Python either. Everything else is Python, with a test under its own sc
   placed ahead of the real one on `PATH`, that calls `command jq` or a bare `jq` calls itself,
   since `command` skips functions and aliases but not the `PATH` search. Every call starts another
   copy of the wrapper, so the chain grows until something stops it. Capture the real path with
-  `type -P` before changing `PATH`, stop unless it is an absolute path outside the shim's own
-  directory, and call that path from inside the shim. An inherited `PATH` can already hold the
-  shim, and a `.` entry yields a relative path. `command -v` is not a substitute, since it prints
+  `type -P` before changing `PATH`, stop unless it is an absolute path that is not the shim itself,
+  tested as files with `[ "$real" -ef "$shim" ]` rather than as spellings, and call that path from
+  inside the shim. An inherited `PATH` can already hold the shim, under a symlinked spelling too,
+  and a `.` entry yields a relative path. `command -v` is not a substitute, since it prints
   the bare name for a shell function of that name.
 - **Self-locating, never dependent on the caller's directory.** A script resolves its own
   directory from `BASH_SOURCE` and references its payloads through it, since the working
