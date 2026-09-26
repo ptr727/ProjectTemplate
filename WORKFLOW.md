@@ -204,7 +204,7 @@ The required behaviors, organized by domain. Each is a **MUST**, and its `Output
 
 `GOVERNANCE.md` "Workflow YAML Conventions" names the tool D9.1 excepts and states the suffix rules D9.2 requires.
 
-- **D9.1** Every action or reusable workflow referenced from another repository is SHA-pinned with a version comment (sole exception: the documented lagging-tag tool). A local (`./`) or self-repository (`$/`) reference names no ref and takes no pin.
+- **D9.1** Every action or reusable workflow referenced from another repository is SHA-pinned with a comment naming the release tag at that SHA, spelled as the referenced repository publishes it (sole exception: the documented lagging-tag tool). A local (`./`) or self-repository (`$/`) reference names no ref and takes no pin, `$/` being GitHub's syntax for a path in the repository holding the workflow file that contains it, resolved at that file's own commit.
 - **D9.2** File/workflow/job/step names follow the suffix rules. A ruleset-bound job's `name:` equals its ruleset `context:` (renamed together).
 - **D9.3** Multi-line bash `run:` blocks start `set -Eeuo pipefail`. Multi-line `if:` uses `>-`.
 - **D9.4** Docker layer cache targets a registry tag, not `type=gha`. `cache-to` writes only the built branch's `<repo>:buildcache-<branch>` and only on push, while `cache-from` reads both branches. A multi-image repo varies the cache **repository** rather than the tag, `<image>:buildcache-<branch>` per image, the tag alone being unable to distinguish two images.
