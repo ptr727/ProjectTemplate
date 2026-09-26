@@ -250,8 +250,8 @@ def source_ref():
     if override in ("0", "1"):
         ref["dirty"] = override == "1"
         print(
-            f"source_ref: AGENT_SAFETY_DIRTY_OVERRIDE={override} in effect, "
-            "ignoring this checkout's real git status",
+            f"AGENT_SAFETY_DIRTY_OVERRIDE={override} is forcing the dirty-checkout signal. "
+            "The real git status was not read.",
             file=sys.stderr,
         )
     else:
