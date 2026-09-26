@@ -801,6 +801,17 @@ class TestContainmentPrefix(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("does not run the deployed prefix", r.stdout)
 
+    def test_a_wrapper_merely_containing_the_prefix_name_is_foreign(self):
+        """Someone else's wrapper is neither overwritten nor reported as a stale copy of ours."""
+        self.home.mkdir(parents=True)
+        other = "/usr/local/bin/audit-" + install.CONTAIN_NAME + "-wrapper"
+        self._write({"env": {install.PREFIX_VAR: other}})
+        self.install()
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], other)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note:", r.stdout)
+
     def test_a_non_object_env_is_refused_rather_than_overwritten(self):
         self.home.mkdir(parents=True)
         self._write({"env": ["not", "an", "object"]})

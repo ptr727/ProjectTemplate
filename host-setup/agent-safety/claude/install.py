@@ -257,11 +257,20 @@ def names_prefix(held, path):
     return held == prefix_value(path)
 
 
+def kit_prefix(held):
+    """Whether a `CLAUDE_CODE_SHELL_PREFIX` value names this kit's prefix, deployed here or at another path.
+
+    Judged on the file name exactly, since a substring match claims someone else's wrapper whose name
+    merely contains this one's.
+    """
+    return os.path.basename(str(held).replace("\\", "/")) == CONTAIN_NAME
+
+
 def foreign_prefix(data):
     """The `CLAUDE_CODE_SHELL_PREFIX` value when it names something other than this kit's prefix, else None."""
     env = data.get("env") if isinstance(data, dict) else None
     held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
-    return held if held is not None and CONTAIN_NAME not in str(held) else None
+    return held if held is not None and not kit_prefix(held) else None
 
 
 def hook_launcher():
@@ -989,7 +998,7 @@ def main():
     capable, reason = containment_capable(contain_dst)
     env = data.setdefault("env", {})
     held = env.get(PREFIX_VAR)
-    ours = held is not None and CONTAIN_NAME in str(held)
+    ours = held is not None and kit_prefix(held)
     if held is not None and not ours:
         done.append(
             f"{PREFIX_VAR} left as {held!r}, which this kit does not own, so no containment"

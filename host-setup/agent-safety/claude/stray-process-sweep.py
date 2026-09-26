@@ -259,6 +259,12 @@ def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
     return None
 
 
+def prefix_registered(env):
+    """Whether this session runs under the containment prefix, whose file name the installer registers."""
+    held = env.get("CLAUDE_CODE_SHELL_PREFIX", "")
+    return os.path.basename(held.replace("\\", "/")) == "tool-containment.py"
+
+
 def session_token(session_id):
     """The session id as `tool-containment.py` spells it in a unit name, or "" where there is none."""
     return re.sub(r"[^A-Za-z0-9-]", "", session_id or "")[:64]
@@ -367,8 +373,8 @@ def main():
     ]
     reaped = ""
     runtime = manager_runtime(os.environ)
-    if runtime:
-
+    if runtime or prefix_registered(os.environ):
+        # With the prefix registered and no manager found, the list fails and says so, as requirement 9 asks.
         def runner(*args):
             return _systemctl(*args, runtime=runtime)
 
@@ -554,6 +560,14 @@ def _selftest():
             "a systemctl that cannot run is reported, never read as nothing to stop",
         ),
         (session_token("a/b c;d") == "abcd", "the unit name is spelled as the prefix spells it"),
+        (
+            prefix_registered({"CLAUDE_CODE_SHELL_PREFIX": "/h/.claude/hooks/tool-containment.py"})
+            and not prefix_registered(
+                {"CLAUDE_CODE_SHELL_PREFIX": "/bin/audit-tool-containment.py-x"}
+            )
+            and not prefix_registered({}),
+            "a session under the prefix is swept even with no manager found, so a failed list is reported",
+        ),
         (
             manager_runtime({}, which=has, exists=socket_in(), uid=1000) is None,
             "a host with no manager socket anywhere has no manager to ask",
