@@ -259,6 +259,15 @@ def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
     return None
 
 
+def should_reap(runtime, env):
+    """Whether the stop phase runs: where a manager was found, or where the session ran under the prefix.
+
+    The second covers a manager that was lost by the session's end, whose failed list is reported as
+    requirement 9 asks rather than skipped in silence.
+    """
+    return bool(runtime) or prefix_registered(env)
+
+
 def prefix_registered(env):
     """Whether this session runs under the containment prefix, whose file name the installer registers."""
     held = env.get("CLAUDE_CODE_SHELL_PREFIX", "")
@@ -320,9 +329,16 @@ def scope_pids(units, runner=_systemctl, read=None):
     }
 
 
-def reap(session_ids, table, runner=_systemctl, read=None):
+def reap(session_ids, table, runner=_systemctl, read=None, manager_found=True):
     """Stop this session's tool-call scopes, returning the report, or "" when there were none."""
     units = session_scopes(session_ids, runner)
+    if units is None and not manager_found:
+        return (
+            "agent-safety: this session ran under the containment prefix, but no systemd user "
+            "manager was found at its end, so its command scopes could not be listed or stopped. "
+            "Start the user manager, then check with: "
+            f"systemctl --user list-units '{_TOOL_UNIT}-*'"
+        )
     if units is None:
         return (
             "agent-safety: could not list this session's command scopes, so none was stopped. "
@@ -373,12 +389,14 @@ def main():
     ]
     reaped = ""
     runtime = manager_runtime(os.environ)
-    if runtime or prefix_registered(os.environ):
-        # With the prefix registered and no manager found, the list fails and says so, as requirement 9 asks.
+    if should_reap(runtime, os.environ):
+
         def runner(*args):
             return _systemctl(*args, runtime=runtime)
 
-        reaped = reap(session_ids, _read_process_table() or {}, runner=runner)
+        reaped = reap(
+            session_ids, _read_process_table() or {}, runner=runner, manager_found=bool(runtime)
+        )
     if reaped:
         print(reaped, file=sys.stderr)
     table = _read_process_table()
@@ -567,6 +585,17 @@ def _selftest():
             )
             and not prefix_registered({}),
             "a session under the prefix is swept even with no manager found, so a failed list is reported",
+        ),
+        (
+            should_reap(None, {"CLAUDE_CODE_SHELL_PREFIX": "/h/.claude/hooks/tool-containment.py"})
+            and should_reap("/run/user/1000", {})
+            and not should_reap(None, {}),
+            "the stop phase runs under the prefix or a manager, and a host with neither is skipped",
+        ),
+        (
+            "no systemd user manager was found"
+            in reap([sid], table, runner=lambda *a: (1, ""), manager_found=False),
+            "a lost manager is named as the reason the scopes were not stopped",
         ),
         (
             manager_runtime({}, which=has, exists=socket_in(), uid=1000) is None,
