@@ -390,7 +390,23 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 CHECKS = {"sha-pin": check_sha_pin, "eol": check_eol, "eol-coverage": check_eol_coverage}
 
 
+def report_paths_that_are_not_utf8() -> None:
+    """Let a path holding a byte that is not UTF-8 print rather than ending the run.
+
+    `unquote_path` decodes such a name with surrogateescape so it opens on disk, which leaves the
+    lone surrogate in the name to reach this program's own output. Encoding it strictly raises at
+    the line printing that name, so every check after it is lost along with the run's verdict, and
+    the exit code becomes a traceback's rather than the gate's. Escaping it costs the reader one
+    unreadable byte in one name.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    report_paths_that_are_not_utf8()
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--check", action="append", choices=sorted(CHECKS))

@@ -476,13 +476,12 @@ class TestQuotedNames(GitTreeCase):
     answers to.
     """
 
-    NAME = os.fsdecode(b"run-\xff-tool")
-
     def setUp(self) -> None:
         super().setUp()
         try:
+            self.NAME = os.fsdecode(b"run-\xff-tool")
             (self.tmp / self.NAME).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        except (OSError, UnicodeEncodeError):
+        except (OSError, ValueError):
             self.skipTest("this filesystem refuses a name that is not valid UTF-8")
 
     def test_an_inherited_quote_path_false_lists_the_real_name_rather_than_raising(self) -> None:
@@ -496,9 +495,25 @@ class TestQuotedNames(GitTreeCase):
         self.assertIn(self.NAME, repo_gate.tracked(self.tmp))
         self.assertTrue(any(f"{self.NAME}: tracked shebang path" in hit for hit in hits), hits)
 
+    def test_the_run_prints_such_a_name_under_a_strict_output_encoding(self) -> None:
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        self.coverage(gitattributes, {})
+        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = repo_gate.main(["--root", str(self.tmp), "--check", "eol-coverage"])
+        out.flush()
+        self.assertEqual(1, rc)
+        self.assertIn(b"run-\\udcff-tool: tracked shebang path", out.buffer.getvalue())
+
+
+class TestQuotedPlainNames(GitTreeCase):
     def test_a_name_quoted_for_a_quote_or_backslash_decodes_to_itself(self) -> None:
         odd = 'say "hi"\\now'
-        (self.tmp / odd).write_text("x\n", encoding="utf-8")
+        try:
+            (self.tmp / odd).write_text("x\n", encoding="utf-8")
+        except OSError:
+            self.skipTest("this filesystem refuses a quote or a backslash in a name")
         self.git("add", "-A")
         self.assertIn(odd, repo_gate.tracked(self.tmp))
 
