@@ -3,16 +3,17 @@ name: shell-codestyle
 description: >-
   Governs Bash/shell script style for ptr727/ProjectTemplate fleet repos: when a bootstrap or
   host-tool script may be shell instead of Python, the mandatory set -Eeuo pipefail header, the
-  pipefail-versus-early-reader pitfall, self-locating scripts, the shellcheck-plus-shfmt
-  clean-compile, and the why-not-what comment rule. Use this whenever writing, reviewing, or
-  editing a shell script (a `.sh` file, or an extensionless bash/sh shebang script), whenever
-  deciding whether a new script should be Bash or Python, or whenever a pipeline built from
-  `curl`/`grep`/`jq`-style commands looks like it silently swallowed a failure. Triggers even when
-  the task looks like a one-line tweak to an existing script, because a missing `-e`/`pipefail`,
-  or a reader piped straight from a producer that closes the pipe early, are each invisible until
-  the exact failure mode they guard against actually happens. Fleet-wide: a shell script can
-  appear in any repo (a bootstrap that installs the interpreter, a host tool that must run before
-  a toolchain exists), not only a repo whose primary language is shell.
+  pipefail-versus-early-reader pitfall, self-recursive command shims, self-locating scripts, the
+  shellcheck-plus-shfmt clean-compile, and the why-not-what comment rule. Use this whenever
+  writing, reviewing, or editing a shell script (a `.sh` file, or an extensionless bash/sh shebang
+  script), whenever deciding whether a new script should be Bash or Python, or whenever a pipeline
+  built from `curl`/`grep`/`jq`-style commands looks like it silently swallowed a failure, or
+  whenever a script or probe writes a wrapper or shim named after a command it also calls.
+  Triggers even when the task looks like a one-line tweak to an existing script, because a missing
+  `-e`/`pipefail`, or a reader piped straight from a producer that closes the pipe early, are each
+  invisible until the exact failure mode they guard against actually happens. Fleet-wide: a shell
+  script can appear in any repo (a bootstrap that installs the interpreter, a host tool that must
+  run before a toolchain exists), not only a repo whose primary language is shell.
 ---
 
 # Shell Codestyle
@@ -50,6 +51,15 @@ depend on Python either. Everything else is Python, with a test under its own sc
 - **A reader that stops early needs its producer read first.** Under `pipefail`, a producer
   writing to a closed pipe exits non-zero, so `curl ... | grep -q` reports a successful fetch as a
   failure whenever the match is found early enough. Capture the output, then search it.
+- **A shim named for a command resolves that command by absolute path.** A wrapper named `jq`,
+  placed ahead of the real one on `PATH`, that calls `command jq` or a bare `jq` calls itself,
+  since `command` skips functions and aliases but not the `PATH` search. Every call starts another
+  copy of the wrapper, so the chain grows until something stops it. Capture the real path with
+  `type -P` before changing `PATH`, stop unless it is an absolute path that is not the shim itself,
+  tested as files with `[ "$real" -ef "$shim" ]` rather than as spellings, and call that path from
+  inside the shim. An inherited `PATH` can already hold the shim, under a symlinked spelling too,
+  and a `.` entry yields a relative path. `command -v` is not a substitute, since it prints
+  the bare name for a shell function of that name.
 - **Self-locating, never dependent on the caller's directory.** A script resolves its own
   directory from `BASH_SOURCE` and references its payloads through it, since the working
   directory at invocation is not a property of the script.

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 INSTALL = HERE / "install.py"
@@ -23,16 +24,27 @@ INSTALL = HERE / "install.py"
 sys.path.insert(0, str(HERE))
 import install
 
+# Held before any case patches `shutil.which`, which is the same object `install` reads.
+REAL_WHICH = shutil.which
 
-def run(home, *args, dirty=False):
+
+def run(home, *args, dirty=False, contain=True):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
     live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE, so a verdict this suite asserts
     depends on the fixture rather than on whether host-setup happens to be mid-edit while the
     suite runs. The default is clean, since that is what every case but one below needs.
+
+    contain forces the containment-capable signal the same way, so a verdict does not depend on
+    whether the machine running the suite has a systemd user manager.
     """
-    env = dict(os.environ, CLAUDE_HOME=str(home), AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0")
+    env = dict(
+        os.environ,
+        CLAUDE_HOME=str(home),
+        AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
+        AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
+    )
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],
         capture_output=True,
@@ -51,8 +63,8 @@ class StampCase(unittest.TestCase):
         self.stamp = self.home / "agent-safety-stamp.json"
         self.md = self.home / "CLAUDE.md"
 
-    def install(self, dirty=False):
-        r = run(self.home, dirty=dirty)
+    def install(self, dirty=False, contain=True):
+        r = run(self.home, dirty=dirty, contain=contain)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -702,6 +714,189 @@ class TestRegistration(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
+
+
+class TestContainmentPrefix(StampCase):
+    """The shell prefix is set where the host can contain a command, and owned only while it names ours."""
+
+    def _settings(self):
+        return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
+
+    def _write(self, data):
+        (self.home / "settings.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def test_a_capable_host_sets_the_prefix_to_the_deployed_file(self):
+        """A bare path, since Claude Code quotes the whole value as one word."""
+        self.install()
+        deployed = self.home / "hooks" / install.CONTAIN_NAME
+        self.assertTrue(deployed.is_file())
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], str(deployed))
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_incapable_host_deploys_the_file_and_sets_no_prefix(self):
+        """The digest stays identical across hosts, so only the registration differs."""
+        self.install(contain=False)
+        self.assertTrue((self.home / "hooks" / install.CONTAIN_NAME).is_file())
+        self.assertNotIn("env", self._settings())
+        r = run(self.home, "--report", contain=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # The report says so, since a silent fallback reads exactly like a contained host.
+        self.assertIn("run uncontained", r.stdout)
+
+    def test_a_removed_prefix_reports_stale_on_a_capable_host(self):
+        self.install()
+        data = self._settings()
+        del data["env"]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no task or memory ceiling", r.stdout)
+
+    def test_our_prefix_on_a_host_that_cannot_contain_reports_stale(self):
+        self.install()
+        r = run(self.home, "--report", contain=False)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot contain", r.stdout)
+        # Every hook fails to exec there, so the note that commands run uncontained would contradict it.
+        self.assertNotIn("run uncontained", r.stdout)
+
+    def test_a_prefix_synced_from_another_host_reports_stale_where_it_cannot_contain(self):
+        """A path this host lacks exits 127 on every hook, which fails the guard open."""
+        self.install(contain=False)
+        data = self._settings()
+        data["env"] = {install.PREFIX_VAR: "/elsewhere/.claude/hooks/" + install.CONTAIN_NAME}
+        self._write(data)
+        r = run(self.home, "--report", contain=False)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot contain", r.stdout)
+
+    def test_reinstalling_on_a_host_that_lost_its_manager_removes_only_our_prefix(self):
+        self.install()
+        data = self._settings()
+        data["env"]["OTHER"] = "kept"
+        self._write(data)
+        self.install(contain=False)
+        self.assertEqual(self._settings()["env"], {"OTHER": "kept"})
+
+    def test_a_foreign_prefix_is_kept_and_noted_without_a_stale_verdict(self):
+        """Someone else's wrapper is theirs, and a re-run leaves it, so it cannot be drift a re-run clears."""
+        self.home.mkdir(parents=True)
+        self._write({"env": {install.PREFIX_VAR: "/usr/local/bin/audit-log"}})
+        r = self.install()
+        self.assertIn("does not own", r.stdout)
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], "/usr/local/bin/audit-log")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note:", r.stdout)
+
+    def test_a_prefix_naming_another_copy_reports_stale(self):
+        self.install()
+        data = self._settings()
+        data["env"][install.PREFIX_VAR] = "/elsewhere/hooks/" + install.CONTAIN_NAME
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("does not run the deployed prefix", r.stdout)
+
+    def test_a_wrapper_merely_containing_the_prefix_name_is_foreign(self):
+        """Someone else's wrapper is neither overwritten nor reported as a stale copy of ours."""
+        self.home.mkdir(parents=True)
+        other = "/usr/local/bin/audit-" + install.CONTAIN_NAME + "-wrapper"
+        self._write({"env": {install.PREFIX_VAR: other}})
+        self.install()
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], other)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note:", r.stdout)
+
+    def test_a_non_object_env_is_refused_rather_than_overwritten(self):
+        self.home.mkdir(parents=True)
+        self._write({"env": ["not", "an", "object"]})
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("`env`", r.stderr)
+        self.assertEqual(self._settings()["env"], ["not", "an", "object"])
+
+
+class TestContainmentCapable(unittest.TestCase):
+    """The judgment every other case forces through AGENT_SAFETY_CONTAINMENT_OVERRIDE, run for real."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.runtime = self.tmp / "runtime"
+        (self.runtime / "systemd").mkdir(parents=True)
+        (self.runtime / "systemd" / "private").write_text("", encoding="utf-8")
+        self.prefix = self.tmp / install.CONTAIN_NAME
+        shutil.copyfile(HERE / install.CONTAIN_NAME, self.prefix)
+        os.chmod(self.prefix, 0o755)
+        self.controllers = self.tmp / "cgroup.controllers"
+        self.controllers.write_text("cpu memory pids\n", encoding="utf-8")
+        which = mock.patch.object(install.shutil, "which", side_effect=self._which)
+        which.start()
+        self.addCleanup(which.stop)
+
+    @staticmethod
+    def _which(name):
+        # The fake claims systemd-run is present, and every other name resolves as it really does.
+        return "/usr/bin/systemd-run" if name == "systemd-run" else REAL_WHICH(name)
+
+    def _judge(self, env=None, system="linux", uid=987654):
+        env = {"XDG_RUNTIME_DIR": str(self.runtime)} if env is None else env
+        return install.containment_capable(
+            self.prefix, env=env, system=system, uid=uid, controllers=str(self.controllers)
+        )
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "the prefix runs through a POSIX shebang"
+    )
+    def test_a_manager_and_a_runnable_prefix_can_contain(self):
+        capable, reason = self._judge()
+        self.assertTrue(capable, reason)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the execute bit is a POSIX property")
+    def test_a_prefix_that_cannot_run_directly_cannot_contain(self):
+        """Run through its interpreter it passes, and run the way Claude Code runs it, it fails."""
+        os.chmod(self.prefix, 0o644)
+        capable, reason = self._judge()
+        self.assertFalse(capable)
+        self.assertIn("does not run as its own executable", reason)
+
+    def test_a_runtime_directory_lacking_the_socket_falls_back_to_the_standard_one(self):
+        standard = os.path.join("/run/user/987654", "systemd", "private")
+        real = os.path.exists
+        with (
+            mock.patch.object(
+                install.os.path, "exists", side_effect=lambda p: p == standard or real(p)
+            ),
+            mock.patch.object(install, "prefix_runs_directly", return_value=""),
+        ):
+            capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})
+        self.assertTrue(capable, reason)
+
+    def test_a_manager_without_the_pids_and_memory_controllers_cannot_contain(self):
+        """A scope under it starts and enforces neither ceiling, as on a cgroup-v1 or hybrid host."""
+        self.controllers.write_text("cpu\n", encoding="utf-8")
+        capable, reason = self._judge()
+        self.assertFalse(capable)
+        self.assertIn("pids and memory", reason)
+
+    def test_an_unreadable_controllers_file_cannot_contain(self):
+        self.controllers.unlink()
+        self.assertFalse(self._judge()[0])
+
+    def test_no_socket_anywhere_cannot_contain(self):
+        capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})
+        self.assertFalse(capable)
+        self.assertIn("no systemd user manager", reason)
+
+    def test_a_non_linux_host_cannot_contain(self):
+        capable, reason = self._judge(system="darwin")
+        self.assertFalse(capable)
+        self.assertIn("darwin", reason)
 
 
 class TestPreexistingCorruption(StampCase):

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook and the SessionEnd stray-process sweep, registers both in the user
-settings.json, merges the permission rules this kit owns into the same file, adds the safety rules to
+Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
+registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
+in its `env`, merges the permission rules this kit owns into the same file, adds the safety rules to
 the user CLAUDE.md (marker-delimited so re-runs update in place), and self-tests each hook before
 registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
@@ -16,6 +17,7 @@ Usage: python3 install.py            (installs to ~/.claude)
        python3 install.py --report   (read-only: is this machine current?)
        CLAUDE_HOME=/x python3 install.py   (override target, for testing)
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing)
+       AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing)
 """
 
 import argparse
@@ -40,15 +42,18 @@ GUARD_NAME = "gh-write-guard.py"
 GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
 SWEEP_STEM = "stray-process-sweep"
+CONTAIN_NAME = "tool-containment.py"
+
+PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
 
 # The hook files this kit copies into ~/.claude/hooks, in deploy order.
 # Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
 # That silence reads as a pass.
-DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME)
+DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME)
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
-# The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
-SWEEP_TIMEOUT_SECONDS = 10
+# The sweep's own calls are each bounded, two `ps` reads at 5s and four `systemctl` calls at 5s, all inside this.
+SWEEP_TIMEOUT_SECONDS = 35
 
 # The stamp's own format version, separate from the content it describes.
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
@@ -173,6 +178,101 @@ MANAGED_PERMISSIONS = [
 ]
 
 
+def containment_capable(prefix, env=None, system=None, uid=None, controllers=None):
+    """(capable, reason): whether this host can run the deployed `prefix` and start a scope for a command.
+
+    Judged at install and at report time alike, so a host that gains or loses its user manager is
+    reported against what it can do now. AGENT_SAFETY_CONTAINMENT_OVERRIDE, read as exactly "0" or
+    "1", replaces the judgment for a test, the way AGENT_SAFETY_DIRTY_OVERRIDE does for the dirty signal.
+    """
+    env = os.environ if env is None else env
+    system = sys.platform if system is None else system
+    override = env.get("AGENT_SAFETY_CONTAINMENT_OVERRIDE")
+    if override in ("0", "1"):
+        return override == "1", "forced by AGENT_SAFETY_CONTAINMENT_OVERRIDE"
+    if not system.startswith("linux"):
+        return False, f"{system} has no systemd user manager"
+    if not shutil.which("systemd-run"):
+        return False, "systemd-run is not installed"
+    # WSLg, `su -`, cron, and `docker exec` shells point elsewhere or nowhere, while the manager listens here.
+    uid = os.getuid() if uid is None else uid
+    if not any(
+        runtime and os.path.exists(os.path.join(runtime, "systemd", "private"))
+        for runtime in (env.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}")
+    ):
+        return False, "no systemd user manager is running for this account"
+    # A scope on a cgroup-v1 or hybrid host, or under a manager not delegated these two, enforces neither ceiling.
+    controllers = controllers or (
+        f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/cgroup.controllers"
+    )
+    try:
+        with open(controllers, encoding="utf-8") as f:
+            delegated = set(f.read().split())
+    except OSError:
+        delegated = set()
+    if not {"pids", "memory"} <= delegated:
+        return False, "the user manager is not delegated the pids and memory controllers"
+    ran = prefix_runs_directly(prefix)
+    if ran:
+        return False, f"the deployed prefix does not run as its own executable ({ran})"
+    return True, "a systemd user manager is running and the prefix runs"
+
+
+def prefix_runs_directly(prefix):
+    """Why `prefix --selftest` fails when executed the way Claude Code executes it, or "" where it passes.
+
+    Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
+    write guard included. A PreToolUse hook that fails is a non-blocking error, so a prefix that cannot
+    run that way, from a missing `python3`, a lost execute bit, or a `noexec` mount, fails the guard open.
+    """
+    try:
+        done = subprocess.run(
+            [str(prefix), "--selftest"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+    if done.returncode != 0:
+        last = (done.stdout + done.stderr).strip().splitlines()[-1:] or ["no output"]
+        return f"exit {done.returncode}: {last[0]}"
+    return ""
+
+
+def prefix_value(path):
+    """The `CLAUDE_CODE_SHELL_PREFIX` value naming the deployed prefix, spelled once for writer and reader.
+
+    A bare path, since Claude Code quotes the whole value as one word, so an interpreter named in front
+    of it is read as part of the file name.
+    """
+    return str(path)
+
+
+def names_prefix(held, path):
+    """Whether a `CLAUDE_CODE_SHELL_PREFIX` value names the deployed prefix."""
+    return held == prefix_value(path)
+
+
+def kit_prefix(held):
+    """Whether a `CLAUDE_CODE_SHELL_PREFIX` value names this kit's prefix, deployed here or at another path.
+
+    Judged on the file name exactly, since a substring match claims someone else's wrapper whose name
+    merely contains this one's.
+    """
+    return os.path.basename(str(held).replace("\\", "/")) == CONTAIN_NAME
+
+
+def foreign_prefix(data):
+    """The `CLAUDE_CODE_SHELL_PREFIX` value when it names something other than this kit's prefix, else None."""
+    env = data.get("env") if isinstance(data, dict) else None
+    held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
+    return held if held is not None and not kit_prefix(held) else None
+
+
 def hook_launcher():
     """A python invocation for the settings.json command. Prefer a bare `python3` (portable and
     unambiguously Python 3), else this interpreter's absolute path (guaranteed the Python 3 running the
@@ -283,7 +383,7 @@ def payload_digest():
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
-    `installed_digest` reads, so the two are directly comparable: the guard, the sweep, then each block.
+    `installed_digest` reads, so the two are directly comparable: each deployed hook, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
@@ -555,6 +655,23 @@ def registration_problems(claude_home):
         )
     elif swept > 1:
         out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
+    capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
+    env = data.get("env")
+    held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
+    ours = names_prefix(held, claude_home / "hooks" / CONTAIN_NAME)
+    # A foreign value is the maintainer's own choice, which a re-run leaves alone, so it is a note rather than drift.
+    if capable and not ours and foreign_prefix(data) is None:
+        why = f"is {held!r}, which does not run the deployed prefix" if held else "is not set"
+        out.append(
+            f"{PREFIX_VAR} {why}, so agent commands run with no task or memory ceiling "
+            f"although this host can contain them ({reason})"
+        )
+    # Any copy of the prefix counts here, since a value synced from another host names a path this one lacks.
+    elif not capable and held is not None and foreign_prefix(data) is None:
+        out.append(
+            f"{PREFIX_VAR} names a containment prefix where it cannot contain ({reason}), "
+            "so re-run the installer to unset it"
+        )
     allow = (
         data.get("permissions", {}).get("allow")
         if isinstance(data.get("permissions"), dict)
@@ -642,6 +759,22 @@ def report(claude_home):
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
+    try:
+        settings_data = json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        settings_data = None
+    foreign = foreign_prefix(settings_data)
+    env_block = settings_data.get("env") if isinstance(settings_data, dict) else None
+    unset = not isinstance(env_block, dict) or env_block.get(PREFIX_VAR) is None
+    capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
+    # A registered prefix on a host that cannot run it is a STALE problem above, not an uncontained host.
+    if unset and not capable:
+        print(f"Note: agent commands on this host run uncontained ({reason}).")
+    if foreign is not None:
+        print(
+            f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so agent commands run "
+            "uncontained. Remove it and re-run the installer to contain them."
+        )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
@@ -692,6 +825,7 @@ def main():
     hooks_dir = claude_home / "hooks"
     hook_dst = hooks_dir / GUARD_NAME
     sweep_dst = hooks_dir / SWEEP_NAME
+    contain_dst = hooks_dir / CONTAIN_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
 
@@ -798,6 +932,7 @@ def main():
         ("hooks/SessionEnd", list),
         ("permissions", dict),
         ("permissions/allow", list),
+        ("env", dict),
     ):
         held = at(data, path)
         # An explicit null is present rather than absent, and `setdefault` hands back the null it found.
@@ -858,6 +993,24 @@ def main():
         }
     )
     done.append("SessionEnd sweep registered")
+
+    # Step 2c sets the containment prefix only where this host can start a scope, and never over a value naming anything else.
+    capable, reason = containment_capable(contain_dst)
+    env = data.setdefault("env", {})
+    held = env.get(PREFIX_VAR)
+    ours = held is not None and kit_prefix(held)
+    if held is not None and not ours:
+        done.append(
+            f"{PREFIX_VAR} left as {held!r}, which this kit does not own, so no containment"
+        )
+    elif capable:
+        env[PREFIX_VAR] = prefix_value(contain_dst)
+        done.append(f"{PREFIX_VAR} set, so agent commands run contained ({reason})")
+    else:
+        env.pop(PREFIX_VAR, None)
+        done.append(f"{PREFIX_VAR} not set, so agent commands run uncontained ({reason})")
+    if not env:
+        del data["env"]
 
     # 3. Permission rules, merged under the prefixes this installer owns.
     # The strip-then-register shape is the hook registration's above, applied to a flat list.
