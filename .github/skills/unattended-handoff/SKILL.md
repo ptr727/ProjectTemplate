@@ -177,8 +177,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    the session handing the lane back removes the label, per `GOVERNANCE.md` "Durable Knowledge and
    Self-Improvement".
 4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
-   criteria, keep the auto-resolvable ones, and take the top one. Read the list with an explicit
-   page size, since `gh issue list` returns 30 rows unless told otherwise.
+   criteria, keep the auto-resolvable ones, and take the top one. Read the list with
+   `gh issue list --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it
+   returns 30 rows unless told otherwise, and apply step 2's full-page check to it.
 5. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
    `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
