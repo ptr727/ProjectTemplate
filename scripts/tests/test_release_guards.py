@@ -1011,6 +1011,81 @@ gh() {
         # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
         self.assertIn("          flags: python-${{ matrix.python-version }}\n", job)
 
+    def test_validator_checks_out_the_triggering_commit(self) -> None:
+        """A ref: on any checkout moves the gate off the commit a publisher releases.
+
+        A bare checkout of the workflow repository fetches github.sha, and a reusable workflow reads
+        its caller's github context, so the bare form is what validates the exact commit a publisher
+        pins. No step in the task carries a ref: at all, asserted file-wide over block, flow, and
+        quoted keys, so no step shape or mapping style carries one past the check.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        self.assertIn("actions/checkout@", workflow)
+        self.assertNotRegex(workflow, r"(?m)(^[ \t-]*|[{,][ \t]*)[\"']?ref[\"']?[ \t]*:")
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "the step runs under bash against a stand-in dotnet that only a POSIX host can execute",
+    )
+    def test_validator_dotnet_leg_fails_when_no_report_was_written(self) -> None:
+        """The best-effort upload reads an empty directory exactly as it reads a healthy run.
+
+        The step's whole script is run against a stand-in dotnet, since a presence check on the
+        assertion would stay green if its condition were inverted. Every case starts from a tree
+        already holding a renamed report, which is what a committed one looks like, so a check that
+        counted it would pass a run that measured nothing.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        marker = "      - name: Run unit tests step\n"
+        self.assertIn(marker, job)
+        body = job.split(marker, 1)[1]
+        opener = re.search(r"(?m)^        run: \|-?\n", body)
+        self.assertIsNotNone(opener, "the step's script must be a literal block scalar")
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+
+        writers = {
+            "report": 'mkdir -p ./coverage && echo "<coverage/>" > "./coverage/0f1e2d3c.cobertura.xml"',
+            "empty report": 'mkdir -p ./coverage && : > "./coverage/0f1e2d3c.cobertura.xml"',
+            "nothing": "mkdir -p ./coverage",
+            "no directory": ":",
+        }
+        expected = {"report": 0, "empty report": 1, "nothing": 1, "no directory": 1}
+        for case, writer in writers.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as scratch:
+                bin_dir = Path(scratch) / "bin"
+                bin_dir.mkdir()
+                stand_in = bin_dir / "dotnet"
+                stand_in.write_text(f"#!/usr/bin/env bash\n{writer}\n", encoding="utf-8")
+                stand_in.chmod(0o755)
+                work = Path(scratch) / "work"
+                (work / "coverage").mkdir(parents=True)
+                (work / "coverage/coverage-committed.cobertura.xml").write_text(
+                    "<coverage/>", encoding="utf-8"
+                )
+                verdict = run(
+                    ["bash", "-c", script],
+                    cwd=work,
+                    env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                self.assertEqual(
+                    expected[case], verdict.returncode, verdict.stdout + verdict.stderr
+                )
+                if expected[case]:
+                    self.assertIn("::error::", verdict.stdout)
+                else:
+                    self.assertTrue((work / "coverage/coverage-0f1e2d3c.cobertura.xml").exists())
+
     @unittest.skipUnless(shutil.which("jq"), "jq is what the step under test runs")
     def test_validator_refuses_a_python_versions_value_fromjson_would_admit(self) -> None:
         """fromJSON admits a JSON array of numbers, which is not a list of interpreter versions.
