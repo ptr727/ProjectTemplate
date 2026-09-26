@@ -2,16 +2,16 @@
 """Shell prefix: run every Bash tool call inside a scope with a task and memory ceiling.
 
 Registered as `CLAUDE_CODE_SHELL_PREFIX` in the user settings.json `env`. Claude Code then runs each
-Bash tool call and each hook command as `<this file> '<command string>'`, one argument holding the
-whole string, including the cwd bookkeeping Claude Code appends to it. For a tool call this file starts
-a transient systemd user scope carrying `TasksMax` and `MemoryMax`, and runs the string under a shell
-inside it.
+Bash tool call, each hook command, and each stdio MCP server launch as `<this file> '<command string>'`,
+one argument holding the whole string. For a tool call this file starts a transient systemd user scope
+carrying `TasksMax` and `MemoryMax`, and runs the string under a shell inside it.
 
-A hook command runs under its shell directly, with no scope. The write guard is a hook, and a PreToolUse
-hook that exits 1 is a non-blocking error, so a scope that failed to start would let the very command
-the guard denies go ahead. A hook is told from a tool call by the `CLAUDE_PROJECT_DIR` Claude Code sets
-for hooks and by the shell snapshot a tool call sources first. Either sign of a tool call is enough to
-contain it, so a change to one of them fails toward containment rather than away from it.
+Everything else runs under its shell directly, with no scope. The write guard is a hook, and a
+PreToolUse hook that exits 1 is a non-blocking error, so a scope that failed to start would let the very
+command the guard denies go ahead. An MCP server is long-lived and started outside any session, so a
+scope would bound it for its whole life and outlive the session that named it. A tool call is told
+apart by the Claude Code shell snapshot it sources first. Where a later Claude Code stops sourcing one,
+tool calls run bare too, and the SessionEnd sweep's report of surviving processes is what remains.
 
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
 host has to be reset. The ceiling belongs to the scope's cgroup rather than to the foreground wait, so
@@ -83,9 +83,9 @@ def snapshot_shell(command):
     return None
 
 
-def is_tool_call(command, env):
-    """Whether Claude Code runs `command` as a Bash tool call rather than as a hook command."""
-    return snapshot_shell(command) is not None or "CLAUDE_PROJECT_DIR" not in env
+def is_tool_call(command):
+    """Whether Claude Code runs `command` as a Bash tool call rather than as a hook or an MCP server."""
+    return snapshot_shell(command) is not None
 
 
 def pick_shell(command, which=which):
@@ -115,9 +115,12 @@ def _number(text):
 
 
 def _percent(value):
-    """Whether `value` is a percentage from 1 to 100, fractional or whole, so `0.25%` typed for `25%` is refused."""
-    number = _number(value[:-1]) if value.endswith("%") else None
-    return number is not None and 1 <= number <= 100
+    """Whether `value` is a whole percentage from 1 to 100, the form every systemd reads.
+
+    A fractional one is an error before systemd 248, and the floor refuses `0.25%` typed for `25%`.
+    """
+    digits = value[:-1] if value.endswith("%") else ""
+    return digits.isascii() and digits.isdigit() and 1 <= int(digits) <= 100
 
 
 def valid_tasks(value):
@@ -180,7 +183,7 @@ def plan(command, env, suffix, runtime, which=which):
     gets the shell itself, and only the tool call is told it runs with no ceiling.
     """
     shell = pick_shell(command, which)
-    if not is_tool_call(command, env):
+    if not is_tool_call(command):
         return [shell, "-c", command], {}, []
     if runtime is None:
         note = "no systemd user manager is reachable, so this command runs with no task or memory ceiling"
@@ -255,6 +258,7 @@ def _selftest():
     )
     ztool = tool.replace("snapshot-bash-", "snapshot-zsh-")
     hook = '"python3" "/opt/agent/.claude/hooks/gh-write-guard.py"'
+    mcp = "'npx' '-y' 'example-mcp-server'"
 
     def fake_which(name):
         return {
@@ -310,8 +314,8 @@ def _selftest():
             "and prints nothing where no manager is reachable",
         ),
         (
-            "--unit=claude-tool-0a1b-2c3d-48-ab" in plan(hook, env, "48-ab", RUN, fake_which)[0],
-            "a command with no snapshot and no hook's project dir is still contained",
+            plan(mcp, env, "48-ab", RUN, fake_which) == (["/usr/bin/bash", "-c", mcp], {}, []),
+            "an MCP server launch, sourcing no snapshot, runs under its shell with no scope",
         ),
         (
             "--unit=claude-tool-0a1b-2c3d-49-ab"
@@ -356,15 +360,24 @@ def _selftest():
         ),
         (session_token("a/b c;d") == "abcd", "a session id cannot inject into a unit name"),
         (
-            all(
-                map(
-                    valid_memory, ("16G", "1.5G", "0.5G", "512M", "12.5%", "1P", "100%", "infinity")
-                )
-            )
+            all(map(valid_memory, ("16G", "1.5G", "0.5G", "512M", "25%", "1P", "100%", "infinity")))
             and not any(
                 map(
                     valid_memory,
-                    ("0", "1024", "0.5", ".5G", "1K", "101%", "0%", "0.25%", "16GB", "G", "lots"),
+                    (
+                        "0",
+                        "1024",
+                        "0.5",
+                        ".5G",
+                        "1K",
+                        "101%",
+                        "0%",
+                        "0.25%",
+                        "12.5%",
+                        "16GB",
+                        "G",
+                        "lots",
+                    ),
                 )
             ),
             "a memory size systemd accepts is accepted, and a malformed one is not",

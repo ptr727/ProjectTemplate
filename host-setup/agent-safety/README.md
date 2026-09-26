@@ -295,7 +295,8 @@ text says, because the harm it covers was never in the text.
    a failure to list or to stop a group as loudly as a finding.
 
    A hook the agent runs, a guard above included, is not placed in a group. A group that fails to
-   start fails the command, and a guard that fails that way is a guard that did not run. Where the
+   start fails the command, and a guard that fails that way is a guard that did not run. Nor is a
+   long-lived server the agent starts, which outlives any one session. Where the
    host offers no such group, the command runs unbounded and says so on every run, because a silent
    fallback reads exactly like a bounded command.
 

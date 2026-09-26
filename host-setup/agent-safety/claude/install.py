@@ -646,9 +646,10 @@ def registration_problems(claude_home):
             f"{PREFIX_VAR} {why}, so agent commands run with no task or memory ceiling "
             f"although this host can contain them ({reason})"
         )
-    elif not capable and ours:
+    # Any copy of the prefix counts here, since a value synced from another host names a path this one lacks.
+    elif not capable and held is not None and foreign_prefix(data) is None:
         out.append(
-            f"{PREFIX_VAR} names the containment prefix where it cannot contain ({reason}), "
+            f"{PREFIX_VAR} names a containment prefix where it cannot contain ({reason}), "
             "so re-run the installer to unset it"
         )
     allow = (
