@@ -178,7 +178,7 @@ MANAGED_PERMISSIONS = [
 ]
 
 
-def containment_capable(prefix, env=None, system=None, uid=None):
+def containment_capable(prefix, env=None, system=None, uid=None, controllers=None):
     """(capable, reason): whether this host can run the deployed `prefix` and start a scope for a command.
 
     Judged at install and at report time alike, so a host that gains or loses its user manager is
@@ -201,6 +201,17 @@ def containment_capable(prefix, env=None, system=None, uid=None):
         for runtime in (env.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}")
     ):
         return False, "no systemd user manager is running for this account"
+    # A scope on a cgroup-v1 or hybrid host, or under a manager not delegated these two, enforces neither ceiling.
+    controllers = controllers or (
+        f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/cgroup.controllers"
+    )
+    try:
+        with open(controllers, encoding="utf-8") as f:
+            delegated = set(f.read().split())
+    except OSError:
+        delegated = set()
+    if not {"pids", "memory"} <= delegated:
+        return False, "the user manager is not delegated the pids and memory controllers"
     ran = prefix_runs_directly(prefix)
     if ran:
         return False, f"the deployed prefix does not run as its own executable ({ran})"
@@ -745,6 +756,9 @@ def report(claude_home):
         )
     except (ValueError, OSError):
         foreign = None
+    capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
+    if not capable and foreign is None:
+        print(f"Note: agent commands on this host run uncontained ({reason}).")
     if foreign is not None:
         print(
             f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so agent commands run "

@@ -743,6 +743,8 @@ class TestContainmentPrefix(StampCase):
         self.assertNotIn("env", self._settings())
         r = run(self.home, "--report", contain=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # The report says so, since a silent fallback reads exactly like a contained host.
+        self.assertIn("run uncontained", r.stdout)
 
     def test_a_removed_prefix_reports_stale_on_a_capable_host(self):
         self.install()
@@ -818,6 +820,8 @@ class TestContainmentCapable(unittest.TestCase):
         self.prefix = self.tmp / install.CONTAIN_NAME
         shutil.copyfile(HERE / install.CONTAIN_NAME, self.prefix)
         os.chmod(self.prefix, 0o755)
+        self.controllers = self.tmp / "cgroup.controllers"
+        self.controllers.write_text("cpu memory pids\n", encoding="utf-8")
         which = mock.patch.object(install.shutil, "which", side_effect=self._which)
         which.start()
         self.addCleanup(which.stop)
@@ -829,7 +833,9 @@ class TestContainmentCapable(unittest.TestCase):
 
     def _judge(self, env=None, system="linux", uid=987654):
         env = {"XDG_RUNTIME_DIR": str(self.runtime)} if env is None else env
-        return install.containment_capable(self.prefix, env=env, system=system, uid=uid)
+        return install.containment_capable(
+            self.prefix, env=env, system=system, uid=uid, controllers=str(self.controllers)
+        )
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"), "the prefix runs through a POSIX shebang"
@@ -857,6 +863,17 @@ class TestContainmentCapable(unittest.TestCase):
         ):
             capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})
         self.assertTrue(capable, reason)
+
+    def test_a_manager_without_the_pids_and_memory_controllers_cannot_contain(self):
+        """A scope under it starts and enforces neither ceiling, as on a cgroup-v1 or hybrid host."""
+        self.controllers.write_text("cpu\n", encoding="utf-8")
+        capable, reason = self._judge()
+        self.assertFalse(capable)
+        self.assertIn("pids and memory", reason)
+
+    def test_an_unreadable_controllers_file_cannot_contain(self):
+        self.controllers.unlink()
+        self.assertFalse(self._judge()[0])
 
     def test_no_socket_anywhere_cannot_contain(self):
         capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})

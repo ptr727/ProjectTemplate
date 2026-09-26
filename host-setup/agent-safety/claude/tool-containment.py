@@ -100,6 +100,8 @@ def pick_shell(command, which=which):
 # The smallest override accepted, so a unitless or mistyped value cannot kill every command at its start.
 MIN_TASKS = 64
 MIN_MEMORY = 256 * 1024**2
+# The largest override accepted, below what systemd parses into its 64-bit limits and rejects past.
+MAX_LIMIT = 2**63
 _UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5, "E": 1024**6}
 
 
@@ -127,7 +129,7 @@ def valid_tasks(value):
     """Whether `value` is a `TasksMax` of at least `MIN_TASKS`, a percentage of the system limit, or infinity."""
     if value == "infinity" or _percent(value):
         return True
-    return value.isascii() and value.isdigit() and int(value) >= MIN_TASKS
+    return value.isascii() and value.isdigit() and MIN_TASKS <= int(value) < MAX_LIMIT
 
 
 def valid_memory(value):
@@ -139,7 +141,7 @@ def valid_memory(value):
     if value == "infinity" or _percent(value):
         return True
     number = _number(value[:-1]) if value[-1:] in _UNITS else None
-    return number is not None and number * _UNITS[value[-1]] >= MIN_MEMORY
+    return number is not None and MIN_MEMORY <= number * _UNITS[value[-1]] < MAX_LIMIT
 
 
 def ceilings(env):
@@ -377,6 +379,8 @@ def _selftest():
                         "16GB",
                         "G",
                         "lots",
+                        "99999999999E",
+                        "9" * 400 + "G",
                     ),
                 )
             ),
@@ -384,7 +388,12 @@ def _selftest():
         ),
         (
             all(map(valid_tasks, ("64", "8192", "50%", "infinity")))
-            and not any(map(valid_tasks, ("0", "1", "1.5", "1e3", "-5", ".5%", "\u0663"))),
+            and not any(
+                map(
+                    valid_tasks,
+                    ("0", "1", "1.5", "1e3", "-5", ".5%", "\u0663", "99999999999999999999"),
+                )
+            ),
             "and so is a task count",
         ),
         (
