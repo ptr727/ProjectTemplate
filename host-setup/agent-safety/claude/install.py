@@ -128,7 +128,7 @@ def matcher_sees_bash(matcher):
 
 
 def matcher_covers_every_exit_reason(matcher):
-    """Whether a SessionEnd matcher's shape runs on every exit reason rather than naming specific ones.
+    """Whether a SessionEnd matcher has a shape known to run on every exit reason, absent, empty, or `*`.
 
     A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool: an
     absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
@@ -522,12 +522,12 @@ def registration_problems(claude_home):
                 )
                 continue
             swept += 1
-            # A matcher naming specific exit reasons runs the sweep on those reasons alone.
-            # Counting it as registered reports a machine current while the sweep never fires on an ordinary exit.
+            # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
+            # Counting it as registered reports a machine current while the sweep may never fire on an ordinary exit.
             if not matcher_covers_every_exit_reason(group.get("matcher")):
                 report(
                     f"the SessionEnd sweep is registered under a matcher "
-                    f"({group.get('matcher')!r}), so it runs on that exit reason alone"
+                    f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
                 )
     if ends is None:
         pass  # likewise reported as a shape error above
