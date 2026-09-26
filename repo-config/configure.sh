@@ -147,7 +147,7 @@ ruleset_id() {
         return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    ids="$(jq -r --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
+    ids="$(jqr --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
     if [ -z "$ids" ]; then return 0; fi
     # Pre-existing drift can leave more than one ruleset with the same name.
     # Use the first and warn, so the duplicates get resolved rather than silently operating on the wrong one.
