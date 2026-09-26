@@ -24,15 +24,23 @@ sys.path.insert(0, str(HERE))
 import install
 
 
-def run(home, *args, dirty=False):
+def run(home, *args, dirty=False, contain=True):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
     live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE, so a verdict this suite asserts
     depends on the fixture rather than on whether host-setup happens to be mid-edit while the
     suite runs. The default is clean, since that is what every case but one below needs.
+
+    contain forces the containment-capable signal the same way, so a verdict does not depend on
+    whether the machine running the suite has a systemd user manager.
     """
-    env = dict(os.environ, CLAUDE_HOME=str(home), AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0")
+    env = dict(
+        os.environ,
+        CLAUDE_HOME=str(home),
+        AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
+        AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
+    )
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],
         capture_output=True,
@@ -51,8 +59,8 @@ class StampCase(unittest.TestCase):
         self.stamp = self.home / "agent-safety-stamp.json"
         self.md = self.home / "CLAUDE.md"
 
-    def install(self, dirty=False):
-        r = run(self.home, dirty=dirty)
+    def install(self, dirty=False, contain=True):
+        r = run(self.home, dirty=dirty, contain=contain)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -702,6 +710,78 @@ class TestRegistration(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
+
+
+class TestContainmentPrefix(StampCase):
+    """The shell prefix is set where the host can contain a command, and owned only while it names ours."""
+
+    def _settings(self):
+        return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
+
+    def _write(self, data):
+        (self.home / "settings.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _want(self):
+        return install.prefix_value(self.home / "hooks" / install.CONTAIN_NAME)
+
+    def test_a_capable_host_sets_the_prefix_to_the_deployed_file(self):
+        self.install()
+        self.assertTrue((self.home / "hooks" / install.CONTAIN_NAME).is_file())
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], self._want())
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_incapable_host_deploys_the_file_and_sets_no_prefix(self):
+        """The digest stays identical across hosts, so only the registration differs."""
+        self.install(contain=False)
+        self.assertTrue((self.home / "hooks" / install.CONTAIN_NAME).is_file())
+        self.assertNotIn("env", self._settings())
+        r = run(self.home, "--report", contain=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_removed_prefix_reports_stale_on_a_capable_host(self):
+        self.install()
+        data = self._settings()
+        del data["env"]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no task or memory ceiling", r.stdout)
+
+    def test_our_prefix_on_a_host_that_cannot_contain_reports_stale(self):
+        self.install()
+        r = run(self.home, "--report", contain=False)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot contain", r.stdout)
+
+    def test_reinstalling_on_a_host_that_lost_its_manager_removes_only_our_prefix(self):
+        self.install()
+        data = self._settings()
+        data["env"]["OTHER"] = "kept"
+        self._write(data)
+        self.install(contain=False)
+        self.assertEqual(self._settings()["env"], {"OTHER": "kept"})
+
+    def test_a_foreign_prefix_is_kept_and_reported(self):
+        """Someone else's wrapper is theirs, so the installer neither replaces nor hides it."""
+        self.home.mkdir(parents=True)
+        self._write({"env": {install.PREFIX_VAR: "/usr/local/bin/audit-log"}})
+        r = self.install()
+        self.assertIn("does not own", r.stdout)
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], "/usr/local/bin/audit-log")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is held by", r.stdout)
+
+    def test_a_non_object_env_is_refused_rather_than_overwritten(self):
+        self.home.mkdir(parents=True)
+        self._write({"env": ["not", "an", "object"]})
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("`env`", r.stderr)
+        self.assertEqual(self._settings()["env"], ["not", "an", "object"])
 
 
 class TestPreexistingCorruption(StampCase):

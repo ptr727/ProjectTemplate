@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""SessionEnd sweep: report the shell processes that outlived the session and that nothing will reap.
+"""SessionEnd sweep: stop the session's contained commands, then report whatever else outlived it.
+
+The first phase stops every command scope `tool-containment.py` started for this session's Bash tool
+calls. Each is known to be this session's own by its unit name, so stopping it needs no judgment about
+what the process is, and a backgrounded runaway ends with the session that started it. What was stopped
+is reported. See host-setup/agent-safety/README.md requirement 9.
+
+The second phase is the report-only sweep below, for everything outside those scopes.
 
 Registered as a Claude Code SessionEnd hook. It reads the hook payload on stdin, walks the process
 table for the agent process this hook is a child of, and reports every descendant running in its own
 session, since a shell started by a tool call is put in a session of its own and therefore survives
-the agent that started it. It never kills anything: the maintainer decides what on the machine is
-still wanted, and a long build backgrounded on purpose looks exactly like a leaked wait from here.
+the agent that started it. This phase never kills anything: the maintainer decides what on the machine
+is still wanted, and a long build backgrounded on purpose looks exactly like a leaked wait from here.
 
 Reporting at all is what needs saying. A SessionEnd hook cannot block, and Claude Code discards its
 JSON output, so stderr on exit 2 is the one channel that reaches the maintainer. Exit 2 is inert on
@@ -28,8 +35,11 @@ Run `stray-process-sweep.py --selftest` to verify the reporting matrix without C
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+
+_TOOL_UNIT = "claude-tool"
 
 # The process-table fields this sweep reads, in this order, with no header line.
 _PS_FORMAT = "pid=,ppid=,sess=,etimes=,args="
@@ -211,15 +221,130 @@ def report(table, roots):
     return "\n".join(lines)
 
 
+def _systemctl(*args):
+    """(exit code, stdout) of `systemctl --user <args>`, or (None, "") when it cannot run at all."""
+    try:
+        done = subprocess.run(
+            ["systemctl", "--user", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return done.returncode, done.stdout
+
+
+def session_token(session_id):
+    """The session id as `tool-containment.py` spells it in a unit name, or "" where there is none."""
+    return re.sub(r"[^A-Za-z0-9-]", "", session_id or "")[:64]
+
+
+def session_scopes(session_id, runner=_systemctl):
+    """The tool-call scopes this session left loaded, or None when systemd cannot be asked.
+
+    Only this session's tool-call scopes match. A hook command's scope is named apart, since another
+    SessionEnd hook may still be running in one while this runs.
+    """
+    token = session_token(session_id)
+    if not token:
+        return []
+    code, out = runner(
+        "list-units",
+        "--type=scope",
+        "--all",
+        "--plain",
+        "--no-legend",
+        "--no-pager",
+        f"{_TOOL_UNIT}-{token}-*.scope",
+    )
+    if code != 0:
+        return None
+    return [line.split()[0] for line in out.splitlines() if line.split()]
+
+
+def scope_pids(units, runner=_systemctl, read=None):
+    """{unit: [pid, ...]} read from each scope's cgroup, empty for a scope whose cgroup cannot be read."""
+
+    def _read(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    read = read or _read
+    code, out = runner("show", "--property=Id", "--property=ControlGroup", "--", *units)
+    groups = {}
+    # One block per unit, blank-line separated, with its properties in systemd's order rather than the order asked.
+    for block in (out or "").split("\n\n") if code == 0 else []:
+        props = dict(line.partition("=")[::2] for line in block.splitlines())
+        if props.get("Id") and props.get("ControlGroup"):
+            groups[props["Id"]] = props["ControlGroup"]
+    return {
+        u: [int(p) for p in read(f"/sys/fs/cgroup{groups[u]}/cgroup.procs").split() if p.isdigit()]
+        if u in groups
+        else []
+        for u in units
+    }
+
+
+def reap(session_id, table, runner=_systemctl, read=None):
+    """Stop this session's tool-call scopes, returning the report, or "" when there were none."""
+    units = session_scopes(session_id, runner)
+    if units is None:
+        return (
+            "agent-safety: could not list this session's command scopes, so none was stopped. "
+            f"Check with: systemctl --user list-units '{_TOOL_UNIT}-*'"
+        )
+    if not units:
+        return ""
+    pids = scope_pids(units, runner, read)
+    code, _out = runner("stop", "--", *units)
+    left = session_scopes(session_id, runner) if code == 0 else units
+    left = units if left is None else [u for u in left if u in units]
+    stopped = [u for u in units if u not in left]
+    lines = []
+    if stopped:
+        noun = "scope" if len(stopped) == 1 else "scopes"
+        lines.append(
+            f"agent-safety: stopped {len(stopped)} command {noun} this session left running."
+        )
+    for u in stopped:
+        members = pids[u]
+        roots = [p for p in members if table.get(p, (None,))[0] not in members] or members
+        lines.append(f"  {u}  {len(members)} process{'' if len(members) == 1 else 'es'}")
+        for p in roots[:3]:
+            if p in table:
+                lines.append(f"    pid {p}  age {_age(table[p][2])}  {table[p][3][:140]}")
+    if left:
+        lines.append(
+            f"agent-safety: {len(left)} command scope(s) did not stop. End them with:\n"
+            f"  systemctl --user kill --signal=SIGKILL {' '.join(left)}"
+        )
+    return "\n".join(lines)
+
+
 def main():
     try:
-        json.loads(sys.stdin.read() or "{}")  # the payload is read and not otherwise used
+        payload = json.loads(sys.stdin.read() or "{}")
     except (ValueError, OSError):
-        pass
+        payload = {}
     # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal
     # `sess`, so on both the hook is inert rather than printing a failure at every session end.
     if os.name != "posix" or sys.platform == "darwin":
         return 0
+    session_id = (
+        payload.get("session_id") if isinstance(payload, dict) else None
+    ) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    reaped = ""
+    if shutil.which("systemctl"):
+        reaped = reap(session_id, _read_process_table() or {})
+    if reaped:
+        print(reaped, file=sys.stderr)
     table = _read_process_table()
     if table is None:
         print(
@@ -237,7 +362,7 @@ def main():
         return 2
     text = report(table, survivors(table, agent, os.getpid()))
     if not text:
-        return 0
+        return 2 if reaped else 0
     print(text, file=sys.stderr)
     return 2
 
@@ -336,6 +461,52 @@ def _selftest():
             _agent_pid(500, shelled) == 200,
             "nor is one whose own arguments name a claude path",
         ),
+    ]
+    sid = "0a1b-2c3d"
+    live = {f"{_TOOL_UNIT}-{sid}-400.scope", f"{_TOOL_UNIT}-{sid}-600.scope"}
+    calls = []
+
+    def fake(*args, stop_code=0, sticky=()):
+        calls.append(args)
+        if args[0] == "list-units":
+            return 0, "".join(
+                f"{u} loaded active running Claude Code command\n" for u in sorted(live)
+            )
+        if args[0] == "show":
+            return 0, "".join(
+                f"ControlGroup=/app.slice/{u}\nId={u}\n\n" for u in args if u.endswith(".scope")
+            )
+        if args[0] == "stop":
+            live.difference_update(u for u in args[2:] if u not in sticky)
+            return stop_code, ""
+        return 1, ""
+
+    procs = {f"/sys/fs/cgroup/app.slice/{_TOOL_UNIT}-{sid}-400.scope/cgroup.procs": "400\n410\n"}
+    reaped = reap(sid, table, runner=fake, read=lambda p: procs.get(p, ""))
+    stopped_all = not live
+    live.update({f"{_TOOL_UNIT}-{sid}-400.scope"})
+    sticky = f"{_TOOL_UNIT}-{sid}-400.scope"
+    stuck = reap(
+        sid, table, runner=lambda *a: fake(*a, sticky=(sticky,)), read=lambda p: procs.get(p, "")
+    )
+    live.clear()
+    checks += [
+        (stopped_all, "every tool-call scope of this session is stopped"),
+        (
+            calls[0][-1] == f"{_TOOL_UNIT}-{sid}-*.scope",
+            "and only this session's tool-call scopes are listed, never a hook's",
+        ),
+        ("stopped 2 command scopes" in reaped, "the report counts what was stopped"),
+        ("2 processes" in reaped and "pid 400" in reaped, "and names each scope's root process"),
+        ("pid 410" not in reaped, "but not a process under that root"),
+        ("did not stop" in stuck and f"SIGKILL {sticky}" in stuck, "a scope that stays is named"),
+        (reap("", table, runner=fake) == "", "a session with no id stops nothing"),
+        (reap(sid, table, runner=fake) == "", "a session that left nothing reports nothing"),
+        (
+            "could not list" in reap(sid, table, runner=lambda *a: (None, "")),
+            "a systemctl that cannot run is reported, never read as nothing to stop",
+        ),
+        (session_token("a/b c;d") == "abcd", "the unit name is spelled as the prefix spells it"),
     ]
     ok = True
     for passed, label in checks:

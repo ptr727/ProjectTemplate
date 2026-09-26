@@ -2,7 +2,7 @@
 
 What any coding agent must be stopped from doing when it runs unattended on this host, stated once,
 independent of which agent implements it. Most of it guards the maintainer's `gh` credentials, which
-is where the harm started. Requirements 7 and 8 guard the machine itself, which is the other thing
+is where the harm started. Requirements 7 to 9 guard the machine itself, which is the other thing
 an unattended agent takes down. This file is the source
 of truth: an implementation is built from the requirements below, and an implementation is audited
 by checking its decisions against them, not by reading its source as the implicit spec.
@@ -21,9 +21,10 @@ prose. The requirements below are that criteria applied to this host.
 ## Requirements
 
 Each requirement is stated as a decision rule, precise enough to implement against any agent's own
-hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape. Requirement 8 is the
-one stated against the end of a session rather than against a tool call, because what it covers has
-already happened by the time any tool call is judged.
+hook or approval-gate API, not tied to Claude Code's `PreToolUse` JSON shape. Requirement 8 is
+stated against the end of a session rather than against a tool call, because what it covers has
+already happened by the time any tool call is judged. Requirement 9 bounds every command whatever its
+text says, because the harm it covers was never in the text.
 
 1. **A GitHub write with its output discarded or forced to success is denied.** A state-changing
    `gh`/API call piped to `>/dev/null`, `2>/dev/null`, `&>/dev/null`, `|| true`, `|| :`, or `|| echo`
@@ -256,9 +257,10 @@ already happened by the time any tool call is judged.
    "Delegation", which states the prohibition for every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
-   being written. This one finds the leaks already running: the ones a session started before that
-   deny reached this machine, the four shapes it deliberately does not reach, and anything else
-   this agent left running whether it leaked or not. At the end of a session, report every descendant
+   being written, and requirement 9 stops what the session's own bounded commands leave behind. This
+   one finds the leaks still running: the ones a session started before either reached this machine,
+   the four shapes requirement 7 deliberately does not reach, and anything else this agent left
+   running outside requirement 9's groups, whether it leaked or not. At the end of a session, report every descendant
    of the agent process that runs outside the agent's own session, since a descendant sharing that
    session ends when the agent does and one in a session of its own does not. Report the root of
    each such subtree rather than every process under it, name each root's command and age, and hand
@@ -277,6 +279,25 @@ already happened by the time any tool call is judged.
    table and a sweep that finds nothing are different answers that silence renders identically. This
    is the only requirement here that is not a denial, and it is a requirement rather than a nicety
    because the alternative is that nobody learns the leak happened at all.
+
+9. **Every command is bounded on tasks and memory, and what it leaves running ends with the
+   session.** Requirement 7 reads the command text, and the harm here was not in it. A probe wrote
+   a command shim that called itself through `PATH`, the command ran the probe only by name, and the
+   chain grew past half a million processes before the host had to be reset. Run each command inside
+   a resource-control group of its own carrying a task ceiling and a memory ceiling, so a runaway
+   fan-out fails at the ceiling with a visible error. The ceiling belongs to the group rather than to
+   the foreground wait, so it still holds after the tool moves a timed-out command to the background
+   and after the command's own shell has exited.
+
+   Name each group for the session that ran it, and at the end of the session stop every group its
+   commands left running, then report what was stopped. This stop needs none of requirement 8's
+   judgment about what a process is, since the group's name proves which session started it. Report
+   a failure to list or to stop a group as loudly as a finding. A hook command is bounded the same
+   way and is not stopped, since another end-of-session hook may still be running in its own group.
+
+   The maintainer sets the ceilings, in a channel the command being bounded cannot reach. Where the
+   host offers no such group, the command runs unbounded and says so on every run, because a silent
+   fallback reads exactly like a bounded command.
 
 ## Decision Flow
 
@@ -321,8 +342,9 @@ flowchart LR
 ```
 
 The first diagram is this spec's actual decision flow, generalized from `claude/gh-write-guard.py`'s
-`classify()`. Requirement 8 appears nowhere in it, deliberately: it judges no tool call, and it runs
-once at the end of a session on whatever the denials above did not prevent. The second is why a failure lands in one layer and not another. A rule that never
+`classify()`. Requirements 8 and 9 appear nowhere in it, deliberately: neither judges a command's
+text. Requirement 9 wraps every command the flow allows, and requirement 8 runs once at the end of a
+session on whatever the denials and the ceilings did not prevent. The second is why a failure lands in one layer and not another. A rule that never
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
 was still not followed, where the trigger is mechanically decidable and the harm is destructive,
@@ -354,7 +376,7 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 8 requirements, via a `PreToolUse` hook and a `SessionEnd` sweep | [`claude/README.md`][claude] |
+| Claude Code | All 9 requirements, via a `PreToolUse` hook, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
@@ -364,8 +386,9 @@ local host-safety hazard for this kit to cover.
 
 ## Auditing an Implementation Against This Spec
 
-Run each of the implementation's own self-tests (`claude/gh-write-guard.py --selftest` and
-`claude/stray-process-sweep.py --selftest` for Claude Code) and compare every case against the
+Run each of the implementation's own self-tests (`claude/gh-write-guard.py --selftest`,
+`claude/stray-process-sweep.py --selftest`, and `claude/tool-containment.py --selftest` for Claude
+Code) and compare every case against the
 requirements list above, one by one, rather than reading the implementation's source as though it
 were the spec. A case the self-test doesn't cover is a gap in
 the audit, not evidence the requirement is satisfied. This is the concrete shape of "ask Claude to
