@@ -218,7 +218,7 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
-    A local or self-repository ref names the running commit and is skipped. References under
+    A local or self-repository ref names no ref to pin and is skipped. References under
     another owner are shape-checked but not resolved.
 
     Resolution is scoped to the scanned repository's own owner, because that is where the fleet's
