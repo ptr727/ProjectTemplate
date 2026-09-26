@@ -297,8 +297,9 @@ text says, because the harm it covers was never in the text.
    A hook the agent runs, a guard above included, is not placed in a group. A group that fails to
    start fails the command, and a guard that fails that way is a guard that did not run. Nor is a
    tool server the agent's harness launches for itself, such as an MCP server, which serves the
-   harness rather than any one session. A server started by a command is a command like any other,
-   and it ends with the session that started it.
+   harness rather than any one session. A server started by a tool call is part of that tool call,
+   and it ends with the session that started it. One a hook starts shares the hook's exemption, and
+   requirement 8 reports it if it outlives the session.
 
    Where the host offers no such group, commands run unbounded and the host's installation report
    says so, because a silent fallback reads exactly like a bounded host. A host that registered the
