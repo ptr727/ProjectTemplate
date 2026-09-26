@@ -776,6 +776,35 @@ class TestCommentWrap(BaitCase):
                     [(c.line, c.body, c.leading) for c in found],
                 )
 
+    def test_a_parameter_expansion_hash_opens_no_comment(self) -> None:
+        """A `#` after `$` or `${` is bash naming a count, so neither spelling reads as a comment.
+
+        A real comment on the same kind of line is still found, leading or trailing.
+        """
+        for text in (
+            "            count=${#items[@]}",
+            '            echo "::error::${#items[@]} open issues. Close them by hand."',
+            "            echo $#",
+        ):
+            with self.subTest(line=text):
+                self.assertEqual([], prose_lint.extracted_comments(Path("x.yml"), [text]))
+        self.assertEqual(
+            [],
+            self.flag(
+                "x.yml",
+                'run: |\n  echo "::error::${#items[@]} open issues. Close them by hand."\n',
+            ),
+        )
+        for text, leading in (
+            ("            count=${#items[@]} # Count the open items.", False),
+            ("            # Count the open items.", True),
+        ):
+            with self.subTest(line=text):
+                found = prose_lint.extracted_comments(Path("x.yml"), [text])
+                self.assertEqual(
+                    [("Count the open items.", leading)], [(c.body, c.leading) for c in found]
+                )
+
     def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
         for name in ("a.lock", "a.csv", "a.txt"):
             with self.subTest(file=name):
