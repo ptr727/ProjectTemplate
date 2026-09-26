@@ -3761,9 +3761,14 @@ _WAIT_CASES = [
         "the same loop and comment with no apostrophe",
     ),
     (
-        "timeout 600 bash -c 'until [ -f x ]; do sleep 30; done'  # the PR's checks",
+        "until [ -f x ]; do sleep 30; done  # the PR's checks",
+        "deny",
+        "an unbounded loop the fallback reads directly is still seen beside an apostrophe in a trailing comment",
+    ),
+    (
+        "timeout 600 until [ -f x ]; do sleep 30; done  # the PR's checks",
         "allow",
-        "a bounded loop stays accepted beside an apostrophe in a trailing comment",
+        "the same loop under a timeout bound stays accepted beside an apostrophe in a trailing comment",
     ),
     (
         'echo "$(echo "\'")"; while true; do sleep 5; done; echo "\'"  # it\'s',
