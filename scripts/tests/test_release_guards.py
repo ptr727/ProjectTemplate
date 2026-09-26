@@ -1072,7 +1072,10 @@ gh() {
                 verdict = run(
                     ["bash", "-c", script],
                     cwd=work,
-                    env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+                    env={
+                        **os.environ,
+                        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                    },
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
