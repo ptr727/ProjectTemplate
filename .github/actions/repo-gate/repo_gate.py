@@ -52,6 +52,7 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # Reading any of those as absence fails a correct pin, which is the direction that costs most.
 ABSENT = {"404", "422"}
 GH_TIMEOUT = 20
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # How a check says it did less than its name.
 # A gate that quietly degrades to a weaker reading prints the same clean line as one that ran.
@@ -398,6 +399,17 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 CHECKS = {"sha-pin": check_sha_pin, "eol": check_eol, "eol-coverage": check_eol_coverage}
 
 
+def printable(line: str) -> str:
+    """`line` with each control character spelled as an escape, so one finding prints as one line.
+
+    `unquote_path` hands back a tracked name exactly as it is on disk, and a name may hold a
+    newline or an escape sequence. Printed raw, such a name forges a line of the gate's own output
+    or drives the reader's terminal, so each C0 or C1 control and DEL is escaped here, where it is
+    shown.
+    """
+    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+
+
 def report_paths_that_are_not_utf8() -> None:
     """Let a path holding a byte that is not UTF-8 print rather than ending the run.
 
@@ -464,10 +476,10 @@ def main(argv: list[str] | None = None) -> int:
         status = "FAIL" if hits else "ok"
         print(f"[{status:4}] {name:12} {len(hits)} issue(s)")
         for h in hits:
-            print(f"         {h}")
+            print(f"         {printable(h)}")
         # After the findings and outside the count, since a note is not one.
         for note in NOTES:
-            print(f"         note: {note}")
+            print(f"         note: {printable(note)}")
         total += len(hits)
     return 1 if total else 0
 

@@ -524,6 +524,22 @@ class TestQuotedPlainNames(GitTreeCase):
         self.git("add", "-A")
         self.assertIn(odd, repo_gate.tracked(self.tmp))
 
+    def test_a_control_character_in_a_name_prints_escaped_rather_than_raw(self) -> None:
+        name = "run\n[ok  ] forged\x1b[2J"
+        gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)
+        try:
+            (self.tmp / name).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        except OSError:
+            self.skipTest("this filesystem refuses a control character in a name")
+        self.coverage(gitattributes, {})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = repo_gate.main(["--root", str(self.tmp), "--check", "eol-coverage"])
+        self.assertEqual(1, rc)
+        self.assertIn("run\\x0a[ok  ] forged\\x1b[2J: tracked shebang path", out.getvalue())
+        self.assertNotIn("\x1b", out.getvalue())
+        self.assertFalse(any(l.startswith("[ok  ] forged") for l in out.getvalue().splitlines()))
+
 
 class TestGovernanceCoupling(unittest.TestCase):
     def test_the_exception_set_matches_what_the_doc_documents(self) -> None:
