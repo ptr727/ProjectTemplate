@@ -349,23 +349,50 @@ _GIT_GLOBAL_VALUE_OPTS = {
 # The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
-_LITERAL_QUOTE_TOKEN = re.compile(
-    f"[{re.escape(_PUNCTUATION_CHARS)}]+|[^ \\t\\r{re.escape(_PUNCTUATION_CHARS)}]+"
-)
+_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"')
+
+
+def _strip_trailing_comment(line):
+    """Return `line` cut at the `#` bash reads as a comment, or None where there is none or the line
+    holds quoting this scan does not model. Only plain quotes are tracked, so a line it accepts is
+    one whose quote boundaries it reads exactly as bash does.
+    """
+    if any(s in line for s in _COMMENT_SCAN_BAIL):
+        return None
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t" or line[i - 1] in _SHELL_OP_CHARS):
+            return line[:i]
+    return None
 
 
 def _operator_tokens(line):
-    """Tokenize one line as the primary path does, isolating operator runs. Where the line's own
-    quoting does not parse, every quote is read as a literal character instead, so no quote
-    pairing bash does not share can hide a command it runs, and only the operators are split out.
+    """Tokenize one line as the primary path does, isolating operator runs. A line that does not
+    parse only because of a trailing comment, an apostrophe in it being the usual case, is
+    tokenized without that comment. Any other line that does not parse falls back to plain
+    splitting, which keeps a quoted argument whole rather than cutting it at an operator character.
     """
+    for text in (line, _strip_trailing_comment(line)):
+        if text is None:
+            continue
+        try:
+            lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+            lex.whitespace_split = True
+            lex.commenters = ""
+            return list(lex)
+        except TypeError:  # punctuation_chars unsupported on old Python
+            break
+        except ValueError:
+            continue
     try:
-        lex = shlex.shlex(line, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
-        lex.whitespace_split = True
-        lex.commenters = ""
-        return list(lex)
-    except (ValueError, TypeError):
-        return _LITERAL_QUOTE_TOKEN.findall(line)
+        return shlex.split(line, posix=True)
+    except ValueError:
+        return line.split()
 
 
 def _shell_tokens(cmd):
@@ -2291,7 +2318,22 @@ _CASES = [
     (
         'echo "$(echo "\'")"; gh issue comment 1 --repo stranger/x --body hi; echo "\'"  # it\'s',
         "deny",
-        "a line whose quoting does not parse reads each quote literally, so no pairing hides the write bash runs",
+        "a line whose quoting does not parse and is not comment-stripped still shows the write bash runs",
+    ),
+    (
+        "gh issue comment 1 --body 'fixed; see log' --repo stranger/x  # it's",
+        "deny",
+        "an operator inside a quoted argument stays in it beside an apostrophe in a trailing comment",
+    ),
+    (
+        "gh issue comment 1 --body 'fixed (see log)' --repo stranger/x  # it's",
+        "deny",
+        "parentheses inside a quoted argument stay in it beside an apostrophe in a trailing comment",
+    ),
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"  # it's",
+        "deny",
+        "a quoted mutation stays whole beside an apostrophe in a trailing comment",
     ),
     (
         'gh api graphql -f query=\'mutation($t:ID!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:"x"}){comment{id}}}\' -F t="PRRT_kwDODvuuzM6SFvx0" >/dev/null 2>&1 || true',
@@ -3771,9 +3813,9 @@ _WAIT_CASES = [
         "the same loop under a timeout bound stays accepted beside an apostrophe in a trailing comment",
     ),
     (
-        'echo "$(echo "\'")"; while true; do sleep 5; done; echo "\'"  # it\'s',
+        "echo it's <<EOF\n'; while true; do sleep 5; done\nEOF",
         "deny",
-        "a quote pairing bash does not share cannot hide the loop on a line whose quoting does not parse",
+        "a heredoc marker inside an unclosed quote opens no heredoc, so the loop after the quote closes is seen",
     ),
     (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
