@@ -884,15 +884,28 @@ tool_status() {
     fi
 }
 
-# Where PATH currently resolves $1 to, when that is not $BIN_DIR/$1, or empty when it already is.
+# Where PATH currently resolves $1 to, when that directory precedes $BIN_DIR, or empty otherwise.
 # Shared by the report, which only names the shadow, and --install/--upgrade, which act on it (apply_tool decides when it is safe to remove).
-# "type -P" skips aliases and shell functions, which "command -v" answers for with no file behind them.
+# Walks PATH itself, since "type -P" answers with the same path whether that directory is ahead of $BIN_DIR or behind it.
 tool_shadow_path() {
-    local name="$1" resolved
-    resolved=$(type -P "$name" 2>/dev/null || true)
-    # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
-    # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
-    [[ $resolved == /* && $resolved != "$BIN_DIR/$name" ]] && printf '%s' "$resolved"
+    local name="$1" dir candidate is_absolute
+    local -a path_dirs
+    IFS=':' read -ra path_dirs <<<"$PATH"
+    for dir in "${path_dirs[@]}"; do
+        # A trailing slash names the same directory, so strip it before comparing or building a path.
+        # "/" itself is the one entry with none to strip.
+        [[ $dir == / ]] || dir="${dir%/}"
+        [[ $dir == "$BIN_DIR" ]] && return 0
+        is_absolute=false
+        [[ $dir == /* ]] && is_absolute=true
+        # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
+        # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
+        candidate="${dir:-.}/$name"
+        if [[ -x $candidate && -f $candidate ]]; then
+            [[ $is_absolute == true ]] && printf '%s' "$candidate"
+            return 0
+        fi
+    done
     return 0
 }
 
