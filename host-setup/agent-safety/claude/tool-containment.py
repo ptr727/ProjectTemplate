@@ -53,6 +53,7 @@ SHELL_VAR = "AGENT_CONTAINMENT_SHELL"
 RESTORE_VAR = "AGENT_CONTAINMENT_RUNTIME_RESTORE"
 
 UNREACHABLE = "no systemd user manager is reachable"
+NO_SYSTEMD_RUN = "systemd-run is not installed"
 UNDELEGATED = "the user manager is not delegated the pids and memory controllers"
 
 # How long a stop waits on SIGTERM before SIGKILL, so the session-end stop fits its hook's budget.
@@ -248,8 +249,8 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
 
 
 def decide(command, env, suffix, runtime, is_delegated, which=which):
-    """`plan` for this host: a tool call under a manager lacking the controllers runs bare, and says why."""
-    why = UNREACHABLE
+    """`plan` for this host: a tool call that cannot be contained runs bare, and says which reason applies."""
+    why = UNREACHABLE if which("systemd-run") else NO_SYSTEMD_RUN
     if runtime and is_tool_call(command) and not is_delegated():
         runtime, why = None, UNDELEGATED
     return plan(command, env, suffix, runtime, which, why=why)
@@ -416,6 +417,19 @@ def _selftest():
             and not is_tool_call("eval 'ls' && pwd -P >| /tmp/elsewhere.txt")
             and not is_tool_call(mcp),
             "a tool call without its snapshot is still recognised by its cwd bookkeeping, sandboxed or quoted",
+        ),
+        (
+            NO_SYSTEMD_RUN
+            in decide(
+                tool,
+                env,
+                "57",
+                None,
+                lambda: True,
+                which=lambda n: None if n == "systemd-run" else fake_which(n),
+            )[2][0]
+            and UNREACHABLE in decide(tool, env, "58", None, lambda: True, which=fake_which)[2][0],
+            "a missing systemd-run is named as such, apart from an unreachable manager",
         ),
         (
             delegated(1000, read=lambda p: "cpu memory pids\n")
