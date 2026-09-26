@@ -335,9 +335,8 @@ def reap(session_ids, table, runner=_systemctl, read=None, manager_found=True):
     if units is None and not manager_found:
         return (
             "agent-safety: this session ran under the containment prefix, but no systemd user "
-            "manager was found at its end, so its command scopes could not be listed or stopped. "
-            "Start the user manager, then check with: "
-            f"systemctl --user list-units '{_TOOL_UNIT}-*'"
+            "manager was found at its end, so this sweep cannot tell whether any command scope "
+            "was started or still runs. The report below covers the processes it can see."
         )
     if units is None:
         return (
@@ -593,9 +592,9 @@ def _selftest():
             "the stop phase runs under the prefix or a manager, and a host with neither is skipped",
         ),
         (
-            "no systemd user manager was found"
+            "cannot tell whether any command scope"
             in reap([sid], table, runner=lambda *a: (1, ""), manager_found=False),
-            "a lost manager is named as the reason the scopes were not stopped",
+            "no manager at session end is reported as unknown, never as a lost manager",
         ),
         (
             manager_runtime({}, which=has, exists=socket_in(), uid=1000) is None,
