@@ -670,7 +670,7 @@ def registration_problems(claude_home):
     elif not capable and held is not None and foreign_prefix(data) is None:
         out.append(
             f"{PREFIX_VAR} names a containment prefix where it cannot contain ({reason}), "
-            "so re-run the installer to unset it"
+            "so re-run the installer to correct it"
         )
     allow = (
         data.get("permissions", {}).get("allow")
