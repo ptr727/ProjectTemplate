@@ -181,7 +181,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    `gh issue list --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it
    returns 30 rows unless told otherwise, and apply step 2's full-page check to it.
 5. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
-   `--dry-run` first. The body
+   adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the
+   Chain" shows, and `--dry-run` first. The body
    carries the sections `session-handoff` "What Goes in the Body" names, with the next steps naming
    the issue and what done looks like. That skill's rules on the body bind it.
 6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
