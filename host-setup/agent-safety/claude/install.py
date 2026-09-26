@@ -53,7 +53,7 @@ PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
 DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME)
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
-# The sweep reads one process table, so this is headroom for a loaded machine rather than a duration it uses.
+# The sweep stops scopes that escalate to SIGKILL after two seconds and reads two process tables, so this is headroom rather than a duration it uses.
 SWEEP_TIMEOUT_SECONDS = 10
 
 # The stamp's own format version, separate from the content it describes.

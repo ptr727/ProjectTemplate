@@ -238,6 +238,18 @@ def _systemctl(*args):
     return done.returncode, done.stdout
 
 
+def manager_reachable(env, which=shutil.which, exists=os.path.exists):
+    """Whether a systemd user manager runs for this session, the test `tool-containment.py` applies.
+
+    A host without one never ran a contained command, and asking `systemctl --user` there fails, which
+    would report a failure to list at every session end on a host the installer never contained.
+    """
+    runtime = env.get("XDG_RUNTIME_DIR")
+    return bool(
+        which("systemctl") and runtime and exists(os.path.join(runtime, "systemd", "private"))
+    )
+
+
 def session_token(session_id):
     """The session id as `tool-containment.py` spells it in a unit name, or "" where there is none."""
     return re.sub(r"[^A-Za-z0-9-]", "", session_id or "")[:64]
@@ -341,7 +353,7 @@ def main():
         payload.get("session_id") if isinstance(payload, dict) else None
     ) or os.environ.get("CLAUDE_CODE_SESSION_ID")
     reaped = ""
-    if shutil.which("systemctl"):
+    if manager_reachable(os.environ):
         reaped = reap(session_id, _read_process_table() or {})
     if reaped:
         print(reaped, file=sys.stderr)
@@ -507,6 +519,26 @@ def _selftest():
             "a systemctl that cannot run is reported, never read as nothing to stop",
         ),
         (session_token("a/b c;d") == "abcd", "the unit name is spelled as the prefix spells it"),
+        (
+            not manager_reachable({}, which=lambda n: "/usr/bin/systemctl", exists=lambda p: True),
+            "a session with no runtime directory has no manager to ask",
+        ),
+        (
+            not manager_reachable(
+                {"XDG_RUNTIME_DIR": "/run/user/1000"},
+                which=lambda n: "/usr/bin/systemctl",
+                exists=lambda p: False,
+            ),
+            "nor does one whose manager socket is absent",
+        ),
+        (
+            manager_reachable(
+                {"XDG_RUNTIME_DIR": "/run/user/1000"},
+                which=lambda n: "/usr/bin/systemctl",
+                exists=lambda p: True,
+            ),
+            "a session with its manager socket is swept",
+        ),
     ]
     ok = True
     for passed, label in checks:

@@ -292,12 +292,16 @@ text says, because the harm it covers was never in the text.
    Name each group for the session that ran it, and at the end of the session stop every group its
    commands left running, then report what was stopped. This stop needs none of requirement 8's
    judgment about what a process is, since the group's name proves which session started it. Report
-   a failure to list or to stop a group as loudly as a finding. A hook command is bounded the same
-   way and is not stopped, since another end-of-session hook may still be running in its own group.
+   a failure to list or to stop a group as loudly as a finding.
 
-   The maintainer sets the ceilings, in a channel the command being bounded cannot reach. Where the
+   A hook the agent runs, a guard above included, is not placed in a group. A group that fails to
+   start fails the command, and a guard that fails that way is a guard that did not run. Where the
    host offers no such group, the command runs unbounded and says so on every run, because a silent
    fallback reads exactly like a bounded command.
+
+   The maintainer sets the ceilings, where a variable set inline in the bounded command cannot reach
+   them. They bound an accident rather than an adversary, since a command can still raise its own
+   group's limits or start a group outside it, and the incident this answers was a mistake.
 
 ## Decision Flow
 

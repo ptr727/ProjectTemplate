@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Shell prefix: run every command Claude Code executes inside a scope with a task and memory ceiling.
+"""Shell prefix: run every Bash tool call inside a scope with a task and memory ceiling.
 
 Registered as `CLAUDE_CODE_SHELL_PREFIX` in the user settings.json `env`. Claude Code then runs each
 Bash tool call and each hook command as `<this file> '<command string>'`, one argument holding the
-whole string, including the cwd bookkeeping Claude Code appends to it. This file starts a transient
-systemd user scope carrying `TasksMax` and `MemoryMax`, and runs the string under a shell inside it.
+whole string, including the cwd bookkeeping Claude Code appends to it. For a tool call this file starts
+a transient systemd user scope carrying `TasksMax` and `MemoryMax`, and runs the string under a shell
+inside it.
+
+A hook command runs under its shell directly, with no scope. The write guard is a hook, and a PreToolUse
+hook that exits 1 is a non-blocking error, so a scope that failed to start would let the very command
+the guard denies go ahead. A hook is told from a tool call by the `CLAUDE_PROJECT_DIR` Claude Code sets
+for hooks and by the shell snapshot a tool call sources first. Either sign of a tool call is enough to
+contain it, so a change to one of them fails toward containment rather than away from it.
 
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
 host has to be reset. The ceiling belongs to the scope's cgroup rather than to the foreground wait, so
@@ -13,16 +20,15 @@ own shell has exited and its children were reparented to init. See
 host-setup/agent-safety/README.md requirement 9.
 
 The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX`. The maintainer raises them with
-`AGENT_CONTAINMENT_TASKS_MAX` and `AGENT_CONTAINMENT_MEMORY_MAX` in the same `env` block. An agent
-cannot raise them for itself, since this process reads the environment the session was launched with
-and runs before anything in the command string does.
+`AGENT_CONTAINMENT_TASKS_MAX` and `AGENT_CONTAINMENT_MEMORY_MAX` in the same `env` block, which an inline
+`VAR=x` in the command cannot change, since this process reads them before the command runs. The
+ceilings bound an accident rather than an adversary: a command can still raise its own scope's
+properties through `systemctl --user set-property`, or start a scope of its own outside this one.
 
-Each scope is named for its session, so the SessionEnd hook stops what a session's commands left
-running and nothing else. A Bash tool call sources a Claude Code shell snapshot and a hook command does
-not, which is what separates the two names. The sweep stops only the tool-call scopes, since another
-SessionEnd hook may still be running in its own scope when it does.
+Each scope is named for its session plus a random suffix, so the SessionEnd hook stops what a session's
+tool calls left running and nothing else, and a reused pid never collides with a scope still loaded.
 
-Where no systemd user manager is reachable, the command runs without a ceiling and one line on stderr
+Where no systemd user manager is reachable, a tool call runs without a ceiling and one line on stderr
 says so, since a silent fallback would read as a contained command. Linux only: the installer does not
 register this prefix on a host without a user manager.
 
@@ -36,7 +42,6 @@ DEFAULT_TASKS_MAX = "8192"
 DEFAULT_MEMORY_MAX = "25%"
 
 TOOL_UNIT = "claude-tool"
-HOOK_UNIT = "claude-hook"
 
 # Since version 254, systemd-run expands `${VAR}` in a scope's arguments by default, rewriting a command before its shell sees it.
 # The flag turning that off is an error on an older systemd, so the command travels in the environment instead.
@@ -58,9 +63,11 @@ def which(name, path=None):
     return None
 
 
-def _count(text):
-    """Whether `text` is a positive decimal count with no leading zero."""
-    return text.isascii() and text.isdigit() and not text.startswith("0")
+def _positive(text, integer=False):
+    """Whether `text` is a positive plain decimal number, an integer where `integer` is set."""
+    if not text.isascii() or not text.replace(".", "", 1).isdigit() or (integer and "." in text):
+        return False
+    return float(text) > 0
 
 
 def session_token(session_id):
@@ -69,16 +76,22 @@ def session_token(session_id):
 
 
 def snapshot_shell(command):
-    """The shell a Bash tool call's snapshot names, or None for a command that sources none."""
+    """The shell named by the snapshot a Bash tool call sources first, or None where it sources none.
+
+    Only the leading `source` clause is read, since the command after it may name any snapshot file.
+    """
+    if not command.startswith("source "):
+        return None
+    lead = command.split("&&", 1)[0]
     for name in ("bash", "zsh"):
-        if f"{_SNAPSHOT}{name}-" in command:
+        if f"{_SNAPSHOT}{name}-" in lead:
             return name
     return None
 
 
-def unit_kind(command):
-    """`TOOL_UNIT` for a Bash tool call, `HOOK_UNIT` for anything else Claude Code runs."""
-    return TOOL_UNIT if snapshot_shell(command) else HOOK_UNIT
+def is_tool_call(command, env):
+    """Whether Claude Code runs `command` as a Bash tool call rather than as a hook command."""
+    return snapshot_shell(command) is not None or "CLAUDE_PROJECT_DIR" not in env
 
 
 def pick_shell(command, which=which):
@@ -90,18 +103,21 @@ def pick_shell(command, which=which):
     return which(snapshot_shell(command) or "bash") or which("bash") or "/bin/sh"
 
 
+def _percent(value):
+    """Whether `value` is a percentage above 0 and at most 100, fractional or whole."""
+    return value.endswith("%") and _positive(value[:-1]) and float(value[:-1]) <= 100
+
+
 def valid_tasks(value):
-    """Whether systemd reads `value` as a `TasksMax`."""
-    return value == "infinity" or _count(value)
+    """Whether `value` is a `TasksMax`: a count, a percentage of the system's limit, or infinity."""
+    return value == "infinity" or _positive(value, integer=True) or _percent(value)
 
 
 def valid_memory(value):
-    """Whether systemd reads `value` as a `MemoryMax`: bytes, a K/M/G/T size, a percentage, or infinity."""
-    if value == "infinity":
+    """Whether `value` is a `MemoryMax`: bytes, a size in K to E, a percentage of RAM, or infinity."""
+    if value == "infinity" or _percent(value):
         return True
-    if value.endswith("%"):
-        return _count(value[:-1]) and int(value[:-1]) <= 100
-    return _count(value[:-1] if value[-1:] in "KMGT" else value)
+    return _positive(value[:-1] if value[-1:] in ("K", "M", "G", "T", "P", "E") else value)
 
 
 def ceilings(env):
@@ -133,13 +149,16 @@ def manager_reachable(env, platform=sys.platform, which=which, exists=os.path.ex
     )
 
 
-def plan(command, env, pid, reachable, which=which):
+def plan(command, env, suffix, reachable, which=which):
     """(argv, extra_env, notices) for the outer stage, which the caller execs.
 
-    With a manager, argv starts the scope and re-enters this file as the inner stage, the command and
-    its shell carried in `extra_env`. Without one, argv is the shell itself, run with no ceiling.
+    For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage,
+    the command and its shell carried in `extra_env`. A hook command, or a tool call with no manager,
+    gets the shell itself, and only the tool call is told it runs with no ceiling.
     """
     shell = pick_shell(command, which)
+    if not is_tool_call(command, env):
+        return [shell, "-c", command], {}, []
     if not reachable:
         note = "no systemd user manager is reachable, so this command runs with no task or memory ceiling"
         return [shell, "-c", command], {}, [note]
@@ -151,7 +170,7 @@ def plan(command, env, pid, reachable, which=which):
         "--scope",
         "--collect",
         "--quiet",
-        f"--unit={unit_kind(command)}-{token}-{pid}",
+        f"--unit={TOOL_UNIT}-{token}-{suffix}",
         "--description=Claude Code command",
         f"--property=TasksMax={tasks}",
         f"--property=MemoryMax={memory}",
@@ -186,7 +205,8 @@ def main(argv):
     if len(argv) != 2:
         print("usage: tool-containment.py '<command string>' | --selftest", file=sys.stderr)
         return 2
-    run, extra, notices = plan(argv[1], os.environ, os.getpid(), manager_reachable(os.environ))
+    suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
+    run, extra, notices = plan(argv[1], os.environ, suffix, manager_reachable(os.environ))
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
     os.execve(run[0], run, {**os.environ, **extra})
@@ -221,17 +241,39 @@ def _selftest():
     os.chmod(probe, 0o755)
 
     env = {"CLAUDE_CODE_SESSION_ID": "0a1b-2c3d", "XDG_RUNTIME_DIR": "/run/user/1000"}
-    argv, extra, notes = plan(tool, env, 42, True, fake_which)
-    hook_argv, _e, _n = plan(hook, env, 43, True, fake_which)
-    bare, bare_extra, bare_notes = plan(tool, env, 44, False, fake_which)
+    hook_env = dict(env, CLAUDE_PROJECT_DIR="/opt/agent/project")
+    # A zsh tool call whose own command names a bash snapshot file after the leading clause.
+    mixed = ztool.replace("eval 'echo", "eval 'ls /x/shell-snapshots/snapshot-bash-1.sh; echo")
+    argv, extra, notes = plan(tool, env, "42-ab", True, fake_which)
+    hook_plan = plan(hook, hook_env, "43-cd", True, fake_which)
+    bare, bare_extra, bare_notes = plan(tool, env, "44-ef", False, fake_which)
     raised = ceilings(
         {"AGENT_CONTAINMENT_TASKS_MAX": "20000", "AGENT_CONTAINMENT_MEMORY_MAX": "64G"}
     )
     refused = ceilings({"AGENT_CONTAINMENT_TASKS_MAX": "0", "AGENT_CONTAINMENT_MEMORY_MAX": "lots"})
     inner_argv, inner_env = inner({"PATH": "/bin", COMMAND_VAR: tool, SHELL_VAR: "/usr/bin/bash"})
     checks = [
-        ("--unit=claude-tool-0a1b-2c3d-42" in argv, "a tool call's scope is named for its session"),
-        ("--unit=claude-hook-0a1b-2c3d-43" in hook_argv, "a hook command's scope is named apart"),
+        (
+            "--unit=claude-tool-0a1b-2c3d-42-ab" in argv,
+            "a tool call's scope is named for its session",
+        ),
+        (
+            hook_plan == (["/usr/bin/bash", "-c", hook], {}, []),
+            "a hook command runs under its shell with no scope, so no systemd failure reaches it",
+        ),
+        (
+            plan(hook, hook_env, "43-cd", False, fake_which)[2] == [],
+            "and prints nothing where no manager is reachable",
+        ),
+        (
+            "--unit=claude-tool-0a1b-2c3d-48-ab" in plan(hook, env, "48-ab", True, fake_which)[0],
+            "a command with no snapshot and no hook's project dir is still contained",
+        ),
+        (
+            "--unit=claude-tool-0a1b-2c3d-49-ab"
+            in plan(tool, hook_env, "49-ab", True, fake_which)[0],
+            "and so is one sourcing a snapshot whatever its environment",
+        ),
         (f"--property=TasksMax={DEFAULT_TASKS_MAX}" in argv, "the task ceiling is applied"),
         (f"--property=MemoryMax={DEFAULT_MEMORY_MAX}" in argv, "the memory ceiling is applied"),
         (
@@ -242,12 +284,12 @@ def _selftest():
         (not any("$" in a for a in argv), "no argument carries a `$` for systemd-run to expand"),
         (extra[SHELL_VAR] == "/usr/bin/bash", "a bash snapshot runs under bash"),
         (
-            plan(ztool, env, 45, True, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
+            plan(ztool, env, "45", True, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
             "a zsh one under zsh",
         ),
         (
-            plan(hook, env, 46, True, fake_which)[1][SHELL_VAR] == "/usr/bin/bash",
-            "a hook under bash",
+            plan(mixed, env, "46", True, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
+            "only the leading source clause picks the shell",
         ),
         (notes == [], "a contained command prints nothing extra"),
         (
@@ -270,13 +312,13 @@ def _selftest():
         ),
         (session_token("a/b c;d") == "abcd", "a session id cannot inject into a unit name"),
         (
-            all(map(valid_memory, ("16G", "1024", "100%", "infinity")))
-            and not any(map(valid_memory, ("0", "07G", "101%", "0%", "16GB", "-1", "1.5G"))),
-            "a memory size is read the way systemd reads one",
+            all(map(valid_memory, ("16G", "1024", "1.5G", "12.5%", "1P", "100%", "infinity")))
+            and not any(map(valid_memory, ("0", "101%", "0%", "16GB", "-1", "G", "lots"))),
+            "a memory size systemd accepts is accepted, and a malformed one is not",
         ),
         (
-            all(map(valid_tasks, ("1", "8192", "infinity")))
-            and not any(map(valid_tasks, ("0", "08", "1e3", "-5", "\u0663"))),
+            all(map(valid_tasks, ("1", "8192", "50%", "infinity")))
+            and not any(map(valid_tasks, ("0", "1.5", "1e3", "-5", "\u0663"))),
             "and so is a task count",
         ),
         (
@@ -285,7 +327,7 @@ def _selftest():
             "PATH is searched in order, and a miss is None",
         ),
         (
-            "--unit=claude-tool-nosession-47" in plan(tool, {}, 47, True, fake_which)[0],
+            "--unit=claude-tool-nosession-47" in plan(tool, {}, "47", True, fake_which)[0],
             "a missing session id names no session the sweep would stop",
         ),
         (inner_argv == ["/usr/bin/bash", "-c", tool], "the inner stage runs the command verbatim"),
