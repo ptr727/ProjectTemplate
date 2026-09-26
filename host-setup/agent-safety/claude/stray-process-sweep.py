@@ -262,8 +262,8 @@ def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
 def should_reap(runtime, env):
     """Whether the stop phase runs: where a manager was found, or where the session ran under the prefix.
 
-    The second covers a manager that was lost by the session's end, whose failed list is reported as
-    requirement 9 asks rather than skipped in silence.
+    The second covers a session under the prefix with no manager found at its end, which is reported as
+    an unknown, since the manager may never have run, rather than skipped in silence.
     """
     return bool(runtime) or prefix_registered(env)
 
@@ -336,7 +336,7 @@ def reap(session_ids, table, runner=_systemctl, read=None, manager_found=True):
         return (
             "agent-safety: this session ran under the containment prefix, but no systemd user "
             "manager was found at its end, so this sweep cannot tell whether any command scope "
-            "was started or still runs. The report below covers the processes it can see."
+            "was started or still runs."
         )
     if units is None:
         return (
