@@ -508,10 +508,12 @@ class TestQuotedNames(GitTreeCase):
 
     def test_a_missing_root_named_in_bytes_that_are_not_utf8_fails_without_raising(self) -> None:
         missing = self.tmp / self.NAME / "gone"
-        err = io.StringIO()
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
         with contextlib.redirect_stderr(err):
             self.assertEqual([], repo_gate.tracked(missing))
-        self.assertIn("git ls-files failed", err.getvalue())
+        err.flush()
+        self.assertIn(b"git ls-files failed", err.buffer.getvalue())
+        self.assertIn(b"run-\\udcff-tool", err.buffer.getvalue())
 
 
 class TestQuotedPlainNames(GitTreeCase):

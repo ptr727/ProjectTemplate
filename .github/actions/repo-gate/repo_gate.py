@@ -151,7 +151,7 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
         # A failed command's stdout is never trusted, even where it is non-empty.
         # A partial listing read as complete is a scan that missed files and said nothing.
         reason = result.stderr.strip() or f"exit {result.returncode}, no stderr"
-        print(f"git ls-files failed: {reason}", file=sys.stderr)
+        print(f"git ls-files failed: {printable(reason)}", file=sys.stderr)
         return []
     return [unquote_path(l) for l in result.stdout.split("\n") if l]
 
@@ -405,9 +405,11 @@ def printable(line: str) -> str:
     `unquote_path` hands back a tracked name exactly as it is on disk, and a name may hold a
     newline or an escape sequence. Printed raw, such a name forges a line of the gate's own output
     or drives the reader's terminal, so each C0 or C1 control and DEL is escaped here, where it is
-    shown.
+    shown. A byte that is not UTF-8 arrives as a lone surrogate, which a strict stream refuses to
+    encode, so it is spelled as an escape too, leaving the result safe on any stream.
     """
-    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
 def report_paths_that_are_not_utf8() -> None:
