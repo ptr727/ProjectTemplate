@@ -52,8 +52,8 @@ PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
 DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME)
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
-# The sweep stops scopes that escalate to SIGKILL after two seconds and reads two process tables, so this is headroom rather than a duration it uses.
-SWEEP_TIMEOUT_SECONDS = 10
+# The sweep's own calls are each bounded, two `ps` reads at 5s and four `systemctl` calls at 5s, all inside this.
+SWEEP_TIMEOUT_SECONDS = 35
 
 # The stamp's own format version, separate from the content it describes.
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
@@ -751,13 +751,15 @@ def report(claude_home):
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
     try:
-        foreign = foreign_prefix(
-            json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
-        )
+        settings_data = json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
     except (ValueError, OSError):
-        foreign = None
+        settings_data = None
+    foreign = foreign_prefix(settings_data)
+    env_block = settings_data.get("env") if isinstance(settings_data, dict) else None
+    unset = not isinstance(env_block, dict) or env_block.get(PREFIX_VAR) is None
     capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
-    if not capable and foreign is None:
+    # A registered prefix on a host that cannot run it is a STALE problem above, not an uncontained host.
+    if unset and not capable:
         print(f"Note: agent commands on this host run uncontained ({reason}).")
     if foreign is not None:
         print(

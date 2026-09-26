@@ -100,53 +100,42 @@ def pick_shell(command, which=which):
     return which(snapshot_shell(command) or "bash") or which("bash") or "/bin/sh"
 
 
-# The smallest override accepted, so a unitless or mistyped value cannot kill every command at its start.
+# The override grammar is one canonical form rather than everything systemd parses.
+# Systemd reads a leading zero as octal, rejects some percentages per property, and varies by version.
 MIN_TASKS = 64
 MIN_MEMORY = 256 * 1024**2
-# The largest override accepted, below what systemd parses into its 64-bit limits and rejects past.
 MAX_LIMIT = 2**63
-_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5, "E": 1024**6}
+_UNITS = {"M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 
-def _number(text):
-    """`text` as a positive number when it is plain decimal digits with at most one inner point, else None."""
-    whole, _dot, frac = text.partition(".")
-    if not (whole.isascii() and whole.isdigit()) or (
-        _dot and not (frac.isascii() and frac.isdigit())
-    ):
+def _count(text):
+    """`text` as an int when it is decimal digits with no leading zero, else None."""
+    if not (text.isascii() and text.isdigit()) or text.startswith("0"):
         return None
-    value = float(text)
-    return value if value > 0 else None
-
-
-def _percent(value):
-    """Whether `value` is a whole percentage from 1 to 100, the form every systemd reads.
-
-    A fractional one is an error before systemd 248, and the floor refuses `0.25%` typed for `25%`.
-    """
-    digits = value[:-1] if value.endswith("%") else ""
-    return digits.isascii() and digits.isdigit() and 1 <= int(digits) <= 100
+    return int(text)
 
 
 def valid_tasks(value):
-    """Whether `value` is a `TasksMax` of at least `MIN_TASKS`, a percentage of the system limit, or infinity."""
-    if value == "infinity" or _percent(value):
-        return True
-    # A leading zero makes systemd read the count as octal, a different ceiling or none at all.
-    plain = value.isascii() and value.isdigit() and not value.startswith("0")
-    return plain and MIN_TASKS <= int(value) < MAX_LIMIT
+    """Whether `value` is `infinity` or a count from `MIN_TASKS` up, the only `TasksMax` forms accepted."""
+    count = _count(value)
+    return value == "infinity" or (count is not None and MIN_TASKS <= count < MAX_LIMIT)
 
 
 def valid_memory(value):
-    """Whether `value` is a `MemoryMax` of at least `MIN_MEMORY` in K to E units, a percentage of RAM, or infinity.
+    """Whether `value` is `infinity`, a whole `1%` to `99%` of RAM, or a whole count of M, G, or T.
 
     A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its
-    start, so a unit is required.
+    start, so a unit is required, and the size floor is `MIN_MEMORY`.
     """
-    if value == "infinity" or _percent(value):
+    if value == "infinity":
         return True
-    number = _number(value[:-1]) if value[-1:] in _UNITS else None
-    return number is not None and MIN_MEMORY <= number * _UNITS[value[-1]] < MAX_LIMIT
+    count = _count(value[:-1])
+    if count is None:
+        return False
+    if value.endswith("%"):
+        return 1 <= count <= 99
+    unit = _UNITS.get(value[-1])
+    return unit is not None and MIN_MEMORY <= count * unit < MAX_LIMIT
 
 
 def ceilings(env):
@@ -243,6 +232,14 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
     return argv, extra, notices
 
 
+def decide(command, env, suffix, runtime, is_delegated, which=which):
+    """`plan` for this host: a tool call under a manager lacking the controllers runs bare, and says why."""
+    why = UNREACHABLE
+    if runtime and is_tool_call(command) and not is_delegated():
+        runtime, why = None, UNDELEGATED
+    return plan(command, env, suffix, runtime, which, why=why)
+
+
 def inner(env):
     """(argv, env) for the inner stage: the shell, with the hand-off variables removed."""
     env = dict(env)
@@ -269,10 +266,9 @@ def main(argv):
         print("usage: tool-containment.py '<command string>' | --selftest", file=sys.stderr)
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
-    runtime, why = manager_runtime(os.environ), UNREACHABLE
-    if runtime and is_tool_call(argv[1]) and not delegated():
-        runtime, why = None, UNDELEGATED
-    run, extra, notices = plan(argv[1], os.environ, suffix, runtime, why=why)
+    run, extra, notices = decide(
+        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated
+    )
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
     os.execve(run[0], run, {**os.environ, **extra})
@@ -378,6 +374,24 @@ def _selftest():
             "a manager lacking the controllers is named as the reason, per command",
         ),
         (
+            decide(tool, env, "53", RUN, lambda: False, fake_which)
+            == (
+                ["/usr/bin/bash", "-c", tool],
+                {},
+                [f"{UNDELEGATED}, so this command runs with no task or memory ceiling"],
+            ),
+            "a manager that lost the controllers runs a tool call bare and says why",
+        ),
+        (
+            "--unit=claude-tool-0a1b-2c3d-54"
+            in decide(tool, env, "54", RUN, lambda: True, fake_which)[0],
+            "a manager holding them contains it",
+        ),
+        (
+            decide(hook, hook_env, "55", RUN, lambda: 1 / 0, fake_which)[2] == [],
+            "a hook command never reads the controllers",
+        ),
+        (
             delegated(1000, read=lambda p: "cpu memory pids\n")
             and not delegated(1000, read=lambda p: "cpu\n"),
             "delegation needs both the pids and the memory controller",
@@ -397,32 +411,33 @@ def _selftest():
         ),
         (session_token("a/b c;d") == "abcd", "a session id cannot inject into a unit name"),
         (
-            all(map(valid_memory, ("16G", "1.5G", "0.5G", "512M", "25%", "1P", "100%", "infinity")))
+            all(map(valid_memory, ("16G", "512M", "1T", "25%", "99%", "infinity")))
             and not any(
                 map(
                     valid_memory,
                     (
                         "0",
                         "1024",
-                        "0.5",
-                        ".5G",
+                        "1.5G",
+                        "0.5G",
+                        "08G",
                         "1K",
-                        "101%",
-                        "0%",
+                        "1P",
+                        "100%",
+                        "050%",
+                        "08%",
                         "0.25%",
-                        "12.5%",
                         "16GB",
                         "G",
                         "lots",
-                        "99999999999E",
-                        "9" * 400 + "G",
+                        "99999999999T",
                     ),
                 )
             ),
-            "a memory size systemd accepts is accepted, and a malformed one is not",
+            "only the canonical memory forms are accepted",
         ),
         (
-            all(map(valid_tasks, ("64", "8192", "50%", "infinity")))
+            all(map(valid_tasks, ("64", "8192", "infinity")))
             and not any(
                 map(
                     valid_tasks,
@@ -437,6 +452,8 @@ def _selftest():
                         "99999999999999999999",
                         "08192",
                         "0100",
+                        "50%",
+                        "100%",
                     ),
                 )
             ),

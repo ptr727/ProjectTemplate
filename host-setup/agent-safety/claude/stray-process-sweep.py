@@ -236,7 +236,7 @@ def _systemctl(*args, runtime=None):
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=8,
+            timeout=5,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
