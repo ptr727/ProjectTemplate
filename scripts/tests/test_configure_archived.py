@@ -143,7 +143,10 @@ class ArchivedRepositoryCase(unittest.TestCase):
 
 
 class EndToEndCase(unittest.TestCase):
-    """The real script, copied whole, exits before its first `gh` call, for apply and check alike."""
+    """The real script, copied whole, exits before any `gh` call when given the repository by name.
+
+    Both apply and check are covered.
+    """
 
     def run_configure(self, status: str, cmd: str) -> subprocess.CompletedProcess[str]:
         bash = require("bash", "jq")
