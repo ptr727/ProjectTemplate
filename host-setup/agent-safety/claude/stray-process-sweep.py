@@ -258,8 +258,7 @@ def session_token(session_id):
 def session_scopes(session_id, runner=_systemctl):
     """The tool-call scopes this session left loaded, or None when systemd cannot be asked.
 
-    Only this session's tool-call scopes match. A hook command's scope is named apart, since another
-    SessionEnd hook may still be running in one while this runs.
+    Only this session's tool-call scopes match, since the prefix places nothing else in a scope.
     """
     token = session_token(session_id)
     if not token:
@@ -315,8 +314,9 @@ def reap(session_id, table, runner=_systemctl, read=None):
     if not units:
         return ""
     pids = scope_pids(units, runner, read)
-    code, _out = runner("stop", "--", *units)
-    left = session_scopes(session_id, runner) if code == 0 else units
+    runner("stop", "--", *units)
+    # Re-listed whatever the stop returned, since a scope collected between the list and the stop fails it.
+    left = session_scopes(session_id, runner)
     left = units if left is None else [u for u in left if u in units]
     stopped = [u for u in units if u not in left]
     lines = []
@@ -349,9 +349,10 @@ def main():
     # `sess`, so on both the hook is inert rather than printing a failure at every session end.
     if os.name != "posix" or sys.platform == "darwin":
         return 0
-    session_id = (
-        payload.get("session_id") if isinstance(payload, dict) else None
-    ) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    held = payload.get("session_id") if isinstance(payload, dict) else None
+    session_id = (held if isinstance(held, str) else None) or os.environ.get(
+        "CLAUDE_CODE_SESSION_ID"
+    )
     reaped = ""
     if manager_reachable(os.environ):
         reaped = reap(session_id, _read_process_table() or {})
@@ -501,12 +502,20 @@ def _selftest():
     stuck = reap(
         sid, table, runner=lambda *a: fake(*a, sticky=(sticky,)), read=lambda p: procs.get(p, "")
     )
+    live.update({f"{_TOOL_UNIT}-{sid}-400.scope", f"{_TOOL_UNIT}-{sid}-600.scope"})
+    raced = reap(
+        sid, table, runner=lambda *a: fake(*a, stop_code=5), read=lambda p: procs.get(p, "")
+    )
     live.clear()
     checks += [
+        (
+            "stopped 2 command scopes" in raced and "did not stop" not in raced,
+            "a stop that fails on a scope already collected still reports what the re-list shows",
+        ),
         (stopped_all, "every tool-call scope of this session is stopped"),
         (
             calls[0][-1] == f"{_TOOL_UNIT}-{sid}-*.scope",
-            "and only this session's tool-call scopes are listed, never a hook's",
+            "and only this session's tool-call scopes are listed",
         ),
         ("stopped 2 command scopes" in reaped, "the report counts what was stopped"),
         ("2 processes" in reaped and "pid 400" in reaped, "and names each scope's root process"),

@@ -28,7 +28,6 @@ import os
 import pathlib
 import platform
 import re
-import shlex
 import shutil
 import socket
 import subprocess
@@ -193,15 +192,53 @@ def containment_capable():
         return False, f"{platform.system()} has no systemd user manager"
     if not shutil.which("systemd-run"):
         return False, "systemd-run is not installed"
-    runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if not runtime or not os.path.exists(os.path.join(runtime, "systemd", "private")):
+    # The prefix runs through its `env python3` shebang for every hook command, the write guard included.
+    # A PreToolUse hook that fails is a non-blocking error, so a `python3` that cannot run it fails the guard open.
+    if not python3_runs_the_prefix():
+        return False, "no python3 3.11 or newer is on PATH to run the prefix"
+    # A `su -`, cron, or `docker exec` shell carries no XDG_RUNTIME_DIR, while the account's sessions do.
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    if not os.path.exists(os.path.join(runtime, "systemd", "private")):
         return False, "no systemd user manager is running for this account"
     return True, "a systemd user manager is running"
 
 
+def python3_runs_the_prefix():
+    """Whether the `python3` the prefix's shebang resolves to is one this kit supports."""
+    found = shutil.which("python3")
+    if not found:
+        return False
+    try:
+        done = subprocess.run(
+            [found, "-c", "import sys; sys.exit(sys.version_info < (3, 11))"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def prefix_value(path):
-    """The `CLAUDE_CODE_SHELL_PREFIX` value naming the deployed prefix, spelled once for writer and reader."""
-    return shlex.quote(str(path))
+    """The `CLAUDE_CODE_SHELL_PREFIX` value naming the deployed prefix, spelled once for writer and reader.
+
+    A bare path, since Claude Code quotes the whole value as one word, so an interpreter named in front
+    of it is read as part of the file name.
+    """
+    return str(path)
+
+
+def names_prefix(held, path):
+    """Whether a `CLAUDE_CODE_SHELL_PREFIX` value names the deployed prefix."""
+    return held == prefix_value(path)
+
+
+def foreign_prefix(data):
+    """The `CLAUDE_CODE_SHELL_PREFIX` value when it names something other than this kit's prefix, else None."""
+    env = data.get("env") if isinstance(data, dict) else None
+    held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
+    return held if held is not None and CONTAIN_NAME not in str(held) else None
 
 
 def hook_launcher():
@@ -589,14 +626,15 @@ def registration_problems(claude_home):
     capable, reason = containment_capable()
     env = data.get("env")
     held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
-    want = prefix_value(claude_home / "hooks" / CONTAIN_NAME)
-    if capable and held != want:
-        why = f"is held by {held!r}" if held else "is not set"
+    ours = names_prefix(held, claude_home / "hooks" / CONTAIN_NAME)
+    # A foreign value is the maintainer's own choice, which a re-run leaves alone, so it is a note rather than drift.
+    if capable and not ours and foreign_prefix(data) is None:
+        why = f"is {held!r}, which does not run the deployed prefix" if held else "is not set"
         out.append(
             f"{PREFIX_VAR} {why}, so agent commands run with no task or memory ceiling "
             f"although this host can contain them ({reason})"
         )
-    elif not capable and held == want:
+    elif not capable and ours:
         out.append(
             f"{PREFIX_VAR} names the containment prefix on a host that cannot contain ({reason}), "
             "so every command prints a notice and runs uncontained"
@@ -688,6 +726,17 @@ def report(claude_home):
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
+    try:
+        foreign = foreign_prefix(
+            json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
+        )
+    except (ValueError, OSError):
+        foreign = None
+    if foreign is not None:
+        print(
+            f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so agent commands run "
+            "uncontained. Remove it and re-run the installer to contain them."
+        )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))

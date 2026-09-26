@@ -723,13 +723,12 @@ class TestContainmentPrefix(StampCase):
             json.dumps(data, indent=2) + "\n", encoding="utf-8"
         )
 
-    def _want(self):
-        return install.prefix_value(self.home / "hooks" / install.CONTAIN_NAME)
-
     def test_a_capable_host_sets_the_prefix_to_the_deployed_file(self):
+        """A bare path, since Claude Code quotes the whole value as one word."""
         self.install()
-        self.assertTrue((self.home / "hooks" / install.CONTAIN_NAME).is_file())
-        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], self._want())
+        deployed = self.home / "hooks" / install.CONTAIN_NAME
+        self.assertTrue(deployed.is_file())
+        self.assertEqual(self._settings()["env"][install.PREFIX_VAR], str(deployed))
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
@@ -764,16 +763,25 @@ class TestContainmentPrefix(StampCase):
         self.install(contain=False)
         self.assertEqual(self._settings()["env"], {"OTHER": "kept"})
 
-    def test_a_foreign_prefix_is_kept_and_reported(self):
-        """Someone else's wrapper is theirs, so the installer neither replaces nor hides it."""
+    def test_a_foreign_prefix_is_kept_and_noted_without_a_stale_verdict(self):
+        """Someone else's wrapper is theirs, and a re-run leaves it, so it cannot be drift a re-run clears."""
         self.home.mkdir(parents=True)
         self._write({"env": {install.PREFIX_VAR: "/usr/local/bin/audit-log"}})
         r = self.install()
         self.assertIn("does not own", r.stdout)
         self.assertEqual(self._settings()["env"][install.PREFIX_VAR], "/usr/local/bin/audit-log")
         r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note:", r.stdout)
+
+    def test_a_prefix_naming_another_copy_reports_stale(self):
+        self.install()
+        data = self._settings()
+        data["env"][install.PREFIX_VAR] = "/elsewhere/hooks/" + install.CONTAIN_NAME
+        self._write(data)
+        r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("is held by", r.stdout)
+        self.assertIn("does not run the deployed prefix", r.stdout)
 
     def test_a_non_object_env_is_refused_rather_than_overwritten(self):
         self.home.mkdir(parents=True)

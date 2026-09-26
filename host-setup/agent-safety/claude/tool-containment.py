@@ -63,13 +63,6 @@ def which(name, path=None):
     return None
 
 
-def _positive(text, integer=False):
-    """Whether `text` is a positive plain decimal number, an integer where `integer` is set."""
-    if not text.isascii() or not text.replace(".", "", 1).isdigit() or (integer and "." in text):
-        return False
-    return float(text) > 0
-
-
 def session_token(session_id):
     """The session id as it appears in a unit name, or "" where there is none to name."""
     return "".join(c for c in session_id or "" if c.isascii() and (c.isalnum() or c == "-"))[:64]
@@ -103,21 +96,46 @@ def pick_shell(command, which=which):
     return which(snapshot_shell(command) or "bash") or which("bash") or "/bin/sh"
 
 
+# The smallest override accepted, so a unitless or mistyped value cannot kill every command at its start.
+MIN_TASKS = 64
+MIN_MEMORY = 256 * 1024**2
+_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5, "E": 1024**6}
+
+
+def _number(text):
+    """`text` as a positive number when it is plain decimal digits with at most one inner point, else None."""
+    whole, _dot, frac = text.partition(".")
+    if not (whole.isascii() and whole.isdigit()) or (
+        _dot and not (frac.isascii() and frac.isdigit())
+    ):
+        return None
+    value = float(text)
+    return value if value > 0 else None
+
+
 def _percent(value):
     """Whether `value` is a percentage above 0 and at most 100, fractional or whole."""
-    return value.endswith("%") and _positive(value[:-1]) and float(value[:-1]) <= 100
+    number = _number(value[:-1]) if value.endswith("%") else None
+    return number is not None and number <= 100
 
 
 def valid_tasks(value):
-    """Whether `value` is a `TasksMax`: a count, a percentage of the system's limit, or infinity."""
-    return value == "infinity" or _positive(value, integer=True) or _percent(value)
+    """Whether `value` is a `TasksMax` of at least `MIN_TASKS`, a percentage of the system limit, or infinity."""
+    if value == "infinity" or _percent(value):
+        return True
+    return value.isascii() and value.isdigit() and int(value) >= MIN_TASKS
 
 
 def valid_memory(value):
-    """Whether `value` is a `MemoryMax`: bytes, a size in K to E, a percentage of RAM, or infinity."""
+    """Whether `value` is a `MemoryMax` of at least `MIN_MEMORY` in K to E units, a percentage of RAM, or infinity.
+
+    A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its
+    start, so a unit is required.
+    """
     if value == "infinity" or _percent(value):
         return True
-    return _positive(value[:-1] if value[-1:] in ("K", "M", "G", "T", "P", "E") else value)
+    number = _number(value[:-1]) if value[-1:] in _UNITS else None
+    return number is not None and number * _UNITS[value[-1]] >= MIN_MEMORY
 
 
 def ceilings(env):
@@ -312,13 +330,22 @@ def _selftest():
         ),
         (session_token("a/b c;d") == "abcd", "a session id cannot inject into a unit name"),
         (
-            all(map(valid_memory, ("16G", "1024", "1.5G", "12.5%", "1P", "100%", "infinity")))
-            and not any(map(valid_memory, ("0", "101%", "0%", "16GB", "-1", "G", "lots"))),
+            all(
+                map(
+                    valid_memory, ("16G", "1.5G", "0.5G", "512M", "12.5%", "1P", "100%", "infinity")
+                )
+            )
+            and not any(
+                map(
+                    valid_memory,
+                    ("0", "1024", "0.5", ".5G", "1K", "101%", "0%", "16GB", "G", "lots"),
+                )
+            ),
             "a memory size systemd accepts is accepted, and a malformed one is not",
         ),
         (
-            all(map(valid_tasks, ("1", "8192", "50%", "infinity")))
-            and not any(map(valid_tasks, ("0", "1.5", "1e3", "-5", "\u0663"))),
+            all(map(valid_tasks, ("64", "8192", "50%", "infinity")))
+            and not any(map(valid_tasks, ("0", "1", "1.5", "1e3", "-5", ".5%", "\u0663"))),
             "and so is a task count",
         ),
         (
