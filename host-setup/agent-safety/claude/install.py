@@ -15,6 +15,7 @@ the machine is current, without changing anything.
 Usage: python3 install.py            (installs to ~/.claude)
        python3 install.py --report   (read-only: is this machine current?)
        CLAUDE_HOME=/x python3 install.py   (override target, for testing)
+       AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing)
 """
 
 import argparse
@@ -214,6 +215,13 @@ def source_ref():
     A dirty tree is reported rather than hidden: the SHA still names a commit, but the bytes
     installed are not that commit's, and a stamp that claims otherwise is the thing this exists
     to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
+
+    AGENT_SAFETY_DIRTY_OVERRIDE, read as exactly "0" or "1", replaces the git-derived dirty
+    signal with a fixed one, and honoring it prints a warning below. Any other value, unset
+    included, falls through to the git status read below, so a stray or misspelled setting
+    cannot silently force a verdict. This exists so a test can assert a verdict without
+    depending on whether this very kit happens to be mid-edit while the suite runs. It never
+    changes what a real, unset-env install reports.
     """
 
     def git(*args):
@@ -238,8 +246,17 @@ def source_ref():
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if branch and branch != "HEAD":
         ref["branch"] = branch
-    status = git("status", "--porcelain", "--", *PAYLOAD_FILES)
-    ref["dirty"] = bool(status)
+    override = os.environ.get("AGENT_SAFETY_DIRTY_OVERRIDE")
+    if override in ("0", "1"):
+        ref["dirty"] = override == "1"
+        print(
+            f"AGENT_SAFETY_DIRTY_OVERRIDE={override} is forcing the dirty-checkout signal. "
+            "The real git status was not read.",
+            file=sys.stderr,
+        )
+    else:
+        status = git("status", "--porcelain", "--", *PAYLOAD_FILES)
+        ref["dirty"] = bool(status)
     return ref
 
 

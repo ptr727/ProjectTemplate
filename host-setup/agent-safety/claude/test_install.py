@@ -24,9 +24,15 @@ sys.path.insert(0, str(HERE))
 import install
 
 
-def run(home, *args):
-    """Invoke the installer as a subprocess, the way a host actually runs it."""
-    env = dict(os.environ, CLAUDE_HOME=str(home))
+def run(home, *args, dirty=False):
+    """Invoke the installer as a subprocess, the way a host actually runs it.
+
+    dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
+    live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE, so a verdict this suite asserts
+    depends on the fixture rather than on whether host-setup happens to be mid-edit while the
+    suite runs. The default is clean, since that is what every case but one below needs.
+    """
+    env = dict(os.environ, CLAUDE_HOME=str(home), AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0")
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],
         capture_output=True,
@@ -45,8 +51,8 @@ class StampCase(unittest.TestCase):
         self.stamp = self.home / "agent-safety-stamp.json"
         self.md = self.home / "CLAUDE.md"
 
-    def install(self):
-        r = run(self.home)
+    def install(self, dirty=False):
+        r = run(self.home, dirty=dirty)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -65,6 +71,16 @@ class TestReportVerdicts(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("CURRENT", r.stdout)
+
+    def test_installing_from_a_dirty_checkout_reports_stale(self):
+        """The bytes on disk are not this commit's, whatever this checkout's real state is."""
+        self.install(dirty=True)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        if stamp["source"].get("vcs") != "git":
+            self.skipTest("this checkout is not a git tree, so there is no dirty signal to force")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("installed from a dirty checkout", r.stdout)
 
     def test_a_changed_payload_reports_stale(self):
         self.install()
@@ -140,6 +156,37 @@ class TestBlocksPresent(StampCase):
 
     def test_an_absent_file_yields_no_blocks_rather_than_raising(self):
         self.assertEqual(install.blocks_present(self.home / "nothing.md"), {})
+
+
+class TestSourceRef(unittest.TestCase):
+    """Calls install.source_ref() directly, with AGENT_SAFETY_DIRTY_OVERRIDE unset.
+
+    Every StampCase test above forces that override through run(), so none of them exercises
+    the git status read this class alone still calls. Skips rather than fails when this
+    checkout cannot supply a clean baseline itself, the same case TestDegradedEnvironments
+    covers by removing PATH: a tarball with no git, or a real edit already sitting in a
+    payload file while the suite runs.
+    """
+
+    def setUp(self):
+        saved_override = os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+        if saved_override is None:
+            self.addCleanup(os.environ.pop, "AGENT_SAFETY_DIRTY_OVERRIDE", None)
+        else:
+            self.addCleanup(os.environ.__setitem__, "AGENT_SAFETY_DIRTY_OVERRIDE", saved_override)
+        baseline = install.source_ref()
+        if baseline.get("vcs") != "git":
+            self.skipTest("this checkout is not a git tree, so source_ref() reads no status")
+        if baseline.get("dirty"):
+            self.skipTest("a payload file is already dirty in this checkout")
+
+    def test_dirtying_a_payload_file_is_detected(self):
+        """Proves the git-status branch itself, which the override lets every other test skip."""
+        target = HERE / install.GUARD_NAME
+        original = target.read_bytes()
+        self.addCleanup(target.write_bytes, original)
+        target.write_bytes(original + b"\n# dirtied by TestSourceRef, restored by addCleanup\n")
+        self.assertTrue(install.source_ref()["dirty"])
 
 
 class TestInstalledContent(StampCase):
@@ -469,6 +516,16 @@ class TestRegistration(StampCase):
         data["hooks"]["PreToolUse"][0]["matcher"] = "Edit"
         self._write(data)
         problems = install.registration_problems(self.home)
+        sweep_defect = "a SessionEnd entry names the sweep but does not run the deployed one"
+        matcher_defect = "so that group never fires"
+        self.assertTrue(
+            any(sweep_defect in p for p in problems),
+            f"the planted SessionEnd type defect was not reported: {problems!r}",
+        )
+        self.assertTrue(
+            any(matcher_defect in p for p in problems),
+            f"the planted PreToolUse matcher defect was not reported: {problems!r}",
+        )
         self.assertEqual([p for p in problems if "is not registered" in p], [], problems)
         self.assertEqual([p for p in problems if "never runs" in p], [], problems)
 

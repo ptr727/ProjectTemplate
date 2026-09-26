@@ -5220,6 +5220,64 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertEqual(0, self.run_reply("--resolve"))
         self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
 
+    def test_an_ascii_pattern_selects_a_body_written_with_typographic_punctuation(self) -> None:
+        """A `--match` string copied from a rendered finding is ASCII, and the body may not be."""
+        body = (
+            "The helper wasn\u2019t clear on \u201cwidening the words\u201d \u2014 it just "
+            "refuses\u2026"
+        )
+        self.wire(page([rthread("t1", body=body)]))
+        self.assertEqual(
+            0,
+            self.run_reply(
+                "--resolve", "--match", 'wasn\'t clear on "widening the words" - it just refuses'
+            ),
+        )
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_a_typographic_pattern_selects_a_body_written_in_ascii(self) -> None:
+        """The fold runs both ways: a pasted pattern can carry the typographic form too."""
+        self.wire(page([rthread("t1", body='The helper says "widen the words" - try again.')]))
+        self.assertEqual(
+            0,
+            self.run_reply("--resolve", "--match", "\u201cwiden the words\u201d \u2014 try again"),
+        )
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_every_documented_character_selects_across_the_ascii_boundary(self) -> None:
+        """Each of the issue's seven characters folds on its own, an expectation independent of
+        `_TYPOGRAPHIC_FOLD` itself, so dropping one from that table still fails this."""
+        expected_folds = {
+            0x2018: "'",  # left single quotation mark
+            0x2019: "'",  # right single quotation mark
+            0x201C: '"',  # left double quotation mark
+            0x201D: '"',  # right double quotation mark
+            0x2013: "-",  # en dash
+            0x2014: "-",  # em dash
+            0x2026: "...",  # horizontal ellipsis
+        }
+        for code_point, ascii_form in expected_folds.items():
+            char = chr(code_point)
+            with self.subTest(char=repr(char)):
+                self.out.seek(0)
+                self.out.truncate(0)
+                self.wire(page([rthread("t1", body=f"The finding reads foo{char}bar plainly.")]))
+                self.assertEqual(0, self.run_reply("--resolve", "--match", f"foo{ascii_form}bar"))
+                self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_no_match_names_how_many_unresolved_threads_there_are(self) -> None:
+        """Zero and several unresolved threads otherwise read the same, with nothing to tell them apart."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="An unrelated finding about naming."),
+                    rthread("t2", body="A second, also unrelated finding."),
+                ]
+            )
+        )
+        self.assertEqual(60, self.run_reply("--resolve"))
+        self.assertIn("of 2 unresolved thread(s) total", self.out.getvalue())
+
 
 class TestReplyConfirmsBeforeResolving(ReplyCase):
     def test_a_reply_returning_no_url_leaves_the_thread_open(self) -> None:

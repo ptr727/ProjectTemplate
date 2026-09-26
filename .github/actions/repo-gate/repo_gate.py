@@ -52,6 +52,7 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # Reading any of those as absence fails a correct pin, which is the direction that costs most.
 ABSENT = {"404", "422"}
 GH_TIMEOUT = 20
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # How a check says it did less than its name.
 # A gate that quietly degrades to a weaker reading prints the same clean line as one that ran.
@@ -62,7 +63,12 @@ NOTES: list[str] = []
 
 def sh(*args: str) -> str:
     return subprocess.run(
-        args, capture_output=True, text=True, encoding="utf-8", check=False
+        args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=False,
     ).stdout
 
 
@@ -125,18 +131,51 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     A caller vendoring a subtree it does not author, per GOVERNANCE.md's carry-versus-reach test,
     can scope every check out of that subtree this way. No check itself needs to change.
     Additive only: an empty or absent `exclude` scans exactly what it always has.
+
+    Git's quoting is pinned on, so the listing is ASCII whatever a config inherits and each quoted
+    name reaches `unquote_path` in the one form it decodes. Git's stderr carries no such quoting, and
+    a failure naming a root that is not UTF-8 echoes that name raw, so the decode tolerates it.
     """
-    args = ["git", "-C", str(root), "ls-files"]
+    args = ["git", "-C", str(root), "-c", "core.quotePath=true", "ls-files"]
     if exclude:
         args += ["--", *(f":!{pattern}" for pattern in exclude)]
-    result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", check=False)
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=False,
+    )
     if result.returncode != 0:
         # A failed command's stdout is never trusted, even where it is non-empty.
         # A partial listing read as complete is a scan that missed files and said nothing.
         reason = result.stderr.strip() or f"exit {result.returncode}, no stderr"
-        print(f"git ls-files failed: {reason}", file=sys.stderr)
+        print(f"git ls-files failed: {printable(reason)}", file=sys.stderr)
         return []
-    return [l for l in result.stdout.split("\n") if l]
+    return [unquote_path(l) for l in result.stdout.split("\n") if l]
+
+
+def unquote_path(name: str) -> str:
+    """The real name behind one `git ls-files` line, which git quotes when the name needs it.
+
+    Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
+    or a control character, escaping it the way C does. Read as a literal path, the quoted form
+    names no file on disk, so a check reading the file would pass over it and report clean.
+
+    The caller pins `core.quotePath=true`, which is what makes a quoted line ASCII and so what
+    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
+    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
+    raw inside the quotes, which this decode cannot carry.
+
+    A byte that is not valid UTF-8 comes back as a surrogate escape, the form `Path` and
+    `resolved_eol` both encode back to the original byte. Latin-1 carries each unescaped byte
+    through unchanged on the way there.
+    """
+    if name.startswith('"') and name.endswith('"') and len(name) > 1:
+        unescaped = name[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
+        return unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
+    return name
 
 
 def workflow_files(files: list[str]) -> list[str]:
@@ -179,8 +218,9 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
-    A local or self-repository ref names the running commit and is skipped. References under
-    another owner are shape-checked but not resolved.
+    A local (`./`) or self-repository (`$/`) ref names no ref to pin and is skipped, and so is
+    one starting with a bare `.github/`, unvalidated. References under another owner are
+    shape-checked but not resolved.
 
     Resolution is scoped to the scanned repository's own owner, because that is where the fleet's
     own actions live and where the decay this catches comes from: a squash merge deletes the
@@ -360,7 +400,36 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 CHECKS = {"sha-pin": check_sha_pin, "eol": check_eol, "eol-coverage": check_eol_coverage}
 
 
+def printable(line: str) -> str:
+    """`line` with each control character spelled as an escape, so one finding prints as one line.
+
+    `unquote_path` hands back a tracked name exactly as it is on disk, and a name may hold a
+    newline or an escape sequence. Printed raw, such a name forges a line of the gate's own output
+    or drives the reader's terminal, so each C0 or C1 control and DEL is escaped here, where it is
+    shown. A byte that is not UTF-8 arrives as a lone surrogate, which a strict stream refuses to
+    encode, so it is spelled as an escape too, leaving the result safe on any stream.
+    """
+    escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def report_paths_that_are_not_utf8() -> None:
+    """Let a path holding a byte that is not UTF-8 print rather than ending the run.
+
+    `unquote_path` decodes such a name with surrogateescape so it opens on disk, which leaves the
+    lone surrogate in the name to reach this program's own output. Encoding it strictly raises at
+    the line printing that name, so every check after it is lost along with the run's verdict, and
+    the exit code becomes a traceback's rather than the gate's. Escaping it costs the reader one
+    unreadable byte in one name.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    report_paths_that_are_not_utf8()
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--check", action="append", choices=sorted(CHECKS))
@@ -410,10 +479,10 @@ def main(argv: list[str] | None = None) -> int:
         status = "FAIL" if hits else "ok"
         print(f"[{status:4}] {name:12} {len(hits)} issue(s)")
         for h in hits:
-            print(f"         {h}")
+            print(f"         {printable(h)}")
         # After the findings and outside the count, since a note is not one.
         for note in NOTES:
-            print(f"         note: {note}")
+            print(f"         note: {printable(note)}")
         total += len(hits)
     return 1 if total else 0
 

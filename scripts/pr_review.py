@@ -3092,19 +3092,35 @@ def describe(thread: dict) -> str:
     )
 
 
+_TYPOGRAPHIC_FOLD = str.maketrans(
+    {
+        "\u2018": "'",  # left single quotation mark
+        "\u2019": "'",  # right single quotation mark
+        "\u201c": '"',  # left double quotation mark
+        "\u201d": '"',  # right double quotation mark
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2026": "...",  # horizontal ellipsis
+    }
+)
+
+
 def matching_threads(threads: list[dict], match: str, path: str | None) -> list[dict]:
     """Threads whose finding text contains `match`, narrowed by `path` where one is given.
 
     Matched on the finding's own words rather than on a line number, because a fix push moves the
     line and every lookup keyed to one then misses: replies posted against nothing while the
     resolves still succeeded, so the threads closed carrying no answer. Case-insensitive, since
-    the text is quoted back out of a digest by a reader rather than compared by a machine.
+    the text is quoted back out of a digest by a reader rather than compared by a machine. Both
+    sides are folded through `_TYPOGRAPHIC_FOLD` first, since the pattern is a substring copied
+    from a rendered finding whose typographic quotes, dashes, or ellipsis may not survive that
+    copy in ASCII.
     """
-    needle = match.lower()
+    needle = match.translate(_TYPOGRAPHIC_FOLD).lower()
     return [
         t
         for t in threads
-        if needle in (first_comment(t).get("body") or "").lower()
+        if needle in (first_comment(t).get("body") or "").translate(_TYPOGRAPHIC_FOLD).lower()
         and (path is None or t.get("path") == path)
     ]
 
@@ -3149,7 +3165,8 @@ def reply_to_thread(
     Every refusal below is a stop rather than a fallback. There is no id to guess at, no
     second-best thread to settle for, and no resolve on a reply that did not land, because each
     of those closes a finding while leaving it unanswered, which is the state a reviewer reads as
-    addressed.
+    addressed. A no-match names the unresolved count, since zero and several otherwise read the
+    same without the reader counting the lines the refusal prints below it.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -3163,6 +3180,7 @@ def reply_to_thread(
             f"status=NO_MATCH nothing was written: no unresolved thread on {owner}/{repo} "
             f"#{num} carries {match!r}"
             + (f" at {path}" if path else "")
+            + f", of {len(threads)} unresolved thread(s) total"
             + ". Widen the words or drop --path rather than reaching for an id, since the "
             "thread may also be resolved already, which reads the same from here."
         )
