@@ -49,6 +49,9 @@ COMMAND_VAR = "AGENT_CONTAINMENT_COMMAND"
 SHELL_VAR = "AGENT_CONTAINMENT_SHELL"
 RESTORE_VAR = "AGENT_CONTAINMENT_RUNTIME_RESTORE"
 
+UNREACHABLE = "no systemd user manager is reachable"
+UNDELEGATED = "the user manager is not delegated the pids and memory controllers"
+
 # How long a stop waits on SIGTERM before SIGKILL, so the session-end stop fits its hook's budget.
 STOP_TIMEOUT = "2s"
 
@@ -129,7 +132,9 @@ def valid_tasks(value):
     """Whether `value` is a `TasksMax` of at least `MIN_TASKS`, a percentage of the system limit, or infinity."""
     if value == "infinity" or _percent(value):
         return True
-    return value.isascii() and value.isdigit() and MIN_TASKS <= int(value) < MAX_LIMIT
+    # A leading zero makes systemd read the count as octal, a different ceiling or none at all.
+    plain = value.isascii() and value.isdigit() and not value.startswith("0")
+    return plain and MIN_TASKS <= int(value) < MAX_LIMIT
 
 
 def valid_memory(value):
@@ -177,7 +182,22 @@ def manager_runtime(env, platform=sys.platform, which=which, exists=os.path.exis
     return None
 
 
-def plan(command, env, suffix, runtime, which=which):
+def delegated(uid=None, read=None):
+    """Whether the user manager holds the pids and memory controllers, without which a scope enforces neither ceiling."""
+    uid = os.getuid() if uid is None else uid
+    path = f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/cgroup.controllers"
+    try:
+        if read:
+            text = read(path)
+        else:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+    except OSError:
+        return False
+    return {"pids", "memory"} <= set(text.split())
+
+
+def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
     """(argv, extra_env, notices) for the outer stage, which the caller execs.
 
     For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage,
@@ -188,8 +208,11 @@ def plan(command, env, suffix, runtime, which=which):
     if not is_tool_call(command):
         return [shell, "-c", command], {}, []
     if runtime is None:
-        note = "no systemd user manager is reachable, so this command runs with no task or memory ceiling"
-        return [shell, "-c", command], {}, [note]
+        return (
+            [shell, "-c", command],
+            {},
+            [f"{why}, so this command runs with no task or memory ceiling"],
+        )
     tasks, memory, notices = ceilings(env)
     token = session_token(env.get("CLAUDE_CODE_SESSION_ID")) or "nosession"
     argv = [
@@ -246,7 +269,10 @@ def main(argv):
         print("usage: tool-containment.py '<command string>' | --selftest", file=sys.stderr)
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
-    run, extra, notices = plan(argv[1], os.environ, suffix, manager_runtime(os.environ))
+    runtime, why = manager_runtime(os.environ), UNREACHABLE
+    if runtime and is_tool_call(argv[1]) and not delegated():
+        runtime, why = None, UNDELEGATED
+    run, extra, notices = plan(argv[1], os.environ, suffix, runtime, why=why)
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
     os.execve(run[0], run, {**os.environ, **extra})
@@ -348,6 +374,15 @@ def _selftest():
         ),
         (len(bare_notes) == 1 and "no task or memory ceiling" in bare_notes[0], "and says so"),
         (
+            UNDELEGATED in plan(tool, env, "52", None, fake_which, why=UNDELEGATED)[2][0],
+            "a manager lacking the controllers is named as the reason, per command",
+        ),
+        (
+            delegated(1000, read=lambda p: "cpu memory pids\n")
+            and not delegated(1000, read=lambda p: "cpu\n"),
+            "delegation needs both the pids and the memory controller",
+        ),
+        (
             raised[:2] == ("20000", "64G") and raised[2] == [],
             "the maintainer can raise both ceilings",
         ),
@@ -391,7 +426,18 @@ def _selftest():
             and not any(
                 map(
                     valid_tasks,
-                    ("0", "1", "1.5", "1e3", "-5", ".5%", "\u0663", "99999999999999999999"),
+                    (
+                        "0",
+                        "1",
+                        "1.5",
+                        "1e3",
+                        "-5",
+                        ".5%",
+                        "\u0663",
+                        "99999999999999999999",
+                        "08192",
+                        "0100",
+                    ),
                 )
             ),
             "and so is a task count",
