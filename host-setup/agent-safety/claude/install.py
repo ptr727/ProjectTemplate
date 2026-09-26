@@ -774,7 +774,7 @@ def report(claude_home):
         remedy = (
             "Remove that value and re-run the installer for this kit to contain them."
             if capable
-            else f"This host cannot contain them either way ({reason})."
+            else f"This kit cannot contain them here now ({reason})."
         )
         print(
             f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so this kit does not "

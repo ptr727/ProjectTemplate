@@ -811,7 +811,7 @@ class TestContainmentPrefix(StampCase):
         self.assertIn("re-run the installer for this kit to contain them", capable.stdout)
         self.assertNotIn("run uncontained", capable.stdout)
         incapable = run(self.home, "--report", contain=False)
-        self.assertIn("cannot contain them either way", incapable.stdout)
+        self.assertIn("This kit cannot contain them here now", incapable.stdout)
         self.assertNotIn("re-run the installer for this kit", incapable.stdout)
 
     def test_a_wrapper_merely_containing_the_prefix_name_is_foreign(self):
