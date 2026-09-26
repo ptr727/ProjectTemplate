@@ -3,9 +3,9 @@
 
 The shell is lifted out of the file rather than restated here, so an edit that removes the
 behavior fails these tests instead of leaving a reimplementation to agree with itself. The
-region under test runs before `gh` is ever invoked, so no stub is needed: a cataloged or absent
-registry falls through to a marker printed just after the lifted region, and an archived one
-exits before reaching it.
+region under test makes no `gh` call of its own, the repository it reads being resolved before it,
+so no stub is needed: a cataloged or absent registry falls through to a marker printed just after
+the lifted region, and an archived one exits before reaching it.
 """
 
 from __future__ import annotations
