@@ -47,6 +47,7 @@ TOOL_UNIT = "claude-tool"
 # The flag turning that off is an error on an older systemd, so the command travels in the environment instead.
 COMMAND_VAR = "AGENT_CONTAINMENT_COMMAND"
 SHELL_VAR = "AGENT_CONTAINMENT_SHELL"
+RESTORE_VAR = "AGENT_CONTAINMENT_RUNTIME_RESTORE"
 
 # How long a stop waits on SIGTERM before SIGKILL, so the session-end stop fits its hook's budget.
 STOP_TIMEOUT = "2s"
@@ -114,9 +115,9 @@ def _number(text):
 
 
 def _percent(value):
-    """Whether `value` is a percentage above 0 and at most 100, fractional or whole."""
+    """Whether `value` is a percentage from 1 to 100, fractional or whole, so `0.25%` typed for `25%` is refused."""
     number = _number(value[:-1]) if value.endswith("%") else None
-    return number is not None and number <= 100
+    return number is not None and 1 <= number <= 100
 
 
 def valid_tasks(value):
@@ -156,18 +157,22 @@ def ceilings(env):
     return tasks, memory, notices
 
 
-def manager_reachable(env, platform=sys.platform, which=which, exists=os.path.exists):
-    """Whether a systemd user manager can start a scope for this process."""
-    runtime = env.get("XDG_RUNTIME_DIR")
-    return bool(
-        platform.startswith("linux")
-        and which("systemd-run")
-        and runtime
-        and exists(os.path.join(runtime, "systemd", "private"))
-    )
+def manager_runtime(env, platform=sys.platform, which=which, exists=os.path.exists, uid=None):
+    """The runtime directory holding this account's systemd user manager socket, or None where there is none.
+
+    `XDG_RUNTIME_DIR` is read first and `/run/user/<uid>` second, since WSLg points the variable at a
+    directory of its own while the user manager listens in the standard one.
+    """
+    if not platform.startswith("linux") or not which("systemd-run"):
+        return None
+    uid = os.getuid() if uid is None else uid
+    for runtime in (env.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}"):
+        if runtime and exists(os.path.join(runtime, "systemd", "private")):
+            return runtime
+    return None
 
 
-def plan(command, env, suffix, reachable, which=which):
+def plan(command, env, suffix, runtime, which=which):
     """(argv, extra_env, notices) for the outer stage, which the caller execs.
 
     For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage,
@@ -177,7 +182,7 @@ def plan(command, env, suffix, reachable, which=which):
     shell = pick_shell(command, which)
     if not is_tool_call(command, env):
         return [shell, "-c", command], {}, []
-    if not reachable:
+    if runtime is None:
         note = "no systemd user manager is reachable, so this command runs with no task or memory ceiling"
         return [shell, "-c", command], {}, [note]
     tasks, memory, notices = ceilings(env)
@@ -200,7 +205,14 @@ def plan(command, env, suffix, reachable, which=which):
         os.path.abspath(__file__),
         "--inner",
     ]
-    return argv, {COMMAND_VAR: command, SHELL_VAR: shell}, notices
+    extra = {COMMAND_VAR: command, SHELL_VAR: shell}
+    # The scope finds the manager through this variable, and the command gets its original value back.
+    if env.get("XDG_RUNTIME_DIR") != runtime:
+        extra["XDG_RUNTIME_DIR"] = runtime
+        extra[RESTORE_VAR] = (
+            "set:" + env["XDG_RUNTIME_DIR"] if "XDG_RUNTIME_DIR" in env else "unset:"
+        )
+    return argv, extra, notices
 
 
 def inner(env):
@@ -208,6 +220,11 @@ def inner(env):
     env = dict(env)
     command = env.pop(COMMAND_VAR, None)
     shell = env.pop(SHELL_VAR, None) or "/bin/sh"
+    state, _sep, original = env.pop(RESTORE_VAR, "").partition(":")
+    if state == "set":
+        env["XDG_RUNTIME_DIR"] = original
+    elif state == "unset":
+        env.pop("XDG_RUNTIME_DIR", None)
     if command is None:
         return None, env
     return [shell, "-c", command], env
@@ -224,7 +241,7 @@ def main(argv):
         print("usage: tool-containment.py '<command string>' | --selftest", file=sys.stderr)
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
-    run, extra, notices = plan(argv[1], os.environ, suffix, manager_reachable(os.environ))
+    run, extra, notices = plan(argv[1], os.environ, suffix, manager_runtime(os.environ))
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
     os.execve(run[0], run, {**os.environ, **extra})
@@ -258,13 +275,22 @@ def _selftest():
         f.write("#!/bin/sh\n")
     os.chmod(probe, 0o755)
 
-    env = {"CLAUDE_CODE_SESSION_ID": "0a1b-2c3d", "XDG_RUNTIME_DIR": "/run/user/1000"}
+    RUN = "/run/user/1000"
+    env = {"CLAUDE_CODE_SESSION_ID": "0a1b-2c3d", "XDG_RUNTIME_DIR": RUN}
+    wslg = dict(env, XDG_RUNTIME_DIR="/mnt/wslg/runtime-dir")
+    wslg_extra = plan(tool, wslg, "50", RUN, fake_which)[1]
+    restored = inner({**wslg, **wslg_extra})[1]
+    unset_extra = plan(tool, {"CLAUDE_CODE_SESSION_ID": "x"}, "51", RUN, fake_which)[1]
+
+    def socket_in(*dirs):
+        return lambda path: any(path == os.path.join(d, "systemd", "private") for d in dirs)
+
     hook_env = dict(env, CLAUDE_PROJECT_DIR="/opt/agent/project")
     # A zsh tool call whose own command names a bash snapshot file after the leading clause.
     mixed = ztool.replace("eval 'echo", "eval 'ls /x/shell-snapshots/snapshot-bash-1.sh; echo")
-    argv, extra, notes = plan(tool, env, "42-ab", True, fake_which)
-    hook_plan = plan(hook, hook_env, "43-cd", True, fake_which)
-    bare, bare_extra, bare_notes = plan(tool, env, "44-ef", False, fake_which)
+    argv, extra, notes = plan(tool, env, "42-ab", RUN, fake_which)
+    hook_plan = plan(hook, hook_env, "43-cd", RUN, fake_which)
+    bare, bare_extra, bare_notes = plan(tool, env, "44-ef", None, fake_which)
     raised = ceilings(
         {"AGENT_CONTAINMENT_TASKS_MAX": "20000", "AGENT_CONTAINMENT_MEMORY_MAX": "64G"}
     )
@@ -280,16 +306,16 @@ def _selftest():
             "a hook command runs under its shell with no scope, so no systemd failure reaches it",
         ),
         (
-            plan(hook, hook_env, "43-cd", False, fake_which)[2] == [],
+            plan(hook, hook_env, "43-cd", None, fake_which)[2] == [],
             "and prints nothing where no manager is reachable",
         ),
         (
-            "--unit=claude-tool-0a1b-2c3d-48-ab" in plan(hook, env, "48-ab", True, fake_which)[0],
+            "--unit=claude-tool-0a1b-2c3d-48-ab" in plan(hook, env, "48-ab", RUN, fake_which)[0],
             "a command with no snapshot and no hook's project dir is still contained",
         ),
         (
             "--unit=claude-tool-0a1b-2c3d-49-ab"
-            in plan(tool, hook_env, "49-ab", True, fake_which)[0],
+            in plan(tool, hook_env, "49-ab", RUN, fake_which)[0],
             "and so is one sourcing a snapshot whatever its environment",
         ),
         (f"--property=TasksMax={DEFAULT_TASKS_MAX}" in argv, "the task ceiling is applied"),
@@ -302,11 +328,11 @@ def _selftest():
         (not any("$" in a for a in argv), "no argument carries a `$` for systemd-run to expand"),
         (extra[SHELL_VAR] == "/usr/bin/bash", "a bash snapshot runs under bash"),
         (
-            plan(ztool, env, "45", True, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
+            plan(ztool, env, "45", RUN, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
             "a zsh one under zsh",
         ),
         (
-            plan(mixed, env, "46", True, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
+            plan(mixed, env, "46", RUN, fake_which)[1][SHELL_VAR] == "/usr/bin/zsh",
             "only the leading source clause picks the shell",
         ),
         (notes == [], "a contained command prints nothing extra"),
@@ -338,7 +364,7 @@ def _selftest():
             and not any(
                 map(
                     valid_memory,
-                    ("0", "1024", "0.5", ".5G", "1K", "101%", "0%", "16GB", "G", "lots"),
+                    ("0", "1024", "0.5", ".5G", "1K", "101%", "0%", "0.25%", "16GB", "G", "lots"),
                 )
             ),
             "a memory size systemd accepts is accepted, and a malformed one is not",
@@ -354,7 +380,7 @@ def _selftest():
             "PATH is searched in order, and a miss is None",
         ),
         (
-            "--unit=claude-tool-nosession-47" in plan(tool, {}, "47", True, fake_which)[0],
+            "--unit=claude-tool-nosession-47" in plan(tool, {}, "47", RUN, fake_which)[0],
             "a missing session id names no session the sweep would stop",
         ),
         (inner_argv == ["/usr/bin/bash", "-c", tool], "the inner stage runs the command verbatim"),
@@ -367,16 +393,34 @@ def _selftest():
             "an inner stage with no command refuses rather than runs",
         ),
         (
-            not manager_reachable(env, platform="darwin", which=fake_which, exists=lambda p: True),
+            manager_runtime(env, "darwin", fake_which, lambda p: True, uid=1000) is None,
             "a non-Linux host has no manager",
         ),
         (
-            not manager_reachable({}, platform="linux", which=fake_which, exists=lambda p: True),
-            "nor does a session with no runtime directory",
+            manager_runtime(env, "linux", fake_which, socket_in(RUN), uid=1000) == RUN,
+            "a Linux session with a manager socket has one",
         ),
         (
-            manager_reachable(env, platform="linux", which=fake_which, exists=lambda p: True),
-            "a Linux session with a manager socket has one",
+            manager_runtime(wslg, "linux", fake_which, socket_in(RUN), uid=1000) == RUN,
+            "a runtime directory lacking the socket falls back to the account's standard one",
+        ),
+        (
+            manager_runtime({}, "linux", fake_which, socket_in(), uid=1000) is None,
+            "and no socket anywhere is no manager",
+        ),
+        (
+            wslg_extra.get("XDG_RUNTIME_DIR") == RUN
+            and restored.get("XDG_RUNTIME_DIR") == "/mnt/wslg/runtime-dir"
+            and RESTORE_VAR not in restored,
+            "systemd-run is pointed at the manager, and the command gets the original directory back",
+        ),
+        (
+            "XDG_RUNTIME_DIR" not in inner({"PATH": "/bin", **unset_extra})[1],
+            "and an unset directory stays unset for the command",
+        ),
+        (
+            RESTORE_VAR not in extra and "XDG_RUNTIME_DIR" not in extra,
+            "a session already pointing at the manager carries no restore",
         ),
     ]
     shutil.rmtree(scratch)

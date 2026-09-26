@@ -221,11 +221,17 @@ def report(table, roots):
     return "\n".join(lines)
 
 
-def _systemctl(*args):
-    """(exit code, stdout) of `systemctl --user <args>`, or (None, "") when it cannot run at all."""
+def _systemctl(*args, runtime=None):
+    """(exit code, stdout) of `systemctl --user <args>`, or (None, "") when it cannot run at all.
+
+    `runtime` points it at the manager found by `manager_runtime`, which may not be the session's own
+    `XDG_RUNTIME_DIR`.
+    """
+    env = dict(os.environ, XDG_RUNTIME_DIR=runtime) if runtime else None
     try:
         done = subprocess.run(
             ["systemctl", "--user", *args],
+            env=env,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -238,16 +244,19 @@ def _systemctl(*args):
     return done.returncode, done.stdout
 
 
-def manager_reachable(env, which=shutil.which, exists=os.path.exists):
-    """Whether a systemd user manager runs for this session, the test `tool-containment.py` applies.
+def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
+    """The runtime directory holding the user manager socket, found as `tool-containment.py` finds it.
 
     A host without one never ran a contained command, and asking `systemctl --user` there fails, which
     would report a failure to list at every session end on a host the installer never contained.
     """
-    runtime = env.get("XDG_RUNTIME_DIR")
-    return bool(
-        which("systemctl") and runtime and exists(os.path.join(runtime, "systemd", "private"))
-    )
+    if not which("systemctl"):
+        return None
+    uid = os.getuid() if uid is None else uid
+    for runtime in (env.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}"):
+        if runtime and exists(os.path.join(runtime, "systemd", "private")):
+            return runtime
+    return None
 
 
 def session_token(session_id):
@@ -255,13 +264,15 @@ def session_token(session_id):
     return re.sub(r"[^A-Za-z0-9-]", "", session_id or "")[:64]
 
 
-def session_scopes(session_id, runner=_systemctl):
-    """The tool-call scopes this session left loaded, or None when systemd cannot be asked.
+def session_scopes(session_ids, runner=_systemctl):
+    """The tool-call scopes these sessions left loaded, or None when systemd cannot be asked.
 
-    Only this session's tool-call scopes match, since the prefix places nothing else in a scope.
+    Only tool-call scopes match, since the prefix places nothing else in a scope. Several ids are
+    accepted because the hook payload and the environment can name different ones, and the prefix
+    names a scope from the environment.
     """
-    token = session_token(session_id)
-    if not token:
+    tokens = sorted({t for t in map(session_token, session_ids) if t})
+    if not tokens:
         return []
     code, out = runner(
         "list-units",
@@ -270,7 +281,7 @@ def session_scopes(session_id, runner=_systemctl):
         "--plain",
         "--no-legend",
         "--no-pager",
-        f"{_TOOL_UNIT}-{token}-*.scope",
+        *(f"{_TOOL_UNIT}-{t}-*.scope" for t in tokens),
     )
     if code != 0:
         return None
@@ -303,9 +314,9 @@ def scope_pids(units, runner=_systemctl, read=None):
     }
 
 
-def reap(session_id, table, runner=_systemctl, read=None):
+def reap(session_ids, table, runner=_systemctl, read=None):
     """Stop this session's tool-call scopes, returning the report, or "" when there were none."""
-    units = session_scopes(session_id, runner)
+    units = session_scopes(session_ids, runner)
     if units is None:
         return (
             "agent-safety: could not list this session's command scopes, so none was stopped. "
@@ -316,7 +327,7 @@ def reap(session_id, table, runner=_systemctl, read=None):
     pids = scope_pids(units, runner, read)
     runner("stop", "--", *units)
     # Re-listed whatever the stop returned, since a scope collected between the list and the stop fails it.
-    left = session_scopes(session_id, runner)
+    left = session_scopes(session_ids, runner)
     left = units if left is None else [u for u in left if u in units]
     stopped = [u for u in units if u not in left]
     lines = []
@@ -350,12 +361,18 @@ def main():
     if os.name != "posix" or sys.platform == "darwin":
         return 0
     held = payload.get("session_id") if isinstance(payload, dict) else None
-    session_id = (held if isinstance(held, str) else None) or os.environ.get(
-        "CLAUDE_CODE_SESSION_ID"
-    )
+    session_ids = [
+        held if isinstance(held, str) else "",
+        os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+    ]
     reaped = ""
-    if manager_reachable(os.environ):
-        reaped = reap(session_id, _read_process_table() or {})
+    runtime = manager_runtime(os.environ)
+    if runtime:
+
+        def runner(*args):
+            return _systemctl(*args, runtime=runtime)
+
+        reaped = reap(session_ids, _read_process_table() or {}, runner=runner)
     if reaped:
         print(reaped, file=sys.stderr)
     table = _read_process_table()
@@ -495,18 +512,27 @@ def _selftest():
         return 1, ""
 
     procs = {f"/sys/fs/cgroup/app.slice/{_TOOL_UNIT}-{sid}-400.scope/cgroup.procs": "400\n410\n"}
-    reaped = reap(sid, table, runner=fake, read=lambda p: procs.get(p, ""))
+    reaped = reap([sid], table, runner=fake, read=lambda p: procs.get(p, ""))
     stopped_all = not live
     live.update({f"{_TOOL_UNIT}-{sid}-400.scope"})
     sticky = f"{_TOOL_UNIT}-{sid}-400.scope"
     stuck = reap(
-        sid, table, runner=lambda *a: fake(*a, sticky=(sticky,)), read=lambda p: procs.get(p, "")
+        [sid], table, runner=lambda *a: fake(*a, sticky=(sticky,)), read=lambda p: procs.get(p, "")
     )
     live.update({f"{_TOOL_UNIT}-{sid}-400.scope", f"{_TOOL_UNIT}-{sid}-600.scope"})
     raced = reap(
-        sid, table, runner=lambda *a: fake(*a, stop_code=5), read=lambda p: procs.get(p, "")
+        [sid], table, runner=lambda *a: fake(*a, stop_code=5), read=lambda p: procs.get(p, "")
     )
     live.clear()
+
+    def has(name):
+        return "/usr/bin/" + name
+
+    def socket_in(*dirs):
+        return lambda path: any(path == os.path.join(d, "systemd", "private") for d in dirs)
+
+    two_calls = []
+    session_scopes(["b", "a", "a", ""], runner=lambda *a: two_calls.append(a) or (0, ""))
     checks += [
         (
             "stopped 2 command scopes" in raced and "did not stop" not in raced,
@@ -521,32 +547,36 @@ def _selftest():
         ("2 processes" in reaped and "pid 400" in reaped, "and names each scope's root process"),
         ("pid 410" not in reaped, "but not a process under that root"),
         ("did not stop" in stuck and f"SIGKILL {sticky}" in stuck, "a scope that stays is named"),
-        (reap("", table, runner=fake) == "", "a session with no id stops nothing"),
-        (reap(sid, table, runner=fake) == "", "a session that left nothing reports nothing"),
+        (reap(["", ""], table, runner=fake) == "", "a session with no id stops nothing"),
+        (reap([sid], table, runner=fake) == "", "a session that left nothing reports nothing"),
         (
-            "could not list" in reap(sid, table, runner=lambda *a: (None, "")),
+            "could not list" in reap([sid], table, runner=lambda *a: (None, "")),
             "a systemctl that cannot run is reported, never read as nothing to stop",
         ),
         (session_token("a/b c;d") == "abcd", "the unit name is spelled as the prefix spells it"),
         (
-            not manager_reachable({}, which=lambda n: "/usr/bin/systemctl", exists=lambda p: True),
-            "a session with no runtime directory has no manager to ask",
+            manager_runtime({}, which=has, exists=socket_in(), uid=1000) is None,
+            "a host with no manager socket anywhere has no manager to ask",
         ),
         (
-            not manager_reachable(
-                {"XDG_RUNTIME_DIR": "/run/user/1000"},
-                which=lambda n: "/usr/bin/systemctl",
-                exists=lambda p: False,
-            ),
-            "nor does one whose manager socket is absent",
+            manager_runtime(
+                {"XDG_RUNTIME_DIR": "/mnt/wslg/runtime-dir"},
+                which=has,
+                exists=socket_in("/run/user/1000"),
+                uid=1000,
+            )
+            == "/run/user/1000",
+            "a runtime directory lacking the socket falls back to the account's standard one",
         ),
         (
-            manager_reachable(
-                {"XDG_RUNTIME_DIR": "/run/user/1000"},
-                which=lambda n: "/usr/bin/systemctl",
-                exists=lambda p: True,
-            ),
-            "a session with its manager socket is swept",
+            manager_runtime({"XDG_RUNTIME_DIR": "/run/user/1000"}, which=lambda n: None, uid=1000)
+            is None,
+            "and a host with no systemctl is never asked",
+        ),
+        (
+            len(two_calls) == 1
+            and two_calls[0][-2:] == (f"{_TOOL_UNIT}-a-*.scope", f"{_TOOL_UNIT}-b-*.scope"),
+            "a payload id and an environment id that differ are both listed, in one call",
         ),
     ]
     ok = True

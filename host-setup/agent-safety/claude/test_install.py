@@ -16,12 +16,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 INSTALL = HERE / "install.py"
 
 sys.path.insert(0, str(HERE))
 import install
+
+# Held before any case patches `shutil.which`, which is the same object `install` reads.
+REAL_WHICH = shutil.which
 
 
 def run(home, *args, dirty=False, contain=True):
@@ -790,6 +794,67 @@ class TestContainmentPrefix(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("`env`", r.stderr)
         self.assertEqual(self._settings()["env"], ["not", "an", "object"])
+
+
+class TestContainmentCapable(unittest.TestCase):
+    """The judgment every other case forces through AGENT_SAFETY_CONTAINMENT_OVERRIDE, run for real."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.runtime = self.tmp / "runtime"
+        (self.runtime / "systemd").mkdir(parents=True)
+        (self.runtime / "systemd" / "private").write_text("", encoding="utf-8")
+        self.prefix = self.tmp / install.CONTAIN_NAME
+        shutil.copyfile(HERE / install.CONTAIN_NAME, self.prefix)
+        os.chmod(self.prefix, 0o755)
+        which = mock.patch.object(install.shutil, "which", side_effect=self._which)
+        which.start()
+        self.addCleanup(which.stop)
+
+    @staticmethod
+    def _which(name):
+        # The fake claims systemd-run is present, and every other name resolves as it really does.
+        return "/usr/bin/systemd-run" if name == "systemd-run" else REAL_WHICH(name)
+
+    def _judge(self, env=None, system="linux", uid=987654):
+        env = {"XDG_RUNTIME_DIR": str(self.runtime)} if env is None else env
+        return install.containment_capable(self.prefix, env=env, system=system, uid=uid)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "the prefix runs through a POSIX shebang"
+    )
+    def test_a_manager_and_a_runnable_prefix_can_contain(self):
+        capable, reason = self._judge()
+        self.assertTrue(capable, reason)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the execute bit is a POSIX property")
+    def test_a_prefix_that_cannot_run_directly_cannot_contain(self):
+        """Run through its interpreter it passes, and run the way Claude Code runs it, it fails."""
+        os.chmod(self.prefix, 0o644)
+        capable, reason = self._judge()
+        self.assertFalse(capable)
+        self.assertIn("does not run as its own executable", reason)
+
+    def test_a_runtime_directory_lacking_the_socket_falls_back_to_the_standard_one(self):
+        standard = os.path.join("/run/user/987654", "systemd", "private")
+        real = os.path.exists
+        with (
+            mock.patch.object(
+                install.os.path, "exists", side_effect=lambda p: p == standard or real(p)
+            ),
+            mock.patch.object(install, "prefix_runs_directly", return_value=""),
+        ):
+            capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})
+        self.assertTrue(capable, reason)
+
+    def test_no_socket_anywhere_cannot_contain(self):
+        capable, reason = self._judge(env={"XDG_RUNTIME_DIR": str(self.tmp / "wslg")})
+        self.assertFalse(capable)
+        self.assertIn("no systemd user manager", reason)
+
+    def test_a_non_linux_host_cannot_contain(self):
+        self.assertFalse(self._judge(system="darwin")[0])
 
 
 class TestPreexistingCorruption(StampCase):

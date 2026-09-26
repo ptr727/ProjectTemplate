@@ -178,46 +178,58 @@ MANAGED_PERMISSIONS = [
 ]
 
 
-def containment_capable():
-    """(capable, reason): whether this host can start a systemd user scope for an agent command.
+def containment_capable(prefix, env=None, system=None, uid=None):
+    """(capable, reason): whether this host can run the deployed `prefix` and start a scope for a command.
 
     Judged at install and at report time alike, so a host that gains or loses its user manager is
     reported against what it can do now. AGENT_SAFETY_CONTAINMENT_OVERRIDE, read as exactly "0" or
     "1", replaces the judgment for a test, the way AGENT_SAFETY_DIRTY_OVERRIDE does for the dirty signal.
     """
-    override = os.environ.get("AGENT_SAFETY_CONTAINMENT_OVERRIDE")
+    env = os.environ if env is None else env
+    system = sys.platform if system is None else system
+    override = env.get("AGENT_SAFETY_CONTAINMENT_OVERRIDE")
     if override in ("0", "1"):
         return override == "1", "forced by AGENT_SAFETY_CONTAINMENT_OVERRIDE"
-    if not sys.platform.startswith("linux"):
+    if not system.startswith("linux"):
         return False, f"{platform.system()} has no systemd user manager"
     if not shutil.which("systemd-run"):
         return False, "systemd-run is not installed"
-    # The prefix runs through its `env python3` shebang for every hook command, the write guard included.
-    # A PreToolUse hook that fails is a non-blocking error, so a `python3` that cannot run it fails the guard open.
-    if not python3_runs_the_prefix():
-        return False, "no python3 3.11 or newer is on PATH to run the prefix"
-    # A `su -`, cron, or `docker exec` shell carries no XDG_RUNTIME_DIR, while the account's sessions do.
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    if not os.path.exists(os.path.join(runtime, "systemd", "private")):
+    # WSLg, `su -`, cron, and `docker exec` shells point elsewhere or nowhere, while the manager listens here.
+    uid = os.getuid() if uid is None else uid
+    if not any(
+        runtime and os.path.exists(os.path.join(runtime, "systemd", "private"))
+        for runtime in (env.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}")
+    ):
         return False, "no systemd user manager is running for this account"
-    return True, "a systemd user manager is running"
+    ran = prefix_runs_directly(prefix)
+    if ran:
+        return False, f"the deployed prefix does not run as its own executable ({ran})"
+    return True, "a systemd user manager is running and the prefix runs"
 
 
-def python3_runs_the_prefix():
-    """Whether the `python3` the prefix's shebang resolves to is one this kit supports."""
-    found = shutil.which("python3")
-    if not found:
-        return False
+def prefix_runs_directly(prefix):
+    """Why `prefix --selftest` fails when executed the way Claude Code executes it, or "" where it passes.
+
+    Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
+    write guard included. A PreToolUse hook that fails is a non-blocking error, so a prefix that cannot
+    run that way, from a missing `python3`, a lost execute bit, or a `noexec` mount, fails the guard open.
+    """
     try:
         done = subprocess.run(
-            [found, "-c", "import sys; sys.exit(sys.version_info < (3, 11))"],
+            [str(prefix), "--selftest"],
             capture_output=True,
-            timeout=10,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return done.returncode == 0
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+    if done.returncode != 0:
+        last = (done.stdout + done.stderr).strip().splitlines()[-1:] or ["no output"]
+        return f"exit {done.returncode}: {last[0]}"
+    return ""
 
 
 def prefix_value(path):
@@ -623,7 +635,7 @@ def registration_problems(claude_home):
         )
     elif swept > 1:
         out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
-    capable, reason = containment_capable()
+    capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
     env = data.get("env")
     held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
     ours = names_prefix(held, claude_home / "hooks" / CONTAIN_NAME)
@@ -636,8 +648,8 @@ def registration_problems(claude_home):
         )
     elif not capable and ours:
         out.append(
-            f"{PREFIX_VAR} names the containment prefix on a host that cannot contain ({reason}), "
-            "so every command prints a notice and runs uncontained"
+            f"{PREFIX_VAR} names the containment prefix where it cannot contain ({reason}), "
+            "so re-run the installer to unset it"
         )
     allow = (
         data.get("permissions", {}).get("allow")
@@ -957,7 +969,7 @@ def main():
     done.append("SessionEnd sweep registered")
 
     # Step 2c sets the containment prefix only where this host can start a scope, and never over a value naming anything else.
-    capable, reason = containment_capable()
+    capable, reason = containment_capable(contain_dst)
     env = data.setdefault("env", {})
     held = env.get(PREFIX_VAR)
     ours = held is not None and CONTAIN_NAME in str(held)
