@@ -114,7 +114,9 @@ handoff chain `AGENTS.md` "Session Scope" defines, so it records work to do next
 its own, and an open one is present by design for as long as that chain is in use. Counting it
 inflates the number this run reports as the backlog by one for every lane in use, and a backlog
 count this fleet reports wrong is a failure with its own history, so filter the label out of the
-ranking and out of every count of the open backlog rather than out of the ranking alone.
+ranking and out of every count of the open backlog rather than out of the ranking alone. A link
+carrying `blocked` as well, as a parked lane does, is still a link, so this rule controls over the
+`blocked` rule below and the link is neither ranked nor counted.
 
 An issue carrying the `blocked` label is counted and is not ranked while its blocker stands. It
 records real work this repository owes, which is why it stays in the count, and the label says the
