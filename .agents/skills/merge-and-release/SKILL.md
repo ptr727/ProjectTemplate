@@ -65,12 +65,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
    partial gate. Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both
    where it is not, so the SHA step 3 merges is the one the gate verified. Where drive-pr's ready
-   report named a head and the recorded one differs, stop and re-ask with the commits added,
+   report named a head and it is not a prefix of the recorded one, stop and re-ask with the commits added,
    `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
    (.commit.message | split("\n")[0])'`, since a feature PR squashed into `develop` after the
    report moves the promotion's head onto content the maintainer never saw. Under an
    `unattended-handoff` standing grant there is no report to compare, and content another session
    merged meanwhile rides along, as that skill's grant accepts.
+   Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
+   this step recorded.
 3. `gh pr merge [number] --merge --match-head-commit <recorded-sha> --repo owner/repo`, so the
    server refuses the merge if the head moved after step 2. Never `--delete-branch`, the
    promotion PR's head is `develop`.
