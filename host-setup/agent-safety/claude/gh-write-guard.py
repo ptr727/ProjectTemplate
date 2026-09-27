@@ -352,72 +352,84 @@ _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 _COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"')
 
 
-def _strip_trailing_comment(line):
-    """Return `line` cut at the `#` bash reads as a comment, or None where there is none or the line
-    holds quoting this scan does not model. Only plain quotes are tracked, so a line it accepts is
-    one whose quote boundaries it reads exactly as bash does.
+def _strip_comments(cmd):
+    """Return `cmd` with every comment bash reads cut away, or None where it holds none or holds
+    quoting or a heredoc this scan does not model. Only plain quotes are tracked, and their state
+    carries across lines as bash's does, so a `#` inside a quote an earlier line opened stays text.
     """
-    if any(s in line for s in _COMMENT_SCAN_BAIL):
+    if "<<" in cmd or any(s in cmd for s in _COMMENT_SCAN_BAIL):
         return None
+    out = []
     quote = None
-    for i, ch in enumerate(line):
-        if quote:
+    comment = found = False
+    for i, ch in enumerate(cmd):
+        if comment:
+            if ch != "\n":
+                continue
+            comment = False
+        elif quote:
             if ch == quote:
                 quote = None
         elif ch in "'\"":
             quote = ch
-        elif ch == "#" and (i == 0 or line[i - 1] in " \t" or line[i - 1] in _SHELL_OP_CHARS):
-            return line[:i]
-    return None
+        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t" or cmd[i - 1] in _SHELL_OP_CHARS):
+            comment = found = True
+            continue
+        out.append(ch)
+    return "".join(out) if found else None
+
+
+def _operator_lex(text):
+    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse."""
+    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+    lex.whitespace_split = True
+    # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
+    # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
+    lex.commenters = ""
+    lex.whitespace = lex.whitespace.replace(
+        "\n", ""
+    )  # A newline is an operator above rather than a gap between words.
+    return list(lex)
 
 
 def _operator_tokens(line):
     """Tokenize one line as the primary path does, isolating operator runs. A line that does not
-    parse only because of a trailing comment, an apostrophe in it being the usual case, is
-    tokenized without that comment. Any other line that does not parse falls back to plain
-    splitting, which keeps a quoted argument whole rather than cutting it at an operator character.
+    parse falls back to plain splitting, which keeps a quoted argument whole rather than cutting it
+    at an operator character.
     """
-    for text in (line, _strip_trailing_comment(line)):
-        if text is None:
-            continue
-        try:
-            lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
-            lex.whitespace_split = True
-            lex.commenters = ""
-            return list(lex)
-        except TypeError:  # punctuation_chars unsupported on old Python
-            break
-        except ValueError:
-            continue
+    try:
+        return _operator_lex(line)
+    except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
+        pass
     try:
         return shlex.split(line, posix=True)
     except ValueError:
         return line.split()
 
 
-def _shell_tokens(cmd):
+def _shell_tokens(cmd, strip_comments=True):
     """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
     their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
-    of that token while a real redirection or line break is separated. Degrades gracefully if the
-    quoting cannot be parsed.
+    of that token while a real redirection or line break is separated. A command that does not parse
+    only because of a comment, an apostrophe in it being the usual case, is tokenized without its
+    comments. Degrades gracefully if the quoting still cannot be parsed.
     """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
-        lex.whitespace_split = True
-        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
-        # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
-        lex.commenters = ""
-        lex.whitespace = lex.whitespace.replace(
-            "\n", ""
-        )  # A newline is an operator above rather than a gap between words.
-        return list(lex)
+        return _operator_lex(cmd)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        toks = []
-        for i, line in enumerate(cmd.split("\n")):
-            if i:
-                toks.append("\n")
-            toks.extend(_operator_tokens(line))
-        return toks
+        pass
+    stripped = _strip_comments(cmd) if strip_comments else None
+    if stripped is not None:
+        try:
+            return _operator_lex(stripped)
+        except (ValueError, TypeError):
+            pass
+    toks = []
+    for i, line in enumerate(cmd.split("\n")):
+        if i:
+            toks.append("\n")
+        toks.extend(_operator_tokens(line))
+    return toks
 
 
 def _is_shell_op(tok):
@@ -2115,7 +2127,7 @@ def _heredoc_opener(line):
     that no token test can tell from a redirection. Skipping there costs a false deny on a line
     holding both, which is vanishingly rare, where reading it wrong drops real commands.
     """
-    toks = _shell_tokens(line)
+    toks = _shell_tokens(line, strip_comments=False)
     if any("((" in t for t in toks):
         return None
     for k, tok in enumerate(toks):
@@ -2319,6 +2331,11 @@ _CASES = [
         'echo "$(echo "\'")"; gh issue comment 1 --repo stranger/x --body hi; echo "\'"  # it\'s',
         "deny",
         "a line whose quoting does not parse and is not comment-stripped still shows the write bash runs",
+    ),
+    (
+        'echo "start\nx # y"; gh issue comment 1 --repo stranger/x --body hi\necho done  # it\'s',
+        "deny",
+        "a `#` inside a quote an earlier line opened is text, so the write after the quote closes is seen",
     ),
     (
         "gh issue comment 1 --body 'fixed; see log' --repo stranger/x  # it's",
@@ -3811,6 +3828,16 @@ _WAIT_CASES = [
         "timeout 600 until [ -f x ]; do sleep 30; done  # the PR's checks",
         "allow",
         "the same loop under a timeout bound stays accepted beside an apostrophe in a trailing comment",
+    ),
+    (
+        'echo "a\n# b"\nwhile true; do sleep 5; done  # the PR\'s checks',
+        "deny",
+        "a quote carried across lines still leaves the comment after it stripped and the loop seen",
+    ),
+    (
+        'echo "a\n<<EOF # "\nwhile true; do sleep 5; done\nEOF',
+        "deny",
+        "a heredoc marker on a line an earlier quote opened hides no loop from the comment strip",
     ),
     (
         "echo it's <<EOF\n'; while true; do sleep 5; done\nEOF",
