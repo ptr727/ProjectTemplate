@@ -135,7 +135,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    a review on the new head and continue the loop.
 8. Repeat 6 and 7 until the promotion PR meets every pr-review-conduct Merge Gate item except the
    maintainer's explicit permission to merge.
-9. Report the promotion PR number and its ready state. Do not merge it.
+9. Report the promotion PR number, its ready state, and its head SHA, the one `merge-and-release`
+   compares against before merging. Do not merge it.
 
 ## Disposing of Every Finding
 

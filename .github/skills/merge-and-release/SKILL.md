@@ -59,18 +59,21 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 ## The Procedure
 
 1. Identify the open develop -> main promotion PR for this repo, stop and report if none is open.
-2. From a hub checkout, `scripts/` is not carried into downstream repos, run `scripts/pr_review.py
-   status [number] --repo owner/repo` on it and confirm the pr-review-conduct Merge Gate. Stop
-   and report exactly what is missing rather than merging on a partial gate. Record the head the
-   go-ahead covers, `gh pr view [number] --repo owner/repo --json headRefOid --jq .headRefOid`:
-   the head the maintainer was shown when giving it, or under an `unattended-handoff` standing
-   grant the head this step verified. Where the live head already differs from the one the
-   maintainer was shown, stop and re-ask, naming the commits added with `git log --oneline
-   <shown>..<live>`, since a feature PR squashed into `develop` after the go-ahead moves the
-   promotion's head and the gate then holds for content the maintainer never saw.
-3. `gh pr merge [number] --merge --match-head-commit <recorded-sha> --repo owner/repo`, the SHA
-   being the one step 2 recorded, so the server refuses the merge if the head moved since. Never
-   `--delete-branch`, the promotion PR's head is `develop`.
+2. Record the promotion's live head, `gh pr view [number] --repo owner/repo --json headRefOid
+   --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
+   run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
+   pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
+   partial gate. Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both
+   where it is not, so the SHA step 3 merges is the one the gate verified. Where drive-pr's ready
+   report named a head and the recorded one differs, stop and re-ask with the commits added,
+   `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
+   (.commit.message | split("\n")[0])'`, since a feature PR squashed into `develop` after the
+   report moves the promotion's head onto content the maintainer never saw. Under an
+   `unattended-handoff` standing grant there is no report to compare, and content another session
+   merged meanwhile rides along, as that skill's grant accepts.
+3. `gh pr merge [number] --merge --match-head-commit <recorded-sha> --repo owner/repo`, so the
+   server refuses the merge if the head moved after step 2. Never `--delete-branch`, the
+   promotion PR's head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. When the chosen scope includes a release, first bring the hub checkout used for this procedure
    current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip
@@ -240,8 +243,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 
 - A merge conflict, a newly failing check, or a gate item that regressed since drive-pr finished
   are each a stop, report the exact state, never force or retry blindly.
-- A merge refused by `--match-head-commit` means the head moved after the go-ahead. Stop and
-  report the commits added, and never retry with the new SHA on the old go-ahead. The maintainer
-  gives a new one, or under an `unattended-handoff` grant the worker parks the promotion.
+- A merge refused by `--match-head-commit` means the head moved after step 2. Attended, stop and
+  report the commits added, named as step 2 names them, and never retry with the new SHA on the
+  old go-ahead. Under an `unattended-handoff` grant, re-run step 2 on the new head instead.
 - `gh pr merge` or `gh workflow run` failing is reported with its actual output, never
   suppressed, never assumed harmless on the agent's side alone.
