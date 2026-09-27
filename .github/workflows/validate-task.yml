@@ -288,7 +288,7 @@ jobs:
 
       # Mypy takes precedence where a config declares both, matching every repo that runs mypy in CI today.
       # A pyright-only config, with no mypy section, falls back to pyright instead.
-      # A declared directory's standalone mypy.ini, setup.cfg [mypy] section, or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
+      # A declared directory's standalone mypy.ini or .mypy.ini, setup.cfg [mypy] section, or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
       # A declared subdirectory configuring neither falls back to the repository root's config and runs the checker from the root, the way a monorepo keeping one config there runs it.
       # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
@@ -334,7 +334,7 @@ jobs:
               config_dir=.
             fi
             if [ -z "$checker" ] && [ "$DECLARED" = "true" ]; then
-              echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml, in a mypy.ini, setup.cfg, or pyrightconfig.json beside it, or in the same files at the repository root. Every Python directory owes a type check."
+              echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml, in a mypy.ini, .mypy.ini, setup.cfg, or pyrightconfig.json beside it, or in the same files at the repository root. Every Python directory owes a type check."
               exit 1
             elif [ -z "$checker" ]; then
               echo "no [tool.mypy] or [tool.pyright] section in $dir/pyproject.toml, skipping"
