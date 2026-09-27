@@ -409,12 +409,27 @@ def _operator_tokens(line):
         return line.split()
 
 
+def _base_tokens(cmd):
+    """Split each line of `cmd` plainly, keeping a newline between lines, as the base fallback did."""
+    toks = []
+    for i, line in enumerate(cmd.split("\n")):
+        if i:
+            toks.append("\n")
+        try:
+            toks.extend(shlex.split(line, posix=True))
+        except ValueError:
+            toks.extend(line.split())
+    return toks
+
+
 def _shell_tokens(cmd, strip_comments=True):
     """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
     their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
     of that token while a real redirection or line break is separated. A command that does not parse
     only because of a comment, an apostrophe in it being the usual case, is tokenized without its
-    comments. Degrades gracefully if the quoting still cannot be parsed.
+    comments, followed by the base fallback's tokens, so a context where bash reads a `#` as text
+    rather than a comment can never hide a command the base fallback saw. Degrades gracefully if
+    the quoting still cannot be parsed.
     """
     try:
         return _operator_lex(cmd)
@@ -423,7 +438,7 @@ def _shell_tokens(cmd, strip_comments=True):
     stripped = _strip_comments(cmd) if strip_comments else None
     if stripped is not None:
         try:
-            return _operator_lex(stripped)
+            return [*_operator_lex(stripped), "\n", *_base_tokens(cmd)]
         except (ValueError, TypeError):
             pass
     toks = []
@@ -2348,6 +2363,11 @@ _CASES = [
         "[[ $x == @(a|#b) ]]; gh issue comment 1 --repo stranger/x --body hi  # it's",
         "deny",
         "a `#` inside an extglob pattern is text, so the write after it is seen beside an apostrophe comment",
+    ),
+    (
+        "[[ a =~ a|#b ]]; gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside a regex is text, so the write after it is seen beside an apostrophe comment",
     ),
     (
         "gh issue comment 1 --body 'fixed; see log' --repo stranger/x  # it's",
