@@ -86,21 +86,9 @@ class ShapeTests(unittest.TestCase):
     def test_tool_config_alone_is_lint_only(self) -> None:
         self.assertEqual("lint-only", self.shape(".", {}, self.TOOL_ONLY))
 
-    def test_a_workspace_member_takes_the_enclosing_lock(self) -> None:
+    def test_a_workspace_member_is_unsupported(self) -> None:
         files = {"uv.lock": "", "pyproject.toml": self.WORKSPACE}
-        self.assertEqual("uv", self.shape("pkg/member", files, self.PROJECT))
-
-    def test_an_enclosing_lock_without_membership_is_unsupported(self) -> None:
-        for label, root, directory in (
-            ("no workspace table", self.PROJECT, "pkg/member"),
-            ("excluded member", self.WORKSPACE, "pkg/skipped"),
-            ("outside the member glob", self.WORKSPACE, "other/member"),
-            ("glob stays inside one segment", self.WORKSPACE, "pkg/deep/member"),
-            ("malformed root", "[tool.uv.workspace\n", "pkg/member"),
-        ):
-            with self.subTest(label):
-                files = {"uv.lock": "", "pyproject.toml": root}
-                self.assertEqual("unsupported", self.shape(directory, files, self.PROJECT))
+        self.assertEqual("unsupported", self.shape("pkg/member", files, self.PROJECT))
 
     def test_a_lint_only_member_under_a_lock_stays_lint_only(self) -> None:
         files = {"uv.lock": "", "pyproject.toml": self.WORKSPACE}

@@ -874,6 +874,95 @@ gh() {
             audit,
         )
 
+    def run_python_tests_step(
+        self, kind: str, tree: set[str], declared: bool
+    ) -> tuple[int, str, str]:
+        """Run the unit-test job's Python step over one constructed directory, against stub uv tools."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Run Python tests step\n", 1)[1]
+        body = step.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        script = "\n".join(line[10:] for line in body.splitlines())
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        work, stubs = root / "work", root / "bin"
+        for path in tree:
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            (work / path).write_text("", encoding="utf-8")
+        stubs.mkdir()
+        # Each stub writes the report its real tool would, so the step's own report check is what decides.
+        python_stub = "#!/usr/bin/env bash\necho x > coverage.xml\n"
+        stub = (
+            "#!/usr/bin/env bash\n"
+            'case " $* " in\n'
+            '*" venv "*) mkdir -p .venv/bin && printf %s "$PYTHON_STUB" > .venv/bin/python && chmod +x .venv/bin/python ;;\n'
+            '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
+            "esac\n"
+        )
+        for name in ("uv", "uvx"):
+            (stubs / name).write_text(stub, encoding="utf-8")
+            (stubs / name).chmod(0o755)
+        output = root / "output"
+        output.write_text("", encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PYTHON_STUB": python_stub,
+            "PYTHON_PROJECTS": f"{kind}\t.\n",
+            "DECLARED": "true" if declared else "false",
+            "GITHUB_OUTPUT": str(output),
+        }
+        result = run(
+            ["bash", "-c", script],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+
+    def test_undeclared_root_keeps_the_old_gate(self) -> None:
+        """A caller declaring nothing runs only a pytest suite beside a manifest, as before the input existed."""
+        cases = {
+            "uv project with tests": ("uv", {"pyproject.toml", "uv.lock", "tests/test_a.py"}, True),
+            "pip project with tests": (
+                "pip",
+                {"pyproject.toml", "requirements.txt", "tests/test_a.py"},
+                True,
+            ),
+            "uv project with no tests": ("uv", {"pyproject.toml", "uv.lock"}, False),
+            "lint-only root with tests": (
+                "lint-only",
+                {"pyproject.toml", "tests/test_a.py"},
+                False,
+            ),
+            "project with no manifest": (
+                "unsupported",
+                {"pyproject.toml", "tests/test_a.py"},
+                False,
+            ),
+        }
+        for label, (kind, tree, runs) in cases.items():
+            with self.subTest(label):
+                code, _, output = self.run_python_tests_step(kind, tree, declared=False)
+                self.assertEqual(0, code)
+                self.assertIn("files=./coverage.xml" if runs else "files=\n", output)
+
+    def test_a_declared_directory_owes_a_runnable_suite(self) -> None:
+        code, _, output = self.run_python_tests_step(
+            "lint-only", {"pyproject.toml", "tests/test_a.py"}, declared=True
+        )
+        self.assertEqual((0, "files=./coverage.xml\n"), (code, output))
+        for label, kind, tree in (
+            ("no tests/", "lint-only", {"pyproject.toml"}),
+            ("no manifest", "unsupported", {"pyproject.toml", "tests/test_a.py"}),
+        ):
+            with self.subTest(label):
+                code, stdout, _ = self.run_python_tests_step(kind, tree, declared=True)
+                self.assertEqual(1, code)
+                self.assertIn("::error::", stdout)
+
     def test_validator_python_leg_reaches_a_pip_dependency_repo(self) -> None:
         """WORKFLOW.md D1.6 owes coverage to every Python directory with tests, uv-managed or not.
 

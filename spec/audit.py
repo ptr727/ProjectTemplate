@@ -310,6 +310,35 @@ def python_type_findings(entry, tree):
     return []
 
 
+def python_undeclared_root_findings(entry, tree):
+    """DRIFT where a registry declaring no Python directory leaves a root suite no gate runs.
+
+    The validator's root default runs a root tests/ suite only beside a root uv.lock or
+    requirements*.txt, the gate it ran before directories could be declared. A root suite with
+    neither is a lint-only one, which runs only once the root is declared, and that repo still
+    claims coverage from coverage_claiming_types(). `tree` is the repo's blob path set, or None
+    when it could not be read in full, in which case nothing is reported.
+    """
+    if tree is None or python_directories_of(entry) or "pyproject.toml" not in tree:
+        return []
+    if not any(p.startswith("tests/") for p in tree):
+        return []
+    if "uv.lock" in tree or any(
+        p.startswith("requirements") and p.endswith(".txt") and "/" not in p for p in tree
+    ):
+        return []
+    return [
+        (
+            "DRIFT",
+            (
+                "python-directories: the root carries a tests/ suite with no uv.lock or "
+                "requirements*.txt, which the undeclared root default never runs. Declare '.' in the "
+                "validator's python-directories input and in the registry's pythonDirectories."
+            ),
+        )
+    ]
+
+
 def python_directory_coverage_findings(entry, tree):
     """DRIFT naming tracked `.py` files that sit outside every directory expected_python_directories()
     expects, mirroring python_directories.py's own uncovered() but measured against the registry's
@@ -2008,12 +2037,12 @@ def normalize_declared_python_directory(line):
     return posixpath.normpath(path)
 
 
-def python_directories_caller_findings(path, text, entry, tree=None):
+def python_directories_caller_findings(path, text, entry):
     """DRIFT when a caller's declared `python-directories` input disagrees with the registry's own.
 
-    Both sides are compared by the directories they resolve to, so a caller naming `.` agrees with a
-    registry naming nothing wherever the tree carries a root pyproject.toml. `tree` is the repo's blob
-    path set, or None when it could not be read, and then the two declarations are compared as written.
+    Compared as written rather than by the directories each resolves to, since naming `.` is not the
+    same as naming nothing: a declared directory owes a suite and a type check that the root default
+    only runs where it finds them.
 
     Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
     _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
@@ -2034,10 +2063,6 @@ def python_directories_caller_findings(path, text, entry, tree=None):
         }
     )
     registry = sorted(python_directories_of(entry))
-    if tree is not None:
-        root = ["."] if "pyproject.toml" in tree else []
-        if sorted(declared or root) == sorted(expected_python_directories(entry, tree)):
-            return []
     if declared == registry:
         return []
     return [
@@ -2616,6 +2641,7 @@ def audit_repo(entry, spec, branch=None):
     # declarations rather than against what any one caller's workflow happens to gate today.
     findings.extend(python_type_findings(entry, tree))
     findings.extend(python_directory_coverage_findings(entry, tree))
+    findings.extend(python_undeclared_root_findings(entry, tree))
     stores = {}
     # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [
@@ -2760,7 +2786,7 @@ def audit_repo(entry, spec, branch=None):
             else:
                 contract = item.get("contract", {})
                 findings.extend(check_interface(path, contract, text))
-                findings.extend(python_directories_caller_findings(path, text, entry, tree))
+                findings.extend(python_directories_caller_findings(path, text, entry))
                 canonical_rel = item.get("reference") or path
                 for job in contract.get("verbatimJobs", []):
                     findings.extend(
@@ -5831,30 +5857,46 @@ def _selftest():
         ),
     ]
     py_caller_root = py_caller_plain.replace("python-directories: Tools", "python-directories: .")
-    py_root_tree = {"pyproject.toml", "app.py"}
-    python_caller_cases = [(*case, None) for case in python_caller_cases] + [
+    python_caller_cases.append(
+        (py_caller_path, py_caller_root, {}, 1, "naming the root is not the same as naming nothing")
+    )
+    undeclared_root_cases = [
         (
-            py_caller_path,
-            py_caller_root,
             {},
+            {"pyproject.toml", "tests/test_a.py", "a.py"},
+            1,
+            "a lint-only root suite nothing runs",
+        ),
+        ({}, {"pyproject.toml", "tests/test_a.py", "uv.lock"}, 0, "a locked root runs by default"),
+        (
+            {},
+            {"pyproject.toml", "tests/test_a.py", "requirements.txt"},
             0,
-            "caller names the root the default gates",
-            py_root_tree,
+            "a pip root runs by default",
         ),
         (
-            py_caller_path,
-            py_caller_no_with,
-            {"pythonDirectories": ["."]},
-            0,
-            "registry names the default root",
-            py_root_tree,
+            {},
+            {"pyproject.toml", "tests/test_a.py", "docs/requirements.txt"},
+            1,
+            "a nested manifest is not the root's",
         ),
-        (py_caller_path, py_caller_root, {}, 1, "caller names a root with no project", {"app.py"}),
-        (py_caller_path, py_caller_root, {}, 1, "unreadable tree compares as written", None),
+        (
+            {"pythonDirectories": ["."]},
+            {"pyproject.toml", "tests/test_a.py"},
+            0,
+            "a declared root runs",
+        ),
+        ({}, {"pyproject.toml", "a.py"}, 0, "no root suite to run"),
+        ({}, None, 0, "unreadable tree reports nothing"),
     ]
+    for entry_in, tree_in, expected, label in undeclared_root_cases:
+        got = len(python_undeclared_root_findings(entry_in, tree_in))
+        if got != expected:
+            ok = False
+            print(f"  FAIL python_undeclared_root_findings [{label}] -> {got}, expected {expected}")
     python_caller_ok = True
-    for path_in, text_in, entry_in, expected, label, tree_in in python_caller_cases:
-        got = len(python_directories_caller_findings(path_in, text_in, entry_in, tree_in))
+    for path_in, text_in, entry_in, expected, label in python_caller_cases:
+        got = len(python_directories_caller_findings(path_in, text_in, entry_in))
         if got != expected:
             ok = False
             python_caller_ok = False
