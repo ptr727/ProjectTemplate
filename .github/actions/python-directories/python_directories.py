@@ -90,7 +90,7 @@ def resolve(declared_text: str, tracked: list[str]) -> tuple[list[str], bool, li
 
 
 def read_file(path: str) -> str:
-    return Path(path).read_text(encoding="utf-8", errors="replace")
+    return Path(path).read_text(encoding="utf-8-sig", errors="replace")
 
 
 def in_directory(directory: str, name: str) -> str:

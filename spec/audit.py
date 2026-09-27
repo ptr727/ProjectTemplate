@@ -2050,7 +2050,7 @@ def workflow_input_text(job_text, key):
     key_at = None
     for i in range(with_at + 1, len(lines)):
         ln = lines[i]
-        if not ln.strip():
+        if not ln.strip() or ln.lstrip().startswith("#"):
             continue
         indent = len(ln) - len(ln.lstrip())
         if indent <= with_indent:
@@ -5991,6 +5991,18 @@ def _selftest():
     py_caller_folded = py_caller_block.replace(
         "python-directories: |\n        Tools\n",
         "python-directories: >\n        Tools\n        Other\n",
+    )
+    py_caller_commented = py_caller_plain.replace(
+        "    with:\n", "    with:\n        # a note indented past the keys\n"
+    )
+    python_caller_cases.append(
+        (
+            py_caller_path,
+            py_caller_commented,
+            {"pythonDirectories": ["Tools"]},
+            0,
+            "a deeper comment hides no key",
+        )
     )
     py_caller_tabbed = py_caller_plain.replace(
         "python-directories: Tools", "python-directories: Too\tls"

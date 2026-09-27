@@ -455,11 +455,13 @@ jobs:
         with:
           directories: ${{ inputs.python-directories }}
 
+      # A root the undeclared default skips still sets uv up, so an empty cache is a normal outcome rather than an error at post-job save.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: ${{ matrix.python-version }}
+          ignore-nothing-to-cache: true
 
       # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
       # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
