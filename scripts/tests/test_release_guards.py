@@ -213,63 +213,6 @@ def fenced_shell_block(markdown: str, marker: str) -> str:
     return blocks[0]
 
 
-def hash_files(pattern: str, present: set[str]) -> bool:
-    """Whether a workflow `hashFiles(<pattern>)` would match anything in `present`.
-
-    `**` spans directory separators and `*` does not, which is what separates a root-only
-    `requirements*.txt` from a recursive `tests/**`.
-    """
-    regex = re.escape(pattern).replace(r"\*\*", "@@").replace(r"\*", "[^/]*").replace("@@", ".*")
-    return any(re.fullmatch(regex, path) for path in present)
-
-
-def split_top_level(expression: str, operator: str) -> list[str]:
-    """Split on `operator` outside any parentheses."""
-    parts: list[str] = []
-    depth = 0
-    start = 0
-    index = 0
-    while index < len(expression):
-        character = expression[index]
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-        elif depth == 0 and expression.startswith(operator, index):
-            parts.append(expression[start:index])
-            index += len(operator)
-            start = index
-            continue
-        index += 1
-    parts.append(expression[start:])
-    return [part.strip() for part in parts]
-
-
-def evaluate_guard(expression: str, present: set[str]) -> bool:
-    """Evaluate a workflow `if:` written only from `hashFiles(...)` emptiness tests, `&&`, `||`, `()`.
-
-    Deliberately narrow rather than a general expression engine: it is here to answer what the
-    validator's Python leg does for one file set, not to reimplement GitHub's evaluator.
-    """
-
-    def atom(text: str) -> bool:
-        match = re.fullmatch(r"hashFiles\('([^']*)'\)\s*(!=|==)\s*''", text.strip())
-        if not match:
-            raise ValueError(f"unsupported guard atom: {text!r}")
-        hit = hash_files(match.group(1), present)
-        return hit if match.group(2) == "!=" else not hit
-
-    result = True
-    for clause in split_top_level(expression, "&&"):
-        if clause.startswith("(") and clause.endswith(")"):
-            result = result and any(
-                atom(alternative) for alternative in split_top_level(clause[1:-1], "||")
-            )
-        else:
-            result = result and atom(clause)
-    return result
-
-
 class ReleaseGuardCase(unittest.TestCase):
     """Publishing and audit discovery require their prerequisite checks to succeed."""
 
@@ -931,37 +874,252 @@ gh() {
             audit,
         )
 
+    def run_python_tests_step(
+        self,
+        kind: str,
+        tree: set[str] | dict[str, str],
+        declared: bool,
+        step_name: str = "Run Python tests step",
+        extra_env: dict[str, str] | None = None,
+    ) -> tuple[int, str, str]:
+        """Run one of the validator's Python steps over a constructed directory, against stub uv tools.
+
+        The third value is what the step wrote to GITHUB_OUTPUT followed by every stub invocation.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        step = workflow.split(f"      - name: {step_name}\n", 1)[1]
+        body = step.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        script = "\n".join(line[10:] for line in body.splitlines())
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        work, stubs = root / "work", root / "bin"
+        contents = tree if isinstance(tree, dict) else dict.fromkeys(tree, "")
+        for path, text in contents.items():
+            (work / path).parent.mkdir(parents=True, exist_ok=True)
+            (work / path).write_text(text, encoding="utf-8")
+        stubs.mkdir()
+        # Each stub writes the report its real tool would, so the step's own report check is what decides.
+        # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
+        python_stub = '#!/usr/bin/env bash\nif [ "$1" = -c ]; then echo 3.99; else echo x > coverage.xml; fi\n'
+        stub = (
+            "#!/usr/bin/env bash\n"
+            'echo "${0##*/} $*${UV_PYTHON:+ [UV_PYTHON=$UV_PYTHON]}" >> "$STUB_LOG"\n'
+            'case " $* " in\n'
+            '*" venv "*) mkdir -p .venv/bin && printf %s "$PYTHON_STUB" > .venv/bin/python && chmod +x .venv/bin/python ;;\n'
+            '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
+            "esac\n"
+        )
+        venv_python = work / ".venv/bin/python"
+        if venv_python.exists():
+            venv_python.write_text(python_stub, encoding="utf-8")
+            venv_python.chmod(0o755)
+        for name in ("uv", "uvx"):
+            (stubs / name).write_text(stub, encoding="utf-8")
+            (stubs / name).chmod(0o755)
+        output, log = root / "output", root / "log"
+        output.write_text("", encoding="utf-8")
+        log.write_text("", encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PYTHON_STUB": python_stub,
+            "PYTHON_PROJECTS": f"{kind}\t.\n",
+            "DECLARED": "true" if declared else "false",
+            "GITHUB_OUTPUT": str(output),
+            "STUB_LOG": str(log),
+            **(extra_env or {}),
+        }
+        if not extra_env or "UV_PYTHON" not in extra_env:
+            env.pop("UV_PYTHON", None)
+        result = run(
+            ["bash", "-c", script],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        written = output.read_text(encoding="utf-8") + log.read_text(encoding="utf-8")
+        return result.returncode, result.stdout, written
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_undeclared_root_keeps_the_old_gate(self) -> None:
+        """A caller declaring nothing runs only a pytest suite beside a manifest, as before the input existed."""
+        cases = {
+            "uv project with tests": ("uv", {"pyproject.toml", "uv.lock", "tests/test_a.py"}, True),
+            "pip project with tests": (
+                "pip",
+                {"pyproject.toml", "requirements.txt", "tests/test_a.py"},
+                True,
+            ),
+            "uv project with no tests": ("uv", {"pyproject.toml", "uv.lock"}, False),
+            "uv project whose tests/ holds only fixtures": (
+                "uv",
+                {"pyproject.toml", "uv.lock", "tests/fixtures/data.json"},
+                True,
+            ),
+            "lint-only root with tests": (
+                "lint-only",
+                {"pyproject.toml", "tests/test_a.py"},
+                False,
+            ),
+            "project with no manifest": (
+                "unsupported",
+                {"pyproject.toml", "tests/test_a.py"},
+                False,
+            ),
+        }
+        for label, (kind, tree, runs) in cases.items():
+            with self.subTest(label):
+                code, _, output = self.run_python_tests_step(kind, tree, declared=False)
+                self.assertEqual(0, code)
+                self.assertIn("files=./coverage.xml" if runs else "files=\n", output)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_lint_installs_a_declared_pip_directory_under_the_named_interpreter(self) -> None:
+        """setup-uv exports UV_PYTHON, which every uv call reads, so the named interpreter has to replace it."""
+        tree = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
+        env = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": '["3.14", "3.13"]'}
+        code, _, written = self.run_python_tests_step(
+            "pip", tree, True, step_name="Sync Python dependencies step", extra_env=env
+        )
+        self.assertEqual(0, code)
+        self.assertIn("uv venv [UV_PYTHON=3.14]", written)
+        self.assertIn("uv pip install -r requirements.txt [UV_PYTHON=3.14]", written)
+        code, _, written = self.run_python_tests_step(
+            "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
+        )
+        self.assertEqual((0, ""), (code, written))
+        for versions in ("[3.14]", '[" "]', "[]", "not json"):
+            with self.subTest(versions=versions):
+                bad = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": versions}
+                code, stdout, _ = self.run_python_tests_step(
+                    "pip", tree, True, step_name="Sync Python dependencies step", extra_env=bad
+                )
+                self.assertEqual(1, code)
+                self.assertIn("::error::The python-versions input", stdout)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_type_check_picks_its_checker_and_environment(self) -> None:
+        """A declared directory owes a type check, run against its installed dependencies."""
+        mypy_section = {
+            "pyproject.toml": "[tool.mypy]\n",
+            "requirements.txt": "",
+            ".venv/bin/python": "",
+        }
+        standalone = {"pyproject.toml": "[tool.ruff]\n", "pyrightconfig.json": "{}"}
+        cases = {
+            "declared pip mypy reads the venv": (
+                "pip",
+                mypy_section,
+                True,
+                0,
+                "uvx mypy@latest --python-executable .venv/bin/python --python-version 3.99",
+            ),
+            "undeclared pip mypy keeps the old call": (
+                "pip",
+                mypy_section,
+                False,
+                0,
+                "uvx mypy@latest\n",
+            ),
+            "declared standalone pyright counts": (
+                "lint-only",
+                standalone,
+                True,
+                0,
+                "uvx pyright@latest\n",
+            ),
+            "undeclared standalone pyright is not read": ("lint-only", standalone, False, 0, None),
+            "declared with no checker fails": ("lint-only", {"pyproject.toml": ""}, True, 1, None),
+            "uv runs its locked checker": (
+                "uv",
+                {"pyproject.toml": "[tool.mypy]\n"},
+                True,
+                0,
+                "uv run mypy",
+            ),
+        }
+        for label, (kind, tree, declared, code_expected, call) in cases.items():
+            with self.subTest(label):
+                code, _, written = self.run_python_tests_step(
+                    kind, tree, declared, step_name="Type check Python step"
+                )
+                self.assertEqual(code_expected, code)
+                if call is None:
+                    self.assertNotIn("mypy", written.replace("[tool.mypy]", ""))
+                    self.assertNotIn("pyright", written)
+                else:
+                    self.assertIn(call, written)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_a_declared_directory_owes_a_runnable_suite(self) -> None:
+        code, _, output = self.run_python_tests_step(
+            "lint-only", {"pyproject.toml", "tests/test_a.py"}, declared=True
+        )
+        self.assertEqual(0, code)
+        self.assertTrue(output.startswith("files=./coverage.xml\n"), output)
+        for label, kind, tree, message in (
+            ("no tests/", "lint-only", {"pyproject.toml"}, "has no tests/ directory"),
+            (
+                "no Python under tests/",
+                "lint-only",
+                {"pyproject.toml", "tests/README.md"},
+                "has no Python files under tests/",
+            ),
+            (
+                "no manifest",
+                "unsupported",
+                {"pyproject.toml", "tests/test_a.py"},
+                "cannot install its dependencies",
+            ),
+        ):
+            with self.subTest(label):
+                code, stdout, _ = self.run_python_tests_step(kind, tree, declared=True)
+                self.assertEqual(1, code)
+                self.assertIn(message, stdout)
+
     def test_validator_python_leg_reaches_a_pip_dependency_repo(self) -> None:
-        """WORKFLOW.md D1.6 owes coverage to every Python repo with tests, uv-managed or not.
+        """WORKFLOW.md D1.6 owes coverage to every Python directory with tests, uv-managed or not.
 
         Gating the leg on `uv.lock` alone skipped a pip/requirements repo that has tests, so it
         collected no coverage and never reached the missing-report failure either.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
-        guards = [
-            " ".join(line.strip() for line in block.strip().splitlines())
-            for block in re.findall(r"(?m)^        if: >-\n((?:^ {10}.*\n)+)", job)
+
+        # Every Python step keys on the resolved directories rather than on a root file, or a nested project is skipped.
+        self.assertNotIn("hashFiles('pyproject.toml')", job)
+        self.assertEqual(2, job.count("if: steps.python.outputs.any == 'true'"))
+        self.assertIn("if: steps.python-tests.outputs.files != ''", job)
+
+        # Each dependency shape reaches its own runner, the lint-only one included.
+        for arm in ("              uv)\n", "              pip)\n", "              lint-only)\n"):
+            self.assertIn(arm, job)
+        self.assertIn("uvx coverage@latest run -m unittest discover -s tests", job)
+        self.assertIn("has no Python files under tests/", job)
+        self.assertIn("cannot install its dependencies", job)
+
+        # The directory list is each loop's stdin, so a child left reading it swallows the directories after it.
+        children = [
+            line for line in workflow.splitlines() if line.lstrip().startswith(('(cd "$dir"', ") "))
         ]
-        python_guards = [guard for guard in guards if "tests/**" in guard]
-
-        # Setup, dependency install, pytest, and upload: one drifting guard reintroduces the skip.
-        self.assertEqual(4, len(python_guards))
-        self.assertEqual(1, len(set(python_guards)))
-
-        trees = {
-            "uv project with tests": ({"pyproject.toml", "uv.lock", "tests/test_a.py"}, True),
-            "pip project with tests": (
-                {"pyproject.toml", "requirements.txt", "requirements-test.txt", "tests/test_a.py"},
-                True,
-            ),
-            "tests but no dependency manifest": ({"pyproject.toml", "tests/test_a.py"}, False),
-            "lint-only scripts tree": ({"pyproject.toml", "scripts/tool.py"}, False),
-            "pip project with no tests": ({"pyproject.toml", "requirements.txt"}, False),
-        }
-        for label, (present, expected) in trees.items():
-            with self.subTest(tree=label):
-                self.assertEqual(expected, evaluate_guard(python_guards[0], present))
+        self.assertTrue(children)
+        for line in children:
+            self.assertTrue(line.endswith("< /dev/null"), line)
 
         # The guard admitting a pip repo is only half of it: the steps must install and run without a lockfile.
         self.assertIn('requirement_args+=(-r "$file")', job)
@@ -975,7 +1133,7 @@ gh() {
         # The lockfile branch installs the project itself, so the pip branch owes the same.
         # Without it a src-layout repo fails collection on its own package instead of running its tests.
         self.assertIn("uv pip install -e .", job)
-        self.assertIn(r"grep -Eq '^[[:space:]]*\[project\]' pyproject.toml", job)
+        self.assertIn('"project" not in tomllib.load', job)
 
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.

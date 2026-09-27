@@ -713,6 +713,17 @@ class RegistryEntryGateCase(unittest.TestCase):
         output = self.run_against(self.entry(groundTruthBranch="release/2.0"))
         self.assertNotIn("groundTruthBranch", output)
 
+    def test_a_declared_python_directories_is_checked_by_the_loop(self) -> None:
+        """A declaration whose types lack 'python' is refused, and the direct-call twin below pins the grammar."""
+        self.assertIn(
+            "Fixture: pythonDirectories declared but types does not include 'python'",
+            self.run_against(self.entry(pythonDirectories=["Tools"])),
+        )
+
+    def test_a_valid_python_directories_passes_the_loop(self) -> None:
+        output = self.run_against(self.entry(pythonDirectories=["Tools"], types=["python"]))
+        self.assertNotIn("pythonDirectories", output)
+
     def test_the_defaults_key_is_checked_by_the_same_grammar(self) -> None:
         """registry/repos.schema.json patterns this key, so a gate that skipped it would be the looser of the two."""
         self.assertIn(
@@ -1557,6 +1568,83 @@ class RegistryGroundTruthBranchCase(unittest.TestCase):
         for value in (None, 42, ["main"]):
             with self.subTest(value=value):
                 self.assertEqual(len(self.errors(value)), 1)
+
+
+class RegistryPythonDirectoriesCase(unittest.TestCase):
+    """A declared pythonDirectories entry must already be the canonical form
+    .github/actions/python-directories/python_directories.py's normalize() would resolve it to, since
+    spec/audit.py's cross-check compares the registry value against a caller's declaration with no
+    further normalization on the registry side.
+
+    Illustrative directory names throughout ("Tools", "Sub") are constructed, never a real repo's own.
+    """
+
+    def errors(self, dirs: object, types: list[str] | None = None) -> list[str]:
+        entry: dict[str, object] = {"pythonDirectories": dirs}
+        if types is not None:
+            entry["types"] = types
+        return validate.python_directories_errors_for_repo(entry, "Fixture")
+
+    def test_an_absent_key_produces_no_errors(self) -> None:
+        self.assertEqual(validate.python_directories_errors_for_repo({}, "Fixture"), [])
+
+    def test_a_normalized_directory_with_the_python_type_passes(self) -> None:
+        self.assertEqual(self.errors(["Tools"], types=["python"]), [])
+
+    def test_a_tab_is_rejected(self) -> None:
+        errors = self.errors(["Too\tls"], types=["python"])
+        self.assertEqual(1, len(errors))
+        self.assertIn("tab", errors[0])
+
+    def test_a_nested_normalized_directory_passes(self) -> None:
+        self.assertEqual(self.errors(["Tools/Sub"], types=["python"]), [])
+
+    def test_an_empty_array_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors([], types=["python"])), 1)
+
+    def test_a_non_array_is_rejected(self) -> None:
+        for value in ("Tools", None, 42):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors(value, types=["python"])), 1)
+
+    def test_a_non_string_element_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors([42], types=["python"])), 1)
+
+    def test_an_empty_or_whitespace_element_is_rejected(self) -> None:
+        for value in ("", "   ", "\t"):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors([value], types=["python"])), 1)
+
+    def test_a_padded_element_is_rejected_rather_than_trimmed(self) -> None:
+        for value in (" Tools", "Tools "):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors([value], types=["python"])), 1)
+
+    def test_a_leading_slash_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors(["/Tools"], types=["python"])), 1)
+
+    def test_a_backslash_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors(["Tools\\Sub"], types=["python"])), 1)
+
+    def test_a_dot_dot_segment_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors(["Tools/../Sub"], types=["python"])), 1)
+
+    def test_a_value_differing_from_its_own_normpath_is_rejected(self) -> None:
+        for value in ("Tools/", "./Tools", "Tools//Sub", "Tools/."):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.errors([value], types=["python"])), 1)
+
+    def test_a_duplicate_entry_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors(["Tools", "Tools"], types=["python"])), 1)
+
+    def test_declared_without_the_python_type_is_rejected(self) -> None:
+        self.assertIn(
+            "Fixture: pythonDirectories declared but types does not include 'python'",
+            self.errors(["Tools"], types=["docs"]),
+        )
+
+    def test_declared_with_no_types_at_all_is_rejected(self) -> None:
+        self.assertEqual(len(self.errors(["Tools"])), 1)
 
 
 class InvestigateTrackingCase(unittest.TestCase):
