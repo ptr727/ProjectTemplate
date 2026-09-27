@@ -191,6 +191,15 @@ class CarryInventoryTests(unittest.TestCase):
 
 
 class CarryManifestTests(unittest.TestCase):
+    def test_a_malformed_types_value_adds_no_selector(self) -> None:
+        for value in ("python", {"python": 1}, None, ["python", 3]):
+            with self.subTest(value=value):
+                selectors = carry.selector_set({"types": value}, {})
+                self.assertEqual(
+                    selectors - {"release", "two-phase"},
+                    {"python"} if isinstance(value, list) else set(),
+                )
+
     def test_selector_excludes_inapplicable_declaration(self) -> None:
         self.assertFalse(carry.applicable(["python"], {"csharp", "release"}))
 

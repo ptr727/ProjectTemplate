@@ -712,6 +712,26 @@ class RegistryEntryGateCase(unittest.TestCase):
                 self.assertIn("Fixture: types must be a list of type-name strings", output)
                 self.assertNotIn("Traceback", output)
 
+    def test_a_mixed_types_list_still_checks_its_string_elements(self) -> None:
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                classificationPending=None,
+                types=["pythn", 3],
+                profiles={"pythn": "build"},
+            )
+        )
+        self.assertIn("Fixture: types must be a list of type-name strings", output)
+        self.assertIn("Fixture: type 'pythn' not defined in project-types.json", output)
+        self.assertNotIn("not one of the repo's types", output)
+
+    def test_a_declared_null_types_names_the_missing_types_remedy(self) -> None:
+        entry = self.entry(status="cataloged", classificationPending=None)
+        entry["types"] = None
+        output = self.run_against(entry)
+        self.assertIn("Fixture: cataloged repo has no types (add types or mark it backlog)", output)
+        self.assertNotIn("types must be a list", output)
+
     def test_a_declared_ground_truth_branch_is_checked_by_the_loop(self) -> None:
         self.assertIn(
             "Fixture: groundTruthBranch 'main?ref=x' does not address unencoded",

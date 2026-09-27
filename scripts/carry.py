@@ -708,9 +708,15 @@ def assert_sections(
             )
 
 
+def entry_types(entry: dict[str, Any]) -> list[str]:
+    """The string elements of the entry's `types`, since `resolve_repo` returns an entry of any status and only a cataloged one has its shape validated."""
+    types = entry.get("types")
+    return [t for t in types if isinstance(t, str)] if isinstance(types, list) else []
+
+
 def selector_set(entry: dict[str, Any], defaults: dict[str, Any]) -> set[str]:
     """The repository's applicability selectors: its types, workflow model, release trigger, and consumer model."""
-    selectors = set(entry.get("types", []))
+    selectors = set(entry_types(entry))
     selectors.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
     selectors.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
     if entry.get("consumerModel"):
@@ -839,7 +845,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     plans = plan_sections(hub, target, units)
     print(f"hubCommit: {hub_commit}")
     print(f"repository: {name}")
-    print(f"types: {','.join(entry.get('types', []))}")
+    print(f"types: {','.join(entry_types(entry))}")
     print(f"files: {len(plans)}")
     for plan in plans:
         print(
@@ -885,7 +891,7 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
     verify_target(target, entry, owned_roots)
     print(f"hubCommit: {hub_commit}")
     print(f"repository: {name}")
-    print(f"types: {','.join(entry.get('types', []))}")
+    print(f"types: {','.join(entry_types(entry))}")
     print(f"declarations: {len(declarations)}")
     clean = True
     for declaration in declarations:

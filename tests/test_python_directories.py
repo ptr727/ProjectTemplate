@@ -188,6 +188,14 @@ class MainTests(unittest.TestCase):
         self.assertIn("byte-order mark", stdout)
         self.assertEqual(written, "")
 
+    def test_the_byte_order_mark_check_reads_no_file_twice(self) -> None:
+        self.track("pyproject.toml", text="\ufeff[tool.ruff]\n")
+        with mock.patch.object(pd, "read_file", side_effect=["\ufeff[tool.ruff]\n"]) as read:
+            code, stdout, _ = self.run_main("")
+        self.assertEqual(code, 1)
+        self.assertIn("byte-order mark", stdout)
+        self.assertEqual(read.call_count, 1)
+
     def test_malformed_toml_exits_one_with_an_error(self) -> None:
         self.track("Tools/pyproject.toml", text="[tool.ruff\n")
         code, stdout, written = self.run_main("Tools")
