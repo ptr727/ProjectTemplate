@@ -1,7 +1,7 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories and python-versions are the four optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -174,7 +174,7 @@ jobs:
           fi
 
       # Language lint by tree detection: a caller carries a language marker file or it does not.
-      # No per-repo input and no registry read decide it, only what the checkout actually holds.
+      # Python is the one exception, gated in the directories the python-directories input declares.
       - name: Setup .NET SDK step
         if: hashFiles('**/*.csproj') != ''
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -223,7 +223,7 @@ jobs:
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv sync --all-groups --frozen)
+              (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -237,9 +237,9 @@ jobs:
             [ -n "$dir" ] || continue
             echo "ruff check in $dir"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run ruff check .)
+              (cd "$dir" && uv run ruff check .) < /dev/null
             else
-              (cd "$dir" && uvx ruff@latest check .)
+              (cd "$dir" && uvx ruff@latest check .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -253,9 +253,9 @@ jobs:
             [ -n "$dir" ] || continue
             echo "ruff format --check in $dir"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run ruff format --check .)
+              (cd "$dir" && uv run ruff format --check .) < /dev/null
             else
-              (cd "$dir" && uvx ruff@latest format --check .)
+              (cd "$dir" && uvx ruff@latest format --check .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -266,6 +266,7 @@ jobs:
         if: steps.python.outputs.any == 'true'
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
@@ -274,15 +275,18 @@ jobs:
               checker=mypy
             elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' "$dir/pyproject.toml"; then
               checker=pyright
+            elif [ "$DECLARED" = "true" ]; then
+              echo "::error::The declared Python directory $dir has no [tool.mypy] or [tool.pyright] section in its pyproject.toml. Every Python directory owes a type check."
+              exit 1
             else
               echo "no [tool.mypy] or [tool.pyright] section in $dir/pyproject.toml, skipping"
               continue
             fi
             echo "$checker in $dir"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run "$checker")
+              (cd "$dir" && uv run "$checker") < /dev/null
             else
-              (cd "$dir" && uvx "$checker@latest")
+              (cd "$dir" && uvx "$checker@latest") < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -322,7 +326,7 @@ jobs:
   # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
   # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # A declared Python directory owes a tests/ suite under coverage, per D1.6, so one without tests/ fails here rather than skipping.
-  # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation, and the fleet audit is where that gap becomes a finding.
+  # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation.
   # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
   # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
@@ -343,7 +347,7 @@ jobs:
       # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well, which is why the entry test is for content rather than for length.
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
       # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
-      # The rest fail in the dependency sync below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
+      # The rest fail in the Run Python tests step below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
       - name: Validate python-versions input step
         env:
@@ -419,6 +423,7 @@ jobs:
       # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
       # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
       # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
+      # Each directory's run reads /dev/null, since the loop's own list is its stdin and a suite reading stdin would swallow the directories after it.
       - name: Run Python tests step
         id: python-tests
         if: steps.python.outputs.any == 'true'
@@ -468,7 +473,7 @@ jobs:
                 uvx coverage@latest xml -o coverage.xml
                 ;;
               esac
-            )
+            ) < /dev/null
             if [[ ! -s "$dir/coverage.xml" ]]; then
               echo "::error::This run wrote no coverage.xml in $dir. A pytest directory selects its coverage source in its own pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing."
               exit 1

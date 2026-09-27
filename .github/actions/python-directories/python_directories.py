@@ -12,7 +12,7 @@ directory covers are therefore reported as a warning rather than gated, and the 
 which compares the declaration against the registry, is where they become a finding.
 
 Each directory is classed by the shape that decides how its tools run: `uv` for a tracked
-uv.lock of its own or an enclosing one (a uv workspace member), `pip` for a requirements*.txt
+uv.lock of its own or one enclosing the uv workspace that lists it as a member, `pip` for a requirements*.txt
 beside it, `lint-only` for a pyproject.toml with no [project] or [build-system] table, and
 `unsupported` for a project with none of those, whose dependencies the validator cannot install.
 
@@ -22,12 +22,15 @@ GITHUB_OUTPUT. Exits 1 on a declaration naming a path that is not a tracked Pyth
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import posixpath
 import re
 import subprocess
 import sys
+import tomllib
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 UNCOVERED_SHOWN = 10
@@ -85,11 +88,37 @@ def resolve(declared_text: str, tracked: list[str]) -> tuple[list[str], bool, li
     return (["."] if "pyproject.toml" in tracked_set else []), False, []
 
 
+def read_file(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def in_directory(directory: str, name: str) -> str:
     return name if directory == "." else f"{directory}/{name}"
 
 
-def shape(directory: str, tracked_set: set[str], pyproject_text: str) -> str:
+def glob_matches(path: str, pattern: str) -> bool:
+    """Whether a workspace glob matches path, `*` staying inside one path segment as uv's does."""
+    parts, globs = path.split("/"), pattern.strip("/").split("/")
+    return len(parts) == len(globs) and all(map(fnmatch.fnmatchcase, parts, globs))
+
+
+def workspace_member(root: str, directory: str, read: Callable[[str], str]) -> bool:
+    """Whether the uv workspace declared at root lists directory as a member and does not exclude it."""
+    try:
+        workspace = tomllib.loads(read(in_directory(root, "pyproject.toml")))["tool"]["uv"][
+            "workspace"
+        ]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return False
+    relative = directory if root == "." else directory[len(root) + 1 :]
+    members = workspace.get("members", [])
+    excluded = workspace.get("exclude", [])
+    return any(glob_matches(relative, g) for g in members) and not any(
+        glob_matches(relative, g) for g in excluded
+    )
+
+
+def shape(directory: str, tracked_set: set[str], read: Callable[[str], str]) -> str:
     """How the directory's tools run, from its tracked files and its pyproject.toml."""
     if in_directory(directory, "uv.lock") in tracked_set:
         return "uv"
@@ -99,13 +128,13 @@ def shape(directory: str, tracked_set: set[str], pyproject_text: str) -> str:
         for path in tracked_set
     ):
         return "pip"
-    if not PROJECT_TABLE.search(pyproject_text):
+    if not PROJECT_TABLE.search(read(in_directory(directory, "pyproject.toml"))):
         return "lint-only"
     parent = directory
     while parent != ".":
         parent = posixpath.dirname(parent) or "."
         if in_directory(parent, "uv.lock") in tracked_set:
-            return "uv"
+            return "uv" if workspace_member(parent, directory, read) else "unsupported"
     return "unsupported"
 
 
@@ -143,8 +172,7 @@ def main() -> int:
     tracked_set = set(tracked)
     projects = []
     for directory in directories:
-        text = Path(in_directory(directory, "pyproject.toml")).read_text(encoding="utf-8")
-        projects.append((shape(directory, tracked_set, text), directory))
+        projects.append((shape(directory, tracked_set, read_file), directory))
         print(f"gating Python directory: {directory} ({projects[-1][0]})")
     if not directories:
         print("no Python directory to gate")

@@ -64,32 +64,51 @@ class ResolveTests(unittest.TestCase):
 class ShapeTests(unittest.TestCase):
     TOOL_ONLY = "[tool.ruff]\n"
     PROJECT = "[project]\nname = 'widget'\n"
+    WORKSPACE = "[tool.uv.workspace]\nmembers = ['pkg/*']\nexclude = ['pkg/skipped']\n"
+
+    def shape(self, directory: str, files: dict[str, str], pyproject: str) -> str:
+        own = "pyproject.toml" if directory == "." else f"{directory}/pyproject.toml"
+        texts = {**files, own: pyproject}
+        return pd.shape(directory, set(texts), texts.__getitem__)
 
     def test_an_own_lock_is_uv(self) -> None:
-        self.assertEqual("uv", pd.shape("Tools", {"Tools/uv.lock"}, self.PROJECT))
+        self.assertEqual("uv", self.shape("Tools", {"Tools/uv.lock": ""}, self.PROJECT))
 
     def test_a_requirements_file_beside_it_is_pip(self) -> None:
-        tracked = {"Tools/requirements-test.txt"}
-        self.assertEqual("pip", pd.shape("Tools", tracked, self.PROJECT))
+        self.assertEqual(
+            "pip", self.shape("Tools", {"Tools/requirements-test.txt": ""}, self.PROJECT)
+        )
 
     def test_a_requirements_file_deeper_down_is_not_pip(self) -> None:
-        tracked = {"Tools/docs/requirements.txt"}
-        self.assertEqual("lint-only", pd.shape("Tools", tracked, self.TOOL_ONLY))
+        files = {"Tools/docs/requirements.txt": ""}
+        self.assertEqual("lint-only", self.shape("Tools", files, self.TOOL_ONLY))
 
     def test_tool_config_alone_is_lint_only(self) -> None:
-        self.assertEqual("lint-only", pd.shape(".", {"pyproject.toml"}, self.TOOL_ONLY))
+        self.assertEqual("lint-only", self.shape(".", {}, self.TOOL_ONLY))
 
     def test_a_workspace_member_takes_the_enclosing_lock(self) -> None:
-        tracked = {"uv.lock", "pkg/member/pyproject.toml"}
-        self.assertEqual("uv", pd.shape("pkg/member", tracked, self.PROJECT))
+        files = {"uv.lock": "", "pyproject.toml": self.WORKSPACE}
+        self.assertEqual("uv", self.shape("pkg/member", files, self.PROJECT))
+
+    def test_an_enclosing_lock_without_membership_is_unsupported(self) -> None:
+        for label, root, directory in (
+            ("no workspace table", self.PROJECT, "pkg/member"),
+            ("excluded member", self.WORKSPACE, "pkg/skipped"),
+            ("outside the member glob", self.WORKSPACE, "other/member"),
+            ("glob stays inside one segment", self.WORKSPACE, "pkg/deep/member"),
+            ("malformed root", "[tool.uv.workspace\n", "pkg/member"),
+        ):
+            with self.subTest(label):
+                files = {"uv.lock": "", "pyproject.toml": root}
+                self.assertEqual("unsupported", self.shape(directory, files, self.PROJECT))
 
     def test_a_lint_only_member_under_a_lock_stays_lint_only(self) -> None:
-        tracked = {"uv.lock", "Tools/pyproject.toml"}
-        self.assertEqual("lint-only", pd.shape("Tools", tracked, self.TOOL_ONLY))
+        files = {"uv.lock": "", "pyproject.toml": self.WORKSPACE}
+        self.assertEqual("lint-only", self.shape("Tools", files, self.TOOL_ONLY))
 
     def test_a_project_with_no_manifest_is_unsupported(self) -> None:
-        self.assertEqual("unsupported", pd.shape(".", {"pyproject.toml"}, self.PROJECT))
-        self.assertEqual("unsupported", pd.shape("Tools", set(), "[build-system]\n"))
+        self.assertEqual("unsupported", self.shape(".", {}, self.PROJECT))
+        self.assertEqual("unsupported", self.shape("Tools", {}, "[build-system]\n"))
 
 
 class UncoveredTests(unittest.TestCase):

@@ -895,6 +895,14 @@ gh() {
         self.assertIn("has no tests/ directory", job)
         self.assertIn("cannot install its dependencies", job)
 
+        # The directory list is each loop's stdin, so a child left reading it swallows the directories after it.
+        children = [
+            line for line in workflow.splitlines() if line.lstrip().startswith(('(cd "$dir"', ") "))
+        ]
+        self.assertTrue(children)
+        for line in children:
+            self.assertTrue(line.endswith("< /dev/null"), line)
+
         # The guard admitting a pip repo is only half of it: the steps must install and run without a lockfile.
         self.assertIn('requirement_args+=(-r "$file")', job)
         self.assertIn('uv pip install "${requirement_args[@]}"', job)

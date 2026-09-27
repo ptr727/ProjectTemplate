@@ -32,7 +32,7 @@ A false declaration is always a finding: a claim the repo does not back is drift
 A language type is present at one of two **depths**, declared as its `profile`:
 
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
-- **lint-only** - the language is present and style-checked here, but not built: there is no build/test/package for it in this repo. Only its lint/style/type-check checks apply. Build and packaging checks are N/A, and test and coverage checks are too, except for Python, whose lint-only directories still owe a suite run under coverage.
+- **lint-only** - the language is present and style-checked here, but not built or packaged in this repo. Its lint/style/type-check checks apply, and build and packaging checks are N/A. Test and coverage checks are N/A too, except for Python, whose lint-only directories still owe a suite run under coverage.
 
 Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`. The coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file) follows tests rather than the profile: the audit reads the repo's tree for tests and holds the requirement N/A only where it finds none.
 
