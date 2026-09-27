@@ -952,6 +952,11 @@ gh() {
                 True,
             ),
             "uv project with no tests": ("uv", {"pyproject.toml", "uv.lock"}, False),
+            "uv project whose tests/ holds only fixtures": (
+                "uv",
+                {"pyproject.toml", "uv.lock", "tests/fixtures/data.json"},
+                True,
+            ),
             "lint-only root with tests": (
                 "lint-only",
                 {"pyproject.toml", "tests/test_a.py"},

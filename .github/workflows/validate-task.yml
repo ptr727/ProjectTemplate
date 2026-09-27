@@ -495,7 +495,7 @@ jobs:
               echo "::error::The declared Python directory $dir declares a project with no uv.lock or requirements*.txt of its own, so the validator cannot install its dependencies. Declare a uv workspace's root rather than its member."
               exit 1
             fi
-            if [ -z "$(find "$dir/tests" -name '*.py' -print -quit 2>/dev/null)" ]; then
+            if [ "$DECLARED" = "true" ] && [ -z "$(find "$dir/tests" -name '*.py' -print -quit 2>/dev/null)" ]; then
               echo "::error::The declared Python directory $dir has no Python files under tests/. Every Python directory owes a test suite run under coverage, per D1.6."
               exit 1
             fi

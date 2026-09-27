@@ -76,6 +76,8 @@ PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "mis
 # Deliberately unanchored.
 # Both notes this form was introduced for end the sentence after the paren, so an end-anchored pattern matches neither of the two it was written to catch.
 # That is the shape a matcher fails at silently: it reports nothing, and a fleet with no such note in it reports exactly the same.
+# A check id here, named in a driftNote on a repo not declaring its type, is the type model's explicit suppression of a discovery advisory rather than a note about a forgotten type.
+DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python"}
 CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 
 
@@ -306,16 +308,29 @@ def expected_python_directories(entry, tree):
 
 
 def python_type_findings(entry, tree):
-    """DEFECT when the tree carries a tracked `.py` blob while the registry's `types` omits 'python'.
+    """The discovery advisory for tracked `.py` files while the registry's `types` omits 'python'.
 
-    `tree` is the repo's blob path set, or None when it could not be read in full, in which case Python's
-    presence is unanswerable and nothing is reported.
+    Advisory rather than a defect, per spec/type-model.md's undeclared-but-detected row: the repo
+    declares the type, or suppresses the advisory with a driftNote naming
+    (python.directories.declared) and its reason, for vendored or incidental Python. `tree` is the
+    repo's blob path set, or None when it could not be read in full, in which case Python's presence
+    is unanswerable and nothing is reported.
     """
     if tree is None or "python" in entry.get("types", []):
         return []
+    notes = entry.get("driftNotes", [])
+    if any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes):
+        return []
     if any(p.endswith(".py") for p in tree):
         return [
-            ("DEFECT", "registry: tracked .py file(s) present on the tree but types omits 'python'")
+            (
+                "DRIFT",
+                (
+                    "registry: tracked .py file(s) present on the tree but types omits 'python'. "
+                    "Declare the type, or record a driftNote naming (python.directories.declared) "
+                    "with the reason Python is not tracked."
+                ),
+            )
         ]
     return []
 
@@ -644,6 +659,8 @@ def driftnote_findings(entry, spec, open_count):
     for note in entry.get("driftNotes", []):
         quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
         for cid in CHECK_ID_RE.findall(note):
+            if DETECTION_SUPPRESSION_IDS.get(cid, "") not in ("", *entry.get("types", [])):
+                continue
             owner, known = check_id_owner(spec, cid)
             if not known:
                 out.append(
@@ -2033,11 +2050,6 @@ def workflow_input_text(job_text, key):
             if indent <= child_indent:
                 break  # dedent back to (or past) the key column ends the block body
             body.append(ln[child_indent:])
-        # A folded scalar joins adjacent lines with a space and keeps a newline where a blank line
-        # separates them, which is the text the caller actually passes.
-        if rest.startswith(">"):
-            paragraphs = "\n".join(ln.strip() for ln in body).split("\n\n")
-            return "\n".join(" ".join(p.split("\n")).strip() for p in paragraphs if p.strip())
         return "\n".join(body)
     return re.sub(r"[ \t]+#.*$", "", rest).strip().strip("'\"")
 
@@ -2072,6 +2084,17 @@ def python_directories_caller_findings(path, text, entry):
     validate_job = split_jobs(text).get("validate", "")
     if "validate-task.yml" not in _code_view(validate_job):
         return []
+    # A folded scalar's value depends on YAML's indentation rules, so it is refused rather than guessed.
+    if re.search(r"^[ \t]*python-directories:[ \t]*>", validate_job, re.MULTILINE):
+        return [
+            (
+                "DRIFT",
+                (
+                    f"python-directories: {path} passes a folded (>) scalar. Write it as a literal "
+                    "(|) block, one directory per line."
+                ),
+            )
+        ]
     declared_text = workflow_input_text(validate_job, "python-directories") or ""
     declared = sorted(
         {
@@ -4587,6 +4610,13 @@ def _selftest():
             ["this repo does not declare"],
         ),
         (
+            "a detection suppression on a repo without the type",
+            ["hugo"],
+            ["Vendored helper, not tracked (python.directories.declared)."],
+            0,
+            [],
+        ),
+        (
             "check id absent from the catalog",
             ["hugo"],
             ["Theme record (hugo.vendored.provenence)."],
@@ -5761,6 +5791,21 @@ def _selftest():
         ({"types": ["python"]}, {"tools/script.py"}, 0, "typed python: 'python' already declared"),
         ({"types": []}, None, 0, "unreadable tree: presence is unanswerable"),
         ({"types": []}, {"README.md"}, 0, "no .py file anywhere: nothing to flag"),
+        (
+            {
+                "types": ["docs"],
+                "driftNotes": ["Vendored tool, not tracked (python.directories.declared)."],
+            },
+            {"tools/script.py"},
+            0,
+            "a driftNote naming the check suppresses the advisory",
+        ),
+        (
+            {"types": ["docs"], "driftNotes": ["python.directories.declared without parentheses"]},
+            {"tools/script.py"},
+            1,
+            "only the parenthesized id suppresses",
+        ),
     ]
     python_type_ok = True
     for entry_in, tree_in, expected, label in python_type_cases:
@@ -5907,16 +5952,7 @@ def _selftest():
             py_caller_folded,
             {"pythonDirectories": ["Other", "Tools"]},
             1,
-            "a folded scalar is one line",
-        ),
-        (
-            py_caller_path,
-            py_caller_folded.replace(
-                "        Tools\n        Other\n", "        Tools\n\n        Other\n"
-            ),
-            {"pythonDirectories": ["Other", "Tools"]},
-            0,
-            "a blank line in a folded scalar keeps its newline",
+            "a folded scalar is refused",
         ),
         (
             py_caller_path,
