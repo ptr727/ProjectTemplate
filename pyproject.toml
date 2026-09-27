@@ -13,7 +13,7 @@ python_version = "3.13"
 # Otherwise a POSIX-only stdlib attribute a runtime skip guard already excludes on that host still fails here, since mypy's own flow analysis does not narrow it away.
 platform = "linux"
 files = ["spec", "host-setup", "scripts"]
-mypy_path = [".github/actions/prose-gate", ".github/actions/repo-gate"]
+mypy_path = [".github/actions/prose-gate", ".github/actions/python-directories", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
 [tool.pyright]

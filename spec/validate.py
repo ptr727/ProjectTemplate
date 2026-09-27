@@ -324,6 +324,63 @@ def ground_truth_branch_errors_for_repo(repo, name):
     return []
 
 
+def python_directories_errors_for_repo(repo, name):
+    """Shape errors for a registry entry's optional `pythonDirectories` (a repo declaring none passes none).
+
+    Each entry must already be the canonical, repository-relative form that
+    .github/actions/python-directories/python_directories.py's normalize() would resolve it to,
+    since spec/audit.py's cross-check compares the registry value against a caller's declared
+    `python-directories` value with no further normalization on the registry side. A value this
+    function would accept but normalize() would rewrite (a trailing slash, a redundant `./`)
+    would read as clean here and then mismatch every caller that already wrote it in canonical
+    form, which is why the checks below mirror normalize()'s refusals plus an exact-normpath
+    equality test rather than reusing normalize() itself and trusting its rewrite.
+
+    Presence is the test rather than truthiness, matching description_errors_for_repo, so a
+    declared `pythonDirectories: []` is reported rather than read as an undeclared field.
+    """
+    if "pythonDirectories" not in repo:
+        return []
+    dirs = repo["pythonDirectories"]
+    if not isinstance(dirs, list) or not dirs:
+        return [f"{name}: pythonDirectories must be a non-empty array of directory paths"]
+    errors = []
+    seen = set()
+    for d in dirs:
+        if not isinstance(d, str) or not d.strip():
+            errors.append(f"{name}: pythonDirectories entry {d!r} must be a non-empty string")
+            continue
+        if d != d.strip():
+            errors.append(
+                f"{name}: pythonDirectories entry {d!r} carries leading/trailing whitespace"
+            )
+            continue
+        if d.startswith("/") or "\\" in d:
+            errors.append(
+                f"{name}: pythonDirectories entry '{d}' must be a repository-relative path with forward slashes"
+            )
+            continue
+        if ".." in d.split("/"):
+            errors.append(
+                f"{name}: pythonDirectories entry '{d}' must not step outside the repository"
+            )
+            continue
+        if d != posixpath.normpath(d):
+            errors.append(
+                f"{name}: pythonDirectories entry '{d}' is not normalized (expected '{posixpath.normpath(d)}')"
+            )
+            continue
+        if d in seen:
+            errors.append(f"{name}: pythonDirectories entry '{d}' is declared more than once")
+            continue
+        seen.add(d)
+    types_decl = repo.get("types")
+    types_list = types_decl if isinstance(types_decl, list) else []
+    if "python" not in types_list:
+        errors.append(f"{name}: pythonDirectories declared but types does not include 'python'")
+    return errors
+
+
 def description_errors_for_repo(repo, name):
     """The per-repo optional-field guard: an explicit `"description": null` is declared-but-invalid, not absent.
 
@@ -914,6 +971,8 @@ def main():
                         errors.append(
                             f"{name}: driftNotes entry {note!r} must be a non-empty string"
                         )
+        # Optional, since a repo whose callers pass no python-directories input declares nothing.
+        errors.extend(python_directories_errors_for_repo(repo, name))
         # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.

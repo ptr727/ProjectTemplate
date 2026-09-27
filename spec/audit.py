@@ -34,6 +34,7 @@ import itertools
 import json
 import locale
 import pathlib
+import posixpath
 import re
 import subprocess
 import sys
@@ -226,21 +227,21 @@ def is_csharp_test_project(path):
     )
 
 
-def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
+def coverage_claiming_types(types, type_mechanisms, tree):
     """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
 
-    A type owes coverage when the fleet maps it to the codecov mechanism, its declared profile is not
-    lint-only, and the repo carries tests for it. The last condition is what keeps a package-only build
-    repo, a library whose tests live elsewhere or are not yet written, from being told to store a token
-    and commit a codecov.yml whose statuses gate a report its pipeline never produces.
+    A type owes coverage when the fleet maps it to the codecov mechanism and the repo carries tests for
+    it, whatever its profile. The test condition is what keeps a package-only build repo, a library
+    whose tests live elsewhere or are not yet written, from being told to store a token and commit a
+    codecov.yml whose statuses gate a report its pipeline never produces.
 
     Each detector is deliberately broader than the hub validator's own guard, which keys its C# leg on
-    `**/*Tests*.csproj` and its Python leg on a root `tests/` directory. D1.6 owes coverage to every repo
-    with tests, and a repo the hub leg does not reach meets it through its own workflows instead, so a
-    detector matching the guard exactly would drop the claim for a repo whose suite sits in `test/` or
-    whose project is named `App.UnitTest.csproj`. Every uncertainty here therefore resolves toward
-    keeping the claim, since a claim kept wrongly surfaces as a finding a reader can dismiss and a claim
-    dropped wrongly is a silent clean report on a repo nobody measured.
+    `**/*Tests*.csproj` and its Python leg on a `tests/` directory in each Python directory it gates.
+    D1.6 owes coverage to every repo with tests, and a repo the hub leg does not reach meets it through
+    its own workflows instead, so a detector matching the guard exactly would drop the claim for a repo
+    whose suite sits in `test/` or whose project is named `App.UnitTest.csproj`. Every uncertainty here
+    therefore resolves toward keeping the claim, since a claim kept wrongly surfaces as a finding a
+    reader can dismiss and a claim dropped wrongly is a silent clean report on a repo nobody measured.
 
     `tree` is the repo's blob path set, or None when it could not be read in full. On None the test
     question is unanswerable, so every candidate type keeps its claim, for that same reason. A type
@@ -254,12 +255,93 @@ def coverage_claiming_types(types, repo_profiles, type_mechanisms, tree):
     }
     claiming = []
     for name in types:
-        if type_mechanisms.get(name) != "codecov" or repo_profiles.get(name) == "lint-only":
+        if type_mechanisms.get(name) != "codecov":
             continue
         detect = detectors.get(name)
         if tree is None or detect is None or detect(tree):
             claiming.append(name)
     return claiming
+
+
+def python_directories_of(entry):
+    """The registry's declared `pythonDirectories` for entry, or [] where none is declared.
+
+    Read defensively (a non-list, or a non-string element, drops rather than raises) since a malformed
+    declaration is spec/validate.py's own finding, and this audit gate must not crash mid-run on a
+    registry CI already gates on push.
+    """
+    dirs = entry.get("pythonDirectories")
+    return [d for d in dirs if isinstance(d, str)] if isinstance(dirs, list) else []
+
+
+def python_directory_covers(directory, path):
+    """Mirrors .github/actions/python-directories/python_directories.py's covers(): '.' covers every
+    path, and any other declared directory covers only its own subtree."""
+    return directory == "." or path.startswith(directory + "/")
+
+
+def expected_python_directories(entry, tree):
+    """The directories a caller's `python-directories` declaration is expected to resolve to.
+
+    Mirrors python_directories.py's resolve() fallback for a caller declaring none: the registry's own
+    `pythonDirectories` where declared, else the root where the tree carries a root pyproject.toml, else
+    no directory at all. `tree` is the repo's blob path set, or None when it could not be read in full.
+    """
+    declared = python_directories_of(entry)
+    if declared:
+        return declared
+    if tree is not None and "pyproject.toml" in tree:
+        return ["."]
+    return []
+
+
+def python_type_findings(entry, tree):
+    """DEFECT when the tree carries a tracked `.py` blob while the registry's `types` omits 'python'.
+
+    `tree` is the repo's blob path set, or None when it could not be read in full, in which case Python's
+    presence is unanswerable and nothing is reported.
+    """
+    if tree is None or "python" in entry.get("types", []):
+        return []
+    if any(p.endswith(".py") for p in tree):
+        return [
+            ("DEFECT", "registry: tracked .py file(s) present on the tree but types omits 'python'")
+        ]
+    return []
+
+
+def python_directory_coverage_findings(entry, tree):
+    """DRIFT naming tracked `.py` files that sit outside every directory expected_python_directories()
+    expects, mirroring python_directories.py's own uncovered() but measured against the registry's
+    declaration rather than a caller's own runtime one, so a registry that stops matching what a repo's
+    callers actually pass is caught here rather than only in each caller's own warning annotation.
+
+    `tree` is the repo's blob path set, or None when it could not be read in full, in which case coverage
+    is unanswerable and nothing is reported. The finding names the count and up to 5 example paths, since
+    a whole tree of them would bury the message the same way python_directories.py's own warning caps at
+    UNCOVERED_SHOWN rather than listing every path.
+    """
+    if tree is None:
+        return []
+    directories = expected_python_directories(entry, tree)
+    missed = sorted(
+        p
+        for p in tree
+        if p.endswith(".py") and not any(python_directory_covers(d, p) for d in directories)
+    )
+    if not missed:
+        return []
+    shown = ", ".join(missed[:5])
+    more = f" and {len(missed) - 5} more" if len(missed) > 5 else ""
+    return [
+        (
+            "DRIFT",
+            (
+                f"python-directories: {len(missed)} tracked .py file(s) sit outside every expected "
+                f"directory ({', '.join(directories) or 'none'}): {shown}{more}"
+            ),
+        )
+    ]
 
 
 @functools.cache
@@ -1855,6 +1937,112 @@ def check_interface(path, contract, text):
     return findings
 
 
+# The two workflow files whose validate job may declare validate-task.yml's `python-directories` input,
+# per WORKFLOW.md's caller contract. A stub that has not yet adopted the reusable gate names no such job
+# and is skipped by python_directories_caller_findings() below rather than compared.
+PYTHON_DIRECTORIES_CALLERS = (
+    ".github/workflows/test-pull-request.yml",
+    ".github/workflows/publish-release.yml",
+)
+# A `key: |`/`key: >` block-scalar indicator on a `with:` input line, matching _BLOCK_SCALAR_KEY's shape
+# below but anchored to the key rather than to a whole line, since workflow_input_text() has already
+# sliced the line down to the value past `key:`.
+_WITH_INPUT_BLOCK_SCALAR = re.compile(r"^(&\S+[ \t]+)?[|>][0-9+-]*[ \t]*(#.*)?$")
+_WITH_KEY = re.compile(r"^([ \t]*)with:[ \t]*(#.*)?$")
+
+
+def workflow_input_text(job_text, key):
+    """The raw text of a `with:` input on a workflow-call job: a block scalar's dedented body, or a plain
+    single value's own line, whichever shape the input was written in.
+
+    Structural, like split_jobs() and _code_view() above: it reads indentation, not YAML semantics, since
+    a hand-written `with:` block stays inside this narrow shape everywhere the fleet writes one. Returns
+    None where the job carries no `with:` mapping, or no such key inside it.
+    """
+    lines = job_text.splitlines()
+    with_at = next((i for i, ln in enumerate(lines) if _WITH_KEY.match(ln)), None)
+    if with_at is None:
+        return None
+    with_indent = len(lines[with_at]) - len(lines[with_at].lstrip())
+    child_indent = None
+    key_at = None
+    for i in range(with_at + 1, len(lines)):
+        ln = lines[i]
+        if not ln.strip():
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        if indent <= with_indent:
+            break  # dedent out of the with: mapping
+        if child_indent is None:
+            child_indent = indent
+        if indent == child_indent and re.match(rf"^{re.escape(key)}:", ln[child_indent:]):
+            key_at = i
+            break
+    if key_at is None or child_indent is None:
+        return None
+    rest = lines[key_at][child_indent + len(key) + 1 :].strip()
+    if not rest or _WITH_INPUT_BLOCK_SCALAR.match(rest):
+        body = []
+        for ln in lines[key_at + 1 :]:
+            if not ln.strip():
+                body.append("")
+                continue
+            indent = len(ln) - len(ln.lstrip())
+            if indent <= child_indent:
+                break  # dedent back to (or past) the key column ends the block body
+            body.append(ln[child_indent:])
+        return "\n".join(body)
+    return re.sub(r"[ \t]+#.*$", "", rest).strip().strip("'\"")
+
+
+def normalize_declared_python_directory(line):
+    """Mirror python_directories.py's normalize(), success case only.
+
+    The audit's cross-check only needs the directories a caller's declaration resolves to; a malformed
+    line is already refused by the hub validator itself at merge time, so this drops one silently rather
+    than reporting the same defect a second time.
+    """
+    path = line.strip()
+    if not path or path.startswith("/") or "\\" in path or ".." in path.split("/"):
+        return None
+    return posixpath.normpath(path)
+
+
+def python_directories_caller_findings(path, text, entry):
+    """DRIFT when a caller's declared `python-directories` input disagrees with the registry's own.
+
+    Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
+    _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
+    not adopted the reusable gate yet, states nothing this can compare against; that absence is already
+    check_interface()'s finding, not this one's.
+    """
+    if path not in PYTHON_DIRECTORIES_CALLERS:
+        return []
+    validate_job = split_jobs(text).get("validate", "")
+    if "validate-task.yml" not in _code_view(validate_job):
+        return []
+    declared_text = workflow_input_text(validate_job, "python-directories") or ""
+    declared = sorted(
+        {
+            d
+            for d in (normalize_declared_python_directory(ln) for ln in declared_text.splitlines())
+            if d
+        }
+    )
+    registry = sorted(python_directories_of(entry))
+    if declared == registry:
+        return []
+    return [
+        (
+            "DRIFT",
+            (
+                f"python-directories: {path} validate job passes {declared or 'none'}, registry "
+                f"declares {registry or 'none'}"
+            ),
+        )
+    ]
+
+
 # A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment such as ` # v1.2.3`, where the leading `v` or digit is required.
 # Dependabot bumps both per repo, so that drift is governed the way EOL is rather than being a fidelity deviation.
 # It is anchored to `uses:`, so a 64-hex docker digest and a tag or branch ref such as `@v4` do not match.
@@ -2404,20 +2592,22 @@ def audit_repo(entry, spec, branch=None):
 
     # --- Secrets (names only) ---
     secrets = spec["secrets"]
-    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only at build profile and only where the repo carries tests for that type.
-    # A lint-only language has no tests and so no coverage, per spec/type-model.md, and a build-profile language with no test suite has none either: the validator's leg never runs, so the token and the codecov.yml would gate on a report the pipeline cannot produce.
+    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only where the repo carries tests for that type.
+    # A language with no test suite has none, since the validator's leg never runs and the token and the codecov.yml would gate on a report the pipeline cannot produce.
     # The tree is read here rather than at the verbatim-tree section below so one call answers both, and the finding for an unreadable tree stays where it was.
-    repo_profiles = entry.get("profiles", {})
-    if not isinstance(repo_profiles, dict):
-        repo_profiles = {}
     carried_entries = repo_tree_entries(slug, ground_head)
+    tree = None if carried_entries is None else set(carried_entries)
     coverage_types = coverage_claiming_types(
         types,
-        repo_profiles,
         secrets.get("typeMechanisms", {}),
-        None if carried_entries is None else set(carried_entries),
+        tree,
     )
     coverage_active = bool(coverage_types)
+    # --- Python presence and directory coverage ---
+    # A tracked .py file is a fact about the tree, read once here and checked against the registry's own
+    # declarations rather than against what any one caller's workflow happens to gate today.
+    findings.extend(python_type_findings(entry, tree))
+    findings.extend(python_directory_coverage_findings(entry, tree))
     stores = {}
     # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [
@@ -2431,8 +2621,6 @@ def audit_repo(entry, spec, branch=None):
     ]
     # The codecov mechanism follows coverage_types rather than the profile, so a language with no tests requires no CODECOV_TOKEN.
     for name in types:
-        if repo_profiles.get(name) == "lint-only":
-            continue
         mechanism = secrets.get("typeMechanisms", {}).get(name)
         if mechanism == "codecov" and name not in coverage_types:
             continue
@@ -2564,6 +2752,7 @@ def audit_repo(entry, spec, branch=None):
             else:
                 contract = item.get("contract", {})
                 findings.extend(check_interface(path, contract, text))
+                findings.extend(python_directories_caller_findings(path, text, entry))
                 canonical_rel = item.get("reference") or path
                 for job in contract.get("verbatimJobs", []):
                     findings.extend(
@@ -5392,111 +5581,259 @@ def _selftest():
     # Applicability turns on tests, so a package-only build repo is N/A rather than owing a token for a report nothing produces.
     type_mechs = {"csharp": "codecov", "python": "codecov"}
     coverage_cases = [
-        (["python"], {}, {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
-        (["python"], {}, {"tests/test_a.py", "pyproject.toml"}, ["python"], "python with tests"),
-        (["python"], {"python": "lint-only"}, {"tests/test_a.py"}, [], "python lint-only"),
-        (["csharp"], {}, {"src/App/App.csproj"}, [], "csharp, no test project"),
-        (["csharp"], {}, {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
-        (["csharp"], {}, {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
+        (["python"], {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
+        (["python"], {"tests/test_a.py", "pyproject.toml"}, ["python"], "python with tests"),
+        (
+            ["python"],
+            {"tests/test_a.py"},
+            ["python"],
+            "python lint-only, with tests, owes the claim same as build",
+        ),
+        (["csharp"], {"src/App/App.csproj"}, [], "csharp, no test project"),
+        (["csharp"], {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
+        (["csharp"], {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
         (
             ["csharp"],
-            {},
             {"test/Specs.csproj"},
             ["csharp"],
             "csharp, located as a test, named nothing",
         ),
         (
             ["csharp"],
-            {},
             {"src/App/App.csproj", "docs/x.md"},
             [],
             "csharp, neither named nor located as a test",
         ),
         (
             ["python"],
-            {},
             {"test_app.py", "pyproject.toml"},
             ["python"],
             "python, root-level test module",
         ),
         (
             ["python"],
-            {},
             {"app_test.py", "pyproject.toml"},
             ["python"],
             "python, trailing _test module",
         ),
         (
             ["python"],
-            {},
             {"src/app.py", "contest.py"},
             [],
             "python, a module merely containing test",
         ),
         (
             ["python"],
-            {},
             {"tests/README.md", "pyproject.toml"},
             [],
             "python, a test directory holding no Python",
         ),
         (
             ["python"],
-            {},
             {"tests/conftest.py", "pyproject.toml"},
             ["python"],
             "python, a test directory holding Python",
         ),
         (
             ["csharp"],
-            {},
             {"test/App.UnitTest.csproj"},
             ["csharp"],
             "csharp, singular Test in the name",
         ),
         (
             ["csharp"],
-            {},
             {"src/widget.tests.csproj"},
             ["csharp"],
             "csharp, a lowercase test segment outside a test directory",
         ),
         (
             ["csharp"],
-            {},
             {"src/Contest.csproj", "src/Latest.csproj"},
             [],
             "csharp, names carrying those letters inside a word rather than as a segment",
         ),
         (
             ["python"],
-            {},
             {"test/test_a.py", "pyproject.toml"},
             ["python"],
             "python, singular test dir",
         ),
-        (["python"], {}, {"src/tests/test_a.py"}, ["python"], "python, tests below the root"),
-        (["python"], {}, {"tests"}, [], "python, a file named tests is not a directory"),
+        (["python"], {"src/tests/test_a.py"}, ["python"], "python, tests below the root"),
+        (["python"], {"tests"}, [], "python, a file named tests is not a directory"),
         (
             ["csharp", "python"],
-            {"python": "lint-only"},
             {"test/App.Tests/App.Tests.csproj", "tools/py/pyproject.toml"},
             ["csharp"],
-            "mixed repo, the tested C# side claims coverage",
+            "mixed repo, the tested C# side claims coverage, the untested lint-only python side does not",
         ),
-        (["python"], {}, None, ["python"], "unreadable tree keeps the claim"),
-        (["docker"], {}, {"tests/test_a.py"}, [], "a type mapped to no mechanism claims nothing"),
+        (["python"], None, ["python"], "unreadable tree keeps the claim"),
+        (["docker"], {"tests/test_a.py"}, [], "a type mapped to no mechanism claims nothing"),
     ]
     coverage_ok = True
-    for types_in, profiles_in, tree_in, expected, label in coverage_cases:
-        got = coverage_claiming_types(types_in, profiles_in, type_mechs, tree_in)
+    for types_in, tree_in, expected, label in coverage_cases:
+        got = coverage_claiming_types(types_in, type_mechs, tree_in)
         if got != expected:
             ok = False
             coverage_ok = False
             print(f"  FAIL coverage_claiming_types [{label}] -> {got}, expected {expected}")
     if coverage_ok:
         print(
-            "  ok   coverage_claiming_types: tests decide the claim, lint-only never claims, and an unreadable tree keeps it"
+            "  ok   coverage_claiming_types: tests decide the claim regardless of profile, and an unreadable tree keeps it"
+        )
+
+    # Constructed repo shapes throughout, never a registry entry, per GOVERNANCE.md "Representative Data
+    # in Agent-Authored Text": "Widget"/"Tools"/"Extra" are illustrative fixtures, not real repos.
+    python_type_cases = [
+        (
+            {"types": ["docs"]},
+            {"tools/script.py"},
+            1,
+            "untyped python: a tracked .py file, no 'python' type",
+        ),
+        ({"types": ["python"]}, {"tools/script.py"}, 0, "typed python: 'python' already declared"),
+        ({"types": []}, None, 0, "unreadable tree: presence is unanswerable"),
+        ({"types": []}, {"README.md"}, 0, "no .py file anywhere: nothing to flag"),
+    ]
+    python_type_ok = True
+    for entry_in, tree_in, expected, label in python_type_cases:
+        got = len(python_type_findings(entry_in, tree_in))
+        if got != expected:
+            ok = False
+            python_type_ok = False
+            print(f"  FAIL python_type_findings [{label}] -> {got} finding(s), expected {expected}")
+    if python_type_ok:
+        print(
+            "  ok   python_type_findings: a tracked .py file with no 'python' type is a DEFECT, and only that"
+        )
+
+    python_directory_cases = [
+        (
+            {"pythonDirectories": ["Tools"]},
+            {"Tools/a.py", "Extra/b.py"},
+            1,
+            "declared directory: one file outside it is missed",
+        ),
+        (
+            {"pythonDirectories": ["Tools"]},
+            {"Tools/a.py", "Tools/sub/b.py"},
+            0,
+            "declared directory: a nested file is still covered",
+        ),
+        (
+            {},
+            {"tools/a.py"},
+            1,
+            "no declaration and no root pyproject.toml: nothing is expected to cover it",
+        ),
+        (
+            {},
+            {"pyproject.toml", "a.py", "sub/b.py"},
+            0,
+            "no declaration, root pyproject.toml: '.' fallback covers everything",
+        ),
+        ({"pythonDirectories": ["Tools"]}, None, 0, "unreadable tree: coverage is unanswerable"),
+        (
+            {"pythonDirectories": ["Tools"]},
+            {f"Extra/f{i}.py" for i in range(7)},
+            1,
+            "more than 5 missed: one finding, capped listing",
+        ),
+    ]
+    python_directory_ok = True
+    for entry_in, tree_in, expected, label in python_directory_cases:
+        got_findings = python_directory_coverage_findings(entry_in, tree_in)
+        if len(got_findings) != expected:
+            ok = False
+            python_directory_ok = False
+            print(
+                f"  FAIL python_directory_coverage_findings [{label}] -> {len(got_findings)} finding(s), expected {expected}"
+            )
+        elif expected and "more" not in got_findings[0][1] and len(tree_in or []) > 5:
+            ok = False
+            python_directory_ok = False
+            print(
+                f"  FAIL python_directory_coverage_findings [{label}] -> missing the '... and N more' cap: {got_findings[0][1]}"
+            )
+    if python_directory_ok:
+        print(
+            "  ok   python_directory_coverage_findings: a .py file outside every expected directory is DRIFT, capped at 5 shown"
+        )
+
+    py_caller_uses = "    uses: ./.github/workflows/validate-task.yml\n"
+    py_caller_block = (
+        "jobs:\n  validate:\n"
+        + py_caller_uses
+        + "    with:\n      python-directories: |\n        Tools\n"
+    )
+    py_caller_plain = (
+        "jobs:\n  validate:\n" + py_caller_uses + "    with:\n      python-directories: Tools\n"
+    )
+    py_caller_no_with = "jobs:\n  validate:\n" + py_caller_uses
+    py_caller_no_hub = "jobs:\n  validate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo inline lint\n"
+    py_caller_path = ".github/workflows/test-pull-request.yml"
+    python_caller_cases = [
+        (
+            py_caller_path,
+            py_caller_block,
+            {"pythonDirectories": ["Tools"]},
+            0,
+            "block scalar matches the registry",
+        ),
+        (
+            py_caller_path,
+            py_caller_block,
+            {"pythonDirectories": ["Other"]},
+            1,
+            "block scalar disagrees with the registry",
+        ),
+        (
+            py_caller_path,
+            py_caller_plain,
+            {"pythonDirectories": ["Tools"]},
+            0,
+            "plain single value matches the registry",
+        ),
+        (
+            py_caller_path,
+            py_caller_no_with,
+            {},
+            0,
+            "no with: input, registry declares none - both empty",
+        ),
+        (
+            py_caller_path,
+            py_caller_no_with,
+            {"pythonDirectories": ["Tools"]},
+            1,
+            "no with: input, registry declares one",
+        ),
+        (
+            ".github/workflows/other.yml",
+            py_caller_block,
+            {"pythonDirectories": ["Other"]},
+            0,
+            "not a scoped caller path",
+        ),
+        (
+            py_caller_path,
+            py_caller_no_hub,
+            {"pythonDirectories": ["Tools"]},
+            0,
+            "validate job never reaches validate-task.yml",
+        ),
+    ]
+    python_caller_ok = True
+    for path_in, text_in, entry_in, expected, label in python_caller_cases:
+        got = len(python_directories_caller_findings(path_in, text_in, entry_in))
+        if got != expected:
+            ok = False
+            python_caller_ok = False
+            print(
+                f"  FAIL python_directories_caller_findings [{label}] -> {got} finding(s), expected {expected}"
+            )
+    if python_caller_ok:
+        print(
+            "  ok   python_directories_caller_findings: a caller's declared python-directories input is compared against the registry"
         )
 
     id_cases = [

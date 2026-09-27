@@ -1,0 +1,39 @@
+name: Python directories
+description: Resolve the Python project directories the validator gates, from the caller's declaration.
+
+inputs:
+  directories:
+    description: >-
+      Newline-separated repository-relative directories, each holding a tracked pyproject.toml,
+      for example 'RegressionTests'. Empty by default, which gates the root where a root
+      pyproject.toml is tracked and nothing otherwise.
+    required: false
+    default: ''
+  report-uncovered:
+    description: >-
+      'true' to warn about tracked .py files outside every resolved directory. One job reports
+      it, so a matrix does not repeat the same warning per leg.
+    required: false
+    default: 'false'
+
+outputs:
+  directories:
+    description: The resolved directories, newline-separated, '.' for the root.
+    value: ${{ steps.resolve.outputs.directories }}
+  any:
+    description: "'true' when at least one directory is gated."
+    value: ${{ steps.resolve.outputs.any }}
+  declared:
+    description: "'true' when the caller declared the directories rather than taking the root default."
+    value: ${{ steps.resolve.outputs.declared }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Python directories step
+      id: resolve
+      shell: bash
+      env:
+        DECLARED: ${{ inputs.directories }}
+        REPORT_UNCOVERED: ${{ inputs.report-uncovered }}
+      run: python3 "$GITHUB_ACTION_PATH/python_directories.py"
