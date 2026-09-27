@@ -1230,7 +1230,7 @@ class TestCommentWrap(BaitCase):
         self.assertEqual(["comment-wrap"], self.flag("a.css", "/* One thing. Another thing. */\n"))
 
     def test_a_version_pin_is_machinery_rather_than_prose(self) -> None:
-        """The action-pinning rule requires a trailing `# vX.Y.Z`, which is a label, not a sentence."""
+        """The action-pinning rule requires a trailing release-tag comment such as `# vX.Y.Z`, which is a label, not a sentence."""
         self.assertEqual([], self.flag("a.yml", "  uses: x@sha # v7.0.0\n"))
         self.assertEqual([], self.flag("a.yml", "  uses: x@sha # v3\n"))
 

@@ -338,11 +338,21 @@ jobs:
         if: hashFiles('**/*Tests*.csproj') != ''
         run: |
           set -Eeuo pipefail
+          rm -rf ./coverage
           dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage
+          written=0
           for report in ./coverage/*.cobertura.xml; do
             [ -e "$report" ] || continue
-            mv "$report" "./coverage/coverage-$(basename "$report")"
+            renamed="./coverage/coverage-$(basename "$report")"
+            mv "$report" "$renamed"
+            if [ -s "$renamed" ]; then
+              written=1
+            fi
           done
+          if [ "$written" -eq 0 ]; then
+            echo "::error::This run wrote no non-empty Cobertura report under ./coverage. Reference Microsoft.Testing.Extensions.CodeCoverage from each test project, per CODESTYLE.md's .NET side."
+            exit 1
+          fi
 
       # Report-only: fail_ci_if_error is false so a Codecov hiccup or an absent token never fails the gate.
       - name: Upload coverage to Codecov step
