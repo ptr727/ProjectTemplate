@@ -33,7 +33,9 @@ whether the Python has third-party runtime dependencies, which shows up structur
   repo's deliverable. It is a PEP 621 uv project: `[project]` with `dependencies` (dev tools in
   `[project.optional-dependencies]` or `[dependency-groups]`), a `[build-system]`, and a committed
   `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings" section). CI runs `uv sync --frozen` +
-  `uv run <tool>`, so the lockfile pins tool versions.
+  `uv run <tool>`, so the lockfile pins tool versions. A `pyproject.toml` beside a
+  `requirements*.txt` is this profile too, installed with pip, whether or not it carries a
+  `[project]` table.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
