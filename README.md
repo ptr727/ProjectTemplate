@@ -129,7 +129,7 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 
 ## How This Repo Operates
 
-ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
+ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only, docs, and python project types in [WORKFLOW.md][workflow]).
 
 The doors a session enters through, and where each leads, matching the "Getting Started" table above:
 
