@@ -311,6 +311,16 @@ def expected_python_directories(entry, tree):
 CARRIED_PYTHON_HELPERS = {"hub-fetch-run.py"}
 
 
+def declared_types(entry):
+    """The string elements of the registry entry's `types` list, or none where `types` is not a list.
+
+    A malformed entry therefore reads as untyped, or as typed by its string elements alone, rather than
+    aborting the run.
+    """
+    types = entry.get("types")
+    return [t for t in types if isinstance(t, str)] if isinstance(types, list) else []
+
+
 def is_repo_python(path):
     return path.endswith(".py") and posixpath.basename(path) not in CARRIED_PYTHON_HELPERS
 
@@ -324,7 +334,7 @@ def python_type_findings(entry, tree):
     repo's blob path set, or None when it could not be read in full, in which case Python's presence
     is unanswerable and nothing is reported.
     """
-    if tree is None or "python" in entry.get("types", []):
+    if tree is None or "python" in declared_types(entry):
         return []
     notes = entry.get("driftNotes", [])
     suppressed = any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes)
@@ -366,7 +376,7 @@ def python_undeclared_root_findings(entry, tree):
     claims coverage for it. `tree` is the repo's blob path set, or None when it could not be read
     in full, in which case nothing is reported.
     """
-    if tree is None or "python" not in entry.get("types", []):
+    if tree is None or "python" not in declared_types(entry):
         return []
     if python_directories_of(entry) or "pyproject.toml" not in tree:
         return []
@@ -401,7 +411,7 @@ def python_directory_coverage_findings(entry, tree):
     a whole tree of them would bury the message the same way python_directories.py's own warning caps at
     UNCOVERED_SHOWN rather than listing every path.
     """
-    if tree is None or "python" not in entry.get("types", []):
+    if tree is None or "python" not in declared_types(entry):
         return []
     directories = expected_python_directories(entry, tree)
     missed = sorted(
@@ -682,7 +692,7 @@ def driftnote_findings(entry, spec, open_count):
     for note in entry.get("driftNotes", []):
         quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
         for cid in CHECK_ID_RE.findall(note):
-            if DETECTION_SUPPRESSION_IDS.get(cid, "") not in ("", *entry.get("types", [])):
+            if DETECTION_SUPPRESSION_IDS.get(cid, "") not in ("", *declared_types(entry)):
                 continue
             owner, known = check_id_owner(spec, cid)
             if not known:
@@ -692,7 +702,7 @@ def driftnote_findings(entry, spec, open_count):
                         f"registry: driftNote names check '{cid}', which spec/project-types.json does not define - fix the id or drop the note: {quoted}",
                     )
                 )
-            elif owner and owner not in entry.get("types", []):
+            elif owner and owner not in declared_types(entry):
                 out.append(
                     (
                         "DRIFT",
@@ -779,7 +789,7 @@ def repo_selectors(entry, defaults):
     default (as configure.sh does). consumerModel has no fleet default - validate.py requires it on every
     cataloged repo, so a cataloged repo always contributes one.
     """
-    sel = set(entry.get("types", []))
+    sel = set(declared_types(entry))
     sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
     sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
     # The consumerModel field has no defaults fallback, since the registry schema does not allow defaults.consumerModel and validate.py requires it on every cataloged repo.
@@ -2539,7 +2549,7 @@ def ground_branch_of(entry, branch=None, defaults=None):
 def audit_repo(entry, spec, branch=None):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
-    types = entry.get("types", [])
+    types = declared_types(entry)
     model = (
         entry.get("workflowModel")
         or spec["registry"].get("defaults", {}).get("workflowModel")
@@ -4633,6 +4643,13 @@ def _selftest():
             ["this repo does not declare"],
         ),
         (
+            "a malformed types value does not abort the note check",
+            None,
+            ["Vendored helper, not tracked (python.directories.declared)."],
+            0,
+            [],
+        ),
+        (
             "a detection suppression on a repo without the type",
             ["hugo"],
             ["Vendored helper, not tracked (python.directories.declared)."],
@@ -5814,6 +5831,7 @@ def _selftest():
         ({"types": ["python"]}, {"tools/script.py"}, 0, "typed python: 'python' already declared"),
         ({"types": []}, None, 0, "unreadable tree: presence is unanswerable"),
         ({"types": []}, {"README.md"}, 0, "no .py file anywhere: nothing to flag"),
+        ({"types": None}, {"tools/script.py"}, 1, "a malformed types value reads as untyped"),
         (
             {"types": ["docs"]},
             {".husky/hub-fetch-run.py"},
@@ -6373,7 +6391,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     presence/contract findings to fix, drift to converge (re-vendor or review), and anything unverifiable.
     """
     name = entry["name"]
-    types = ", ".join(entry.get("types", [])) or "untyped"
+    types = ", ".join(declared_types(entry)) or "untyped"
     stamp = f"{ground}@{audited_sha[:7]}" if audited_sha else ground
     blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
     drift = [t for k, t in findings if k == "DRIFT"]
@@ -6565,7 +6583,7 @@ def main(argv=None):
         except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
-        print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
+        print(f"== {entry['name']} ({', '.join(declared_types(entry))}; {model}){stamp} ==")
         if not findings:
             print(
                 "  clean (deterministic checks only; no project-type check in spec/project-types.json runs here, and the cross-cutting ones are covered only in part - AUDIT.md section 4)"
