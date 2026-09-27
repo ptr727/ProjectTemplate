@@ -32,9 +32,14 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
 
 - **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
   pyright strict (or mypy where the repo requires it).
-- **lint-only** (Scripts): no `[project]`, no lockfile. Uses `uvx` for third-party tools, unittest
+- **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
+  pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
   defect. Use the repository's exact coverage command and unittest scope from `OPERATIONS.md`.
+
+The profile decides only how the tools are installed, never what is owed. Every Python directory
+owes lint, format, a type check, a `tests/` suite, and coverage, and a repo declares each such
+directory in the hub validator's `python-directories` input.
 
 For the full profile specification and per-repo adaptation axes (type checker, dependency
 declaration, versioning, VS Code config), see `references/profiles.md`.

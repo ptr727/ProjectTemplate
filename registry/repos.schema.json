@@ -100,6 +100,13 @@
                         }
                     }
                 },
+                "pythonDirectories": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 },
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "$comment": "The repository-relative directories this repo's callers pass as validate-task.yml's `python-directories` input, per .github/actions/python-directories/python_directories.py. Absent means callers pass none. Shape and cross-check against a caller's own declaration are spec/validate.py's and spec/audit.py's, since this schema is advisory and no gate runs it."
+                },
                 "requiredSecrets": {
                     "type": "array",
                     "items": {

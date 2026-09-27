@@ -1,9 +1,9 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint by tree detection, the prose gate, and the repo gate), unit-test (a generic dotnet test or pytest, skipped where the caller has no test project, and run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs and python-versions are the three optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories and python-versions are the four optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -17,6 +17,12 @@ on:
       # Threaded to the repo-gate composite action's own exclude-globs input, unvalidated.
       repo-gate-exclude-globs:
         description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing sha-pin and tracked-path eol-coverage scans via repo_gate.py's --exclude.
+        required: false
+        type: string
+        default: ''
+      # Resolved and checked by the python-directories action, which both Python jobs run, so a malformed declaration fails before any tool runs.
+      python-directories:
+        description: Repository-relative directories holding a Python project, one per line (for example 'RegressionTests'), each with a tracked pyproject.toml. Each is linted, type checked, and tested under coverage. Empty gates the root where a root pyproject.toml is tracked. List '.' alongside a subdirectory to keep the root gated too.
         required: false
         type: string
         default: ''
@@ -168,7 +174,7 @@ jobs:
           fi
 
       # Language lint by tree detection: a caller carries a language marker file or it does not.
-      # No per-repo input and no registry read decide it, only what the checkout actually holds.
+      # Python is the one exception, gated in the directories the python-directories input declares.
       - name: Setup .NET SDK step
         if: hashFiles('**/*.csproj') != ''
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -193,60 +199,139 @@ jobs:
         if: hashFiles('**/*.csproj') != ''
         run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
 
+      - name: Resolve Python directories step
+        id: python
+        uses: $/.github/actions/python-directories
+        with:
+          directories: ${{ inputs.python-directories }}
+          report-uncovered: 'true'
+
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
       # This is the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
-        if: hashFiles('pyproject.toml') != '' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
+        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.13"
 
+      # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
+      # They install under the first interpreter the caller names, since they need not resolve under the one this job pins, and UV_PYTHON is what every uv call below reads for it.
       - name: Sync Python dependencies step
-        if: hashFiles('pyproject.toml') != '' && hashFiles('uv.lock') != ''
-        run: uv sync --all-groups --frozen
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
+        run: |
+          set -Eeuo pipefail
+          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          install_requirements() {
+            if [ -n "${PIP_PYTHON:-}" ]; then
+              export UV_PYTHON="$PIP_PYTHON"
+            fi
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            if [ "$kind" = uv ]; then
+              (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
+              # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
+              if ! PIP_PYTHON=$(jq -er 'if type == "array" and length > 0 and (.[0] | type == "string" and test("\\S")) then .[0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
+                echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry installs the declared pip directory $dir."
+                exit 1
+              fi
+              (cd "$dir" && install_requirements) < /dev/null
+            fi
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Lint Python step
-        if: hashFiles('pyproject.toml') != ''
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          if [ -f uv.lock ]; then
-            uv run ruff check .
-          else
-            uvx ruff@latest check .
-          fi
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            echo "ruff check in $dir"
+            if [ "$kind" = uv ]; then
+              (cd "$dir" && uv run ruff check .) < /dev/null
+            else
+              (cd "$dir" && uvx ruff@latest check .) < /dev/null
+            fi
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Check Python formatting step
-        if: hashFiles('pyproject.toml') != ''
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          if [ -f uv.lock ]; then
-            uv run ruff format --check .
-          else
-            uvx ruff@latest format --check .
-          fi
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            echo "ruff format --check in $dir"
+            if [ "$kind" = uv ]; then
+              (cd "$dir" && uv run ruff format --check .) < /dev/null
+            else
+              (cd "$dir" && uvx ruff@latest format --check .) < /dev/null
+            fi
+          done <<< "$PYTHON_PROJECTS"
 
       # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
       # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
+      # A declared directory's standalone mypy.ini or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
       # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
-        if: hashFiles('pyproject.toml') != ''
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
-          if grep -Eq '^[[:space:]]*\[tool\.mypy\]' pyproject.toml; then
-            if [ -f uv.lock ]; then
-              uv run mypy
-            else
-              uvx mypy@latest
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            standalone_mypy=false
+            standalone_pyright=false
+            if [ "$DECLARED" = "true" ]; then
+              if [ -f "$dir/mypy.ini" ] || [ -f "$dir/.mypy.ini" ]; then
+                standalone_mypy=true
+              fi
+              if [ -f "$dir/pyrightconfig.json" ]; then
+                standalone_pyright=true
+              fi
             fi
-          elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' pyproject.toml; then
-            if [ -f uv.lock ]; then
-              uv run pyright
+            if grep -Eq '^[[:space:]]*\[tool\.mypy\]' "$dir/pyproject.toml" || [ "$standalone_mypy" = true ]; then
+              checker=mypy
+            elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' "$dir/pyproject.toml" || [ "$standalone_pyright" = true ]; then
+              checker=pyright
+            elif [ "$DECLARED" = "true" ]; then
+              echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml or in a mypy.ini or pyrightconfig.json beside it. Every Python directory owes a type check."
+              exit 1
             else
-              uvx pyright@latest
+              echo "no [tool.mypy] or [tool.pyright] section in $dir/pyproject.toml, skipping"
+              continue
             fi
-          else
-            echo "no [tool.mypy] or [tool.pyright] section, skipping"
-          fi
+            echo "$checker in $dir"
+            if [ "$kind" = uv ]; then
+              (cd "$dir" && uv run "$checker") < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && [ "$checker" = mypy ]; then
+              # Left alone, mypy targets the interpreter it runs under, so the venv's version is passed with it.
+              (cd "$dir" && uvx mypy@latest --python-executable .venv/bin/python --python-version "$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])')") < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
+              (cd "$dir" && uvx pyright@latest --pythonpath .venv/bin/python) < /dev/null
+            else
+              (cd "$dir" && uvx "$checker@latest") < /dev/null
+            fi
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Lint composite actions step
         if: hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
@@ -281,10 +366,10 @@ jobs:
           exclude-globs: ${{ inputs.repo-gate-exclude-globs }}
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
-  # Every step below carries its own tree-detection guard instead.
-  # A caller with neither a *Tests*.csproj nor a tests/ directory beside a pyproject.toml and a dependency manifest runs every step's guard false, and the job reports success having done nothing, which is the clean skip this job promises.
-  # That manifest is a committed uv.lock or a root requirements*.txt, the two dependency mechanisms spec/project-types.json names, so a pip-based Python repo with tests is served here rather than skipped, per D1.6.
-  # What excludes the lint-only Python profile here is the root tests/ guard rather than the manifest one, that profile being tooling scripts embedded in a non-Python repo rather than a tested package at the root.
+  # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
+  # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # A declared Python directory owes a tests/ suite under coverage, per D1.6, so one without tests/ fails here rather than skipping.
+  # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation.
   # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
   # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
@@ -305,7 +390,7 @@ jobs:
       # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well, which is why the entry test is for content rather than for length.
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
       # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
-      # The rest fail in the dependency sync below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
+      # The rest fail in the Run Python tests step below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
       - name: Validate python-versions input step
         env:
@@ -364,70 +449,105 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+      - name: Resolve Python directories step
+        id: python
+        uses: $/.github/actions/python-directories
+        with:
+          directories: ${{ inputs.python-directories }}
+
+      # A root the undeclared default skips still sets uv up, so an empty cache is a normal outcome rather than an error at post-job save.
       - name: Setup uv step
-        if: >-
-          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
-          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
+        if: steps.python.outputs.any == 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: ${{ matrix.python-version }}
+          ignore-nothing-to-cache: true
 
-      # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
-      # The editable install matches what uv sync gives the other branch, and its guard leaves a layout declaring no [project] alone.
-      - name: Sync dependencies step
-        if: >-
-          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
-          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
-        run: |
-          set -Eeuo pipefail
-          if [ -f uv.lock ]; then
-            uv sync --all-groups --frozen
-          else
-            uv venv
-            requirement_args=()
-            for file in requirements*.txt; do
-              [ -e "$file" ] || continue
-              requirement_args+=(-r "$file")
-            done
-            if [ "${#requirement_args[@]}" -gt 0 ]; then
-              uv pip install "${requirement_args[@]}"
-            fi
-            if grep -Eq '^[[:space:]]*\[project\]' pyproject.toml; then
-              uv pip install -e .
-            fi
-          fi
-
-      # --cov-report=xml names the report format and selects nothing to measure, so the repository's own pyproject.toml supplies the --cov selector, per D1.6.
+      # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
+      # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
       # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
       # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
-      - name: Run pytest step
-        if: >-
-          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
-          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
+      # Each directory's run reads /dev/null, since the loop's own list is its stdin and a suite reading stdin would swallow the directories after it.
+      - name: Run Python tests step
+        id: python-tests
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
-          rm -f coverage.xml
-          if [ -f uv.lock ]; then
-            uv run pytest --cov-report=xml
-          else
-            .venv/bin/python -m pytest --cov-report=xml
-          fi
-          if [[ ! -s coverage.xml ]]; then
-            echo "::error::This run wrote no coverage.xml at the repository root. Select a coverage source in this repository's pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing, and leave the report at the root path the upload step below reads."
-            exit 1
-          fi
+          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          install_requirements() {
+            if [ -n "${PIP_PYTHON:-}" ]; then
+              export UV_PYTHON="$PIP_PYTHON"
+            fi
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
+          reports=()
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            if [ "$DECLARED" != "true" ] && { [ ! -d "$dir/tests" ] || [ "$kind" = lint-only ] || [ "$kind" = unsupported ]; }; then
+              echo "the undeclared root runs only a pytest suite with a dependency manifest beside it, skipping"
+              continue
+            fi
+            if [ "$kind" = unsupported ]; then
+              echo "::error::The declared Python directory $dir declares a project with no uv.lock or requirements*.txt of its own, so the validator cannot install its dependencies. Declare a uv workspace's root rather than its member."
+              exit 1
+            fi
+            if [ "$DECLARED" = "true" ] && [ ! -d "$dir/tests" ]; then
+              echo "::error::The declared Python directory $dir has no tests/ directory. Every Python directory owes a test suite run under coverage, per D1.6."
+              exit 1
+            fi
+            if [ "$DECLARED" = "true" ] && [ -z "$(find "$dir/tests" -name '*.py' -print -quit)" ]; then
+              echo "::error::The declared Python directory $dir has no Python files under tests/. Every Python directory owes a test suite run under coverage, per D1.6."
+              exit 1
+            fi
+            echo "tests in $dir ($kind)"
+            rm -f "$dir/coverage.xml"
+            (
+              cd "$dir"
+              case "$kind" in
+              uv)
+                uv sync --all-groups --frozen
+                uv run pytest --cov-report=xml
+                ;;
+              pip)
+                install_requirements
+                .venv/bin/python -m pytest --cov-report=xml
+                ;;
+              lint-only)
+                uvx coverage@latest run -m unittest discover -s tests
+                uvx coverage@latest xml -o coverage.xml
+                ;;
+              esac
+            ) < /dev/null
+            if [[ ! -s "$dir/coverage.xml" ]]; then
+              echo "::error::This run wrote no coverage.xml in $dir. A pytest directory selects its coverage source in its own pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing."
+              exit 1
+            fi
+            reports+=("$dir/coverage.xml")
+          done <<< "$PYTHON_PROJECTS"
+          files=$(IFS=,; printf '%s' "${reports[*]}")
+          echo "files=$files" >> "$GITHUB_OUTPUT"
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.
       # The flag names the leg, so a multi-interpreter repo reads its legs apart in Codecov rather than seeing one merged number for all of them.
       - name: Upload coverage to Codecov step (Python)
-        if: >-
-          hashFiles('pyproject.toml') != '' && hashFiles('tests/**') != ''
-          && (hashFiles('uv.lock') != '' || hashFiles('requirements*.txt') != '')
+        if: steps.python-tests.outputs.files != ''
         continue-on-error: true
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
+          files: ${{ steps.python-tests.outputs.files }}
           flags: python-${{ matrix.python-version }}
           fail_ci_if_error: false
 
