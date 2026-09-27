@@ -92,7 +92,7 @@ function Resolve-Pwsh {
     $candidates = @((Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'))
     if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'PowerShell\7\pwsh.exe') }
     foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
     return $null
 }
@@ -171,8 +171,8 @@ function Get-MarkerPath { Join-Path $script:DIR 'hub.owned' }
 # Answers whether an existing $DIR\hub may be removed: absent, or created by this run.
 function Test-HubRemovable {
     $hubPath = Join-Path $script:DIR 'hub'
-    if (-not (Test-Path $hubPath)) { return $true }
-    if (Test-Path (Get-MarkerPath)) { return $true }
+    if (-not (Test-Path -LiteralPath $hubPath)) { return $true }
+    if (Test-Path -LiteralPath (Get-MarkerPath)) { return $true }
     fail "$hubPath exists and this run did not create it, so it will not be removed. Pass -Dir to choose another cache location."
     return $false
 }
@@ -243,7 +243,7 @@ function Invoke-FetchHubLocked {
     step "Fetching $script:HUB_REPO at $script:REF"
     if (-not (Test-HubRemovable)) { return $false }
     $hubPath = Join-Path $script:DIR 'hub'
-    if (Test-Path $hubPath) { Remove-Item -Recurse -Force $hubPath }
+    if (Test-Path -LiteralPath $hubPath) { Remove-Item -LiteralPath $hubPath -Recurse -Force }
     # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
     New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
     # A full clone of the default branch first, whatever -Ref names: spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary.
@@ -252,8 +252,8 @@ function Invoke-FetchHubLocked {
     if ($LASTEXITCODE -ne 0) {
         fail "Could not clone $script:HUB_REPO. Check that this host reaches github.com."
         # The marker goes with the directory it marked: an orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
-        Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
-        Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $hubPath -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Get-MarkerPath) -Force -ErrorAction SilentlyContinue
         return $false
     }
     # Set the moment the clone lands, whatever -Ref still has to do: Invoke-Cleanup is gated on this, and a later ref-specific failure below must still remove the tree this step already created.
@@ -342,14 +342,14 @@ function Test-DownstreamCheckout {
 
 function Invoke-Cleanup {
     if ($script:KEEP -or -not $script:HUB_FETCHED) { return }
-    if (-not (Test-Path (Get-MarkerPath))) { return }
+    if (-not (Test-Path -LiteralPath (Get-MarkerPath))) { return }
     # Same exclusive lock every reader and writer takes, via Invoke-WithHubLock, so this waits out another session still mid-use rather than deleting the tree out from under it.
     # No -ArgumentList needed: the scriptblock only reads script-scoped state ($script:DIR, Get-MarkerPath), not a local parameter of this function, so there is nothing for PSReviewUnusedParameter to flag here the way Invoke-HostTool's own $Tool/$Arguments needed forwarding.
     Invoke-WithHubLock -ScriptBlock {
         $hubPath = Join-Path $script:DIR 'hub'
         # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
-        Remove-Item -Recurse -Force $hubPath -ErrorAction SilentlyContinue
-        if (-not (Test-Path $hubPath)) { Remove-Item -Force (Get-MarkerPath) -ErrorAction SilentlyContinue }
+        Remove-Item -LiteralPath $hubPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $hubPath)) { Remove-Item -LiteralPath (Get-MarkerPath) -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -370,7 +370,7 @@ function Invoke-HostTool {
 function Invoke-InHub {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][string]$Tool, [string[]]$Arguments = @())
     $path = Join-Path $script:HUB_ROOT $Directory | Join-Path -ChildPath $Tool
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -LiteralPath $path)) {
         fail "$script:HUB_ROOT carries no $Tool at $Directory, so this ref is not one to run tasks from"
         return 1
     }
