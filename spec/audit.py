@@ -312,7 +312,7 @@ CARRIED_PYTHON_HELPERS = {"hub-fetch-run.py"}
 
 
 def declared_types(entry):
-    """The string elements of the registry entry's `types` list, or none where `types` is not a list.
+    """The string elements of the registry entry's `types` list, or an empty list where `types` is not a list.
 
     A malformed entry therefore reads as untyped, or as typed by its string elements alone, rather than
     aborting the run.
@@ -5870,6 +5870,26 @@ def _selftest():
     if python_type_ok:
         print(
             "  ok   python_type_findings: a tracked .py file with no 'python' type is a suppressible advisory, and a stale suppression is reported"
+        )
+
+    declared_types_cases = [
+        ({"types": ["python", "docs"]}, ["python", "docs"], "a list of strings is read whole"),
+        ({"types": ["python", 3, None]}, ["python"], "a mixed list keeps its string elements"),
+        ({"types": "python"}, [], "a string is not a list"),
+        ({"types": {"python": 1}}, [], "an object is not a list"),
+        ({"types": None}, [], "a declared null reads as untyped"),
+        ({}, [], "an absent field reads as untyped"),
+    ]
+    declared_types_ok = True
+    for entry_in, expected, label in declared_types_cases:
+        got = declared_types(entry_in)
+        if got != expected:
+            ok = False
+            declared_types_ok = False
+            print(f"  FAIL declared_types [{label}] -> {got!r}, expected {expected!r}")
+    if declared_types_ok:
+        print(
+            "  ok   declared_types: a malformed types value reads as its string elements or as an empty list"
         )
 
     python_directory_cases = [
