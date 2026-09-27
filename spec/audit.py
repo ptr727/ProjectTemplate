@@ -312,7 +312,11 @@ CARRIED_PYTHON_HELPERS = {"hub-fetch-run.py"}
 
 
 def declared_types(entry):
-    """The registry entry's `types`, or none where the value is not a list of strings, so a malformed entry reads as untyped rather than aborting the run."""
+    """The string elements of the registry entry's `types` list, or none where `types` is not a list.
+
+    A malformed entry therefore reads as untyped, or as typed by its string elements alone, rather than
+    aborting the run.
+    """
     types = entry.get("types")
     return [t for t in types if isinstance(t, str)] if isinstance(types, list) else []
 
