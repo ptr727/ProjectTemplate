@@ -217,47 +217,47 @@ jobs:
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_DIRECTORIES: ${{ steps.python.outputs.directories }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
-            if [ -f "$dir/uv.lock" ]; then
+            if [ "$kind" = uv ]; then
               (cd "$dir" && uv sync --all-groups --frozen)
             fi
-          done <<< "$PYTHON_DIRECTORIES"
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_DIRECTORIES: ${{ steps.python.outputs.directories }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             echo "ruff check in $dir"
-            if [ -f "$dir/uv.lock" ]; then
+            if [ "$kind" = uv ]; then
               (cd "$dir" && uv run ruff check .)
             else
               (cd "$dir" && uvx ruff@latest check .)
             fi
-          done <<< "$PYTHON_DIRECTORIES"
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Check Python formatting step
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_DIRECTORIES: ${{ steps.python.outputs.directories }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             echo "ruff format --check in $dir"
-            if [ -f "$dir/uv.lock" ]; then
+            if [ "$kind" = uv ]; then
               (cd "$dir" && uv run ruff format --check .)
             else
               (cd "$dir" && uvx ruff@latest format --check .)
             fi
-          done <<< "$PYTHON_DIRECTORIES"
+          done <<< "$PYTHON_PROJECTS"
 
       # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
       # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
@@ -265,10 +265,10 @@ jobs:
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_DIRECTORIES: ${{ steps.python.outputs.directories }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
         run: |
           set -Eeuo pipefail
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             if grep -Eq '^[[:space:]]*\[tool\.mypy\]' "$dir/pyproject.toml"; then
               checker=mypy
@@ -279,12 +279,12 @@ jobs:
               continue
             fi
             echo "$checker in $dir"
-            if [ -f "$dir/uv.lock" ]; then
+            if [ "$kind" = uv ]; then
               (cd "$dir" && uv run "$checker")
             else
               (cd "$dir" && uvx "$checker@latest")
             fi
-          done <<< "$PYTHON_DIRECTORIES"
+          done <<< "$PYTHON_PROJECTS"
 
       - name: Lint composite actions step
         if: hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
@@ -322,7 +322,7 @@ jobs:
   # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
   # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # A declared Python directory owes a tests/ suite under coverage, per D1.6, so one without tests/ fails here rather than skipping.
-  # The root default keeps its old skip where the root carries no tests/, since a caller declaring nothing has not yet taken on that obligation, and the fleet audit is where that gap becomes a finding.
+  # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation, and the fleet audit is where that gap becomes a finding.
   # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
   # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
@@ -423,29 +423,35 @@ jobs:
         id: python-tests
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_DIRECTORIES: ${{ steps.python.outputs.directories }}
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
           reports=()
-          while IFS= read -r dir; do
+          while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
-            if [ ! -d "$dir/tests" ]; then
-              if [ "$DECLARED" = "true" ]; then
-                echo "::error::The declared Python directory $dir has no tests/ directory. Every Python directory owes a test suite run under coverage, per D1.6."
-                exit 1
-              fi
-              echo "no tests/ beside the root pyproject.toml, skipping"
+            if [ "$DECLARED" != "true" ] && { [ ! -d "$dir/tests" ] || [ "$kind" = lint-only ] || [ "$kind" = unsupported ]; }; then
+              echo "the undeclared root runs only a pytest suite with a dependency manifest beside it, skipping"
               continue
             fi
-            echo "tests in $dir"
+            if [ "$kind" = unsupported ]; then
+              echo "::error::The declared Python directory $dir declares a project with no uv.lock, no enclosing uv workspace lock, and no requirements*.txt, so the validator cannot install its dependencies."
+              exit 1
+            fi
+            if [ ! -d "$dir/tests" ]; then
+              echo "::error::The declared Python directory $dir has no tests/ directory. Every Python directory owes a test suite run under coverage, per D1.6."
+              exit 1
+            fi
+            echo "tests in $dir ($kind)"
             rm -f "$dir/coverage.xml"
             (
               cd "$dir"
-              if [ -f uv.lock ]; then
+              case "$kind" in
+              uv)
                 uv sync --all-groups --frozen
                 uv run pytest --cov-report=xml
-              elif compgen -G 'requirements*.txt' > /dev/null; then
+                ;;
+              pip)
                 uv venv
                 requirement_args=()
                 for file in requirements*.txt; do
@@ -456,17 +462,19 @@ jobs:
                   uv pip install -e .
                 fi
                 .venv/bin/python -m pytest --cov-report=xml
-              else
+                ;;
+              lint-only)
                 uvx coverage@latest run -m unittest discover -s tests
                 uvx coverage@latest xml -o coverage.xml
-              fi
+                ;;
+              esac
             )
             if [[ ! -s "$dir/coverage.xml" ]]; then
               echo "::error::This run wrote no coverage.xml in $dir. A pytest directory selects its coverage source in its own pyproject.toml, an addopts entry of --cov=<package> in practice, since --cov-report=xml alone measures nothing."
               exit 1
             fi
             reports+=("$dir/coverage.xml")
-          done <<< "$PYTHON_DIRECTORIES"
+          done <<< "$PYTHON_PROJECTS"
           files=$(IFS=,; echo "${reports[*]}")
           echo "files=$files" >> "$GITHUB_OUTPUT"
 

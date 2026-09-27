@@ -17,9 +17,11 @@ inputs:
     default: 'false'
 
 outputs:
-  directories:
-    description: The resolved directories, newline-separated, '.' for the root.
-    value: ${{ steps.resolve.outputs.directories }}
+  projects:
+    description: >-
+      One '<shape><TAB><directory>' line per resolved directory, '.' for the root, the shape being
+      uv, pip, lint-only, or unsupported.
+    value: ${{ steps.resolve.outputs.projects }}
   any:
     description: "'true' when at least one directory is gated."
     value: ${{ steps.resolve.outputs.any }}

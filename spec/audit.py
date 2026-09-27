@@ -2008,8 +2008,12 @@ def normalize_declared_python_directory(line):
     return posixpath.normpath(path)
 
 
-def python_directories_caller_findings(path, text, entry):
+def python_directories_caller_findings(path, text, entry, tree=None):
     """DRIFT when a caller's declared `python-directories` input disagrees with the registry's own.
+
+    Both sides are compared by the directories they resolve to, so a caller naming `.` agrees with a
+    registry naming nothing wherever the tree carries a root pyproject.toml. `tree` is the repo's blob
+    path set, or None when it could not be read, and then the two declarations are compared as written.
 
     Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
     _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
@@ -2030,6 +2034,10 @@ def python_directories_caller_findings(path, text, entry):
         }
     )
     registry = sorted(python_directories_of(entry))
+    if tree is not None:
+        root = ["."] if "pyproject.toml" in tree else []
+        if sorted(declared or root) == sorted(expected_python_directories(entry, tree)):
+            return []
     if declared == registry:
         return []
     return [
@@ -2752,7 +2760,7 @@ def audit_repo(entry, spec, branch=None):
             else:
                 contract = item.get("contract", {})
                 findings.extend(check_interface(path, contract, text))
-                findings.extend(python_directories_caller_findings(path, text, entry))
+                findings.extend(python_directories_caller_findings(path, text, entry, tree))
                 canonical_rel = item.get("reference") or path
                 for job in contract.get("verbatimJobs", []):
                     findings.extend(
@@ -5822,9 +5830,31 @@ def _selftest():
             "validate job never reaches validate-task.yml",
         ),
     ]
+    py_caller_root = py_caller_plain.replace("python-directories: Tools", "python-directories: .")
+    py_root_tree = {"pyproject.toml", "app.py"}
+    python_caller_cases = [(*case, None) for case in python_caller_cases] + [
+        (
+            py_caller_path,
+            py_caller_root,
+            {},
+            0,
+            "caller names the root the default gates",
+            py_root_tree,
+        ),
+        (
+            py_caller_path,
+            py_caller_no_with,
+            {"pythonDirectories": ["."]},
+            0,
+            "registry names the default root",
+            py_root_tree,
+        ),
+        (py_caller_path, py_caller_root, {}, 1, "caller names a root with no project", {"app.py"}),
+        (py_caller_path, py_caller_root, {}, 1, "unreadable tree compares as written", None),
+    ]
     python_caller_ok = True
-    for path_in, text_in, entry_in, expected, label in python_caller_cases:
-        got = len(python_directories_caller_findings(path_in, text_in, entry_in))
+    for path_in, text_in, entry_in, expected, label, tree_in in python_caller_cases:
+        got = len(python_directories_caller_findings(path_in, text_in, entry_in, tree_in))
         if got != expected:
             ok = False
             python_caller_ok = False

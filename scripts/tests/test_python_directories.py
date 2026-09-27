@@ -50,7 +50,7 @@ class ResolveTests(unittest.TestCase):
         self.assertIn("no tracked pyproject.toml", errors[0])
 
     def test_a_path_outside_the_repository_is_refused(self) -> None:
-        for line in ("/abs", "../up", "a/../../up", "win\\path"):
+        for line in ("/abs", "../up", "a/../../up", "win\\path", "tab\tname"):
             with self.subTest(line=line):
                 _, _, errors = pd.resolve(line, ["pyproject.toml"])
                 self.assertEqual(len(errors), 1)
@@ -59,6 +59,37 @@ class ResolveTests(unittest.TestCase):
         directories, declared, errors = pd.resolve("../up", ["pyproject.toml"])
         self.assertEqual((directories, declared), ([], True))
         self.assertTrue(errors)
+
+
+class ShapeTests(unittest.TestCase):
+    TOOL_ONLY = "[tool.ruff]\n"
+    PROJECT = "[project]\nname = 'widget'\n"
+
+    def test_an_own_lock_is_uv(self) -> None:
+        self.assertEqual("uv", pd.shape("Tools", {"Tools/uv.lock"}, self.PROJECT))
+
+    def test_a_requirements_file_beside_it_is_pip(self) -> None:
+        tracked = {"Tools/requirements-test.txt"}
+        self.assertEqual("pip", pd.shape("Tools", tracked, self.PROJECT))
+
+    def test_a_requirements_file_deeper_down_is_not_pip(self) -> None:
+        tracked = {"Tools/docs/requirements.txt"}
+        self.assertEqual("lint-only", pd.shape("Tools", tracked, self.TOOL_ONLY))
+
+    def test_tool_config_alone_is_lint_only(self) -> None:
+        self.assertEqual("lint-only", pd.shape(".", {"pyproject.toml"}, self.TOOL_ONLY))
+
+    def test_a_workspace_member_takes_the_enclosing_lock(self) -> None:
+        tracked = {"uv.lock", "pkg/member/pyproject.toml"}
+        self.assertEqual("uv", pd.shape("pkg/member", tracked, self.PROJECT))
+
+    def test_a_lint_only_member_under_a_lock_stays_lint_only(self) -> None:
+        tracked = {"uv.lock", "Tools/pyproject.toml"}
+        self.assertEqual("lint-only", pd.shape("Tools", tracked, self.TOOL_ONLY))
+
+    def test_a_project_with_no_manifest_is_unsupported(self) -> None:
+        self.assertEqual("unsupported", pd.shape(".", {"pyproject.toml"}, self.PROJECT))
+        self.assertEqual("unsupported", pd.shape("Tools", set(), "[build-system]\n"))
 
 
 class UncoveredTests(unittest.TestCase):
@@ -110,9 +141,9 @@ class MainTests(unittest.TestCase):
         code, _, written = self.run_main("Tools")
         self.assertEqual(code, 0)
         lines = written.splitlines()
-        self.assertTrue(lines[0].startswith("directories<<EOF_"))
-        self.assertEqual(lines[1], "Tools")
-        self.assertEqual(lines[2], lines[0].removeprefix("directories<<"))
+        self.assertTrue(lines[0].startswith("projects<<EOF_"))
+        self.assertEqual(lines[1], "lint-only\tTools")
+        self.assertEqual(lines[2], lines[0].removeprefix("projects<<"))
         self.assertIn("any=true", lines)
         self.assertIn("declared=true", lines)
 

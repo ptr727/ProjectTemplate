@@ -889,10 +889,11 @@ gh() {
         self.assertIn("if: steps.python-tests.outputs.files != ''", job)
 
         # Each dependency shape reaches its own runner, the lint-only one included.
-        self.assertIn("if [ -f uv.lock ]; then", job)
-        self.assertIn("elif compgen -G 'requirements*.txt' > /dev/null; then", job)
+        for arm in ("              uv)\n", "              pip)\n", "              lint-only)\n"):
+            self.assertIn(arm, job)
         self.assertIn("uvx coverage@latest run -m unittest discover -s tests", job)
         self.assertIn("has no tests/ directory", job)
+        self.assertIn("cannot install its dependencies", job)
 
         # The guard admitting a pip repo is only half of it: the steps must install and run without a lockfile.
         self.assertIn('requirement_args+=(-r "$file")', job)

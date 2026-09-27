@@ -49,10 +49,11 @@ whether the Python has third-party runtime dependencies, which shows up structur
   default (per GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is
   the runner instead. A script that carries a gate still earns tests, written with the standard
   library's `unittest` so they run under bare `python3` with nothing installed, as
-  `test_<script>.py` under a `tests/` directory beside the scripts it exercises
-  (`<scripts-dir>/tests/`), kept apart so a test never reads as a tool. Within the scripts
-  directory the name carries the kind: a gate that checks and exits non-zero on a finding takes a
-  `_lint` or `_gate` suffix, and a utility that does work takes none. Any repo carrying Python
+  `test_<script>.py` under a `tests/` directory beside the scripts it exercises and their
+  `pyproject.toml` (`<scripts-dir>/tests/`), where the validator looks for it, kept apart so a
+  test never reads as a tool. Within the scripts directory the name carries the kind: a gate
+  that checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility
+  that does work takes none. Any repo carrying Python
   owes the same gates whatever its profile: lint, format, a type check, a test suite, and a
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside

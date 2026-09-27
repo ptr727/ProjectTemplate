@@ -11,19 +11,27 @@ The declaration is what decides what is gated, never discovery, since a stray or
 directory covers are therefore reported as a warning rather than gated, and the fleet audit,
 which compares the declaration against the registry, is where they become a finding.
 
-Writes `directories` (newline-separated), `any`, and `declared` to GITHUB_OUTPUT. Exits 1 on
-a declaration naming a path that is not a tracked Python project.
+Each directory is classed by the shape that decides how its tools run: `uv` for a tracked
+uv.lock of its own or an enclosing one (a uv workspace member), `pip` for a requirements*.txt
+beside it, `lint-only` for a pyproject.toml with no [project] or [build-system] table, and
+`unsupported` for a project with none of those, whose dependencies the validator cannot install.
+
+Writes `projects` (one `<shape><TAB><directory>` line each), `any`, and `declared` to
+GITHUB_OUTPUT. Exits 1 on a declaration naming a path that is not a tracked Python project.
 """
 
 from __future__ import annotations
 
 import os
 import posixpath
+import re
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 UNCOVERED_SHOWN = 10
+PROJECT_TABLE = re.compile(r"^[ \t]*\[(project|build-system)\]", re.MULTILINE)
 
 
 def escape_command(value: str) -> str:
@@ -41,6 +49,8 @@ def normalize(line: str) -> tuple[str | None, str | None]:
     path = line.strip()
     if not path:
         return None, None
+    if "\t" in path:
+        return None, f"'{path}' must not hold a tab"
     if path.startswith("/") or "\\" in path:
         return None, f"'{path}' must be a repository-relative path with forward slashes"
     if ".." in path.split("/"):
@@ -75,6 +85,30 @@ def resolve(declared_text: str, tracked: list[str]) -> tuple[list[str], bool, li
     return (["."] if "pyproject.toml" in tracked_set else []), False, []
 
 
+def in_directory(directory: str, name: str) -> str:
+    return name if directory == "." else f"{directory}/{name}"
+
+
+def shape(directory: str, tracked_set: set[str], pyproject_text: str) -> str:
+    """How the directory's tools run, from its tracked files and its pyproject.toml."""
+    if in_directory(directory, "uv.lock") in tracked_set:
+        return "uv"
+    prefix = in_directory(directory, "requirements")
+    if any(
+        path.startswith(prefix) and path.endswith(".txt") and "/" not in path[len(prefix) :]
+        for path in tracked_set
+    ):
+        return "pip"
+    if not PROJECT_TABLE.search(pyproject_text):
+        return "lint-only"
+    parent = directory
+    while parent != ".":
+        parent = posixpath.dirname(parent) or "."
+        if in_directory(parent, "uv.lock") in tracked_set:
+            return "uv"
+    return "unsupported"
+
+
 def uncovered(directories: list[str], tracked: list[str]) -> list[str]:
     return [
         path
@@ -106,15 +140,19 @@ def main() -> int:
                     f"reads them: {shown}{more}. Declare each project's directory in the python-directories input."
                 )
             )
+    tracked_set = set(tracked)
+    projects = []
     for directory in directories:
-        print(f"gating Python directory: {directory}")
+        text = Path(in_directory(directory, "pyproject.toml")).read_text(encoding="utf-8")
+        projects.append((shape(directory, tracked_set, text), directory))
+        print(f"gating Python directory: {directory} ({projects[-1][0]})")
     if not directories:
         print("no Python directory to gate")
     # A random delimiter, since a fixed one could appear as a directory name and end the value early.
     delimiter = f"EOF_{uuid.uuid4().hex}"
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        output.write(f"directories<<{delimiter}\n")
-        output.writelines(f"{directory}\n" for directory in directories)
+        output.write(f"projects<<{delimiter}\n")
+        output.writelines(f"{kind}\t{directory}\n" for kind, directory in projects)
         output.write(f"{delimiter}\n")
         output.write(f"any={'true' if directories else 'false'}\n")
         output.write(f"declared={'true' if declared else 'false'}\n")
