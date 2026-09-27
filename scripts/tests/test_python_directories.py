@@ -184,6 +184,19 @@ class MainTests(unittest.TestCase):
         self.assertIn("is not valid TOML", stdout)
         self.assertEqual(written, "")
 
+    def test_malformed_toml_fails_beside_a_manifest_too(self) -> None:
+        for manifest in ("Tools/uv.lock", "Tools/requirements.txt"):
+            with self.subTest(manifest=manifest):
+                self.track(manifest)
+                self.track("Tools/pyproject.toml", text="[tool.ruff\n")
+                code, stdout, _ = self.run_main("Tools")
+                self.assertEqual(code, 1)
+                self.assertIn("is not valid TOML", stdout)
+                subprocess.run(
+                    ["git", "-C", str(self.root), "rm", "-q", "--cached", "--", manifest],
+                    check=True,
+                )
+
     @unittest.skipUnless(sys.platform == "linux", "needs a filesystem that accepts non-UTF-8 names")
     def test_a_non_utf8_name_is_warned_about_rather_than_crashing(self) -> None:
         self.track("pyproject.toml")

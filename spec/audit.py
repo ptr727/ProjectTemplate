@@ -227,11 +227,21 @@ def is_csharp_test_project(path):
     )
 
 
+def coverage_candidate_types(types, repo_profiles):
+    """The declared types whose profile leaves them owing coverage at all, before tests are looked for.
+
+    Python's lint-only profile still runs its suite under coverage, so only a lint-only language other
+    than Python drops out here, the type model holding coverage N/A for it.
+    """
+    profiles = repo_profiles if isinstance(repo_profiles, dict) else {}
+    return [t for t in types if t == "python" or profiles.get(t) != "lint-only"]
+
+
 def coverage_claiming_types(types, type_mechanisms, tree):
     """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
 
     A type owes coverage when the fleet maps it to the codecov mechanism and the repo carries tests for
-    it, whatever its profile. The test condition is what keeps a package-only build repo, a library
+    it, `types` having already passed coverage_candidate_types(). The test condition is what keeps a package-only build repo, a library
     whose tests live elsewhere or are not yet written, from being told to store a token and commit a
     codecov.yml whose statuses gate a report its pipeline never produces.
 
@@ -2023,9 +2033,11 @@ def workflow_input_text(job_text, key):
             if indent <= child_indent:
                 break  # dedent back to (or past) the key column ends the block body
             body.append(ln[child_indent:])
-        # A folded scalar joins its lines with spaces, so the caller passes them as one line.
+        # A folded scalar joins adjacent lines with a space and keeps a newline where a blank line
+        # separates them, which is the text the caller actually passes.
         if rest.startswith(">"):
-            return " ".join(ln.strip() for ln in body if ln.strip())
+            paragraphs = "\n".join(ln.strip() for ln in body).split("\n\n")
+            return "\n".join(" ".join(p.split("\n")).strip() for p in paragraphs if p.strip())
         return "\n".join(body)
     return re.sub(r"[ \t]+#.*$", "", rest).strip().strip("'\"")
 
@@ -2637,7 +2649,7 @@ def audit_repo(entry, spec, branch=None):
     carried_entries = repo_tree_entries(slug, ground_head)
     tree = None if carried_entries is None else set(carried_entries)
     coverage_types = coverage_claiming_types(
-        types,
+        coverage_candidate_types(types, entry.get("profiles", {})),
         secrets.get("typeMechanisms", {}),
         tree,
     )
@@ -5710,6 +5722,22 @@ def _selftest():
         (["docker"], {"tests/test_a.py"}, [], "a type mapped to no mechanism claims nothing"),
     ]
     coverage_ok = True
+    candidate_cases = [
+        (
+            ["csharp", "python"],
+            {"csharp": "lint-only", "python": "lint-only"},
+            ["python"],
+            "only Python's lint-only owes coverage",
+        ),
+        (["csharp"], {"csharp": "build"}, ["csharp"], "a build language stays a candidate"),
+        (["csharp"], None, ["csharp"], "a malformed profiles value is read as none"),
+    ]
+    for types_in, profiles_in, expected, label in candidate_cases:
+        got = coverage_candidate_types(types_in, profiles_in)
+        if got != expected:
+            ok = False
+            coverage_ok = False
+            print(f"  FAIL coverage_candidate_types [{label}] -> {got}, expected {expected}")
     for types_in, tree_in, expected, label in coverage_cases:
         got = coverage_claiming_types(types_in, type_mechs, tree_in)
         if got != expected:
@@ -5880,6 +5908,15 @@ def _selftest():
             {"pythonDirectories": ["Other", "Tools"]},
             1,
             "a folded scalar is one line",
+        ),
+        (
+            py_caller_path,
+            py_caller_folded.replace(
+                "        Tools\n        Other\n", "        Tools\n\n        Other\n"
+            ),
+            {"pythonDirectories": ["Other", "Tools"]},
+            0,
+            "a blank line in a folded scalar keeps its newline",
         ),
         (
             py_caller_path,

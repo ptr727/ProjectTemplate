@@ -880,6 +880,7 @@ gh() {
         tree: set[str] | dict[str, str],
         declared: bool,
         step_name: str = "Run Python tests step",
+        extra_env: dict[str, str] | None = None,
     ) -> tuple[int, str, str]:
         """Run one of the validator's Python steps over a constructed directory, against stub uv tools.
 
@@ -900,7 +901,7 @@ gh() {
         python_stub = "#!/usr/bin/env bash\necho x > coverage.xml\n"
         stub = (
             "#!/usr/bin/env bash\n"
-            'echo "${0##*/} $*" >> "$STUB_LOG"\n'
+            'echo "${0##*/} $*${UV_PYTHON:+ [UV_PYTHON=$UV_PYTHON]}" >> "$STUB_LOG"\n'
             'case " $* " in\n'
             '*" venv "*) mkdir -p .venv/bin && printf %s "$PYTHON_STUB" > .venv/bin/python && chmod +x .venv/bin/python ;;\n'
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
@@ -920,7 +921,10 @@ gh() {
             "DECLARED": "true" if declared else "false",
             "GITHUB_OUTPUT": str(output),
             "STUB_LOG": str(log),
+            **(extra_env or {}),
         }
+        if not extra_env or "UV_PYTHON" not in extra_env:
+            env.pop("UV_PYTHON", None)
         result = run(
             ["bash", "-c", script],
             cwd=work,
@@ -964,6 +968,25 @@ gh() {
                 code, _, output = self.run_python_tests_step(kind, tree, declared=False)
                 self.assertEqual(0, code)
                 self.assertIn("files=./coverage.xml" if runs else "files=\n", output)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_lint_installs_a_declared_pip_directory_under_the_named_interpreter(self) -> None:
+        """setup-uv exports UV_PYTHON, which every uv call reads, so the named interpreter has to replace it."""
+        tree = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
+        env = {"UV_PYTHON": "3.13", "PIP_PYTHON": "3.14"}
+        code, _, written = self.run_python_tests_step(
+            "pip", tree, True, step_name="Sync Python dependencies step", extra_env=env
+        )
+        self.assertEqual(0, code)
+        self.assertIn("uv venv [UV_PYTHON=3.14]", written)
+        self.assertIn("uv pip install -r requirements.txt [UV_PYTHON=3.14]", written)
+        code, _, written = self.run_python_tests_step(
+            "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
+        )
+        self.assertEqual((0, ""), (code, written))
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
