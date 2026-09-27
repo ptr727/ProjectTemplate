@@ -256,7 +256,7 @@ def contract_problems(tools: list[dict]) -> list[str]:
                     f"{name} source.{plat} is empty, so a host on that platform is told to upgrade and not where from"
                 )
         # The remedy is shape-checked and not required, so a repository floor without one degrades to the source line rather than failing the merge.
-        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and scripts/tests/test_bootstrap.py rather than here.
+        # Requiring it fleet-wide is the hub declaration's contract, held by spec/validate.py and tests/test_bootstrap.py rather than here.
         rem = t.get("remedy")
         if rem is not None and not isinstance(rem, dict):
             problems.append(

@@ -5,7 +5,7 @@ Each case reintroduces a fault and asserts the gate objects to it, because a gat
 watched fail is a gate nobody knows works. Where a case covers a table, it reads the live table
 rather than restating it: a proof that restates the gated data proves only that the function runs.
 
-Run as `python3 scripts/tests/test_prose_lint.py`, or under `python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_prose_lint.py`, or under `python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -33,11 +33,11 @@ try:
 except ImportError:
     resource = None  # type: ignore[assignment]
 
-PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[2] / ".github/actions/prose-gate/prose_lint.py"
+PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[1] / ".github/actions/prose-gate/prose_lint.py"
 sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
 import prose_lint
 
-REPO = Path(__file__).resolve().parent.parent.parent
+REPO = Path(__file__).resolve().parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / ".agents" / "skills" / "comment-and-doc-style" / "SKILL.md"
 PROSE_GATE_ACTION = REPO / ".github" / "actions" / "prose-gate" / "action.yml"
 VALIDATE_TASK_WORKFLOW = REPO / ".github" / "workflows" / "validate-task.yml"

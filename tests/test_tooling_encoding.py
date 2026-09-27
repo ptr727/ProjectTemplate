@@ -16,8 +16,8 @@ A test rather than a lint rule because nothing in this repository's toolchain ch
 and `read_text`, `PLW1514`, covers neither, and this repository does not select it in any case,
 since `pyproject.toml` extends the default set with `I` alone and that rule is preview-gated.
 
-Run as `python3 scripts/tests/test_tooling_encoding.py`, or under
-`python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_tooling_encoding.py`, or under
+`python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent.parent
+REPO = Path(__file__).resolve().parent.parent
 
 # The spawning callables whose text mode this rule governs.
 SPAWNERS = frozenset({"run", "check_output", "check_call", "Popen"})
@@ -45,7 +45,7 @@ UNTRACKED_EXCLUDES = tuple(
 
 # One deliberate omission, keyed by (repository-relative path, function name) instead of by a bare name a future function elsewhere could reuse, and by a line number that moves.
 # That case proves its cp1252 patch reaches the decoder, and naming an encoding would defeat it.
-EXEMPT_FUNCTIONS = frozenset({("scripts/tests/test_prose_lint.py", "locale_patch_bites")})
+EXEMPT_FUNCTIONS = frozenset({("tests/test_prose_lint.py", "locale_patch_bites")})
 
 # The two production gates this scan was written for, and the ones a maintainer runs locally before a push, so the scan reaching them is asserted by name rather than only by count.
 GATE_FILES = (

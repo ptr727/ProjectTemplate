@@ -1,0 +1,57 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Ruff Format",
+            "type": "process",
+            "command": "uvx",
+            "args": [
+                "ruff@latest",
+                "format"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Ruff Check",
+            "type": "process",
+            "command": "uvx",
+            "args": [
+                "ruff@latest",
+                "check"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Python Types",
+            "type": "process",
+            "command": "uvx",
+            "args": [
+                "mypy@latest"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Python Format",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Ruff Format",
+                "Ruff Check",
+                "Python Types"
+            ],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": []
+        }
+    ]
+}

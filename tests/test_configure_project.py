@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 CONFIGURE = ROOT / "repo-config" / "configure.sh"
 PAYLOAD = ROOT / "repo-config" / "project.json"
 
