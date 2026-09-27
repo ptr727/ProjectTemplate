@@ -2110,13 +2110,37 @@ def python_directories_caller_findings(path, text, entry):
     Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
     _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
     not adopted the reusable gate yet, states nothing this can compare against; that absence is already
-    check_interface()'s finding, not this one's.
+    check_interface()'s finding, not this one's. A shape this cannot read is reported rather than skipped
+    or misread: validate-task.yml called from a job under another key, and a flow-mapping `with:`.
     """
     if path not in PYTHON_DIRECTORIES_CALLERS:
         return []
-    validate_job = split_jobs(text).get("validate", "")
+    jobs = split_jobs(text)
+    validate_job = jobs.get("validate", "")
     if "validate-task.yml" not in _code_view(validate_job):
-        return []
+        others = sorted(k for k, body in jobs.items() if "validate-task.yml" in _code_view(body))
+        if not others:
+            return []
+        return [
+            (
+                "DRIFT",
+                (
+                    f"python-directories: {path} calls validate-task.yml from job "
+                    f"{', '.join(others)} rather than 'validate', so its python-directories input is "
+                    "not compared against the registry."
+                ),
+            )
+        ]
+    if re.search(r"^[ \t]*with:[ \t]*\{", validate_job, re.MULTILINE):
+        return [
+            (
+                "DRIFT",
+                (
+                    f"python-directories: {path} writes its validate job's with: inputs as a flow "
+                    "mapping, which the audit cannot read. Write a block mapping, one input per line."
+                ),
+            )
+        ]
     # A folded scalar's value depends on YAML's indentation rules, so it is refused rather than guessed.
     if re.search(r"^[ \t]*python-directories:[ \t]*>", validate_job, re.MULTILINE):
         return [
@@ -5938,6 +5962,10 @@ def _selftest():
             "the carried hook helper sits outside every directory",
         )
     )
+    python_directory_cases += [
+        ({"types": "python"}, {"tools/x.py"}, 0, "a string types value reads as untyped"),
+        ({"types": None}, {"tools/x.py"}, 0, "a null types value reads as untyped"),
+    ]
     for entry_in, tree_in, expected, label in python_directory_cases:
         got_findings = python_directory_coverage_findings(
             {"types": ["python"], **entry_in}, tree_in
@@ -6020,6 +6048,20 @@ def _selftest():
             {"pythonDirectories": ["Tools"]},
             0,
             "validate job never reaches validate-task.yml",
+        ),
+        (
+            py_caller_path,
+            py_caller_block.replace("  validate:\n", "  check:\n"),
+            {"pythonDirectories": ["Tools"]},
+            1,
+            "a renamed job is reported, not skipped",
+        ),
+        (
+            py_caller_path,
+            "jobs:\n  validate:\n" + py_caller_uses + "    with: { python-directories: Tools }\n",
+            {},
+            1,
+            "a flow-mapping with: is reported, not misread as declaring nothing",
         ),
     ]
     py_caller_root = py_caller_plain.replace("python-directories: Tools", "python-directories: .")
@@ -6104,6 +6146,20 @@ def _selftest():
             "an untyped repo gets only the type advisory",
         )
     )
+    undeclared_root_cases += [
+        (
+            {"types": "python"},
+            {"pyproject.toml", "tests/test_a.py"},
+            0,
+            "a string types value reads as untyped",
+        ),
+        (
+            {"types": None},
+            {"pyproject.toml", "tests/test_a.py"},
+            0,
+            "a null types value reads as untyped",
+        ),
+    ]
     for entry_in, tree_in, expected, label in undeclared_root_cases:
         got = len(python_undeclared_root_findings({"types": ["python"], **entry_in}, tree_in))
         if got != expected:

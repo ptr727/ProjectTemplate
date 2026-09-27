@@ -899,12 +899,22 @@ gh() {
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
         # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
-        python_stub = '#!/usr/bin/env bash\nif [ "$1" = -c ]; then echo 3.99; else echo x > coverage.xml; fi\n'
+        # It holds mypy only where VENV_MYPY is set, and logs a mypy run the way the uv stubs log theirs.
+        python_stub = (
+            "#!/usr/bin/env bash\n"
+            'case "$1 $2" in\n'
+            '"-c "*find_spec*) [ -n "${VENV_MYPY:-}" ] ;;\n'
+            '"-c "*) echo 3.99 ;;\n'
+            '"-m mypy") echo "python $*" >> "$STUB_LOG" ;;\n'
+            "*) echo x > coverage.xml ;;\n"
+            "esac\n"
+        )
         stub = (
             "#!/usr/bin/env bash\n"
             'echo "${0##*/} $*${UV_PYTHON:+ [UV_PYTHON=$UV_PYTHON]}" >> "$STUB_LOG"\n'
             'case " $* " in\n'
             '*" venv "*) mkdir -p .venv/bin && printf %s "$PYTHON_STUB" > .venv/bin/python && chmod +x .venv/bin/python ;;\n'
+            '*" unittest "*) exit "${UNITTEST_EXIT:-0}" ;;\n'
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
             "esac\n"
         )
@@ -1018,49 +1028,107 @@ gh() {
             ".venv/bin/python": "",
         }
         standalone = {"pyproject.toml": "[tool.ruff]\n", "pyrightconfig.json": "{}"}
+        pinned = {**mypy_section, "pyproject.toml": '[tool.mypy]\npython_version = "3.12"\n'}
+        root_config = {"pyproject.toml": "[tool.mypy]\n", "sub/pyproject.toml": "[tool.ruff]\n"}
+        in_sub = {"PYTHON_PROJECTS": "lint-only\tsub\n"}
+        venv_mypy = {"VENV_MYPY": "1"}
         cases = {
             "declared pip mypy reads the venv": (
                 "pip",
                 mypy_section,
                 True,
+                None,
                 0,
-                "uvx mypy@latest --python-executable .venv/bin/python --python-version 3.99",
+                r"uvx mypy@latest --python-executable /\S+/\.venv/bin/python --python-version 3\.99\n",
+            ),
+            "declared pip mypy keeps a pinned python_version": (
+                "pip",
+                pinned,
+                True,
+                None,
+                0,
+                r"uvx mypy@latest --python-executable /\S+/\.venv/bin/python\n",
+            ),
+            "declared pip mypy installed in the venv runs there": (
+                "pip",
+                mypy_section,
+                True,
+                venv_mypy,
+                0,
+                r"^python -m mypy\n",
             ),
             "undeclared pip mypy keeps the old call": (
                 "pip",
                 mypy_section,
                 False,
+                None,
                 0,
-                "uvx mypy@latest\n",
+                r"uvx mypy@latest\n",
             ),
             "declared standalone pyright counts": (
                 "lint-only",
                 standalone,
                 True,
+                None,
                 0,
-                "uvx pyright@latest\n",
+                r"uvx pyright@latest\n",
             ),
-            "undeclared standalone pyright is not read": ("lint-only", standalone, False, 0, None),
-            "declared with no checker fails": ("lint-only", {"pyproject.toml": ""}, True, 1, None),
+            "declared setup.cfg mypy counts": (
+                "lint-only",
+                {"pyproject.toml": "[tool.ruff]\n", "setup.cfg": "[mypy]\n"},
+                True,
+                None,
+                0,
+                r"uvx mypy@latest\n",
+            ),
+            "declared subdirectory falls back to the root config": (
+                "lint-only",
+                root_config,
+                True,
+                in_sub,
+                0,
+                r"uvx mypy@latest\n",
+            ),
+            "undeclared standalone pyright is not read": (
+                "lint-only",
+                standalone,
+                False,
+                None,
+                0,
+                None,
+            ),
+            "declared with no checker fails": (
+                "lint-only",
+                {"pyproject.toml": ""},
+                True,
+                None,
+                1,
+                None,
+            ),
             "uv runs its locked checker": (
                 "uv",
                 {"pyproject.toml": "[tool.mypy]\n"},
                 True,
+                None,
                 0,
-                "uv run mypy",
+                r"uv run --project /\S+ mypy\n",
             ),
         }
-        for label, (kind, tree, declared, code_expected, call) in cases.items():
+        for label, (kind, tree, declared, env, code_expected, call) in cases.items():
             with self.subTest(label):
-                code, _, written = self.run_python_tests_step(
-                    kind, tree, declared, step_name="Type check Python step"
+                code, stdout, written = self.run_python_tests_step(
+                    kind, tree, declared, step_name="Type check Python step", extra_env=env
                 )
                 self.assertEqual(code_expected, code)
                 if call is None:
                     self.assertNotIn("mypy", written.replace("[tool.mypy]", ""))
                     self.assertNotIn("pyright", written)
                 else:
-                    self.assertIn(call, written)
+                    self.assertRegex(written, re.compile(call, re.MULTILINE))
+                if env is in_sub:
+                    self.assertIn("mypy in sub, configured in .", stdout)
+                if env is venv_mypy:
+                    self.assertNotIn("uvx", written)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
@@ -1091,6 +1159,16 @@ gh() {
                 code, stdout, _ = self.run_python_tests_step(kind, tree, declared=True)
                 self.assertEqual(1, code)
                 self.assertIn(message, stdout)
+        for status, explained in ((5, True), (1, False)):
+            with self.subTest(f"unittest exit {status}"):
+                code, stdout, _ = self.run_python_tests_step(
+                    "lint-only",
+                    {"pyproject.toml", "tests/test_a.py"},
+                    declared=True,
+                    extra_env={"UNITTEST_EXIT": str(status)},
+                )
+                self.assertEqual(status, code)
+                self.assertEqual(explained, "unittest found no tests" in stdout)
 
     def test_validator_python_leg_reaches_a_pip_dependency_repo(self) -> None:
         """WORKFLOW.md D1.6 owes coverage to every Python directory with tests, uv-managed or not.

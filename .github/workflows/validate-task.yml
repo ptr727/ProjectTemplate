@@ -286,9 +286,10 @@ jobs:
             fi
           done <<< "$PYTHON_PROJECTS"
 
-      # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
-      # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
-      # A declared directory's standalone mypy.ini or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
+      # Mypy takes precedence where a config declares both, matching every repo that runs mypy in CI today.
+      # A pyright-only config, with no mypy section, falls back to pyright instead.
+      # A declared directory's standalone mypy.ini, setup.cfg [mypy] section, or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
+      # A declared subdirectory configuring neither falls back to the repository root's config and runs the checker from the root, the way a monorepo keeping one config there runs it.
       # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
@@ -297,39 +298,53 @@ jobs:
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
+          has_section() {
+            [ -f "$1" ] && grep -Eq "^[[:space:]]*\[$2\]" "$1"
+          }
+          find_checker() {
+            checker=
+            if has_section "$1/pyproject.toml" 'tool\.mypy' || { [ "$2" = true ] && { [ -f "$1/mypy.ini" ] || [ -f "$1/.mypy.ini" ] || has_section "$1/setup.cfg" mypy; }; }; then
+              checker=mypy
+            elif has_section "$1/pyproject.toml" 'tool\.pyright' || { [ "$2" = true ] && [ -f "$1/pyrightconfig.json" ]; }; then
+              checker=pyright
+            fi
+          }
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
-            standalone_mypy=false
-            standalone_pyright=false
-            if [ "$DECLARED" = "true" ]; then
-              if [ -f "$dir/mypy.ini" ] || [ -f "$dir/.mypy.ini" ]; then
-                standalone_mypy=true
-              fi
-              if [ -f "$dir/pyrightconfig.json" ]; then
-                standalone_pyright=true
-              fi
+            find_checker "$dir" "$DECLARED"
+            config_dir="$dir"
+            if [ -z "$checker" ] && [ "$DECLARED" = "true" ] && [ "$dir" != . ]; then
+              find_checker . true
+              config_dir=.
             fi
-            if grep -Eq '^[[:space:]]*\[tool\.mypy\]' "$dir/pyproject.toml" || [ "$standalone_mypy" = true ]; then
-              checker=mypy
-            elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' "$dir/pyproject.toml" || [ "$standalone_pyright" = true ]; then
-              checker=pyright
-            elif [ "$DECLARED" = "true" ]; then
-              echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml or in a mypy.ini or pyrightconfig.json beside it. Every Python directory owes a type check."
+            if [ -z "$checker" ] && [ "$DECLARED" = "true" ]; then
+              echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml, in a mypy.ini, setup.cfg, or pyrightconfig.json beside it, or in the same files at the repository root. Every Python directory owes a type check."
               exit 1
-            else
+            elif [ -z "$checker" ]; then
               echo "no [tool.mypy] or [tool.pyright] section in $dir/pyproject.toml, skipping"
               continue
             fi
-            echo "$checker in $dir"
+            echo "$checker in $dir, configured in $config_dir"
+            project="$(cd "$dir" && pwd)"
+            venv_python="$project/.venv/bin/python"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run "$checker") < /dev/null
+              (cd "$config_dir" && uv run --project "$project" "$checker") < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && [ "$checker" = mypy ]; then
-              # Left alone, mypy targets the interpreter it runs under, so the venv's version is passed with it.
-              (cd "$dir" && uvx mypy@latest --python-executable .venv/bin/python --python-version "$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])')") < /dev/null
+              if "$venv_python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("mypy") is None)'; then
+                # The venv's own mypy imports the plugins installed beside it and targets its interpreter already.
+                (cd "$config_dir" && "$venv_python" -m mypy) < /dev/null
+              else
+                # Left alone, mypy under uvx targets the interpreter it runs under, so the venv's version is passed unless the config pins its own, which the flag would override.
+                version_args=()
+                if ! grep -Eqs '^[[:space:]]*python_version[[:space:]]*=' "$config_dir/pyproject.toml" "$config_dir/mypy.ini" "$config_dir/.mypy.ini" "$config_dir/setup.cfg"; then
+                  version_args=(--python-version "$("$venv_python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')")
+                fi
+                (cd "$config_dir" && uvx mypy@latest --python-executable "$venv_python" "${version_args[@]}") < /dev/null
+              fi
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
-              (cd "$dir" && uvx pyright@latest --pythonpath .venv/bin/python) < /dev/null
+              (cd "$config_dir" && uvx pyright@latest --pythonpath "$venv_python") < /dev/null
             else
-              (cd "$dir" && uvx "$checker@latest") < /dev/null
+              (cd "$config_dir" && uvx "$checker@latest") < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -525,7 +540,12 @@ jobs:
                 .venv/bin/python -m pytest --cov-report=xml
                 ;;
               lint-only)
-                uvx coverage@latest run -m unittest discover -s tests
+                status=0
+                uvx coverage@latest run -m unittest discover -s tests || status=$?
+                if [ "$status" -eq 5 ]; then
+                  echo "::error::unittest found no tests in $dir/tests. Discovery collects only unittest.TestCase subclasses, so a pytest-style plain test function does not count, and it skips a nested test directory that has no __init__.py."
+                fi
+                [ "$status" -eq 0 ] || exit "$status"
                 uvx coverage@latest xml -o coverage.xml
                 ;;
               esac
