@@ -8,8 +8,8 @@ reason: the mechanism rests on git's own file listing and merge-base rather than
 module could stub convincingly. A third, smaller set reads this repository's own tree, since a unit
 table that silently stops covering a canonical reports exactly what a healthy one does.
 
-Run as `python3 scripts/tests/test_canonical_review.py`, or under
-`python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_canonical_review.py`, or under
+`python3 -m unittest discover -s tests`.
 """
 
 import contextlib
@@ -24,7 +24,7 @@ import unittest.mock
 from pathlib import Path
 from typing import Any
 
-SCRIPTS = Path(__file__).resolve().parent.parent
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS.parent / "spec"))
 import audit

@@ -2,7 +2,7 @@
 """Exercise skills_install.py's materialization and staleness reporting, without touching the
 real `claude` CLI state or the real ~/.agents directory.
 
-Run as `python3 scripts/tests/test_skills_install.py`, or under `python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_skills_install.py`, or under `python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import skills_install
 
 
@@ -673,7 +673,7 @@ class IntendedInBootstrapTreeCase(unittest.TestCase):
 
 
 LINUX_WRAPPER = (
-    Path(__file__).resolve().parent.parent.parent / "host-setup" / "linux" / "install-skills.sh"
+    Path(__file__).resolve().parent.parent / "host-setup" / "linux" / "install-skills.sh"
 )
 
 

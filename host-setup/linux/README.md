@@ -19,7 +19,7 @@ host-setup/linux/setup-github.sh --status
 host-setup/linux/install-skills.sh --report
 ```
 
-Each script is LF with a shebang, and its executable bit is tracked in git. A fresh checkout therefore runs each without a `bash` prefix. That is the Linux form of "this will run", and [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts both.
+Each script is LF with a shebang, and its executable bit is tracked in git. A fresh checkout therefore runs each without a `bash` prefix. That is the Linux form of "this will run", and [`tests/test_bootstrap.py`][test-bootstrap] asserts both.
 
 ## Requirements
 
@@ -162,7 +162,7 @@ Two of those are guards rather than previews. `--release --dry-run` on a Proxmox
 
 `--repo` adds the repository's `install.linux` entries to the report or action. Only `apt` package names are accepted. The script does not execute the declaration's `remedy` text. Reading the JSON needs `jq`, which the ordinary fleet install provides.
 
-The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every `.sh` file `git ls-files` returns, plus a tracked, extension-less file whose shebang names bash or sh. A local run uses the same `koalaman/shellcheck:stable` and `mvdan/shfmt:latest` containers. [`scripts/tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
+The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every `.sh` file `git ls-files` returns, plus a tracked, extension-less file whose shebang names bash or sh. A local run uses the same `koalaman/shellcheck:stable` and `mvdan/shfmt:latest` containers. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 
 <!-- Repo -->
 
@@ -174,7 +174,7 @@ The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every 
 [install-tools]: ./install-tools.sh
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
-[test-bootstrap]: ../../scripts/tests/test_bootstrap.py
+[test-bootstrap]: ../../tests/test_bootstrap.py
 [upgrade-host]: ./upgrade-host.sh
 [windows-readme]: ../windows/README.md
 
