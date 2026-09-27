@@ -7,6 +7,11 @@
         "files.trimTrailingWhitespace": true,
         "[markdown]": { "files.trimTrailingWhitespace": false },
         "[plaintext]": { "files.trimTrailingWhitespace": false },
+        "[python]": {
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.formatOnSave": true,
+            "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+        },
         "files.encoding": "utf8",
         "git.alwaysSignOff": true
     },
@@ -14,10 +19,14 @@
         "recommendations": [
             "anthropic.claude-code",
             "arahata.linter-actionlint",
+            "charliermarsh.ruff",
             "davidanson.vscode-markdownlint",
             "editorconfig.editorconfig",
             "fanaticpythoner.better-todo-tree",
             "github.vscode-github-actions",
+            "ms-python.mypy-type-checker",
+            "ms-python.python",
+            "ms-python.vscode-pylance",
             "streetsidesoftware.code-spell-checker",
             "timonwong.shellcheck",
             "yzhang.markdown-all-in-one"
