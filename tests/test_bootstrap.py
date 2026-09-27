@@ -19,7 +19,7 @@ That assertion runs once per platform, because the two installers do not manage 
 difference is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
 the spec declares it not applicable on Windows.
 
-Run as `python3 scripts/tests/test_bootstrap.py`, or under `python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_bootstrap.py`, or under `python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
 BOOTSTRAP_PS = ROOT / "host-setup" / "bootstrap.ps1"
 LINUX = ROOT / "host-setup" / "linux"

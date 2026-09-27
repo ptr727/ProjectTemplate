@@ -14,7 +14,7 @@ from pathlib import Path
 from subprocess import run
 from typing import NamedTuple
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 
 
 SHELL_LABELS = ("bash", "sh", "shell")

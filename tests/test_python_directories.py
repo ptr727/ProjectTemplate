@@ -5,7 +5,7 @@ The resolution itself is pure over a tracked-file list, so most cases pass one i
 cases run main() in a temp git repository, since the GITHUB_OUTPUT shape and the exit code are what
 the validator's steps actually read.
 
-Run as `python3 scripts/tests/test_python_directories.py`, or under `python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_python_directories.py`, or under `python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/actions/python-directories"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/python-directories"))
 import python_directories as pd
 
 

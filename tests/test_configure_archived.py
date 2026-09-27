@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-CONFIGURE = Path(__file__).resolve().parents[2] / "repo-config" / "configure.sh"
+CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
 
 def lift(pattern: str) -> str:

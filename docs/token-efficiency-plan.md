@@ -123,7 +123,7 @@ both runs there. A material regression blocks the change regardless of bytes sav
 **Verification is the gate, per [GOVERNANCE.md "Verification Discipline"][governance-verification].**
 Markdown lints clean, `python3 scripts/prose_lint.py` passes, and
 `python3 scripts/repo_gate.py --check eol` passes. Any added script carries its unittest under
-`scripts/tests/`. Claim done only with the gate outputs in hand.
+`tests/`. Claim done only with the gate outputs in hand.
 
 ## Phased Delivery
 
@@ -146,7 +146,7 @@ Establishes G5 and G6, the two instruments every later phase reads.
 - [ ] Add `scripts/token_inventory.py`: measures per-layer sizes, the `AGENTS.md` and
       `.github/copilot-instructions.md` section splits, and per-skill description, body, and
       reference bytes, emitting the tables this doc carries. Cover it with a unittest under
-      `scripts/tests/` and document it in `scripts/README.md`. Verify it reproduces the baseline
+      `tests/` and document it in `scripts/README.md`. Verify it reproduces the baseline
       below.
 - [ ] Author `docs/token-benchmark.md`: the structured prompt set from
       [issue #766][issue-766], positive and negative routing cases per skill, each recording

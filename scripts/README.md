@@ -6,20 +6,20 @@ The fleet's checks and review tooling, run by hand, with the deterministic ones 
 
 Python only, standard library only, no third-party packages. Every check script is read-only and exits non-zero on a finding. `build_dist.py`, `local_review.py`, `canonical_review.py`, `handoff.py`, and `skills_install.py` below are the exceptions, since a generator, two recorders, an installer, and the handoff chain all exist to write. `build_dist.py --check` and `skills_install.py --report` are read-only modes for CI and for asking without changing anything. `local_review.py status` and `check` answer without recording anything, but they are not read-only in that same sense: reading the working tree stages it, which writes inside `.git` and runs any `filter.*.clean` the repository configures, and only the receipt is left untouched. `canonical_review.py` reads files rather than staging them, so its `list`, `status`, `sweep`, and `report` are read-only outright, and `record` alone writes.
 
-The directory separates its kinds by name and by tree. A gate checks and exits non-zero on a finding, and its name carries a `_lint` or `_gate` suffix saying what it gates. The `prose_lint.py` and `repo_gate.py` entry points delegate to the action-owned implementations that gate this tree in CI, and `host_gate.py` gates the machine it runs on. A utility does work rather than gating and carries no suffix: `build_dist.py`, `canonical_review.py`, `handoff.py`, `local_review.py`, `pr_review.py`, `skills_install.py`. The unit tests live apart under [`scripts/tests/`][tests], one `test_<script>.py` per script, driving the canonical implementations against input they must reject. A gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
+The directory separates its kinds by name and by tree. A gate checks and exits non-zero on a finding, and its name carries a `_lint` or `_gate` suffix saying what it gates. The `prose_lint.py` and `repo_gate.py` entry points delegate to the action-owned implementations that gate this tree in CI, and `host_gate.py` gates the machine it runs on. A utility does work rather than gating and carries no suffix: `build_dist.py`, `canonical_review.py`, `handoff.py`, `local_review.py`, `pr_review.py`, `skills_install.py`. The unit tests live apart at the repository root under [`tests/`][tests], one `test_<script>.py` per script, driving the canonical implementations against input they must reject. A gate nobody has watched fail is a gate nobody knows works. Where a case covers a table it reads the live table rather than restating it, and each one asserts a floor on what a healthy run reaches, since a check whose scan matches nothing reports zero findings and reads exactly like a pass.
 
 ```sh
-python3 scripts/tests/test_prose_lint.py
-python3 scripts/tests/test_repo_gate.py
-python3 scripts/tests/test_pr_review.py
-python3 scripts/tests/test_handoff.py
-python3 scripts/tests/test_local_review.py
-python3 scripts/tests/test_canonical_review.py
-python3 scripts/tests/test_build_dist.py
-python3 scripts/tests/test_skills_install.py
-python3 scripts/tests/test_carry.py
-python3 -m unittest discover -s scripts/tests    # all of them, and exits 5 if the suite vanishes
-uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests && uvx coverage@latest report
+python3 tests/test_prose_lint.py
+python3 tests/test_repo_gate.py
+python3 tests/test_pr_review.py
+python3 tests/test_handoff.py
+python3 tests/test_local_review.py
+python3 tests/test_canonical_review.py
+python3 tests/test_build_dist.py
+python3 tests/test_skills_install.py
+python3 tests/test_carry.py
+python3 -m unittest discover -s tests    # all of them, and exits 5 if the suite vanishes
+uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests && uvx coverage@latest report
 ```
 
 ## `docker_lint.py`
@@ -386,5 +386,5 @@ The two channels hold different things: the Codex and opencode copy keeps the re
 [resync]: ../RESYNC.md
 [review-cost-issue]: https://github.com/ptr727/ProjectTemplate/issues/1631
 [section-model]: ../spec/section-model.md
-[tests]: ./tests/
+[tests]: ../tests/
 [validate-hook]: ../.github/actions/validate/action.yml

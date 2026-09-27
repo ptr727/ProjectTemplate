@@ -1,8 +1,8 @@
 # The hub's own validate hook, run by validate-task.yml's validate job for this repo.
-# The fleet doc-lint block and the generic unit-test job in validate-task.yml do not cover the hub's own machinery.
+# The fleet doc-lint block and the Python leg in validate-task.yml, which runs the unittest suite under tests/, do not cover the rest of the hub's own machinery.
 # Carrying this hook makes the hub exercise the override path on every hub pull request, where a repo with no hook of its own exercises the hub default at .github/actions/validate-default.
 name: Validate repository (hub)
-description: Registry and spec validation, the script self-test suite, the fleet-skills freshness check, and the unclassified-character report.
+description: Registry and spec validation, the self-tests outside the unittest suite, the fleet-skills freshness check, and the unclassified-character report.
 
 runs:
   using: composite
@@ -22,16 +22,14 @@ runs:
       with:
         python-version: "3.13"
 
-    # Each gate here is proven by a case that reintroduces the fault it catches, wherever it lives.
-    # A test sits with the layer that owns it rather than beside the file it names, so a read-only gate over the spec and the host tooling lives in scripts/tests/ even where its subject is shell.
-    # The agent-safety kit carries its own tests because it ships as a unit.
-    # Every run goes through coverage with --append, so one report covers the whole self-test surface, informational with no threshold adopted.
+    # The unittest suite under tests/ is the validator's Python leg, since the hub declares '.' in python-directories, so it runs there under coverage and uploads to Codecov like any adopter's.
+    # What stays here is each self-test that is not a unittest suite, and the agent-safety kit carries its own tests because it ships as a unit.
+    # Every run after the first appends, so one report covers these self-tests, informational with no threshold adopted.
     - name: Run script self-tests step
       shell: bash
       run: |
         set -Eeuo pipefail
-        uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s scripts/tests
-        uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+        uvx coverage@latest run --source=scripts,spec,host-setup spec/audit.py --selftest
         uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
         uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
         uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py

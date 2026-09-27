@@ -9,8 +9,8 @@ The fixture isolates git's global and system configuration. Without that, a host
 signing on cannot commit inside the fixture at all, and a host with a different `core.autocrlf`
 answers the attribute cases differently than CI does.
 
-Run as `python3 scripts/tests/test_local_review.py`, or under
-`python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_local_review.py`, or under
+`python3 -m unittest discover -s tests`.
 """
 
 import contextlib
@@ -27,7 +27,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "local_review.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "local_review.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import local_review
 

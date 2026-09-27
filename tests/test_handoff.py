@@ -10,8 +10,8 @@ Two refusals earn cases of their own because the chain exists to fix them. An am
 never resolved by picking, and a repository missing the label refuses rather than reporting an
 empty chain, which is the silent failure the `decision` label already demonstrated fleet-wide.
 
-Run as `python3 scripts/tests/test_handoff.py`, or under
-`python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_handoff.py`, or under
+`python3 -m unittest discover -s tests`.
 """
 
 import argparse
@@ -26,7 +26,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent.parent
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import handoff
 

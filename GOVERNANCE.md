@@ -339,7 +339,8 @@ Every repo's GitHub repository details (the About panel) follow a fixed conventi
 - [`.agents/`](./.agents/): hub-only, the source the fleet's Skills are authored in. `scripts/build_dist.py` builds it into the two generated trees below, and neither of those is hand-edited.
 - [`.github/skills/`](./.github/skills/): generated in the hub from `.agents/skills/` and carried verbatim to every repo, so a fix to a Skill belongs at that source rather than in any copy of this tree.
 - [`.claude-plugin/fleet-skills/`](./.claude-plugin/fleet-skills/): hub-only, the same Skills as a Claude plugin. The `marketplace.json` beside it names the plugin rather than the Skills, is hand-authored, and `build_dist.py` never writes it.
-- [`scripts/`](./scripts/): the fleet's lint and review tooling, with the deterministic checks also gating CI, for the documented rules no CI linter checks. Its unit tests sit apart under [`scripts/tests/`](./scripts/tests/). Hosted here and reached rather than carried, per "Hub-Hosted Tooling".
+- [`scripts/`](./scripts/): the fleet's lint and review tooling, with the deterministic checks also gating CI, for the documented rules no CI linter checks. Hosted here and reached rather than carried, per "Hub-Hosted Tooling".
+- [`tests/`](./tests/): hub-only, the unit tests for the tooling under `scripts/`, `spec/`, and `host-setup/`, which the shared validator runs under coverage as the hub's declared Python directory.
 - [`docs/`](./docs/): hub-only procedure and measurement docs (host setup, repository configuration, signing, agent token cost), none of them carried downstream.
 - [`host-setup/`](./host-setup/): hub-only, the installers that bring a machine up to the host contract `docs/host-setup.md` states, one tree each for Linux and Windows, with the cross-platform agent-safety install beside them.
 - [`reports/`](./reports/): hub-only, holding every repo's audit output rather than each repo holding its own.
