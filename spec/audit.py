@@ -307,6 +307,14 @@ def expected_python_directories(entry, tree):
     return []
 
 
+# The catalog's hook snippets carry this helper into repos of every language, so it is fleet tooling rather than the repo's own Python.
+CARRIED_PYTHON_HELPERS = {"hub-fetch-run.py"}
+
+
+def is_repo_python(path):
+    return path.endswith(".py") and posixpath.basename(path) not in CARRIED_PYTHON_HELPERS
+
+
 def python_type_findings(entry, tree):
     """The discovery advisory for tracked `.py` files while the registry's `types` omits 'python'.
 
@@ -320,7 +328,7 @@ def python_type_findings(entry, tree):
         return []
     notes = entry.get("driftNotes", [])
     suppressed = any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes)
-    present = any(p.endswith(".py") for p in tree)
+    present = any(is_repo_python(p) for p in tree)
     # The note-freshness check skips this note on a repo without the type, so its staleness is reported here, where the tree is.
     if suppressed and not present:
         return [
@@ -399,7 +407,7 @@ def python_directory_coverage_findings(entry, tree):
     missed = sorted(
         p
         for p in tree
-        if p.endswith(".py") and not any(python_directory_covers(d, p) for d in directories)
+        if is_repo_python(p) and not any(python_directory_covers(d, p) for d in directories)
     )
     if not missed:
         return []
@@ -5807,6 +5815,12 @@ def _selftest():
         ({"types": []}, None, 0, "unreadable tree: presence is unanswerable"),
         ({"types": []}, {"README.md"}, 0, "no .py file anywhere: nothing to flag"),
         (
+            {"types": ["docs"]},
+            {".husky/hub-fetch-run.py"},
+            0,
+            "the carried hook helper is not the repo's Python",
+        ),
+        (
             {
                 "types": ["docs"],
                 "driftNotes": ["Vendored tool, not tracked (python.directories.declared)."],
@@ -5877,6 +5891,14 @@ def _selftest():
     # Each case describes a Python-typed repo unless it names its own types, since an untyped one gets only the type advisory.
     python_directory_cases.append(
         ({"types": ["docs"]}, {"tools/x.py"}, 0, "an untyped repo gets only the type advisory")
+    )
+    python_directory_cases.append(
+        (
+            {"pythonDirectories": ["Tools"]},
+            {"Tools/a.py", "hub-fetch-run.py"},
+            0,
+            "the carried hook helper sits outside every directory",
+        )
     )
     for entry_in, tree_in, expected, label in python_directory_cases:
         got_findings = python_directory_coverage_findings(

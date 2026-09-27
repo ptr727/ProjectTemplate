@@ -45,7 +45,7 @@ This is packaged as the `dotnet-codestyle` Skill at `.agents/skills/dotnet-codes
 
 *This section applies only to the Python side. A repo with no Python projects still carries it (the file is carried whole) and ignores it.*
 
-The style guide for any Python project(s) in this repo: the build-versus-lint-only profile split, the uv/ruff/pyright/mypy/pytest toolchain, `src` layout, formatting and linting, comment and docstring conventions, type hints, naming, imports, patterns to avoid, test conventions including the `pytest-cov` dependency and coverage selector a build-profile repo with tests owes under `WORKFLOW.md` D1.6, and versioning.
+The style guide for any Python project(s) in this repo: the build-versus-lint-only profile split, the uv/ruff/pyright/mypy/pytest toolchain, `src` layout, formatting and linting, comment and docstring conventions, type hints, naming, imports, patterns to avoid, test conventions including the `pytest-cov` dependency and coverage selector a Python directory running pytest owes under `WORKFLOW.md` D1.6, and versioning.
 
 This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the scope. Read the skill for the full rules and the profile-adaptation guidance.
 

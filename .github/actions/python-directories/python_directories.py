@@ -34,6 +34,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 UNCOVERED_SHOWN = 10
+# The catalog's hook snippets carry this helper into repos of every language, so it is fleet tooling rather than the repo's own Python.
+CARRIED_HELPERS = {"hub-fetch-run.py"}
 
 
 def escape_command(value: str) -> str:
@@ -119,7 +121,9 @@ def uncovered(directories: list[str], tracked: list[str]) -> list[str]:
     return [
         path
         for path in tracked
-        if path.endswith(".py") and not any(covers(d, path) for d in directories)
+        if path.endswith(".py")
+        and posixpath.basename(path) not in CARRIED_HELPERS
+        and not any(covers(d, path) for d in directories)
     ]
 
 

@@ -898,7 +898,8 @@ gh() {
             (work / path).write_text(text, encoding="utf-8")
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
-        python_stub = "#!/usr/bin/env bash\necho x > coverage.xml\n"
+        # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
+        python_stub = '#!/usr/bin/env bash\nif [ "$1" = -c ]; then echo 3.99; else echo x > coverage.xml; fi\n'
         stub = (
             "#!/usr/bin/env bash\n"
             'echo "${0##*/} $*${UV_PYTHON:+ [UV_PYTHON=$UV_PYTHON]}" >> "$STUB_LOG"\n'
@@ -907,6 +908,10 @@ gh() {
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
             "esac\n"
         )
+        venv_python = work / ".venv/bin/python"
+        if venv_python.exists():
+            venv_python.write_text(python_stub, encoding="utf-8")
+            venv_python.chmod(0o755)
         for name in ("uv", "uvx"):
             (stubs / name).write_text(stub, encoding="utf-8")
             (stubs / name).chmod(0o755)
@@ -1007,7 +1012,11 @@ gh() {
     )
     def test_type_check_picks_its_checker_and_environment(self) -> None:
         """A declared directory owes a type check, run against its installed dependencies."""
-        mypy_section = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
+        mypy_section = {
+            "pyproject.toml": "[tool.mypy]\n",
+            "requirements.txt": "",
+            ".venv/bin/python": "",
+        }
         standalone = {"pyproject.toml": "[tool.ruff]\n", "pyrightconfig.json": "{}"}
         cases = {
             "declared pip mypy reads the venv": (
@@ -1015,7 +1024,7 @@ gh() {
                 mypy_section,
                 True,
                 0,
-                "uvx mypy@latest --python-executable .venv/bin/python",
+                "uvx mypy@latest --python-executable .venv/bin/python --python-version 3.99",
             ),
             "undeclared pip mypy keeps the old call": (
                 "pip",
