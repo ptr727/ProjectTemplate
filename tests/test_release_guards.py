@@ -1034,6 +1034,7 @@ gh() {
             "pyproject.toml": '[tool.mypy]\n[tool.other]\npython_version = "3.12"\n',
         }
         pinned_unread = {**pinned, "mypy.ini": "[mypy]\n"}
+        pinned_ini = {**mypy_section, "mypy.ini": "[mypy] ; note\npython_version: 3.12\n"}
         root_config = {"pyproject.toml": "[tool.mypy]\n", "sub/pyproject.toml": "[tool.ruff]\n"}
         in_sub = {"PYTHON_PROJECTS": "lint-only\tsub\n"}
         venv_mypy = {"VENV_MYPY": "1"}
@@ -1069,6 +1070,14 @@ gh() {
                 None,
                 0,
                 r"--python-version 3\.99\n",
+            ),
+            "an INI pin written with a colon still pins": (
+                "pip",
+                pinned_ini,
+                True,
+                None,
+                0,
+                r"uvx mypy@latest --python-executable /\S+/\.venv/bin/python\n",
             ),
             "declared pip mypy installed in the venv runs there": (
                 "pip",

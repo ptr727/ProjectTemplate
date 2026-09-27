@@ -323,7 +323,7 @@ jobs:
             else
               return 1
             fi
-            awk -v want="[$section]" '/^[[:space:]]*\[/ { h = $0; sub(/#.*/, "", h); gsub(/[[:space:]]/, "", h); on = (h == want); next } on && /^[[:space:]]*python_version[[:space:]]*=/ { found = 1 } END { exit !found }' "$file"
+            awk -v want="[$section]" '/^[[:space:]]*\[/ { h = $0; sub(/[#;].*/, "", h); gsub(/[[:space:]]/, "", h); on = (h == want); next } on && /^[[:space:]]*python_version[[:space:]]*[=:]/ { found = 1 } END { exit !found }' "$file"
           }
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
