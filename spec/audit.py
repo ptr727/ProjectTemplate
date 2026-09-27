@@ -2117,11 +2117,11 @@ def python_directories_caller_findings(path, text, entry):
         return []
     jobs = split_jobs(text)
     validate_job = jobs.get("validate", "")
-    if "validate-task.yml" not in _code_view(validate_job):
-        others = sorted(k for k, body in jobs.items() if "validate-task.yml" in _code_view(body))
-        if not others:
-            return []
-        return [
+    others = sorted(
+        k for k, body in jobs.items() if k != "validate" and "validate-task.yml" in _code_view(body)
+    )
+    unread = (
+        [
             (
                 "DRIFT",
                 (
@@ -2131,8 +2131,13 @@ def python_directories_caller_findings(path, text, entry):
                 ),
             )
         ]
+        if others
+        else []
+    )
+    if "validate-task.yml" not in _code_view(validate_job):
+        return unread
     if re.search(r"^[ \t]*with:[ \t]*\{", validate_job, re.MULTILINE):
-        return [
+        return unread + [
             (
                 "DRIFT",
                 (
@@ -2143,7 +2148,7 @@ def python_directories_caller_findings(path, text, entry):
         ]
     # A folded scalar's value depends on YAML's indentation rules, so it is refused rather than guessed.
     if re.search(r"^[ \t]*python-directories:[ \t]*>", validate_job, re.MULTILINE):
-        return [
+        return unread + [
             (
                 "DRIFT",
                 (
@@ -2162,8 +2167,8 @@ def python_directories_caller_findings(path, text, entry):
     )
     registry = sorted(python_directories_of(entry))
     if declared == registry:
-        return []
-    return [
+        return unread
+    return unread + [
         (
             "DRIFT",
             (
@@ -6062,6 +6067,13 @@ def _selftest():
             {},
             1,
             "a flow-mapping with: is reported, not misread as declaring nothing",
+        ),
+        (
+            py_caller_path,
+            py_caller_block + "  validate-extra:\n" + py_caller_uses,
+            {"pythonDirectories": ["Tools"]},
+            1,
+            "a second job calling validate-task.yml is reported beside a matching validate",
         ),
     ]
     py_caller_root = py_caller_plain.replace("python-directories: Tools", "python-directories: .")

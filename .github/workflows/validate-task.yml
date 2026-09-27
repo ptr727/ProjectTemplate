@@ -309,6 +309,22 @@ jobs:
               checker=pyright
             fi
           }
+          # Reads python_version only from the one config file mypy loads, and only from its mypy section.
+          pins_python_version() {
+            local file section
+            if [ -f "$1/mypy.ini" ]; then
+              file="$1/mypy.ini" section=mypy
+            elif [ -f "$1/.mypy.ini" ]; then
+              file="$1/.mypy.ini" section=mypy
+            elif has_section "$1/pyproject.toml" 'tool\.mypy'; then
+              file="$1/pyproject.toml" section=tool.mypy
+            elif has_section "$1/setup.cfg" mypy; then
+              file="$1/setup.cfg" section=mypy
+            else
+              return 1
+            fi
+            awk -v want="[$section]" '/^[[:space:]]*\[/ { h = $0; sub(/#.*/, "", h); gsub(/[[:space:]]/, "", h); on = (h == want); next } on && /^[[:space:]]*python_version[[:space:]]*=/ { found = 1 } END { exit !found }' "$file"
+          }
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             find_checker "$dir" "$DECLARED"
@@ -326,25 +342,30 @@ jobs:
             fi
             echo "$checker in $dir, configured in $config_dir"
             project="$(cd "$dir" && pwd)"
+            # Run from the root, a checker reads the root config's own file selection, so the directory is named to keep it the one checked.
+            targets=()
+            if [ "$config_dir" != "$dir" ]; then
+              targets=("$dir")
+            fi
             venv_python="$project/.venv/bin/python"
             if [ "$kind" = uv ]; then
-              (cd "$config_dir" && uv run --project "$project" "$checker") < /dev/null
+              (cd "$config_dir" && uv run --project "$project" "$checker" "${targets[@]}") < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && [ "$checker" = mypy ]; then
               if "$venv_python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("mypy") is None)'; then
                 # The venv's own mypy imports the plugins installed beside it and targets its interpreter already.
-                (cd "$config_dir" && "$venv_python" -m mypy) < /dev/null
+                (cd "$config_dir" && "$venv_python" -m mypy "${targets[@]}") < /dev/null
               else
                 # Left alone, mypy under uvx targets the interpreter it runs under, so the venv's version is passed unless the config pins its own, which the flag would override.
                 version_args=()
-                if ! grep -Eqs '^[[:space:]]*python_version[[:space:]]*=' "$config_dir/pyproject.toml" "$config_dir/mypy.ini" "$config_dir/.mypy.ini" "$config_dir/setup.cfg"; then
+                if ! pins_python_version "$config_dir"; then
                   version_args=(--python-version "$("$venv_python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')")
                 fi
-                (cd "$config_dir" && uvx mypy@latest --python-executable "$venv_python" "${version_args[@]}") < /dev/null
+                (cd "$config_dir" && uvx mypy@latest --python-executable "$venv_python" "${version_args[@]}" "${targets[@]}") < /dev/null
               fi
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
-              (cd "$config_dir" && uvx pyright@latest --pythonpath "$venv_python") < /dev/null
+              (cd "$config_dir" && uvx pyright@latest --pythonpath "$venv_python" "${targets[@]}") < /dev/null
             else
-              (cd "$config_dir" && uvx "$checker@latest") < /dev/null
+              (cd "$config_dir" && uvx "$checker@latest" "${targets[@]}") < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -543,7 +564,7 @@ jobs:
                 status=0
                 uvx coverage@latest run -m unittest discover -s tests || status=$?
                 if [ "$status" -eq 5 ]; then
-                  echo "::error::unittest found no tests in $dir/tests. Discovery collects only unittest.TestCase subclasses, so a pytest-style plain test function does not count, and it skips a nested test directory that has no __init__.py."
+                  echo "::error::unittest found no tests in $dir/tests. Discovery collects only unittest.TestCase subclasses, so a pytest-style plain test function does not count, it reads only files named test*.py, and it skips a nested test directory that has no __init__.py."
                 fi
                 [ "$status" -eq 0 ] || exit "$status"
                 uvx coverage@latest xml -o coverage.xml

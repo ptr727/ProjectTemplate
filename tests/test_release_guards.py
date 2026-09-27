@@ -1029,6 +1029,11 @@ gh() {
         }
         standalone = {"pyproject.toml": "[tool.ruff]\n", "pyrightconfig.json": "{}"}
         pinned = {**mypy_section, "pyproject.toml": '[tool.mypy]\npython_version = "3.12"\n'}
+        pinned_elsewhere = {
+            **mypy_section,
+            "pyproject.toml": '[tool.mypy]\n[tool.other]\npython_version = "3.12"\n',
+        }
+        pinned_unread = {**pinned, "mypy.ini": "[mypy]\n"}
         root_config = {"pyproject.toml": "[tool.mypy]\n", "sub/pyproject.toml": "[tool.ruff]\n"}
         in_sub = {"PYTHON_PROJECTS": "lint-only\tsub\n"}
         venv_mypy = {"VENV_MYPY": "1"}
@@ -1048,6 +1053,22 @@ gh() {
                 None,
                 0,
                 r"uvx mypy@latest --python-executable /\S+/\.venv/bin/python\n",
+            ),
+            "a python_version outside the mypy section is no pin": (
+                "pip",
+                pinned_elsewhere,
+                True,
+                None,
+                0,
+                r"--python-version 3\.99\n",
+            ),
+            "a pin in a config mypy does not load is no pin": (
+                "pip",
+                pinned_unread,
+                True,
+                None,
+                0,
+                r"--python-version 3\.99\n",
             ),
             "declared pip mypy installed in the venv runs there": (
                 "pip",
@@ -1087,7 +1108,7 @@ gh() {
                 True,
                 in_sub,
                 0,
-                r"uvx mypy@latest\n",
+                r"uvx mypy@latest sub\n",
             ),
             "undeclared standalone pyright is not read": (
                 "lint-only",
