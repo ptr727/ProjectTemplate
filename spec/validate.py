@@ -31,7 +31,7 @@ BRANCH_POLICIES = ("custom", "none")
 # Each of those is invisible and each is exactly as unmatchable by an exact comparison as a trailing space, so refusing padding admits the zero-width twin that fails in the same place for the same reason.
 # Stated positively a grammar admits nothing invisible, needs no notion of whitespace at all, and cannot drift when a Python release changes what str.isspace() answers.
 # Each pattern below means the same thing in Python re and in ECMA-262, the engine an editor resolving registry/repos.schema.json actually uses.
-# That schema therefore carries these exact strings, and scripts/tests/test_spec_validate.py asserts that it still does.
+# That schema therefore carries these exact strings, and tests/test_spec_validate.py asserts that it still does.
 # The portability is what makes an editor-side copy safe at all, since an earlier attempt was reverted for leaving the editor refusing values the gate allowed.
 # `$` is end-of-string in only one of the two, since Python's also matches just before a trailing newline.
 # `(?![\s\S])` is end-of-string in both, because `\s` and `\S` name different sets in the two engines while their union is every character in each.

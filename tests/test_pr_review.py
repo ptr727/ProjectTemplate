@@ -6,7 +6,7 @@ answer rather than a crash: a review attributed to the wrong login, a review cou
 stale head, or a wait that returns success while nothing landed. Each case below feeds a crafted
 GraphQL payload and asserts the reading, with `gql` replaced so no case reaches the network.
 
-Run as `python3 scripts/tests/test_pr_review.py`, or under `python3 -m unittest discover -s scripts/tests`.
+Run as `python3 tests/test_pr_review.py`, or under `python3 -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
 
-REPO = Path(__file__).resolve().parent.parent.parent
+REPO = Path(__file__).resolve().parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
 CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"

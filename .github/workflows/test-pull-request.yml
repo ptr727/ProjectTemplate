@@ -17,6 +17,10 @@ jobs:
     uses: ./.github/workflows/validate-task.yml
     permissions:
       contents: read
+    with:
+      python-directories: .
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
   # Its name is the ruleset-bound required status-check context, so rename it and the ruleset context together.

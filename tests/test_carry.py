@@ -10,8 +10,8 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "spec"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
 import carry
 

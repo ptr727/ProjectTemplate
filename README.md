@@ -129,7 +129,7 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
 
 ## How This Repo Operates
 
-ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only project type in [WORKFLOW.md][workflow]).
+ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only, docs, and python project types in [WORKFLOW.md][workflow]).
 
 The doors a session enters through, and where each leads, matching the "Getting Started" table above:
 
@@ -151,7 +151,7 @@ The full entry-point map behind these doors, with the gap register and the roadm
 Within this repo, day-to-day development follows the same branching, CI, review, and release model it documents for the fleet:
 
 - **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
-- **CI is lint-only.** There is no build or unit test. The PR gate runs markdownlint, cspell, JSON validation (`jq` parses `registry/`, `spec/`, and `repo-config/`, plus the `spec/validate.py` cross-reference and shape checks), and actionlint, and exposes the ruleset-bound `Check pull request workflow status job` aggregator. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
+- **CI lints and tests, and builds nothing.** The PR gate calls the fleet's reusable validator, `.github/workflows/validate-task.yml`, whose header names every job it runs, among them the unit-test job that runs the Python suite under `tests/` with coverage uploaded to Codecov. The hub's own validate hook, `.github/actions/validate/action.yml`, adds the registry and spec checks and the self-tests outside that suite, and the ruleset-bound `Check pull request workflow status job` aggregator gates the merge. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
 - **Review loop.** Every PR enters the GitHub Copilot review loop and must reach a green review result before merging. The agent drives that loop and merges only with explicit maintainer permission. CodeRabbit and Qodo remain advisory candidates under the measured [pull request reviewer evaluation][pr-reviewer-evaluation], and the [reviewer reference][pr-reviewer-reference] records how each reviewer behaves and which repositories it covers. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE). Versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
