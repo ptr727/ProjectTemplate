@@ -349,35 +349,104 @@ _GIT_GLOBAL_VALUE_OPTS = {
 # The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
+_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"', "<<", "((")
+_EXTGLOB_OPEN = re.compile(r"[@?*+!]\(")
 
 
-def _shell_tokens(cmd):
-    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
-    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
-    of that token while a real redirection or line break is separated. Degrades gracefully if the
-    quoting cannot be parsed.
+def _strip_comments(cmd):
+    """Return `cmd` with every comment bash reads cut away, or None where it holds none or holds
+    quoting, a heredoc, or a nested context such as arithmetic or an extglob pattern, where a `#`
+    is text, that this scan does not model. Only plain quotes are tracked, and their state
+    carries across lines as bash's does, so a `#` inside a quote an earlier line opened stays text.
+    """
+    if any(s in cmd for s in _COMMENT_SCAN_BAIL) or _EXTGLOB_OPEN.search(cmd):
+        return None
+    out = []
+    quote = None
+    comment = found = False
+    for i, ch in enumerate(cmd):
+        if comment:
+            if ch != "\n":
+                continue
+            comment = False
+        elif quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t" or cmd[i - 1] in _SHELL_OP_CHARS):
+            comment = found = True
+            continue
+        out.append(ch)
+    return "".join(out) if found else None
+
+
+def _operator_lex(text):
+    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse."""
+    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+    lex.whitespace_split = True
+    # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
+    # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
+    lex.commenters = ""
+    lex.whitespace = lex.whitespace.replace(
+        "\n", ""
+    )  # A newline is an operator above rather than a gap between words.
+    return list(lex)
+
+
+def _operator_tokens(line):
+    """Tokenize one line as the primary path does, isolating operator runs. A line that does not
+    parse falls back to plain splitting, which keeps a quoted argument whole rather than cutting it
+    at an operator character.
     """
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
-        lex.whitespace_split = True
-        # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
-        # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
-        lex.commenters = ""
-        lex.whitespace = lex.whitespace.replace(
-            "\n", ""
-        )  # A newline is an operator above rather than a gap between words.
-        return list(lex)
+        return _operator_lex(line)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        # Neither fallback isolates an operator, so the lines are split here to keep the one thing this path must not lose, that a newline ends the command before it.
-        toks = []
-        for i, line in enumerate(cmd.split("\n")):
-            if i:
-                toks.append("\n")
-            try:
-                toks.extend(shlex.split(line, posix=True))
-            except ValueError:
-                toks.extend(line.split())
-        return toks
+        pass
+    try:
+        return shlex.split(line, posix=True)
+    except ValueError:
+        return line.split()
+
+
+def _base_tokens(cmd):
+    """Split each line of `cmd` plainly, keeping a newline between lines, as the base fallback did."""
+    toks = []
+    for i, line in enumerate(cmd.split("\n")):
+        if i:
+            toks.append("\n")
+        try:
+            toks.extend(shlex.split(line, posix=True))
+        except ValueError:
+            toks.extend(line.split())
+    return toks
+
+
+def _shell_tokens(cmd, strip_comments=True):
+    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
+    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
+    of that token while a real redirection or line break is separated. A command that does not parse
+    only because of a comment, an apostrophe in it being the usual case, is tokenized without its
+    comments, followed by the base fallback's tokens, so a context where bash reads a `#` as text
+    rather than a comment can never hide a command the base fallback saw. Degrades gracefully if
+    the quoting still cannot be parsed.
+    """
+    try:
+        return _operator_lex(cmd)
+    except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
+        pass
+    stripped = _strip_comments(cmd) if strip_comments else None
+    if stripped is not None:
+        try:
+            return [*_operator_lex(stripped), "\n", *_base_tokens(cmd)]
+        except (ValueError, TypeError):
+            pass
+    toks = []
+    for i, line in enumerate(cmd.split("\n")):
+        if i:
+            toks.append("\n")
+        toks.extend(_operator_tokens(line))
+    return toks
 
 
 def _is_shell_op(tok):
@@ -2075,7 +2144,7 @@ def _heredoc_opener(line):
     that no token test can tell from a redirection. Skipping there costs a false deny on a line
     holding both, which is vanishingly rare, where reading it wrong drops real commands.
     """
-    toks = _shell_tokens(line)
+    toks = _shell_tokens(line, strip_comments=False)
     if any("((" in t for t in toks):
         return None
     for k, tok in enumerate(toks):
@@ -2275,6 +2344,46 @@ def classify(
 # --- Self-test ---------------------------------------------------------------------------------------
 _CASES = [
     # (command, expected_decision, label)
+    (
+        'echo "$(echo "\'")"; gh issue comment 1 --repo stranger/x --body hi; echo "\'"  # it\'s',
+        "deny",
+        "a line whose quoting does not parse and is not comment-stripped still shows the write bash runs",
+    ),
+    (
+        'echo "start\nx # y"; gh issue comment 1 --repo stranger/x --body hi\necho done  # it\'s',
+        "deny",
+        "a `#` inside a quote an earlier line opened is text, so the write after the quote closes is seen",
+    ),
+    (
+        "(( 1 #x )); gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside arithmetic is text, so the write after it is seen beside an apostrophe comment",
+    ),
+    (
+        "[[ $x == @(a|#b) ]]; gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside an extglob pattern is text, so the write after it is seen beside an apostrophe comment",
+    ),
+    (
+        "[[ a =~ a|#b ]]; gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside a regex is text, so the write after it is seen beside an apostrophe comment",
+    ),
+    (
+        "gh issue comment 1 --body 'fixed; see log' --repo stranger/x  # it's",
+        "deny",
+        "an operator inside a quoted argument stays in it beside an apostrophe in a trailing comment",
+    ),
+    (
+        "gh issue comment 1 --body 'fixed (see log)' --repo stranger/x  # it's",
+        "deny",
+        "parentheses inside a quoted argument stay in it beside an apostrophe in a trailing comment",
+    ),
+    (
+        "gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"$TID\"  # it's",
+        "deny",
+        "a quoted mutation stays whole beside an apostrophe in a trailing comment",
+    ),
     (
         'gh api graphql -f query=\'mutation($t:ID!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:"x"}){comment{id}}}\' -F t="PRRT_kwDODvuuzM6SFvx0" >/dev/null 2>&1 || true',
         "deny",
@@ -3732,6 +3841,41 @@ _WAIT_CASES = [
         "a review wait whose condition can stay false forever",
     ),
     ("while true; do sleep 30; done", "deny", "the shape with no condition to become true at all"),
+    (
+        "while ! gh pr checks 5 --watch; do sleep 30; done  # the PR's checks",
+        "deny",
+        "an apostrophe in a trailing comment leaves the quoting unparseable, which must not hide the loop",
+    ),
+    (
+        "while ! gh pr checks 5 --watch; do sleep 30; done  # the PRs checks",
+        "deny",
+        "the same loop and comment with no apostrophe",
+    ),
+    (
+        "until [ -f x ]; do sleep 30; done  # the PR's checks",
+        "deny",
+        "an unbounded loop the fallback reads directly is still seen beside an apostrophe in a trailing comment",
+    ),
+    (
+        "timeout 600 until [ -f x ]; do sleep 30; done  # the PR's checks",
+        "allow",
+        "the same loop under a timeout bound stays accepted beside an apostrophe in a trailing comment",
+    ),
+    (
+        'echo "a\n# b"\nwhile true; do sleep 5; done  # the PR\'s checks',
+        "deny",
+        "a quote carried across lines still leaves the comment after it stripped and the loop seen",
+    ),
+    (
+        'echo "a\n<<EOF # "\nwhile true; do sleep 5; done\nEOF',
+        "deny",
+        "a heredoc marker on a line an earlier quote opened hides no loop from the comment strip",
+    ),
+    (
+        "echo it's <<EOF\n'; while true; do sleep 5; done\nEOF",
+        "deny",
+        "a heredoc marker inside an unclosed quote opens no heredoc, so the loop after the quote closes is seen",
+    ),
     (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
         "deny",
