@@ -981,7 +981,7 @@ gh() {
     def test_lint_installs_a_declared_pip_directory_under_the_named_interpreter(self) -> None:
         """setup-uv exports UV_PYTHON, which every uv call reads, so the named interpreter has to replace it."""
         tree = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
-        env = {"UV_PYTHON": "3.13", "PIP_PYTHON": "3.14"}
+        env = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": '["3.14", "3.13"]'}
         code, _, written = self.run_python_tests_step(
             "pip", tree, True, step_name="Sync Python dependencies step", extra_env=env
         )
@@ -992,6 +992,14 @@ gh() {
             "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
         )
         self.assertEqual((0, ""), (code, written))
+        for versions in ("[3.14]", '[" "]', "[]", "not json"):
+            with self.subTest(versions=versions):
+                bad = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": versions}
+                code, stdout, _ = self.run_python_tests_step(
+                    "pip", tree, True, step_name="Sync Python dependencies step", extra_env=bad
+                )
+                self.assertEqual(1, code)
+                self.assertIn("::error::The python-versions input", stdout)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",

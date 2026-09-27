@@ -319,9 +319,22 @@ def python_type_findings(entry, tree):
     if tree is None or "python" in entry.get("types", []):
         return []
     notes = entry.get("driftNotes", [])
-    if any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes):
+    suppressed = any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes)
+    present = any(p.endswith(".py") for p in tree)
+    # The note-freshness check skips this note on a repo without the type, so its staleness is reported here, where the tree is.
+    if suppressed and not present:
+        return [
+            (
+                "DRIFT",
+                (
+                    "registry: a driftNote suppresses the Python advisory (python.directories.declared), "
+                    "but the tree carries no .py file. Delete the note."
+                ),
+            )
+        ]
+    if suppressed:
         return []
-    if any(p.endswith(".py") for p in tree):
+    if present:
         return [
             (
                 "DRIFT",
@@ -345,7 +358,9 @@ def python_undeclared_root_findings(entry, tree):
     claims coverage for it. `tree` is the repo's blob path set, or None when it could not be read
     in full, in which case nothing is reported.
     """
-    if tree is None or python_directories_of(entry) or "pyproject.toml" not in tree:
+    if tree is None or "python" not in entry.get("types", []):
+        return []
+    if python_directories_of(entry) or "pyproject.toml" not in tree:
         return []
     if not any(p.startswith("tests/") and p.endswith(".py") for p in tree):
         return []
@@ -378,7 +393,7 @@ def python_directory_coverage_findings(entry, tree):
     a whole tree of them would bury the message the same way python_directories.py's own warning caps at
     UNCOVERED_SHOWN rather than listing every path.
     """
-    if tree is None:
+    if tree is None or "python" not in entry.get("types", []):
         return []
     directories = expected_python_directories(entry, tree)
     missed = sorted(
@@ -5801,6 +5816,12 @@ def _selftest():
             "a driftNote naming the check suppresses the advisory",
         ),
         (
+            {"types": ["docs"], "driftNotes": ["Retired helper (python.directories.declared)."]},
+            {"README.md"},
+            1,
+            "a suppression with no .py file left is stale",
+        ),
+        (
             {"types": ["docs"], "driftNotes": ["python.directories.declared without parentheses"]},
             {"tools/script.py"},
             1,
@@ -5816,7 +5837,7 @@ def _selftest():
             print(f"  FAIL python_type_findings [{label}] -> {got} finding(s), expected {expected}")
     if python_type_ok:
         print(
-            "  ok   python_type_findings: a tracked .py file with no 'python' type is a DEFECT, and only that"
+            "  ok   python_type_findings: a tracked .py file with no 'python' type is a suppressible advisory, and a stale suppression is reported"
         )
 
     python_directory_cases = [
@@ -5853,8 +5874,14 @@ def _selftest():
         ),
     ]
     python_directory_ok = True
+    # Each case describes a Python-typed repo unless it names its own types, since an untyped one gets only the type advisory.
+    python_directory_cases.append(
+        ({"types": ["docs"]}, {"tools/x.py"}, 0, "an untyped repo gets only the type advisory")
+    )
     for entry_in, tree_in, expected, label in python_directory_cases:
-        got_findings = python_directory_coverage_findings(entry_in, tree_in)
+        got_findings = python_directory_coverage_findings(
+            {"types": ["python"], **entry_in}, tree_in
+        )
         if len(got_findings) != expected:
             ok = False
             python_directory_ok = False
@@ -5997,8 +6024,16 @@ def _selftest():
         ),
         ({}, None, 0, "unreadable tree reports nothing"),
     ]
+    undeclared_root_cases.append(
+        (
+            {"types": ["docs"]},
+            {"pyproject.toml", "tests/test_a.py"},
+            0,
+            "an untyped repo gets only the type advisory",
+        )
+    )
     for entry_in, tree_in, expected, label in undeclared_root_cases:
-        got = len(python_undeclared_root_findings(entry_in, tree_in))
+        got = len(python_undeclared_root_findings({"types": ["python"], **entry_in}, tree_in))
         if got != expected:
             ok = False
             print(f"  FAIL python_undeclared_root_findings [{label}] -> {got}, expected {expected}")

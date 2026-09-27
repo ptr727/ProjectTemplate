@@ -219,7 +219,7 @@ jobs:
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
-          PIP_PYTHON: ${{ fromJSON(inputs.python-versions)[0] }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
@@ -245,6 +245,11 @@ jobs:
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
+              # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
+              if ! PIP_PYTHON=$(jq -er 'if type == "array" and length > 0 and (.[0] | type == "string" and test("\\S")) then .[0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
+                echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry installs the declared pip directory $dir."
+                exit 1
+              fi
               (cd "$dir" && install_requirements) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
