@@ -2126,8 +2126,8 @@ def python_directories_caller_findings(path, text, entry):
                 "DRIFT",
                 (
                     f"python-directories: {path} calls validate-task.yml from job "
-                    f"{', '.join(others)} rather than 'validate', so its python-directories input is "
-                    "not compared against the registry."
+                    f"{', '.join(others)}, whose python-directories input is not compared against "
+                    "the registry, since only the job keyed 'validate' is read."
                 ),
             )
         ]
