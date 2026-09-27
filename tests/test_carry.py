@@ -191,7 +191,7 @@ class CarryInventoryTests(unittest.TestCase):
 
 
 class CarryManifestTests(unittest.TestCase):
-    def test_a_malformed_types_value_adds_no_selector(self) -> None:
+    def test_only_a_types_lists_string_elements_become_selectors(self) -> None:
         for value in ("python", {"python": 1}, None, ["python", 3]):
             with self.subTest(value=value):
                 selectors = carry.selector_set({"types": value}, {})
