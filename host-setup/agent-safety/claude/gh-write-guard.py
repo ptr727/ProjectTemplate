@@ -349,15 +349,17 @@ _GIT_GLOBAL_VALUE_OPTS = {
 # The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
-_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"')
+_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"', "<<", "((")
+_EXTGLOB_OPEN = re.compile(r"[@?*+!]\(")
 
 
 def _strip_comments(cmd):
     """Return `cmd` with every comment bash reads cut away, or None where it holds none or holds
-    quoting or a heredoc this scan does not model. Only plain quotes are tracked, and their state
+    quoting, a heredoc, or a nested context such as arithmetic or an extglob pattern, where a `#`
+    is text, that this scan does not model. Only plain quotes are tracked, and their state
     carries across lines as bash's does, so a `#` inside a quote an earlier line opened stays text.
     """
-    if "<<" in cmd or any(s in cmd for s in _COMMENT_SCAN_BAIL):
+    if any(s in cmd for s in _COMMENT_SCAN_BAIL) or _EXTGLOB_OPEN.search(cmd):
         return None
     out = []
     quote = None
@@ -2336,6 +2338,16 @@ _CASES = [
         'echo "start\nx # y"; gh issue comment 1 --repo stranger/x --body hi\necho done  # it\'s',
         "deny",
         "a `#` inside a quote an earlier line opened is text, so the write after the quote closes is seen",
+    ),
+    (
+        "(( 1 #x )); gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside arithmetic is text, so the write after it is seen beside an apostrophe comment",
+    ),
+    (
+        "[[ $x == @(a|#b) ]]; gh issue comment 1 --repo stranger/x --body hi  # it's",
+        "deny",
+        "a `#` inside an extglob pattern is text, so the write after it is seen beside an apostrophe comment",
     ),
     (
         "gh issue comment 1 --body 'fixed; see log' --repo stranger/x  # it's",
