@@ -36,6 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
 BOOTSTRAP_PS = ROOT / "host-setup" / "bootstrap.ps1"
+MENU = ROOT / "host-setup" / "menu.sh"
 LINUX = ROOT / "host-setup" / "linux"
 WINDOWS = ROOT / "host-setup" / "windows"
 HOST_TOOLS = ROOT / "spec" / "host-tools.json"
@@ -700,6 +701,70 @@ class TestKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("cleanup")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "old")
+
+
+def menu_functions() -> str:
+    """`menu.sh` without its closing `main "$@"`, so a test can source its functions alone."""
+    lines = MENU.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    if lines[-1] != 'main "$@"':
+        raise AssertionError(f"menu.sh no longer ends with its main call: {lines[-1]!r}")
+    return "\n".join(lines[:-1]) + "\n"
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux menu's own functions")
+class TestMenuSkillsInstall(unittest.TestCase):
+    """Which installer the menu's skills task runs, since the installer registers its own directory."""
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.functions = self.dir / "functions.sh"
+        self.functions.write_text(menu_functions(), encoding="utf-8")
+        self.hub = self.dir / "hub"
+        for relative in ("host-setup/bootstrap.sh", "host-setup/linux/install-skills.sh"):
+            script = self.hub / relative
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text(f'#!/bin/sh\necho "{relative} $*"\n', encoding="utf-8")
+            script.chmod(0o755)
+
+    def run_task(self, fetched: bool, extra: str = "") -> subprocess.CompletedProcess[str]:
+        script = "\n".join(
+            [
+                f'source "{self.functions}"',
+                f'DIR="{self.dir}"',
+                f'HUB_ROOT="{self.hub}"',
+                f"HUB_FETCHED={'true' if fetched else 'false'}",
+                extra,
+                "ensure_hub_root() { return 0; }",
+                "install_skills_locked",
+            ]
+        )
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+
+    def test_a_fetched_clone_hands_the_install_to_the_bootstraps_kept_tree(self) -> None:
+        """The menu removes its clone on exit, so installing from it registers a directory about to go."""
+        result = self.run_task(fetched=True, extra="REF=develop\nASSUME_YES=true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(), "host-setup/bootstrap.sh --skills --ref develop --yes"
+        )
+
+    def test_a_fetched_clone_never_passes_the_menus_cache_directory_on(self) -> None:
+        """The bootstrap keeps its tree under a data directory, and the menu's own directory is a cache."""
+        result = self.run_task(fetched=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("--dir", result.stdout)
+
+    def test_a_hub_checkout_the_menu_runs_from_installs_from_that_checkout(self) -> None:
+        result = self.run_task(fetched=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "host-setup/linux/install-skills.sh")
 
 
 class TestHarness(unittest.TestCase):

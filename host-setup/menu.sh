@@ -311,9 +311,15 @@ host_tool_locked() {
     local tool="$1"
     shift
     ensure_hub_root || return 1
-    local path="$HUB_ROOT/host-setup/linux/$tool"
+    run_in_hub "host-setup/linux" "$tool" "$@"
+}
+
+run_in_hub() {
+    local dir="$1" tool="$2"
+    shift 2
+    local path="$HUB_ROOT/$dir/$tool"
     [[ -x $path ]] || {
-        fail "$HUB_ROOT carries no $tool at host-setup/linux, so this ref is not one to run tasks from"
+        fail "$HUB_ROOT carries no $tool at $dir, so this ref is not one to run tasks from"
         return 1
     }
 
@@ -321,6 +327,23 @@ host_tool_locked() {
     [[ $ASSUME_YES == true ]] && flags+=(--yes)
     [[ $DRY_RUN == true ]] && flags+=(--dry-run)
     "$path" "$@" "${flags[@]}"
+}
+
+install_skills() {
+    hub_read_lock_acquire || return 1
+    local rc=0
+    install_skills_locked || rc=$?
+    hub_read_lock_release
+    return "$rc"
+}
+
+install_skills_locked() {
+    ensure_hub_root || return 1
+    if [[ $HUB_FETCHED == true ]]; then
+        run_in_hub "host-setup" bootstrap.sh --skills --ref "$REF"
+    else
+        run_in_hub "host-setup/linux" install-skills.sh
+    fi
 }
 
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
@@ -466,7 +489,7 @@ dispatch() {
     6) host_tool setup-github.sh --status ;;
     7) host_tool setup-github.sh --configure ;;
     8) host_tool install-skills.sh --report ;;
-    9) host_tool install-skills.sh ;;
+    9) install_skills ;;
     10) audit_repo ;;
     11) check_skills_dist ;;
     12) carry_action check ;;

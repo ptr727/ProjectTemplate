@@ -363,17 +363,32 @@ function Invoke-HostTool {
     return (Invoke-WithHubLock -ArgumentList @($Tool, $Arguments) -ScriptBlock {
             param($Tool, $Arguments)
             if (-not (Confirm-HubRoot)) { return 1 }
-            $path = Join-Path $script:HUB_ROOT 'host-setup\windows' | Join-Path -ChildPath $Tool
-            if (-not (Test-Path $path)) {
-                fail "$script:HUB_ROOT carries no $Tool at host-setup\windows, so this ref is not one to run tasks from"
-                return 1
+            return (Invoke-InHub -Directory 'host-setup\windows' -Tool $Tool -Arguments $Arguments)
+        })
+}
+
+function Invoke-InHub {
+    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][string]$Tool, [string[]]$Arguments = @())
+    $path = Join-Path $script:HUB_ROOT $Directory | Join-Path -ChildPath $Tool
+    if (-not (Test-Path $path)) {
+        fail "$script:HUB_ROOT carries no $Tool at $Directory, so this ref is not one to run tasks from"
+        return 1
+    }
+    $flags = @()
+    if ($script:ASSUME_YES) { $flags += '-Yes' }
+    if ($script:DRY_RUN) { $flags += '-DryRun' }
+    # Out-Host again, for the same reason as the git calls above: bare, this would join the exit code below into one leaked return value.
+    & $script:PWSH_PATH -NoProfile -ExecutionPolicy Bypass -File $path @Arguments @flags | Out-Host
+    return $LASTEXITCODE
+}
+
+function Invoke-SkillsInstall {
+    return (Invoke-WithHubLock {
+            if (-not (Confirm-HubRoot)) { return 1 }
+            if ($script:HUB_FETCHED) {
+                return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments '-Skills', '-Ref', $script:REF)
             }
-            $flags = @()
-            if ($script:ASSUME_YES) { $flags += '-Yes' }
-            if ($script:DRY_RUN) { $flags += '-DryRun' }
-            # Out-Host again, for the same reason as the git calls above: bare, this would join the exit code below into one leaked return value.
-            & $script:PWSH_PATH -NoProfile -ExecutionPolicy Bypass -File $path @Arguments @flags | Out-Host
-            return $LASTEXITCODE
+            return (Invoke-InHub -Directory 'host-setup\windows' -Tool 'install-skills.ps1')
         })
 }
 
@@ -519,7 +534,7 @@ function Invoke-Dispatch {
         '7' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Configure') }
         '8' { return (Invoke-HostTool -Tool 'setup-wsl.ps1' -Arguments '-Status') }
         '9' { return (Invoke-HostTool -Tool 'install-skills.ps1' -Arguments '-Report') }
-        '10' { return (Invoke-HostTool -Tool 'install-skills.ps1') }
+        '10' { return (Invoke-SkillsInstall) }
         '11' { return (Invoke-AuditRepo) }
         '12' { return (Invoke-CheckSkillsDist) }
         '13' { return (Invoke-CarryAction 'check') }
