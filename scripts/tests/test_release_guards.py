@@ -875,23 +875,32 @@ gh() {
         )
 
     def run_python_tests_step(
-        self, kind: str, tree: set[str], declared: bool
+        self,
+        kind: str,
+        tree: set[str] | dict[str, str],
+        declared: bool,
+        step_name: str = "Run Python tests step",
     ) -> tuple[int, str, str]:
-        """Run the unit-test job's Python step over one constructed directory, against stub uv tools."""
+        """Run one of the validator's Python steps over a constructed directory, against stub uv tools.
+
+        The third value is what the step wrote to GITHUB_OUTPUT followed by every stub invocation.
+        """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        step = workflow.split("      - name: Run Python tests step\n", 1)[1]
+        step = workflow.split(f"      - name: {step_name}\n", 1)[1]
         body = step.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
         script = "\n".join(line[10:] for line in body.splitlines())
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         work, stubs = root / "work", root / "bin"
-        for path in tree:
+        contents = tree if isinstance(tree, dict) else dict.fromkeys(tree, "")
+        for path, text in contents.items():
             (work / path).parent.mkdir(parents=True, exist_ok=True)
-            (work / path).write_text("", encoding="utf-8")
+            (work / path).write_text(text, encoding="utf-8")
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
         python_stub = "#!/usr/bin/env bash\necho x > coverage.xml\n"
         stub = (
             "#!/usr/bin/env bash\n"
+            'echo "${0##*/} $*" >> "$STUB_LOG"\n'
             'case " $* " in\n'
             '*" venv "*) mkdir -p .venv/bin && printf %s "$PYTHON_STUB" > .venv/bin/python && chmod +x .venv/bin/python ;;\n'
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
@@ -900,8 +909,9 @@ gh() {
         for name in ("uv", "uvx"):
             (stubs / name).write_text(stub, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        output = root / "output"
+        output, log = root / "output", root / "log"
         output.write_text("", encoding="utf-8")
+        log.write_text("", encoding="utf-8")
         env = {
             **os.environ,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
@@ -909,6 +919,7 @@ gh() {
             "PYTHON_PROJECTS": f"{kind}\t.\n",
             "DECLARED": "true" if declared else "false",
             "GITHUB_OUTPUT": str(output),
+            "STUB_LOG": str(log),
         }
         result = run(
             ["bash", "-c", script],
@@ -920,7 +931,8 @@ gh() {
             timeout=60,
             check=False,
         )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+        written = output.read_text(encoding="utf-8") + log.read_text(encoding="utf-8")
+        return result.returncode, result.stdout, written
 
     def test_undeclared_root_keeps_the_old_gate(self) -> None:
         """A caller declaring nothing runs only a pytest suite beside a manifest, as before the input existed."""
@@ -949,11 +961,60 @@ gh() {
                 self.assertEqual(0, code)
                 self.assertIn("files=./coverage.xml" if runs else "files=\n", output)
 
+    def test_type_check_picks_its_checker_and_environment(self) -> None:
+        """A declared directory owes a type check, run against its installed dependencies."""
+        mypy_section = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
+        standalone = {"pyproject.toml": "[tool.ruff]\n", "pyrightconfig.json": "{}"}
+        cases = {
+            "declared pip mypy reads the venv": (
+                "pip",
+                mypy_section,
+                True,
+                0,
+                "uvx mypy@latest --python-executable .venv/bin/python",
+            ),
+            "undeclared pip mypy keeps the old call": (
+                "pip",
+                mypy_section,
+                False,
+                0,
+                "uvx mypy@latest\n",
+            ),
+            "declared standalone pyright counts": (
+                "lint-only",
+                standalone,
+                True,
+                0,
+                "uvx pyright@latest\n",
+            ),
+            "undeclared standalone pyright is not read": ("lint-only", standalone, False, 0, None),
+            "declared with no checker fails": ("lint-only", {"pyproject.toml": ""}, True, 1, None),
+            "uv runs its locked checker": (
+                "uv",
+                {"pyproject.toml": "[tool.mypy]\n"},
+                True,
+                0,
+                "uv run mypy",
+            ),
+        }
+        for label, (kind, tree, declared, code_expected, call) in cases.items():
+            with self.subTest(label):
+                code, _, written = self.run_python_tests_step(
+                    kind, tree, declared, step_name="Type check Python step"
+                )
+                self.assertEqual(code_expected, code)
+                if call is None:
+                    self.assertNotIn("mypy", written.replace("[tool.mypy]", ""))
+                    self.assertNotIn("pyright", written)
+                else:
+                    self.assertIn(call, written)
+
     def test_a_declared_directory_owes_a_runnable_suite(self) -> None:
         code, _, output = self.run_python_tests_step(
             "lint-only", {"pyproject.toml", "tests/test_a.py"}, declared=True
         )
-        self.assertEqual((0, "files=./coverage.xml\n"), (code, output))
+        self.assertEqual(0, code)
+        self.assertTrue(output.startswith("files=./coverage.xml\n"), output)
         for label, kind, tree in (
             ("no tests/", "lint-only", {"pyproject.toml"}),
             ("no manifest", "unsupported", {"pyproject.toml", "tests/test_a.py"}),
@@ -1004,7 +1065,7 @@ gh() {
         # The lockfile branch installs the project itself, so the pip branch owes the same.
         # Without it a src-layout repo fails collection on its own package instead of running its tests.
         self.assertIn("uv pip install -e .", job)
-        self.assertIn(r"grep -Eq '^[[:space:]]*\[project\]' pyproject.toml", job)
+        self.assertIn('"project" not in tomllib.load', job)
 
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.

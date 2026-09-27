@@ -315,9 +315,10 @@ def python_undeclared_root_findings(entry, tree):
 
     The validator's root default runs a root tests/ suite only beside a root uv.lock or
     requirements*.txt, the gate it ran before directories could be declared. A root suite with
-    neither is a lint-only one, which runs only once the root is declared, and that repo still
-    claims coverage from coverage_claiming_types(). `tree` is the repo's blob path set, or None
-    when it could not be read in full, in which case nothing is reported.
+    neither runs only once a lint-only root is declared or a [project] root gains a manifest, and
+    the blob paths alone cannot say which the root is. Meanwhile coverage_claiming_types() still
+    claims coverage for it. `tree` is the repo's blob path set, or None when it could not be read
+    in full, in which case nothing is reported.
     """
     if tree is None or python_directories_of(entry) or "pyproject.toml" not in tree:
         return []
@@ -332,8 +333,10 @@ def python_undeclared_root_findings(entry, tree):
             "DRIFT",
             (
                 "python-directories: the root carries a tests/ suite with no uv.lock or "
-                "requirements*.txt, which the undeclared root default never runs. Declare '.' in the "
-                "validator's python-directories input and in the registry's pythonDirectories."
+                "requirements*.txt, which the undeclared root default never runs. A lint-only root "
+                "declares '.' in the validator's python-directories input and the registry's "
+                "pythonDirectories, and a root whose pyproject.toml declares [project] adds a "
+                "uv.lock or requirements*.txt instead."
             ),
         )
     ]

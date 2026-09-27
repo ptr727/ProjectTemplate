@@ -94,6 +94,15 @@ class ShapeTests(unittest.TestCase):
         files = {"uv.lock": "", "pyproject.toml": self.WORKSPACE}
         self.assertEqual("lint-only", self.shape("Tools", files, self.TOOL_ONLY))
 
+    def test_every_toml_spelling_of_a_project_is_a_project(self) -> None:
+        for text in (
+            "[ project ]\nname = 'w'\n",
+            "project = { name = 'w' }\n",
+            "project.name = 'w'\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual("unsupported", self.shape("Tools", {}, text))
+
     def test_a_project_with_no_manifest_is_unsupported(self) -> None:
         self.assertEqual("unsupported", self.shape(".", {}, self.PROJECT))
         self.assertEqual("unsupported", self.shape("Tools", {}, "[build-system]\n"))
@@ -123,11 +132,11 @@ class MainTests(unittest.TestCase):
         self.output = self.root.parent / f"{self.root.name}-output"
         self.addCleanup(lambda: self.output.unlink(missing_ok=True))
 
-    def track(self, *paths: str) -> None:
+    def track(self, *paths: str, text: str = "") -> None:
         for path in paths:
             target = self.root / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("", encoding="utf-8")
+            target.write_text(text, encoding="utf-8")
         subprocess.run(["git", "-C", str(self.root), "add", "--", *paths], check=True)
 
     def run_main(self, declared: str, report: str = "false") -> tuple[int, str, str]:
@@ -167,6 +176,32 @@ class MainTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("::error::", stdout)
         self.assertEqual(written, "")
+
+    def test_malformed_toml_exits_one_with_an_error(self) -> None:
+        self.track("Tools/pyproject.toml", text="[tool.ruff\n")
+        code, stdout, written = self.run_main("Tools")
+        self.assertEqual(code, 1)
+        self.assertIn("is not valid TOML", stdout)
+        self.assertEqual(written, "")
+
+    @unittest.skipUnless(sys.platform == "linux", "needs a filesystem that accepts non-UTF-8 names")
+    def test_a_non_utf8_name_is_warned_about_rather_than_crashing(self) -> None:
+        self.track("pyproject.toml")
+        (self.root / os.fsdecode(b"bad\xff.py")).write_text("", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "-A"], check=True)
+        script = Path(pd.__file__)
+        env = {
+            **os.environ,
+            "DECLARED": "Other",
+            "REPORT_UNCOVERED": "true",
+            "GITHUB_OUTPUT": str(self.output),
+        }
+        self.track("Other/pyproject.toml")
+        result = subprocess.run(
+            [sys.executable, str(script)], cwd=self.root, env=env, capture_output=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b"bad\\udcff.py", result.stdout)
 
     def test_uncovered_files_warn_only_when_asked(self) -> None:
         self.track("Tools/pyproject.toml", "Tools/a.py", "Stray/b.py")

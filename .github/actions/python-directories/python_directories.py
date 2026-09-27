@@ -23,17 +23,17 @@ GITHUB_OUTPUT. Exits 1 on a declaration naming a path that is not a tracked Pyth
 
 from __future__ import annotations
 
+import io
 import os
 import posixpath
-import re
 import subprocess
 import sys
+import tomllib
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 
 UNCOVERED_SHOWN = 10
-PROJECT_TABLE = re.compile(r"^[ \t]*\[(project|build-system)\]", re.MULTILINE)
 
 
 def escape_command(value: str) -> str:
@@ -105,7 +105,8 @@ def shape(directory: str, tracked_set: set[str], read: Callable[[str], str]) -> 
         for path in tracked_set
     ):
         return "pip"
-    if not PROJECT_TABLE.search(read(in_directory(directory, "pyproject.toml"))):
+    config = tomllib.loads(read(in_directory(directory, "pyproject.toml")))
+    if "project" not in config and "build-system" not in config:
         return "lint-only"
     return "unsupported"
 
@@ -119,6 +120,9 @@ def uncovered(directories: list[str], tracked: list[str]) -> list[str]:
 
 
 def main() -> int:
+    # A tracked path need not be valid UTF-8, and a warning naming one must not crash the step it only warns in.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="backslashreplace")
     tracked = tracked_files()
     directories, declared, errors = resolve(os.environ.get("DECLARED", ""), tracked)
     if errors:
@@ -144,7 +148,12 @@ def main() -> int:
     tracked_set = set(tracked)
     projects = []
     for directory in directories:
-        projects.append((shape(directory, tracked_set, read_file), directory))
+        try:
+            projects.append((shape(directory, tracked_set, read_file), directory))
+        except tomllib.TOMLDecodeError as error:
+            message = f"{in_directory(directory, 'pyproject.toml')} is not valid TOML: {error}"
+            print(f"::error::python-directories: {escape_command(message)}")
+            return 1
         print(f"gating Python directory: {directory} ({projects[-1][0]})")
     if not directories:
         print("no Python directory to gate")

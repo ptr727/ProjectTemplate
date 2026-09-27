@@ -214,16 +214,33 @@ jobs:
         with:
           python-version: "3.13"
 
+      # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
+          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          install_requirements() {
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
+              (cd "$dir" && install_requirements) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -261,7 +278,7 @@ jobs:
 
       # Mypy takes precedence where a pyproject declares both sections, matching every repo that runs mypy in CI today.
       # A pyright-only pyproject, with no [tool.mypy] section, falls back to pyright instead.
-      # A standalone mypy.ini or pyrightconfig.json counts too, the placement a Home Assistant integration keeps.
+      # A declared directory's standalone mypy.ini or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
       # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
@@ -272,9 +289,19 @@ jobs:
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
-            if grep -Eq '^[[:space:]]*\[tool\.mypy\]' "$dir/pyproject.toml" || [ -f "$dir/mypy.ini" ] || [ -f "$dir/.mypy.ini" ]; then
+            standalone_mypy=false
+            standalone_pyright=false
+            if [ "$DECLARED" = "true" ]; then
+              if [ -f "$dir/mypy.ini" ] || [ -f "$dir/.mypy.ini" ]; then
+                standalone_mypy=true
+              fi
+              if [ -f "$dir/pyrightconfig.json" ]; then
+                standalone_pyright=true
+              fi
+            fi
+            if grep -Eq '^[[:space:]]*\[tool\.mypy\]' "$dir/pyproject.toml" || [ "$standalone_mypy" = true ]; then
               checker=mypy
-            elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' "$dir/pyproject.toml" || [ -f "$dir/pyrightconfig.json" ]; then
+            elif grep -Eq '^[[:space:]]*\[tool\.pyright\]' "$dir/pyproject.toml" || [ "$standalone_pyright" = true ]; then
               checker=pyright
             elif [ "$DECLARED" = "true" ]; then
               echo "::error::The declared Python directory $dir configures neither mypy nor pyright, in its pyproject.toml or in a mypy.ini or pyrightconfig.json beside it. Every Python directory owes a type check."
@@ -286,6 +313,10 @@ jobs:
             echo "$checker in $dir"
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv run "$checker") < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && [ "$checker" = mypy ]; then
+              (cd "$dir" && uvx mypy@latest --python-executable .venv/bin/python) < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
+              (cd "$dir" && uvx pyright@latest --pythonpath .venv/bin/python) < /dev/null
             else
               (cd "$dir" && uvx "$checker@latest") < /dev/null
             fi
@@ -421,7 +452,6 @@ jobs:
 
       # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
       # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
-      # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
       # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
       # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
       # Each directory's run reads /dev/null, since the loop's own list is its stdin and a suite reading stdin would swallow the directories after it.
@@ -433,6 +463,19 @@ jobs:
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
+          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          install_requirements() {
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
           reports=()
           while IFS=$'\t' read -r kind dir; do
             [ -n "$dir" ] || continue
@@ -458,15 +501,7 @@ jobs:
                 uv run pytest --cov-report=xml
                 ;;
               pip)
-                uv venv
-                requirement_args=()
-                for file in requirements*.txt; do
-                  requirement_args+=(-r "$file")
-                done
-                uv pip install "${requirement_args[@]}"
-                if grep -Eq '^[[:space:]]*\[project\]' pyproject.toml; then
-                  uv pip install -e .
-                fi
+                install_requirements
                 .venv/bin/python -m pytest --cov-report=xml
                 ;;
               lint-only)
