@@ -785,7 +785,7 @@ def repo_selectors(entry, defaults):
     default (as configure.sh does). consumerModel has no fleet default - validate.py requires it on every
     cataloged repo, so a cataloged repo always contributes one.
     """
-    sel = set(entry.get("types", []))
+    sel = set(declared_types(entry))
     sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
     sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
     # The consumerModel field has no defaults fallback, since the registry schema does not allow defaults.consumerModel and validate.py requires it on every cataloged repo.
@@ -2545,7 +2545,7 @@ def ground_branch_of(entry, branch=None, defaults=None):
 def audit_repo(entry, spec, branch=None):
     findings = []  # (kind, text)
     slug = repo_slug(entry)
-    types = entry.get("types", [])
+    types = declared_types(entry)
     model = (
         entry.get("workflowModel")
         or spec["registry"].get("defaults", {}).get("workflowModel")
@@ -6387,7 +6387,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     presence/contract findings to fix, drift to converge (re-vendor or review), and anything unverifiable.
     """
     name = entry["name"]
-    types = ", ".join(entry.get("types", [])) or "untyped"
+    types = ", ".join(declared_types(entry)) or "untyped"
     stamp = f"{ground}@{audited_sha[:7]}" if audited_sha else ground
     blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
     drift = [t for k, t in findings if k == "DRIFT"]
@@ -6579,7 +6579,7 @@ def main(argv=None):
         except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
-        print(f"== {entry['name']} ({', '.join(entry.get('types', []))}; {model}){stamp} ==")
+        print(f"== {entry['name']} ({', '.join(declared_types(entry))}; {model}){stamp} ==")
         if not findings:
             print(
                 "  clean (deterministic checks only; no project-type check in spec/project-types.json runs here, and the cross-cutting ones are covered only in part - AUDIT.md section 4)"

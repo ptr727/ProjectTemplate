@@ -703,6 +703,15 @@ class RegistryEntryGateCase(unittest.TestCase):
         # An override of None drops the key, which is how a case declares a field absent rather than declared null.
         return {k: v for k, v in base.items() if v is not None}
 
+    def test_a_types_value_that_is_not_a_list_of_strings_is_refused(self) -> None:
+        for value in ({"python": 1}, 5, "python", ["python", 3]):
+            with self.subTest(value=value):
+                output = self.run_against(
+                    self.entry(status="cataloged", classificationPending=None, types=value)
+                )
+                self.assertIn("Fixture: types must be a list of type-name strings", output)
+                self.assertNotIn("Traceback", output)
+
     def test_a_declared_ground_truth_branch_is_checked_by_the_loop(self) -> None:
         self.assertIn(
             "Fixture: groundTruthBranch 'main?ref=x' does not address unencoded",

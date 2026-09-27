@@ -1005,7 +1005,11 @@ def main():
             continue
 
         repo_types = repo.get("types", [])
-        if not repo_types:
+        # CI runs no JSON-schema validation, so the shape is checked here before anything iterates it.
+        if not isinstance(repo_types, list) or not all(isinstance(t, str) for t in repo_types):
+            errors.append(f"{name}: types must be a list of type-name strings, got {repo_types!r}")
+            repo_types = []
+        elif not repo_types:
             errors.append(f"{name}: cataloged repo has no types (add types or mark it backlog)")
         for t in repo_types:
             if t not in known_types:
