@@ -215,16 +215,18 @@ jobs:
           python-version: "3.13"
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
+      # They install under the first interpreter the caller names, since they need not resolve under the one this job pins.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
+          PIP_PYTHON: ${{ fromJSON(inputs.python-versions)[0] }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
           # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
           install_requirements() {
-            uv venv
+            uv venv ${PIP_PYTHON:+--python "$PIP_PYTHON"}
             local requirement_args=()
             local file
             for file in requirements*.txt; do
@@ -465,7 +467,7 @@ jobs:
           set -Eeuo pipefail
           # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
           install_requirements() {
-            uv venv
+            uv venv ${PIP_PYTHON:+--python "$PIP_PYTHON"}
             local requirement_args=()
             local file
             for file in requirements*.txt; do
@@ -487,8 +489,8 @@ jobs:
               echo "::error::The declared Python directory $dir declares a project with no uv.lock or requirements*.txt of its own, so the validator cannot install its dependencies. Declare a uv workspace's root rather than its member."
               exit 1
             fi
-            if [ ! -d "$dir/tests" ]; then
-              echo "::error::The declared Python directory $dir has no tests/ directory. Every Python directory owes a test suite run under coverage, per D1.6."
+            if [ -z "$(find "$dir/tests" -name '*.py' -print -quit 2>/dev/null)" ]; then
+              echo "::error::The declared Python directory $dir has no Python files under tests/. Every Python directory owes a test suite run under coverage, per D1.6."
               exit 1
             fi
             echo "tests in $dir ($kind)"
@@ -516,7 +518,7 @@ jobs:
             fi
             reports+=("$dir/coverage.xml")
           done <<< "$PYTHON_PROJECTS"
-          files=$(IFS=,; echo "${reports[*]}")
+          files=$(IFS=,; printf '%s' "${reports[*]}")
           echo "files=$files" >> "$GITHUB_OUTPUT"
 
       # Best-effort: continue-on-error plus fail_ci_if_error false, so a missing token never reds the gate.

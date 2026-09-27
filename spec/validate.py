@@ -355,6 +355,9 @@ def python_directories_errors_for_repo(repo, name):
                 f"{name}: pythonDirectories entry {d!r} carries leading/trailing whitespace"
             )
             continue
+        if "\t" in d:
+            errors.append(f"{name}: pythonDirectories entry {d!r} must not hold a tab")
+            continue
         if d.startswith("/") or "\\" in d:
             errors.append(
                 f"{name}: pythonDirectories entry '{d}' must be a repository-relative path with forward slashes"

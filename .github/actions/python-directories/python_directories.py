@@ -96,7 +96,12 @@ def in_directory(directory: str, name: str) -> str:
 
 
 def shape(directory: str, tracked_set: set[str], read: Callable[[str], str]) -> str:
-    """How the directory's tools run, from its tracked files and its pyproject.toml."""
+    """How the directory's tools run, from its tracked files and its pyproject.toml.
+
+    The pyproject.toml is parsed first whatever the shape, so a malformed one fails here rather than
+    reading as a project with no [project] table in a later step.
+    """
+    config = tomllib.loads(read(in_directory(directory, "pyproject.toml")))
     if in_directory(directory, "uv.lock") in tracked_set:
         return "uv"
     prefix = in_directory(directory, "requirements")
@@ -105,7 +110,6 @@ def shape(directory: str, tracked_set: set[str], read: Callable[[str], str]) -> 
         for path in tracked_set
     ):
         return "pip"
-    config = tomllib.loads(read(in_directory(directory, "pyproject.toml")))
     if "project" not in config and "build-system" not in config:
         return "lint-only"
     return "unsupported"

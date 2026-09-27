@@ -322,7 +322,7 @@ def python_undeclared_root_findings(entry, tree):
     """
     if tree is None or python_directories_of(entry) or "pyproject.toml" not in tree:
         return []
-    if not any(p.startswith("tests/") for p in tree):
+    if not any(p.startswith("tests/") and p.endswith(".py") for p in tree):
         return []
     if "uv.lock" in tree or any(
         p.startswith("requirements") and p.endswith(".txt") and "/" not in p for p in tree
@@ -2023,6 +2023,9 @@ def workflow_input_text(job_text, key):
             if indent <= child_indent:
                 break  # dedent back to (or past) the key column ends the block body
             body.append(ln[child_indent:])
+        # A folded scalar joins its lines with spaces, so the caller passes them as one line.
+        if rest.startswith(">"):
+            return " ".join(ln.strip() for ln in body if ln.strip())
         return "\n".join(body)
     return re.sub(r"[ \t]+#.*$", "", rest).strip().strip("'\"")
 
@@ -2035,7 +2038,7 @@ def normalize_declared_python_directory(line):
     than reporting the same defect a second time.
     """
     path = line.strip()
-    if not path or path.startswith("/") or "\\" in path or ".." in path.split("/"):
+    if not path or "\t" in path or path.startswith("/") or "\\" in path or ".." in path.split("/"):
         return None
     return posixpath.normpath(path)
 
@@ -5863,6 +5866,29 @@ def _selftest():
     python_caller_cases.append(
         (py_caller_path, py_caller_root, {}, 1, "naming the root is not the same as naming nothing")
     )
+    py_caller_folded = py_caller_block.replace(
+        "python-directories: |\n        Tools\n",
+        "python-directories: >\n        Tools\n        Other\n",
+    )
+    py_caller_tabbed = py_caller_plain.replace(
+        "python-directories: Tools", "python-directories: Too\tls"
+    )
+    python_caller_cases += [
+        (
+            py_caller_path,
+            py_caller_folded,
+            {"pythonDirectories": ["Other", "Tools"]},
+            1,
+            "a folded scalar is one line",
+        ),
+        (
+            py_caller_path,
+            py_caller_tabbed,
+            {"pythonDirectories": ["Too\tls"]},
+            1,
+            "a tabbed entry resolves to nothing",
+        ),
+    ]
     undeclared_root_cases = [
         (
             {},
@@ -5890,6 +5916,12 @@ def _selftest():
             "a declared root runs",
         ),
         ({}, {"pyproject.toml", "a.py"}, 0, "no root suite to run"),
+        (
+            {},
+            {"pyproject.toml", "tests/App.Tests/App.Tests.csproj"},
+            0,
+            "a tests/ holding no Python",
+        ),
         ({}, None, 0, "unreadable tree reports nothing"),
     ]
     for entry_in, tree_in, expected, label in undeclared_root_cases:

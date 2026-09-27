@@ -934,6 +934,10 @@ gh() {
         written = output.read_text(encoding="utf-8") + log.read_text(encoding="utf-8")
         return result.returncode, result.stdout, written
 
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
     def test_undeclared_root_keeps_the_old_gate(self) -> None:
         """A caller declaring nothing runs only a pytest suite beside a manifest, as before the input existed."""
         cases = {
@@ -961,6 +965,10 @@ gh() {
                 self.assertEqual(0, code)
                 self.assertIn("files=./coverage.xml" if runs else "files=\n", output)
 
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
     def test_type_check_picks_its_checker_and_environment(self) -> None:
         """A declared directory owes a type check, run against its installed dependencies."""
         mypy_section = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
@@ -1009,6 +1017,10 @@ gh() {
                 else:
                     self.assertIn(call, written)
 
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
     def test_a_declared_directory_owes_a_runnable_suite(self) -> None:
         code, _, output = self.run_python_tests_step(
             "lint-only", {"pyproject.toml", "tests/test_a.py"}, declared=True
@@ -1017,6 +1029,7 @@ gh() {
         self.assertTrue(output.startswith("files=./coverage.xml\n"), output)
         for label, kind, tree in (
             ("no tests/", "lint-only", {"pyproject.toml"}),
+            ("no Python under tests/", "lint-only", {"pyproject.toml", "tests/README.md"}),
             ("no manifest", "unsupported", {"pyproject.toml", "tests/test_a.py"}),
         ):
             with self.subTest(label):
@@ -1042,7 +1055,7 @@ gh() {
         for arm in ("              uv)\n", "              pip)\n", "              lint-only)\n"):
             self.assertIn(arm, job)
         self.assertIn("uvx coverage@latest run -m unittest discover -s tests", job)
-        self.assertIn("has no tests/ directory", job)
+        self.assertIn("has no Python files under tests/", job)
         self.assertIn("cannot install its dependencies", job)
 
         # The directory list is each loop's stdin, so a child left reading it swallows the directories after it.

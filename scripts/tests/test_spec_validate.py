@@ -1591,6 +1591,11 @@ class RegistryPythonDirectoriesCase(unittest.TestCase):
     def test_a_normalized_directory_with_the_python_type_passes(self) -> None:
         self.assertEqual(self.errors(["Tools"], types=["python"]), [])
 
+    def test_a_tab_is_rejected(self) -> None:
+        errors = self.errors(["Too\tls"], types=["python"])
+        self.assertEqual(1, len(errors))
+        self.assertIn("tab", errors[0])
+
     def test_a_nested_normalized_directory_passes(self) -> None:
         self.assertEqual(self.errors(["Tools/Sub"], types=["python"]), [])
 
