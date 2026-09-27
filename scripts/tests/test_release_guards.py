@@ -1106,6 +1106,9 @@ gh() {
         self.assertEqual(2, job.count("if: steps.python.outputs.any == 'true'"))
         self.assertIn("if: steps.python-tests.outputs.files != ''", job)
 
+        # The undeclared root's skip still sets uv up, and an empty cache must not fail the job at post-job save.
+        self.assertIn("          ignore-nothing-to-cache: true\n", job)
+
         # Each dependency shape reaches its own runner, the lint-only one included.
         for arm in ("              uv)\n", "              pip)\n", "              lint-only)\n"):
             self.assertIn(arm, job)

@@ -181,6 +181,13 @@ class MainTests(unittest.TestCase):
         self.assertIn("::error::", stdout)
         self.assertEqual(written, "")
 
+    def test_a_byte_order_mark_fails_with_its_cause_named(self) -> None:
+        self.track("pyproject.toml", text="\ufeff[tool.ruff]\n")
+        code, stdout, written = self.run_main("")
+        self.assertEqual(code, 1)
+        self.assertIn("byte-order mark", stdout)
+        self.assertEqual(written, "")
+
     def test_malformed_toml_exits_one_with_an_error(self) -> None:
         self.track("Tools/pyproject.toml", text="[tool.ruff\n")
         code, stdout, written = self.run_main("Tools")
