@@ -90,7 +90,7 @@ def resolve(declared_text: str, tracked: list[str]) -> tuple[list[str], bool, li
 
 
 def read_file(path: str) -> str:
-    return Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    return Path(path).read_text(encoding="utf-8", errors="replace")
 
 
 def in_directory(directory: str, name: str) -> str:
@@ -159,7 +159,11 @@ def main() -> int:
         try:
             projects.append((shape(directory, tracked_set, read_file), directory))
         except tomllib.TOMLDecodeError as error:
-            message = f"{in_directory(directory, 'pyproject.toml')} is not valid TOML: {error}"
+            project = in_directory(directory, "pyproject.toml")
+            message = f"{project} is not valid TOML: {error}"
+            # Both tomllib and mypy reject a byte-order mark, so it fails here with its cause named rather than being stripped for this step alone.
+            if read_file(project).startswith("\ufeff"):
+                message += ". It starts with a byte-order mark, so save it as UTF-8 without one"
             print(f"::error::python-directories: {escape_command(message)}")
             return 1
         print(f"gating Python directory: {directory} ({projects[-1][0]})")

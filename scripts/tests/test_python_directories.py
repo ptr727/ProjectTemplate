@@ -181,11 +181,12 @@ class MainTests(unittest.TestCase):
         self.assertIn("::error::", stdout)
         self.assertEqual(written, "")
 
-    def test_a_byte_order_mark_does_not_break_parsing(self) -> None:
+    def test_a_byte_order_mark_fails_with_its_cause_named(self) -> None:
         self.track("pyproject.toml", text="\ufeff[tool.ruff]\n")
-        code, _, written = self.run_main("")
-        self.assertEqual(code, 0)
-        self.assertIn("lint-only\t.", written)
+        code, stdout, written = self.run_main("")
+        self.assertEqual(code, 1)
+        self.assertIn("byte-order mark", stdout)
+        self.assertEqual(written, "")
 
     def test_malformed_toml_exits_one_with_an_error(self) -> None:
         self.track("Tools/pyproject.toml", text="[tool.ruff\n")
