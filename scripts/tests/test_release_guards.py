@@ -1063,15 +1063,25 @@ gh() {
         )
         self.assertEqual(0, code)
         self.assertTrue(output.startswith("files=./coverage.xml\n"), output)
-        for label, kind, tree in (
-            ("no tests/", "lint-only", {"pyproject.toml"}),
-            ("no Python under tests/", "lint-only", {"pyproject.toml", "tests/README.md"}),
-            ("no manifest", "unsupported", {"pyproject.toml", "tests/test_a.py"}),
+        for label, kind, tree, message in (
+            ("no tests/", "lint-only", {"pyproject.toml"}, "has no tests/ directory"),
+            (
+                "no Python under tests/",
+                "lint-only",
+                {"pyproject.toml", "tests/README.md"},
+                "has no Python files under tests/",
+            ),
+            (
+                "no manifest",
+                "unsupported",
+                {"pyproject.toml", "tests/test_a.py"},
+                "cannot install its dependencies",
+            ),
         ):
             with self.subTest(label):
                 code, stdout, _ = self.run_python_tests_step(kind, tree, declared=True)
                 self.assertEqual(1, code)
-                self.assertIn("::error::", stdout)
+                self.assertIn(message, stdout)
 
     def test_validator_python_leg_reaches_a_pip_dependency_repo(self) -> None:
         """WORKFLOW.md D1.6 owes coverage to every Python directory with tests, uv-managed or not.

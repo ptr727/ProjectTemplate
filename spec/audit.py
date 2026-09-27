@@ -2085,9 +2085,9 @@ def normalize_declared_python_directory(line):
 def python_directories_caller_findings(path, text, entry):
     """DRIFT when a caller's declared `python-directories` input disagrees with the registry's own.
 
-    Compared as written rather than by the directories each resolves to, since naming `.` is not the
-    same as naming nothing: a declared directory owes a suite and a type check that the root default
-    only runs where it finds them.
+    Each side is normalized and deduplicated, then compared as a set of declarations rather than by
+    the directories each resolves to, since naming `.` is not the same as naming nothing: a declared
+    directory owes a suite and a type check that the root default only runs where it finds them.
 
     Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
     _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
