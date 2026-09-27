@@ -54,7 +54,7 @@ Look up the repo in [`registry/repos.json`][repos]. An entry with status `archiv
 Otherwise read its `types[]`. If the entry is `classificationPending` (a backlog repo), classify it from the tree and propose a registry update:
 
 - `*.csproj` / `*.slnx` -> `csharp`, a `dotnet nuget push` workflow -> `nuget`, a `System.CommandLine` console -> `console`.
-- a tracked `.py` file -> `python`, a `pypa/gh-action-pypi-publish` workflow -> `pypi`.
+- a tracked `.py` file other than the carried `hub-fetch-run.py` hook helper -> `python`, a `pypa/gh-action-pypi-publish` workflow -> `pypi`.
 - `Dockerfile` + a docker build/push workflow -> `docker`, an `upstream-version.json` tracker -> `upstream-wrapper`.
 - `custom_components/*/manifest.json` + `hacs.json` -> `homeassistant`, a codegen workflow -> `codegen`, no `build-*` task -> `source-only`, governance-only -> `docs`.
 - `hugo.yaml` / `hugo.toml` / `config/_default/hugo.yaml` -> `hugo`. A repo may carry it alongside `source-only`, since a site deploy leaf is not a `build-*` task and both declarations stay true.

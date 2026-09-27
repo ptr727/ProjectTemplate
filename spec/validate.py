@@ -1004,11 +1004,15 @@ def main():
             errors.append(f"{name}: unknown status '{status}'")
             continue
 
-        repo_types = repo.get("types", [])
+        declared = repo.get("types")
         # CI runs no JSON-schema validation, so the shape is checked here before anything iterates it.
-        if not isinstance(repo_types, list) or not all(isinstance(t, str) for t in repo_types):
-            errors.append(f"{name}: types must be a list of type-name strings, got {repo_types!r}")
-            repo_types = []
+        repo_types = (
+            [t for t in declared if isinstance(t, str)] if isinstance(declared, list) else []
+        )
+        if declared is not None and (
+            not isinstance(declared, list) or len(repo_types) != len(declared)
+        ):
+            errors.append(f"{name}: types must be a list of type-name strings, got {declared!r}")
         elif not repo_types:
             errors.append(f"{name}: cataloged repo has no types (add types or mark it backlog)")
         for t in repo_types:
