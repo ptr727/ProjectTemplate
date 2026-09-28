@@ -1181,6 +1181,20 @@ def reviewed_head(pr: dict) -> bool:
     return bool(head_reviews(pr))
 
 
+def head_review_done(pr: dict, min_rounds: int) -> bool:
+    """True once the reviewer's rounds on the head exceed `min_rounds`.
+
+    `min_rounds` defaults to 0, where this is `reviewed_head` exactly: `bool(x)` and `len(x) > 0`
+    agree on any list. A caller that already read a `rounds=` count from `status`, then
+    re-requested a review on that same, already-covered head, passes that count through `wait
+    --min-rounds` instead, so this holds out for a round beyond it, rather than crediting the
+    earlier round the caller had already seen and was re-requesting past. Nothing here reads the
+    request set: whether a request is outstanding is the caller's business, since a live request
+    and a stale, already-answered one about to be cleared read identically at any single poll.
+    """
+    return len(head_reviews(pr)) > min_rounds
+
+
 def review_effort(pr: dict) -> tuple[str, str]:
     """The newest head review's effective effort and selection source.
 
@@ -3444,6 +3458,18 @@ def main(argv: list[str] | None = None) -> int:
         "activity elsewhere in this repository is a quota-limit refusal with nothing "
         "answering it since, pass this once the quota is believed to have reset",
     )
+    ap.add_argument(
+        "--min-rounds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="wait: treat the head as covered only once the reviewer's rounds on it exceed N, "
+        "rather than on any round. Pass the `rounds=` a prior `status` already read, after "
+        "re-requesting a review on a head that already carries one: `reviewed_head` alone "
+        "would report that earlier round as done at once, never waiting for the fresh one "
+        "the re-request was for (default 0, so any round counts, unchanged from before "
+        "this flag existed)",
+    )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
     ap.add_argument(
@@ -3493,6 +3519,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
     if a.pickup_grace < 0:
         ap.error("--pickup-grace cannot be negative")
+    if a.min_rounds < 0:
+        ap.error("--min-rounds cannot be negative")
     # A negative threshold reports every check in that state, on every run, from the first read.
     # A field that fires always is one a reader learns to skip, which costs the real case.
     for name in ("check_grace", "check_stall"):
@@ -3540,7 +3568,7 @@ def main(argv: list[str] | None = None) -> int:
     delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
-    done, answer = reviewed_head(pr), answered_outside_review(pr)
+    done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
     # A drifted login matches no filter here, so `done` stays false however long this runs.
     # Waiting it out reports a review that landed as one that never did, at the timeout.
     # The liveness query carries the authors, so this costs the loop no extra call.
@@ -3583,7 +3611,7 @@ def main(argv: list[str] | None = None) -> int:
             i += 1
             # Re-read head each iteration: a push during the wait moves it.
             pr = gql(Q_LIVE, owner, repo, a.number)
-            done, answer = reviewed_head(pr), answered_outside_review(pr)
+            done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
             drift = reviewer_login_drift(pr)
 
     # One payload decides the digest and the exit code together.
@@ -3616,7 +3644,7 @@ def main(argv: list[str] | None = None) -> int:
     # Gating the verdict behind it left the login check unable to reach an exit code.
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
-    if unrecognized_shapes(final) or reviewed_head(final):
+    if unrecognized_shapes(final) or head_review_done(final, a.min_rounds):
         verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.

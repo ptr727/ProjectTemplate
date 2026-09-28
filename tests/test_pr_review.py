@@ -4430,6 +4430,32 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertEqual(1, slept.call_count)
 
+    def test_min_rounds_holds_out_past_a_round_status_already_reported(self) -> None:
+        """`status`'s guidance for unstated coverage is to re-request on the same head, which
+        leaves an earlier round covering it while the fresh one this wait was called to watch
+        for is still outstanding. Naming that earlier `rounds=` count on `--min-rounds` is what
+        `wait` needs to hold out for one beyond it, rather than reading `reviewed_head` alone and
+        reporting the earlier round as done at once without ever waiting for the fresh one the
+        re-request was for. The first poll here carries that shape: one review already on the
+        head, a request still pending. Without the flag,
+        `wait` returns on it unpolled, per `test_wait_returns_zero_once_the_review_lands_on_the_head`.
+        """
+        self.answer(
+            payload([review()], pending=True),
+            payload([review(), review(rid="PRR_two", at=LATE)]),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_times_out_rather_than_crediting_the_round_it_was_told_to_skip(self) -> None:
+        """A round no higher than `--min-rounds` must not report success at the timeout either,
+        or the exit code repeats the bug the polling half of this fix already closes."""
+        self.answer(payload([review()], pending=True))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=PENDING", self.out.getvalue())
+
     def test_wait_exits_thirty_at_the_timeout_rather_than_reporting_success(self) -> None:
         """Pending is not failure and not success, so it takes a code of its own."""
         self.answer(payload([review(oid=OLD)]))
@@ -5821,6 +5847,12 @@ class TestContract(unittest.TestCase):
             pr_review.main(["wait", "7", "--repo", "o/r", "--pickup-grace", "-1"])
         # The repository is named, or this exits on the missing argument and proves nothing.
         self.assertIn("pickup-grace", err.getvalue())
+
+    def test_a_negative_min_rounds_is_rejected_rather_than_read_as_any_round(self) -> None:
+        """A negative count is satisfied by the same `rounds=0` a caller naming none would see."""
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--min-rounds", "-1"])
+        self.assertIn("min-rounds", err.getvalue())
 
     def test_a_negative_check_threshold_is_rejected_rather_than_firing_on_every_check(self) -> None:
         """Below zero, every check in that state reports stuck from the first read.
