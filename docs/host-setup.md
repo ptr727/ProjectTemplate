@@ -282,12 +282,13 @@ opencode does not read Codex's `config.toml`. Keep its permission mode in openco
 
 ## Fleet Skills Install
 
-The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`. The copy keeps the revision it was taken from, while the Claude Code plugin loads the hub checkout in place and serves whatever it holds at read time. `--report` answers each by name: which commit the copy came from, judged against the promoted `main` as last fetched (or `--intended <rev>`, or on a bootstrapped host the commit its loader resolved), and which branch and commit the registered checkout is serving now. It exits non-zero when the copy is not current, and the live channel following its checkout is the design rather than a fault.
+The fleet's agent skills are hand-authored in the hub at `.agents/skills/` and installed per user by [`scripts/skills_install.py`][skills-install]: an overlay copy into `~/.agents/skills/` for Codex and opencode, and a user-scope Claude Code plugin install where the `claude` CLI is present. Every run stamps the hub commit it installed from into `~/.agents/skills-install-stamp.json`. The copy keeps the revision it was taken from, while the Claude Code plugin loads the hub checkout in place and serves whatever it holds at read time. `--report` answers each by name: which commit the copy came from, judged against the promoted `main` as last fetched (or `--intended <rev>`, or on a bootstrapped host the commit its loader resolved), and which branch and commit the registered checkout is serving now. It exits non-zero when the copy is not current, and the live channel following its checkout is the design rather than a fault. An install leaves a registration from another existing directory where it is and prints the command that moves it, and `--snapshot-only` refreshes the copy without touching the registration at all.
 
 Install from a hub checkout, once per machine:
 
 ```shell
 python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
+python3 scripts/skills_install.py --snapshot-only   # the Codex/opencode copy alone
 python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
