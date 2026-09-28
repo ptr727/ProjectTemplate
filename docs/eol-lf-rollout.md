@@ -25,10 +25,12 @@ file the new default touches, in the pull request that added this doc.
 ## Per-Repo Conversion
 
 For a `release` repo, or an operational repo whose `lineEndings` is already `lf`: pull the hub's
-new `.editorconfig`, confirm `.gitattributes` needs no change (it doesn't, per the policy above),
-renormalize every tracked file the new default now covers from CRLF to LF (skip anything with
-a genuine reason to stay CRLF, pinned narrowly by file type rather than kept as a whole-repo
-default, per `Vantage-Config`'s own `*.dc` pin below), run
+new `.editorconfig`, confirm `.gitattributes` needs no change for the fleet default itself (it
+doesn't, per the policy above), renormalize every tracked file the new default now covers from
+CRLF to LF (skip anything with a genuine reason to stay CRLF, and give each file type that
+genuinely needs a CRLF pin a matching entry in both `.editorconfig` and `.gitattributes`, never
+one alone, per `Vantage-Config`'s own `*.dc` pin below and
+[`references/line-endings.md`][line-endings] "Scripts and extensionless executables"), run
 `editorconfig-checker` clean, and open the PR through the repo's normal branching model
 ([`branching-and-release-model`][branching-and-release-model] Skill). Isolate the
 renormalization from any content edit in its own commit, verified with
@@ -80,7 +82,9 @@ registry as of this doc's authorship, except where an entry records a later recl
 - [ ] **HolidayLights** (`release`)
 - [ ] **Blog** (`release`, `lineEndings: lf`): already on the new default's value, a documented
       release-repo exception before this rollout, per its `registry/repos.json` `driftNotes`.
-      Verify rather than convert, same reasoning as the two operational `lf` repos.
+      Verify rather than convert, same reasoning as **ESPHome-Config** and
+      **HomeAssistant-Config** above (not **Vantage-Config**, whose row above records an actual
+      conversion rather than an already-`lf` repo to verify).
 
 <!-- Repo -->
 
