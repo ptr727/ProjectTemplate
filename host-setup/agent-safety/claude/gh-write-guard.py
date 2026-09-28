@@ -1957,7 +1957,7 @@ def _timeout_bounds_wrapper(toks, w):
     `echo` in a run of its own.
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
-    unless a non-zero `-k` follows it with a SIGKILL, since signal 0 is delivered to no process and
+    unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no process and
     the `timeout` goes on waiting for a child that keeps running.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a

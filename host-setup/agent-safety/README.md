@@ -192,11 +192,11 @@ text says, because the harm it covers was never in the text.
    <duration>` running the `sh -c`/`bash -c` wrapper that holds the loop, `timeout 600 bash -c
    '<the loop>'`. That placement is the only one that works, since `timeout` takes a command and
    a loop keyword is not one, so `timeout 600 until ...; do sleep 30; done` is a syntax error
-   rather than a bounded wait. A `-s`/`--signal` option leaves it a bound, except signal 0 in any
-   spelling GNU `timeout` reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number
-   it masks to 0, such as `128`). Signal 0 is delivered to no process, so the `timeout` goes on
-   waiting for a child that keeps running, unless a non-zero `-k`/`--kill-after` follows it with a
-   SIGKILL. The second is an arithmetic guard in the
+   rather than a bounded wait. A `-s`/`--signal` naming signal 0 in any spelling GNU `timeout`
+   reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
+   `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
+   child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
+   where its value takes the form a duration takes here. The second is an arithmetic guard in the
    loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
@@ -256,9 +256,10 @@ text says, because the harm it covers was never in the text.
    from a loop doing ordinary work in its body. A guard comparing against a counter the body never
    increments is textually a bound and is infinite anyway. A wait inside a script file is unseen,
    the same blind spot every requirement here has. A redirect from a named pipe is a file path in
-   the command text, indistinguishable from a redirect from a file. And a `timeout` sending a signal
-   the payload handles and ignores is textually a bound, since which signals a payload ignores is
-   not decidable from the command text. A false deny on an ordinary loop costs more work than those
+   the command text, indistinguishable from a redirect from a file. And a `timeout` sending any
+   other signal that ends nothing is still read as a bound. That covers a signal whose default
+   action ends nothing, such as `CONT`, `CHLD`, or a stop signal, and one the payload handles and
+   ignores, which is not decidable from the command text at all. A false deny on an ordinary loop costs more work than those
    leaks do, and each still falls under `AGENTS.md` "Delegation", which states the prohibition for
    every agent whether or not a hook is installed.
 
