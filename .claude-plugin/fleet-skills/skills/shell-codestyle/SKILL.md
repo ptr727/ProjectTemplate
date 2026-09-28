@@ -55,15 +55,15 @@ depend on Python either. Everything else is Python, with a test under its own sc
   placed ahead of the real one on `PATH`, that calls `command jq` or a bare `jq` calls itself,
   since `command` skips functions and aliases but not the `PATH` search. Every call starts another
   copy of the wrapper, so the chain grows until something stops it. Run `hash -r`, then capture
-  the real path with `type -P` before changing `PATH`. Once the shim file exists, stop unless that
-  path is absolute and is not the shim itself, tested as files with `[ "$real" -ef "$shim" ]`
-  rather than as spellings, and call that path from inside the shim. An inherited `PATH` can
-  already hold the shim, under a symlinked spelling too, and a `.` entry yields a relative path.
-  `type -P` prints a hashed path without checking that the file is still there, and `-ef` is false
-  while the shim is not yet written, so a shim deleted and rebuilt at a path the shell already
-  hashed passes both checks unless the hash is cleared and the test waits for the file.
-  `command -v` is not a substitute, since it prints the bare name for a shell function of that
-  name.
+  the real path with `type -P` before changing `PATH`. Stop unless it is an absolute path that is
+  not the shim itself, tested as files with `[ "$real" -ef "$shim" ]` rather than as spellings,
+  then run that test again once the shim is written, removing the shim where it fails, and call
+  that path from inside the shim. An inherited `PATH` can already hold the shim, under a symlinked
+  spelling too, and a `.` entry yields a relative path. `type -P` prints a hashed path without
+  checking that the file is still there, and `-ef` is false while the shim is not yet written, so
+  a shim deleted and rebuilt at a path the shell already hashed passes a test made only before
+  the write while the hash is left in place. `command -v` is not a substitute, since it prints the
+  bare name for a shell function of that name.
 - **Self-locating, never dependent on the caller's directory.** A script resolves its own
   directory from `BASH_SOURCE` and references its payloads through it, since the working
   directory at invocation is not a property of the script.
