@@ -10,6 +10,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from subprocess import run
 from typing import NamedTuple
@@ -356,6 +357,170 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual(
             2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
         )
+
+    def test_release_the_token_cannot_tag_is_superseded(self) -> None:
+        """github-release re-dispatches the publisher and cancels itself once the head's workflows differ, per D4.7.
+
+        GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree no longer
+        matches its branch's head, so the step decides before the create step runs. It dispatches only where
+        every push since was a release bot's, which the stub proves by running the step's own --jq
+        filter against a constructed repository activity response.
+        """
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        marker = "      - name: Supersede a release the token cannot tag step\n"
+        self.assertIn(marker, workflow)
+        self.assertLess(
+            workflow.index(marker), workflow.index("      - name: Create GitHub release step\n")
+        )
+        body = workflow.split(marker, 1)[1]
+        opener = re.search(r"(?m)^        run: \|-?\n", body)
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+
+        plan = (REPO / ".github/workflows/publish-plan-task.yml").read_text(encoding="utf-8")
+        allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
+        self.assertTrue(allowed)
+        self.assertEqual(allowed, set(re.findall(r'"\$actor" == "([^"]+)"', script)))
+
+        bot = {"login": "ptr727-codegen[bot]"}
+        middle = "e" * 40
+
+        def one_push(built: str, head: str) -> list[dict[str, object]]:
+            return [{"after": head, "before": built, "activity_type": "pr_merge", "actor": bot}]
+
+        def publish(
+            later_path: str,
+            pushes: Callable[[str, str], list[dict[str, object]]] = one_push,
+            push_during_check: bool = False,
+        ) -> tuple[int, list[str]]:
+            with tempfile.TemporaryDirectory() as scratch:
+                root = Path(scratch)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                activity = root / "activity.json"
+                calls = root / "calls"
+                work = root / "work"
+                (bin_dir / "gh").write_text(
+                    "#!/bin/sh\n"
+                    'if [ "$1" = api ]; then\n'
+                    f'  echo "api $2" >> "{calls}"\n'
+                    '  if [ -n "$PUSH_DURING_CHECK" ]; then '
+                    f'git -C "{work}" commit -q --allow-empty -m again && git -C "{work}" push -q origin main; fi\n'
+                    f'  exec jq -r "$4" "{activity}"\n'
+                    "fi\n"
+                    f'echo "$*" >> "{calls}"\n',
+                    encoding="utf-8",
+                )
+                (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                for stub in bin_dir.iterdir():
+                    stub.chmod(0o755)
+                env = {
+                    **os.environ,
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_AUTHOR_NAME": "t",
+                    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                    "GIT_COMMITTER_NAME": "t",
+                    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+                }
+
+                def git(cwd: Path, *args: str) -> str:
+                    return run(
+                        ["git", *args],
+                        cwd=cwd,
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                    ).stdout.strip()
+
+                origin = root / "origin.git"
+                git(root, "init", "--bare", "-b", "main", str(origin))
+                git(root, "clone", str(origin), str(work))
+                git(work, "checkout", "-b", "main")
+                for relative in (".github/workflows/ci.yml", "src/app.py"):
+                    (work / relative).parent.mkdir(parents=True, exist_ok=True)
+                    (work / relative).write_text("one\n", encoding="utf-8")
+                git(work, "add", ".")
+                git(work, "commit", "-m", "built")
+                git(work, "push", "origin", "main")
+                built_sha = git(work, "rev-parse", "HEAD")
+                built = root / "built"
+                git(root, "clone", str(origin), str(built))
+                (work / later_path).write_text("two\n", encoding="utf-8")
+                git(work, "commit", "-am", "later")
+                git(work, "push", "origin", "main")
+                head_sha = git(work, "rev-parse", "HEAD")
+                activity.write_text(json.dumps(pushes(built_sha, head_sha)), encoding="utf-8")
+                verdict = run(
+                    ["bash", "-c", script],
+                    cwd=built,
+                    env={
+                        **env,
+                        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+                        "BRANCH": "main",
+                        "GITHUB_REPOSITORY": "example/widget",
+                        "GITHUB_RUN_ID": "42",
+                        "GITHUB_WORKFLOW_REF": "example/widget/.github/workflows/publish-release.yml@refs/heads/main",
+                        "PUSH_DURING_CHECK": "1" if push_during_check else "",
+                    },
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                logged = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+                return verdict.returncode, logged
+
+        query = "api repos/example/widget/activity?ref=refs/heads/main&per_page=100"
+        dispatched = [
+            query,
+            "workflow run publish-release.yml --repo example/widget --ref main",
+            "run cancel 42 --repo example/widget",
+        ]
+        self.assertEqual((0, []), publish("src/app.py"))
+        self.assertEqual((1, dispatched), publish(".github/workflows/ci.yml"))
+
+        def two_pushes(second: dict[str, str]) -> Callable[[str, str], list[dict[str, object]]]:
+            return lambda built, head: [
+                {"after": head, "before": middle, "activity_type": "push", "actor": bot},
+                {"after": middle, "before": built, "activity_type": "pr_merge", "actor": second},
+            ]
+
+        self.assertEqual((1, dispatched), publish(".github/workflows/ci.yml", two_pushes(bot)))
+        refusals: dict[str, dict[str, object]] = {
+            "human pusher": {"pushes": two_pushes({"login": "maintainer"})},
+            "no pusher": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": built, "activity_type": "push", "actor": None}
+                ]
+            },
+            "force push": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": built, "activity_type": "force_push", "actor": bot}
+                ]
+            },
+            "no record": {"pushes": lambda built, head: []},
+            "cycle": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": middle, "activity_type": "push", "actor": bot},
+                    {"after": middle, "before": head, "activity_type": "push", "actor": bot},
+                ]
+            },
+            "push during check": {"push_during_check": True},
+        }
+        for name, case in refusals.items():
+            with self.subTest(name):
+                self.assertEqual(
+                    (1, [query]),
+                    publish(".github/workflows/ci.yml", **case),  # type: ignore[arg-type]
+                )
 
     def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
         """validate-release refuses a branch git would not accept as a name, on a smoke run too.
