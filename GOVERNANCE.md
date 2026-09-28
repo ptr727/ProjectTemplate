@@ -75,7 +75,8 @@ dual-target bot wiring, and the operational-repo delta in full.
 The **two-phase model is the default**: PRs build fast, publishing is batched, a human merge
 never auto-publishes on its own. See [`WORKFLOW.md`](./WORKFLOW.md) for the full CI/CD contract.
 Publishing fires on a manual dispatch, a code-affecting bot push to `main`, or a `main`-only
-weekly schedule (Docker), and versioning is semantic and maintainer-controlled (NBGV owns the build number,
+weekly schedule (Docker). A bot publish that a workflow merge overtakes re-dispatches itself per
+`WORKFLOW.md` D4.7. Versioning is semantic and maintainer-controlled (NBGV owns the build number,
 the maintainer owns the `major.minor` floor). **Operational** repos differ, with a dispatch-only
 release and no auto-publish bots. See "Operational Repositories" below.
 
