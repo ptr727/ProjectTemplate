@@ -504,7 +504,7 @@ class TestRegistration(StampCase):
         for label, entry, expected in (
             (
                 "decoy",
-                {"type": "command", "command": "echo stray-process-sweep"},
+                {"type": "command", "command": "echo /tmp/stray-process-sweep.py"},
                 "does not run the deployed one",
             ),
             ("timeout", dict(good, timeout=1), "carries timeout 1"),
@@ -714,6 +714,26 @@ class TestRegistration(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_wrapper_merely_containing_a_stem_is_not_the_kits_registration(self):
+        """A maintainer's own hook whose command merely contains a stem, such as
+        `my-gh-write-guard-audit.sh`, is neither counted by `--report` as this kit's registration
+        nor removed by a re-run. A substring test on the whole command claimed both; judging
+        ownership by the file name a token names does neither."""
+        for event, wrapper_name in (
+            ("PreToolUse", "my-gh-write-guard-audit.sh"),
+            ("SessionEnd", "my-stray-process-sweep-audit.sh"),
+        ):
+            with self.subTest(event=event):
+                self.install()
+                data = self._settings()
+                wrapper = {"type": "command", "command": f"bash /usr/local/bin/{wrapper_name}"}
+                data["hooks"][event][0]["hooks"].append(wrapper)
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [])
+                self.install()
+                hooks = self._settings()["hooks"][event][0]["hooks"]
+                self.assertIn(wrapper, hooks, "the wrapper was removed by a re-run")
 
 
 class TestContainmentPrefix(StampCase):

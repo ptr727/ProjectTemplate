@@ -28,6 +28,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -114,6 +115,25 @@ def runs_hook(command, path):
     return any(
         re.search(rf"(?:^|[\s\"'(]){re.escape(sp)}(?=$|[\s\"')|&;])", text) for sp in spellings
     )
+
+
+def names_hook(command, name):
+    """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME).
+
+    Judged on each token's file name exactly, the way `kit_prefix` judges
+    `CLAUDE_CODE_SHELL_PREFIX`: a substring test on the whole command string also claims a
+    maintainer's own hook whose file name merely contains this kit's stem, such as
+    `my-gh-write-guard-audit.sh` containing `gh-write-guard`. Every token is checked rather than
+    trusting position, since a hand-written or UI-added command need not put the path last.
+    `shlex.split` fails open to whitespace splitting on an unbalanced quote, since a hand-edited
+    command is data to judge rather than something this check may raise on.
+    """
+    text = str(command).replace("\\", "/")
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        tokens = text.split()
+    return any(os.path.basename(t) == name for t in tokens)
 
 
 def matcher_sees_bash(matcher):
@@ -577,7 +597,7 @@ def registration_problems(claude_home):
         if not isinstance(group, dict):
             continue
         for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or GUARD_STEM not in str(hook.get("command", "")):
+            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), GUARD_NAME):
                 continue
             named += 1
             if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
@@ -612,7 +632,7 @@ def registration_problems(claude_home):
             continue
         sweep_path = claude_home / "hooks" / SWEEP_NAME
         for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
+            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), SWEEP_NAME):
                 continue
             sweeps_named += 1
             if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
@@ -971,7 +991,9 @@ def main():
     for g in pre:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if GUARD_STEM not in str(h.get("command", ""))]
+            hooks_list[:] = [
+                h for h in hooks_list if not names_hook(h.get("command", ""), GUARD_NAME)
+            ]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
@@ -985,7 +1007,9 @@ def main():
     for g in ends:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
+            hooks_list[:] = [
+                h for h in hooks_list if not names_hook(h.get("command", ""), SWEEP_NAME)
+            ]
     end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
     if end_group is None:
         end_group = {"hooks": []}
