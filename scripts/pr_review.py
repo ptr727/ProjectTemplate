@@ -1181,6 +1181,45 @@ def reviewed_head(pr: dict) -> bool:
     return bool(head_reviews(pr))
 
 
+def head_review_done(pr: dict, min_rounds: int) -> bool:
+    """True once a round past position `min_rounds` in the reviewer's own history covers the head.
+
+    Positions are read off `reviewer_nodes(pr, "reviews")`, every one of the reviewer's own
+    reviews on this pull request, on any head, refusals included, oldest first: the exact list
+    `status` counts for its own `rounds=`. A caller that already read that count, then
+    re-requested a review on an already-covered head, passes it through `wait --min-rounds`
+    instead, so this holds out for a round sitting past it.
+
+    The round satisfying `min_rounds` and the round satisfying coverage must be the same round,
+    which is why this walks one list rather than checking `reviewed_head(pr)` and a count as two
+    independent clauses. Two clauses would let a refusal past the baseline satisfy the count
+    while an untouched, older genuine round still satisfies `reviewed_head`, reporting done on a
+    round that answered the re-request by declining it. A caller passing 0, every caller that
+    predates this flag among them, reduces to `reviewed_head` exactly, since position 0 is every
+    position a non-empty list has.
+
+    Counting `reviewer_nodes(pr, "reviews")` rather than `head_reviews(pr)`, the head-scoped,
+    refusal-excluded list `reviewed_head` itself narrows to, matters independently of the above:
+    a push during the wait moves the head, which empties a head-scoped list and reads a brand
+    new head's first genuine round as still short of a baseline measured against a head that no
+    longer exists, where this list carries forward since a push adds to it rather than resetting
+    it. Positions still land past `min_rounds` correctly once the head moves, since a review on
+    the superseded head sits at an earlier position than one on the new head, never a later one.
+
+    The same `last:100` window both `Q_LIVE` and `Q_FULL` place on their own `reviews`
+    connection bounds this the way it bounds `status`'s own `rounds=`: a pull request whose
+    Copilot rounds have aged out of that window under other reviewers' own traffic undercounts
+    here exactly as `status` would, reading a landed round as still short of the baseline rather
+    than crediting it, so this fails toward a caller waiting longer, not toward a false success.
+    """
+    revs = reviewer_nodes(pr, "reviews")
+    head = pr["headRefOid"]
+    return any(
+        i >= min_rounds and (n.get("commit") or {}).get("oid") == head and not refusal_of(n)
+        for i, n in enumerate(revs)
+    )
+
+
 def review_effort(pr: dict) -> tuple[str, str]:
     """The newest head review's effective effort and selection source.
 
@@ -3083,7 +3122,13 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
 
 
 def describe(thread: dict) -> str:
-    """One line naming a thread by what a reader recognizes it as, never by its id."""
+    """One line naming a thread by what a reader recognizes it as, never by its id.
+
+    The 120-character cutoff below is a display limit rather than a matching one: `--match`
+    itself compares against the whole body, so a pattern copied from past the cutoff has nothing
+    printed to copy from, and widening the words or adding `--path` is the way past that, not a
+    longer cutoff here.
+    """
     c = first_comment(thread)
     body = " ".join((c.get("body") or "").split())
     return (
@@ -3114,13 +3159,20 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     the text is quoted back out of a digest by a reader rather than compared by a machine. Both
     sides are folded through `_TYPOGRAPHIC_FOLD` first, since the pattern is a substring copied
     from a rendered finding whose typographic quotes, dashes, or ellipsis may not survive that
-    copy in ASCII.
+    copy in ASCII. Both sides also fold whitespace to a single space, the same collapse
+    `describe()` applies before printing a thread's body as an `unresolved:` line, so a pattern
+    copied from that printed line still matches the raw body it was copied from, whether the
+    whitespace the printed line flattened was a line break, a tab, or a run of spaces.
     """
-    needle = match.translate(_TYPOGRAPHIC_FOLD).lower()
+
+    def fold(text: str) -> str:
+        return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
+
+    needle = fold(match)
     return [
         t
         for t in threads
-        if needle in (first_comment(t).get("body") or "").translate(_TYPOGRAPHIC_FOLD).lower()
+        if needle in fold(first_comment(t).get("body") or "")
         and (path is None or t.get("path") == path)
     ]
 
@@ -3444,6 +3496,18 @@ def main(argv: list[str] | None = None) -> int:
         "activity elsewhere in this repository is a quota-limit refusal with nothing "
         "answering it since, pass this once the quota is believed to have reset",
     )
+    ap.add_argument(
+        "--min-rounds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="wait: treat the head as covered only once the reviewer's total rounds on this "
+        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
+        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
+        "already carries one: `reviewed_head` alone would report that earlier round as done "
+        "at once, never waiting for the fresh one the re-request was for (default 0, so any "
+        "round counts, unchanged from before this flag existed)",
+    )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
     ap.add_argument(
@@ -3493,6 +3557,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
     if a.pickup_grace < 0:
         ap.error("--pickup-grace cannot be negative")
+    if a.min_rounds < 0:
+        ap.error("--min-rounds cannot be negative")
     # A negative threshold reports every check in that state, on every run, from the first read.
     # A field that fires always is one a reader learns to skip, which costs the real case.
     for name in ("check_grace", "check_stall"):
@@ -3540,7 +3606,7 @@ def main(argv: list[str] | None = None) -> int:
     delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
-    done, answer = reviewed_head(pr), answered_outside_review(pr)
+    done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
     # A drifted login matches no filter here, so `done` stays false however long this runs.
     # Waiting it out reports a review that landed as one that never did, at the timeout.
     # The liveness query carries the authors, so this costs the loop no extra call.
@@ -3583,7 +3649,7 @@ def main(argv: list[str] | None = None) -> int:
             i += 1
             # Re-read head each iteration: a push during the wait moves it.
             pr = gql(Q_LIVE, owner, repo, a.number)
-            done, answer = reviewed_head(pr), answered_outside_review(pr)
+            done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
             drift = reviewer_login_drift(pr)
 
     # One payload decides the digest and the exit code together.
@@ -3616,7 +3682,7 @@ def main(argv: list[str] | None = None) -> int:
     # Gating the verdict behind it left the login check unable to reach an exit code.
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
-    if unrecognized_shapes(final) or reviewed_head(final):
+    if unrecognized_shapes(final) or head_review_done(final, a.min_rounds):
         verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.

@@ -902,18 +902,8 @@ TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructi
 # The undeclared-H2 scan reads the same set.
 UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
-# The version-literal scan reads the four instruction documents a repo owns prose in.
-# .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
-VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
-
-# A three-part version, a full commit SHA, or an abbreviated one standing alone as a token.
-# The lookarounds keep a dotted quad, such as an address, from matching as a version.
-# An abbreviated SHA must mix a digit and a letter, so an all-letter word such as "facade" is not one.
-VERSION_LITERAL = re.compile(
-    r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
-    r"|\b[0-9a-fA-F]{40}\b"
-    r"|(?<![0-9A-Za-z#_])(?=[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-]))(?=[a-fA-F]*[0-9])(?=[0-9]*[a-fA-F])[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-])"
-)
+VERSION_LITERAL_SCANNED = validate.VERSION_LITERAL_SCANNED
+VERSION_LITERAL = validate.VERSION_LITERAL
 
 
 def strip_sections(text, names, keep_pins=False):
@@ -1918,6 +1908,7 @@ _BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
 _BARE_BLOCK_SCALAR = re.compile(r"^(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
 # A step's `- key: |` sequence-item prefix, stripped before matching the two patterns above.
 _SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
+_IF_KEY = re.compile(r"^if\s*:")
 
 
 def _code_view(text):
@@ -1928,12 +1919,23 @@ def _code_view(text):
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
     A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
     way, so its body is dropped too, keeping only the `key:` line itself.
+    A block-scalar `if:` body, the form the Workflow YAML convention sets for a multi-line condition, is kept,
+    since an `if:` value is always an expression.
+    It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
     """
     out = []
     skip_indent = None
+    fold_indent = None
     for ln in text.splitlines():
         if ln.lstrip().startswith("#"):
             continue
+        if fold_indent is not None:
+            if not ln.strip():
+                continue
+            if (len(ln) - len(ln.lstrip())) > fold_indent:
+                out[-1] += " " + ln.strip()
+                continue
+            fold_indent = None
         if skip_indent is not None:
             if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
                 skip_indent = None  # a dedent back to (or past) the key column ends the block body
@@ -1949,7 +1951,10 @@ def _code_view(text):
             key_col += dash.end()
             stripped = stripped[dash.end() :]
         if _BLOCK_SCALAR_KEY.match(stripped):
-            skip_indent = key_col
+            if _IF_KEY.match(stripped):
+                fold_indent = key_col
+            else:
+                skip_indent = key_col
         elif dash and _BARE_BLOCK_SCALAR.match(stripped):
             # A bare `- |` has no key, so its own boundary is the dash's column, not a key past it.
             skip_indent = dash_col
@@ -3496,6 +3501,37 @@ def _selftest():
             1,
         ),
         (
+            "publish-release.yml stub carrying its publish condition in a folded if: >-",
+            publish_stub.replace(
+                "    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}\n",
+                "    if: >-\n"
+                "      ${{ needs.plan.outputs.publish == 'true'\n"
+                "      && needs.validate.result == 'success' }}\n",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub whose folded if: >- wraps inside the required token",
+            publish_stub.replace(
+                "    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}\n",
+                "    if: >-\n"
+                "      ${{ needs.plan.outputs.publish == 'true' && needs.validate.result\n"
+                "      == 'success' }}\n",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub naming the validation token only in a name: | body",
+            publish_stub.replace(
+                "    name: Publish project release job\n",
+                "    name: |\n      needs.validate.result == 'success'\n",
+            ).replace(" && needs.validate.result == 'success'", ""),
+            publish_contract,
+            1,
+        ),
+        (
             "publish-release.yml stub whose publish job ignores failed validation",
             publish_stub.replace(" && needs.validate.result == 'success'", ""),
             publish_contract,
@@ -3744,6 +3780,16 @@ def _selftest():
             "a bare sequence-item block scalar (`- |`, a matrix string) still drops its body",
             "  include:\n    - |\n      TOKEN\n",
             "  include:\n    - |",
+        ),
+        (
+            "a folded `if: >-` keeps its body, folded onto the key line",
+            "  publish:\n    if: >-\n      ${{ a\n\n      && b }}\n    uses: x\n",
+            "  publish:\n    if: >- ${{ a && b }}\n    uses: x",
+        ),
+        (
+            "a step's folded `- if: >-` keeps its body too",
+            "      - if: >-\n          ${{ a }}\n        run: echo\n",
+            "      - if: >- ${{ a }}\n        run: echo",
         ),
     ]
     for label, text, want in code_view_cases:
