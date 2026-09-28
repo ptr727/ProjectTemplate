@@ -1,6 +1,6 @@
 # VS Code Workspace Catalog
 
-The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. Each piece is a copyable JSON fragment in this directory. `base.jsonc` carries the standard set, and `dotnet.jsonc`, `python.jsonc`, and `docker.jsonc` carry the per-type additions. A repo's `<Repo>.code-workspace` composes `base.jsonc` plus the fragments for the languages and targets it ships. Discovered from the fleet's workspace files.
+The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. Each piece is a copyable JSON fragment in this directory. `base.jsonc` carries the standard set, and `dotnet.jsonc`, `python.jsonc`, and `docker.jsonc` carry the per-type additions. A repo's `<Repo>.code-workspace` composes `base.jsonc` plus the fragments for the languages and targets it ships.
 
 ## Standard Extensions (every repo)
 
