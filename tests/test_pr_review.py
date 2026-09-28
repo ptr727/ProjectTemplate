@@ -4456,6 +4456,68 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
         self.assertIn("status=PENDING", self.out.getvalue())
 
+    def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
+        """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
+        reviewer's own reviews on this pull request, on any head. A count narrowed to the
+        current head disagrees with that whenever a stale, off-head round sits in the history,
+        and undercounts every round after it forever, since the off-head round it excludes never
+        ages out. Two rounds already exist here, one off the current head, matching a `status`
+        read of `rounds=2` before the re-request. The one that lands after it is the third, on
+        the head, and is what `--min-rounds 2` was asked to hold out for.
+        """
+        self.answer(
+            payload([review(oid=OLD, rid="PRR_stale"), review(rid="PRR_head_one")], pending=True),
+            payload(
+                [
+                    review(oid=OLD, rid="PRR_stale"),
+                    review(rid="PRR_head_one"),
+                    review(rid="PRR_head_two", at=LATE),
+                ]
+            ),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "2"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_counts_a_head_refusal_the_way_status_does(self) -> None:
+        """A refusal sits in `status`'s `rounds=` but not in a head-scoped count, since a refusal
+        covers nothing and `reviewed_head` excludes it. A caller reading `rounds=1` off one
+        refusal and reaching `--min-rounds 1` once a genuine round then lands beside it must see
+        that genuine round as the fresh one it asked for, not read the head-scoped count, still 1
+        because it never counted the refusal to begin with, as still short of the baseline.
+
+        The first poll is bodyless, the shape the liveness query itself carries: `refusal_of`
+        reads nothing there and counts the refusal as ordinary coverage, same as
+        `test_the_liveness_reading_ends_the_wait_and_the_full_read_refuses_it` above. The full
+        read that follows carries the body and is where the refusal is actually read as one,
+        alongside the genuine round that answers it.
+        """
+        bodyless_refusal = {k: v for k, v in review(rid="PRR_refusal").items() if k != "body"}
+        self.answer(
+            payload([bodyless_refusal], pending=True),
+            payload([review(body=REFUSED, rid="PRR_refusal"), review(rid="PRR_genuine", at=LATE)]),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_survives_a_push_moving_the_head(self) -> None:
+        """A head-scoped count resets to zero the moment a push moves the head, so it reads a
+        brand new head's first genuine round as still short of a baseline that was measured
+        against a head that no longer exists. The unscoped count `status` prints never resets:
+        one round already sits on the old head, matching a `status` read of `rounds=1`, and the
+        round that lands on the head after the push is the second, which is what
+        `--min-rounds 1` was asked to hold out for.
+        """
+        stale = payload([review(oid=OLD)], pending=True)
+        stale["headRefOid"] = OLD
+        self.answer(
+            stale, payload([review(oid=OLD, rid="PRR_stale"), review(rid="PRR_two", at=LATE)])
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
     def test_wait_exits_thirty_at_the_timeout_rather_than_reporting_success(self) -> None:
         """Pending is not failure and not success, so it takes a code of its own."""
         self.answer(payload([review(oid=OLD)]))

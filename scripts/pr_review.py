@@ -1182,17 +1182,31 @@ def reviewed_head(pr: dict) -> bool:
 
 
 def head_review_done(pr: dict, min_rounds: int) -> bool:
-    """True once the reviewer's rounds on the head exceed `min_rounds`.
+    """True once the head is covered by a round beyond the `min_rounds` a caller already knew of.
 
-    `min_rounds` defaults to 0, where this is `reviewed_head` exactly: `bool(x)` and `len(x) > 0`
-    agree on any list. A caller that already read a `rounds=` count from `status`, then
-    re-requested a review on that same, already-covered head, passes that count through `wait
-    --min-rounds` instead, so this holds out for a round beyond it, rather than crediting the
-    earlier round the caller had already seen and was re-requesting past. Nothing here reads the
-    request set: whether a request is outstanding is the caller's business, since a live request
-    and a stale, already-answered one about to be cleared read identically at any single poll.
+    `min_rounds` defaults to 0, where this is `reviewed_head` exactly: `reviewed_head` true makes
+    `reviewer_nodes(pr, "reviews")` non-empty too, since `head_reviews` only narrows it, so the
+    second clause holds whenever the first does and this reduces to the first alone. A caller
+    that already read a `rounds=` count from `status`, then re-requested a review on that same,
+    already-covered head, passes that count through `wait --min-rounds` instead, so this holds
+    out for a round beyond it.
+
+    The count is `reviewer_nodes(pr, "reviews")`, every one of the reviewer's own reviews on this
+    pull request, on any head, refusals included, the exact quantity `status` prints as `rounds=`
+    rather than `len(head_reviews(pr))`, the head-scoped, refusal-excluded count `reviewed_head`
+    itself narrows to. Two failures follow from comparing `min_rounds` against that narrower
+    count instead: a push during the wait moves the head, which resets a head-scoped count to
+    zero and reads a brand new head's first genuine round as still short of a baseline measured
+    against a head that no longer exists, where the unscoped count carries forward since it
+    never resets; and a refusal on the head sits in `rounds=` but not in the head-scoped count,
+    so a caller who read `rounds=1` off one refusal and reached `--min-rounds 1` once a genuine
+    round then landed alongside it would see the head-scoped count stay at 1, never exceeding the
+    baseline, although the genuine round is exactly the fresh one the wait was for. `reviewed_head`
+    stays the separate, unaffected gate: it is what requires the round satisfying the count to
+    actually be on the current head and not itself a refusal, so a rising count from other heads
+    or from further refusals alone never reads as done on its own.
     """
-    return len(head_reviews(pr)) > min_rounds
+    return reviewed_head(pr) and len(reviewer_nodes(pr, "reviews")) > min_rounds
 
 
 def review_effort(pr: dict) -> tuple[str, str]:
@@ -3463,12 +3477,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         metavar="N",
-        help="wait: treat the head as covered only once the reviewer's rounds on it exceed N, "
-        "rather than on any round. Pass the `rounds=` a prior `status` already read, after "
-        "re-requesting a review on a head that already carries one: `reviewed_head` alone "
-        "would report that earlier round as done at once, never waiting for the fresh one "
-        "the re-request was for (default 0, so any round counts, unchanged from before "
-        "this flag existed)",
+        help="wait: treat the head as covered only once the reviewer's total rounds on this "
+        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
+        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
+        "already carries one: `reviewed_head` alone would report that earlier round as done "
+        "at once, never waiting for the fresh one the re-request was for (default 0, so any "
+        "round counts, unchanged from before this flag existed)",
     )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
