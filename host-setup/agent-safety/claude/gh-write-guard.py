@@ -1744,6 +1744,10 @@ def _bound_in_condition(cond):
     A `&&` inside `[[ ]]` joins two tests rather than ending one, so only `]]` closes it.
     A `$(...)`, `<(...)`, or backtick operand is a command of its own, so its flags compare nothing.
     Its parentheses, and a test's own grouping ones, end no test.
+    A substitution glued to a word, `x$(...)`, is a command of its own all the same.
+    A separator fused to a parenthesis, `;(` or `|(`, ends a test as a bare one does.
+    A `case` pattern's `)` inside a substitution closes no parenthesis, so it ends no substitution.
+    A backtick with no partner after it is a quoted literal, since an unquoted one does not parse.
     Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
     The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
     """
@@ -1758,18 +1762,23 @@ def _bound_in_condition(cond):
                 or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
             ):
                 closer = _TEST_CLOSERS[name]
-                depth = group = 0
+                depth = group = cases = 0
                 tick = False
             continue
         opens, closes = tok.count("("), tok.count(")")
         if "`" in tok:
-            tick ^= tok.count("`") % 2 == 1
+            if tok.count("`") % 2:
+                tick = not tick and any(t.count("`") % 2 for t in cond[k + 1 :])
         elif tick:
             pass
-        elif (opens or closes) and set(tok) <= set("()|&;<>"):
+        elif _is_shell_op(tok):
             if depth:
-                depth = max(0, depth + opens - closes)
-            elif opens and (cond[k - 1] == "$" or tok in ("<(", ">(")):
+                if not cases:
+                    depth = max(0, depth + opens - closes)
+                cases = cases if depth else 0
+            elif set(tok) & set(";|&\n") and not (closer == "]]" and tok in ("&&", "||")):
+                closer = None
+            elif opens and (cond[k - 1].endswith("$") or tok in ("<(", ">(")):
                 depth = opens
             else:
                 group += opens
@@ -1777,10 +1786,13 @@ def _bound_in_condition(cond):
                     closer = None
                 group = max(0, group - closes)
         elif depth:
-            pass
+            if tok == "case" and _opens_command(cond, k):
+                cases += 1
+            elif tok == "esac" and cases:
+                cases -= 1
         elif tok in _TEST_COMPARISONS:
             return True
-        elif (closer and tok == closer) or (closer != "]]" and _is_separator(tok)):
+        elif closer and tok == closer:
             closer = None
     return False
 
@@ -4284,6 +4296,41 @@ _WAIT_CASES = [
         "while ! (test -f x) && ls -lt out; do sleep 30; done",
         "deny",
         "a subshell's closing parenthesis ends the `test` inside it, so a later flag is no bound",
+    ),
+    (
+        "while ! [ -n x$(ls -lt out) ]; do sleep 30; done",
+        "deny",
+        "a substitution glued to a word is still a command of its own, so its flag compares nothing",
+    ),
+    (
+        "while ! test -f x;(ls -lt out); do sleep 30; done",
+        "deny",
+        "a separator fused to a subshell ends the `test`, so the subshell's flag is no bound",
+    ),
+    (
+        "while ! test -f x|(ls -lt out); do sleep 30; done",
+        "deny",
+        "a pipe fused to a subshell ends the `test`, so the subshell's flag is no bound",
+    ),
+    (
+        "while ! [[ $(case a in a) ls -lt out;; esac) ]]; do sleep 30; done",
+        "deny",
+        "a `case` pattern's parenthesis inside a substitution does not end the substitution",
+    ),
+    (
+        "while [ $(case a in (a) echo 1;; esac) -lt 3 ]; do sleep 1; done",
+        "allow",
+        "a substitution holding a `case` still ends at its own parenthesis before a comparison",
+    ),
+    (
+        "while [ \"$c\" != '`' -a $i -lt 3 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a quoted literal backtick with no partner opens no substitution to hide the comparison",
+    ),
+    (
+        "while [[ -f x || $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `||` inside `[[ ]]` joins two tests rather than ending one",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
