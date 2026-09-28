@@ -92,6 +92,18 @@ SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
 GITHUB_URL_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?(?![\s\S])"
 )
+# The version-literal scan reads the four instruction documents a repo owns prose in.
+# .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
+VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
+
+# A three-part version, a full commit SHA, or an abbreviated one standing alone as a token.
+# The lookarounds keep a dotted quad, such as an address, from matching as a version.
+# An abbreviated SHA must mix a digit and a letter, so an all-letter word such as "facade" is not one.
+VERSION_LITERAL = re.compile(
+    r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
+    r"|\b[0-9a-fA-F]{40}\b"
+    r"|(?<![0-9A-Za-z#_])(?=[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-]))(?=[a-fA-F]*[0-9])(?=[0-9]*[a-fA-F])[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-])"
+)
 # How faithfully a carried unit is checked, per spec/fidelity-model.md, defaulting to presence.
 FIDELITIES = ("presence", "intent", "verbatim", "interface")
 # The keys an interface unit's `contract` may carry (kept in sync with files.schema.json).
@@ -528,6 +540,29 @@ def carried_link_errors(root, baseline):
                         f"files.json: {source} {region} links to relative target "
                         f"'{relative_target}', which is not universally carried"
                     )
+    return errors
+
+
+def version_literal_errors(root):
+    """Reject a three-part version or commit SHA anywhere in the hub's own instruction documents.
+
+    Verbatim sections are scanned too, since spec/audit.py excises them on every downstream run and
+    every carrier inherits their bytes, so a literal there has to be stopped before it merges here.
+    """
+    errors = []
+    for source in VERSION_LITERAL_SCANNED:
+        path = root / source
+        if not path.is_file():
+            continue
+        literals = sorted(
+            set(VERSION_LITERAL.findall(path.read_text(encoding="utf-8", errors="replace")))
+        )
+        if literals:
+            errors.append(
+                f"{source}: names a three-part version or a commit SHA ({', '.join(literals)}); "
+                "write the example with a placeholder such as 1.0.N "
+                "(GOVERNANCE.md, Documentation Style Conventions)"
+            )
     return errors
 
 
@@ -1360,6 +1395,7 @@ def main():
                     )
 
     errors.extend(carried_link_errors(ROOT, baseline))
+    errors.extend(version_literal_errors(ROOT))
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
