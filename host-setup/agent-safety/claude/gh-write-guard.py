@@ -349,36 +349,282 @@ _GIT_GLOBAL_VALUE_OPTS = {
 # The string is the form shlex takes the set in, and the set is derived from it so the two cannot drift apart.
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
-_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"', "<<", "((")
-_EXTGLOB_OPEN = re.compile(r"[@?*+!]\(")
+_EXTGLOB_PREFIX = "@?*+!"
+_DQ_ESCAPE = re.compile(r'\\([$`"\\\n])')
 
 
-def _strip_comments(cmd):
-    """Return `cmd` with every comment bash reads cut away, or None where it holds none or holds
-    quoting, a heredoc, or a nested context such as arithmetic or an extglob pattern, where a `#`
-    is text, that this scan does not model. Only plain quotes are tracked, and their state
-    carries across lines as bash's does, so a `#` inside a quote an earlier line opened stays text.
+def _skip_backticks(cmd, i):
+    """Index just past the backquote closing a command substitution whose body starts at `i`."""
+    while i < len(cmd):
+        if cmd[i] == "\\":
+            i += 2
+        elif cmd[i] == "`":
+            return i + 1
+        else:
+            i += 1
+    raise ValueError("unterminated backquote")
+
+
+def _skip_quote_body(cmd, i, closer):
+    """Index just past the `closer` ending a quoted span whose body starts at `i`, for a double-quoted
+    or `$'...'` span. Both honor a backslash escape, and a double-quoted span also holds nested
+    substitutions, each skipped whole, since a quote inside one does not end the outer span.
     """
-    if any(s in cmd for s in _COMMENT_SCAN_BAIL) or _EXTGLOB_OPEN.search(cmd):
-        return None
-    out = []
-    quote = None
-    comment = found = False
-    for i, ch in enumerate(cmd):
-        if comment:
-            if ch != "\n":
-                continue
-            comment = False
-        elif quote:
-            if ch == quote:
-                quote = None
-        elif ch in "'\"":
-            quote = ch
-        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t" or cmd[i - 1] in _SHELL_OP_CHARS):
-            comment = found = True
+    while i < len(cmd):
+        ch = cmd[i]
+        if ch == "\\":
+            i += 2
+        elif ch == closer:
+            return i + 1
+        elif closer == '"' and (ch == "`" or cmd.startswith(("$(", "${"), i)):
+            i = _skip_nested(cmd, i)
+        else:
+            i += 1
+    raise ValueError("unterminated quote")
+
+
+def _skip_nested(cmd, i):
+    """Index just past the quote, escape, or substitution opening at `i`, or None where none does."""
+    ch = cmd[i]
+    if ch == "\\":
+        return i + 2
+    if ch == "'":
+        end = cmd.find("'", i + 1)
+        if end < 0:
+            raise ValueError("unterminated quote")
+        return end + 1
+    if ch == '"':
+        return _skip_quote_body(cmd, i + 1, '"')
+    if ch == "`":
+        return _skip_backticks(cmd, i + 1)
+    if cmd.startswith("$'", i):
+        return _skip_quote_body(cmd, i + 2, "'")
+    if cmd.startswith('$"', i):
+        return _skip_quote_body(cmd, i + 2, '"')
+    if cmd.startswith("$(", i):
+        return _skip_group(cmd, i + 2, "(", ")", comments=True)
+    if cmd.startswith("${", i):
+        return _skip_group(cmd, i + 2, "{", "}", comments=False)
+    return None
+
+
+def _skip_group(cmd, i, opener, closer, comments):
+    """Index just past the `closer` ending a group whose body starts at `i`. Bash reads the body in a
+    fresh quoting context, so a quote the outer text opened does not carry into it. With `comments`,
+    as in a command substitution, a `#` opening a word hides the rest of its line, a `closer`
+    included. A parameter expansion or an extglob pattern passes False, since a `#` there is text.
+    """
+    depth = 0
+    while i < len(cmd):
+        nxt = _skip_nested(cmd, i)
+        if nxt is not None:
+            i = nxt
             continue
-        out.append(ch)
-    return "".join(out) if found else None
+        ch = cmd[i]
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            if not depth:
+                return i + 1
+            depth -= 1
+        elif comments and ch == "#" and (cmd[i - 1] in " \t\r" or cmd[i - 1] in _SHELL_OP_CHARS):
+            end = cmd.find("\n", i)
+            if end < 0:
+                break
+            i = end
+            continue
+        i += 1
+    raise ValueError("unterminated group")
+
+
+def _arith_depth(run, depth):
+    """The arithmetic nesting after an operator `run`, None outside `(( ))`, else the open parens."""
+    k = 0
+    while k < len(run):
+        if depth is None:
+            if run.startswith("((", k):
+                depth = 0
+                k += 2
+                continue
+        elif run[k] == "(":
+            depth += 1
+        elif run[k] == ")":
+            if depth:
+                depth -= 1
+            elif run.startswith("))", k):
+                depth = None
+                k += 2
+                continue
+        k += 1
+    return depth
+
+
+def _heredoc_line_tokens(line):
+    """Tokenize one heredoc body line. A `#` is text in a body, so it is read that way first. A body
+    fed to a shell is a script, though, where a `#` does open a comment, so a line that does not parse
+    as text is read again with comments, and then plainly, rather than dropped.
+    """
+    for comments in (False, True):
+        try:
+            return _context_lex(line, comments)
+        except (ValueError, RecursionError):
+            pass
+    return _operator_tokens(line)
+
+
+def _context_lex(cmd, comments=True):
+    """Tokenize `cmd` as `_operator_lex` does, tracking the contexts bash nests rather than only plain
+    quotes. Quote state carries across lines, a backslash escapes, and a substitution or `$'...'` span
+    is read whole, so a quote inside `"$(...)"` does not end the outer one. A `#` opening a word
+    outside every quote is a comment and dropped, with `comments`, and is text inside arithmetic, an
+    extglob pattern, a `[[ =~ ]]` operand, and a heredoc body. A `=~` operand is one word holding
+    `|`, parens, and spaces inside parens, as bash reads it. A `!(` opening a word is a negated
+    subshell rather than a pattern, since bash runs it so unless extglob is on. A `-` glued to `<<`
+    is the dash form, where a spaced one is the delimiter itself. Raises ValueError where a quote or
+    group never closes, which bash also rejects.
+    """
+    toks, word, heredocs = [], [], []
+    started = False
+    word_at = 0
+    arith = None  # paren depth inside `(( ))`, None outside it
+    in_cond = False  # inside `[[ ]]`
+    regex = None  # paren depth inside a `=~` operand, None outside one
+    tag_wanted = None  # (index the `<<` ended at, dash form) until its delimiter word arrives
+
+    def flush():
+        nonlocal started, in_cond, regex, tag_wanted
+        if not started:
+            return
+        tok = "".join(word)
+        word.clear()
+        started = False
+        toks.append(tok)
+        if tag_wanted is not None:
+            end, dash = tag_wanted
+            if word_at == end and tok.startswith("-"):
+                dash, tok = True, tok[1:]
+            if tok:
+                heredocs.append((tok, dash))
+                tag_wanted = None
+            else:
+                tag_wanted = (-1, dash)
+        regex = 0 if in_cond and tok == "=~" else None
+        if tok == "[[":
+            in_cond = True
+        elif tok == "]]":
+            in_cond = False
+
+    n = len(cmd)
+    i = 0
+    while i < n:
+        ch = cmd[i]
+        if regex is not None and (
+            ch in "(|<>#" or (ch == ")" and regex) or (regex and ch in " \t\r")
+        ):
+            regex += (ch == "(") - (ch == ")")
+            if not started:
+                word_at = i
+            started = True
+            word.append(ch)
+            i += 1
+            continue
+        if ch in " \t\r":
+            flush()
+            i += 1
+            continue
+        if ch == "#" and comments and not started and arith is None:
+            end = cmd.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        if (
+            ch == "("
+            and started
+            and arith is None
+            and word
+            and word[-1] == cmd[i - 1]
+            and cmd[i - 1] in _EXTGLOB_PREFIX
+            and cmd[i - 2 : i - 1] != "\\"
+            and not (cmd[i - 1] == "!" and word_at == i - 1)
+        ):
+            end = _skip_group(cmd, i + 1, "(", ")", comments=False)
+            word.append(cmd[i:end])
+            i = end
+            continue
+        if ch in _SHELL_OP_CHARS:
+            flush()
+            j = i
+            while j < n and cmd[j] in _SHELL_OP_CHARS:
+                j += 1
+                if cmd[j - 1] == "\n" and heredocs:
+                    break
+            run = cmd[i:j]
+            toks.append(run)
+            regex = None
+            if arith is None and "<<" in run and "<<<" not in run:
+                tag_wanted = (j, False)
+            arith = _arith_depth(run, arith)
+            i = j
+            if "\n" in run:
+                tag_wanted = None
+                if heredocs:
+                    i = _heredoc_bodies(cmd, i, heredocs, toks)
+                    heredocs.clear()
+            continue
+        if ch == "\\" and cmd[i + 1 : i + 2] == "\n":
+            i += 2
+            continue
+        if not started:
+            word_at = i
+        started = True
+        if ch == "\\":
+            if i + 1 >= n:
+                raise ValueError("no escaped character")
+            word.append(cmd[i + 1])
+            i += 2
+        elif ch == "'":
+            end = _skip_nested(cmd, i)
+            word.append(cmd[i + 1 : end - 1])
+            i = end
+        elif ch == '"' or cmd.startswith(('$"', "$'"), i):
+            body = i + (1 if ch == '"' else 2)
+            end = _skip_quote_body(cmd, body, cmd[body - 1])
+            text = cmd[body : end - 1]
+            word.append(
+                _DQ_ESCAPE.sub(lambda m: m.group(1).strip("\n"), text)
+                if cmd[body - 1] == '"'
+                else text
+            )
+            i = end
+        elif ch == "`" or cmd.startswith("${", i):
+            end = _skip_nested(cmd, i)
+            word.append(cmd[i:end])
+            i = end
+        else:
+            word.append(ch)
+            i += 1
+    flush()
+    return toks
+
+
+def _heredoc_bodies(cmd, i, heredocs, toks):
+    """Tokenize the heredoc bodies starting at `i`, each through its delimiter line, into `toks`,
+    and return the index just past the last one. Bash reads a body line by line rather than as part
+    of the command, so each line is tokenized alone and a quote in one never spans into the next.
+    """
+    n = len(cmd)
+    for tag, dash in heredocs:
+        while i < n:
+            end = cmd.find("\n", i)
+            if end < 0:
+                end = n
+            line = cmd[i:end]
+            toks.extend(_heredoc_line_tokens(line))
+            if end < n:
+                toks.append("\n")
+            i = end + 1
+            if (line.lstrip("\t") if dash else line) == tag:
+                break
+    return min(i, n)
 
 
 def _operator_lex(text):
@@ -409,38 +655,22 @@ def _operator_tokens(line):
         return line.split()
 
 
-def _base_tokens(cmd):
-    """Split each line of `cmd` plainly, keeping a newline between lines, as the base fallback did."""
-    toks = []
-    for i, line in enumerate(cmd.split("\n")):
-        if i:
-            toks.append("\n")
-        try:
-            toks.extend(shlex.split(line, posix=True))
-        except ValueError:
-            toks.extend(line.split())
-    return toks
-
-
 def _shell_tokens(cmd, strip_comments=True):
     """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
     their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
-    of that token while a real redirection or line break is separated. A command that does not parse
-    only because of a comment, an apostrophe in it being the usual case, is tokenized without its
-    comments, followed by the base fallback's tokens, so a context where bash reads a `#` as text
-    rather than a comment can never hide a command the base fallback saw. Degrades gracefully if
-    the quoting still cannot be parsed.
+    of that token while a real redirection or line break is separated. A command whose quoting shlex
+    cannot follow, an apostrophe in a comment or a quote nested in `"$(...)"` being the usual cases,
+    is read by `_context_lex`, dropping its comments unless `strip_comments` is False. Degrades to one
+    line at a time where the quoting still cannot be parsed.
     """
     try:
         return _operator_lex(cmd)
     except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
         pass
-    stripped = _strip_comments(cmd) if strip_comments else None
-    if stripped is not None:
-        try:
-            return [*_operator_lex(stripped), "\n", *_base_tokens(cmd)]
-        except (ValueError, TypeError):
-            pass
+    try:
+        return _context_lex(cmd, strip_comments)
+    except (ValueError, RecursionError):
+        pass
     toks = []
     for i, line in enumerate(cmd.split("\n")):
         if i:
@@ -3877,6 +4107,51 @@ _WAIT_CASES = [
         "a heredoc marker inside an unclosed quote opens no heredoc, so the loop after the quote closes is seen",
     ),
     (
+        "echo \"$(date)\" 'x\nwhile true; do sleep 5; done\n' # it's",
+        "allow",
+        "loop text inside a quote an earlier line opened is text, not a loop, beside a substitution and an apostrophe",
+    ),
+    (
+        "while ! [[ $x =~ a|#b ]]; do sleep 30; done  # the PR's checks",
+        "deny",
+        "a `#` inside a `=~` operand is text, so the loop around the test is seen",
+    ),
+    (
+        "while true; do sleep 1; done # it's \\note",
+        "deny",
+        "a backslash inside the comment itself does not hide the loop before it",
+    ),
+    (
+        'echo "$(date)"; while ! gh pr checks 5 --watch; do sleep 30; done  # it\'s',
+        "deny",
+        "a command substitution elsewhere on the line does not hide the loop",
+    ),
+    (
+        'echo "$(echo "\'")"; while true; do sleep 5; done; echo "\'"  # it\'s',
+        "deny",
+        "a double quote nested in a substitution inside a double quote does not hide the loop",
+    ),
+    (
+        "echo ${x#a}; while true; do sleep 1; done # it's",
+        "deny",
+        "a `#` inside a parameter expansion is text, so the loop after it is seen",
+    ),
+    (
+        "echo @(a|#b); while true; do sleep 1; done # it's",
+        "deny",
+        "a `#` inside an extglob pattern is text, so the loop after it is seen",
+    ),
+    (
+        "(( x = 16#ff )); while true; do sleep 1; done # it's",
+        "deny",
+        "a `#` inside arithmetic is text, so the loop after it is seen",
+    ),
+    (
+        "echo `date`; while true; do sleep 1; done # it's",
+        "deny",
+        "a backquote substitution elsewhere on the line does not hide the loop",
+    ),
+    (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
         "deny",
         "a wrapper payload is read the same as a bare command line",
@@ -4375,6 +4650,79 @@ _WAIT_CASES = [
 ]
 
 
+_CONTEXT_LEX_CASES = [
+    (
+        "echo \"$(date)\" 'x\nwhile true\n' # it's",
+        ["echo", "$(date)", "x\nwhile true\n"],
+        "a quote carries across lines",
+    ),
+    (
+        "[[ $x =~ a|#b ]] # it's",
+        ["[[", "$x", "=~", "a|#b", "]]"],
+        "a `=~` operand holds `|` and `#`",
+    ),
+    (
+        "[[ $x =~ (a b|c) ]]; y # it's",
+        ["[[", "$x", "=~", "(a b|c)", "]]", ";", "y"],
+        "a `=~` operand holds spaces inside parens",
+    ),
+    (
+        "[[ ( $x =~ a ) ]] # it's",
+        ["[[", "(", "$x", "=~", "a", ")", "]]"],
+        "a `)` outside the operand's parens ends it",
+    ),
+    ("echo ${x#a} # it's", ["echo", "${x#a}"], "a parameter expansion is read whole"),
+    ("(( x = 16#ff )) # it's", ["((", "x", "=", "16#ff", "))"], "a `#` inside arithmetic is text"),
+    ("echo @(a|#b) # it's", ["echo", "@(a|#b)"], "an extglob pattern is one word"),
+    ("!(x) # it's", ["!", "(", "x", ")"], "a `!(` opening a word is a negated subshell"),
+    (
+        'echo "$(echo "\'")" # it\'s',
+        ["echo", '$(echo "\'")'],
+        "a substitution's quotes start over inside it",
+    ),
+    (
+        "echo \"$(x # it's\n)\" y # it's",
+        ["echo", "$(x # it's\n)", "y"],
+        "a comment inside a substitution hides its `)`",
+    ),
+    (
+        "cat <<-EOF\n\tit's\n\tEOF\necho 'a\nb' # it's",
+        ["cat", "<<", "-EOF", "\n", "it's", "\n", "EOF", "\n", "echo", "a\nb"],
+        "a heredoc body line is read alone, and the dash form's tabbed delimiter ends the body",
+    ),
+    (
+        "cat <<EOF\n;it's\nEOF\necho y # it's",
+        ["cat", "<<", "EOF", "\n", ";it's", "\n", "EOF", "\n", "echo", "y"],
+        "a heredoc body starts at the newline, even where its first line opens with an operator",
+    ),
+    (
+        "(( ((a)) << 2 ))\necho 'x\ny'",
+        ["((", "((", "a", "))", "<<", "2", "))\n", "echo", "x\ny"],
+        "a paren group inside arithmetic does not end it, so a shift there opens no heredoc",
+    ),
+    (
+        "cat << -\n#x\n-\necho y # it's",
+        ["cat", "<<", "-", "\n", "#x", "\n", "-", "\n", "echo", "y"],
+        "a spaced `-` is the delimiter, and a `#` in a body is text",
+    ),
+    ("echo \\#x 'a' # it's", ["echo", "#x", "a"], "an escaped `#` opens no comment"),
+    ("echo $'it\\'s' # it's the PR's", ["echo", "it\\'s"], "a `$'...'` span honors its escapes"),
+    (
+        "echo `a # it's` b # it's",
+        ["echo", "`a # it's`", "b"],
+        "a backquote substitution is read whole",
+    ),
+    ('echo "a\\"b" # it\'s', ["echo", 'a"b'], "an escaped double quote does not end the span"),
+    (
+        "echo 'a' #it's\n#x\necho b",
+        ["echo", "a", "\n", "\n", "echo", "b"],
+        "a comment ends at its newline",
+    ),
+    ("echo 'x", None, "an unterminated quote raises"),
+    ('echo "$(x"', None, "an unterminated substitution raises"),
+]
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -4589,6 +4937,15 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, want, label in _CONTEXT_LEX_CASES:
+        try:
+            got = _context_lex(cmd)
+        except ValueError:
+            got = None
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [lex  ] {label}")
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
