@@ -4876,6 +4876,16 @@ class TestCli(GqlCase):
         slept.assert_not_called()
         self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
 
+    def test_a_drifted_login_in_the_answer_is_not_read_as_unrecorded(self) -> None:
+        """A renamed reviewer is what the poll reports, so the request is not judged on its spelling."""
+        drifted = {"__typename": "Bot", "login": "copilot-pull-request-reviewer-v2"}
+        before = request_state(events=("RRE_1",))
+        after = {
+            "reviewRequests": {"nodes": [{"requestedReviewer": drifted}]},
+            "timelineItems": {"nodes": [{"id": "RRE_1", "requestedReviewer": drifted}]},
+        }
+        self.assertIsNone(pr_review.request_recorded(before, after))
+
     def test_an_answer_carrying_no_request_state_is_not_read_as_unrecorded(self) -> None:
         """An unread state is not a reading of one, so the wait polls as it did before."""
         before = request_state(events=("RRE_1",))

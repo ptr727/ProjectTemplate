@@ -991,11 +991,20 @@ def request_recorded(before: dict, after: dict) -> bool | None:
     True where the reviewer sits in the pending set afterwards, or where a review-request event
     naming it is newer than the newest one read before the request. False where neither holds,
     which is the shape an exhausted Copilot allowance left: every mutation succeeded, and none
-    added an event or a pending reviewer. None where the answer carries neither field, since an
+    added an event or a pending reviewer. None where the answer lacks either field, since an
     unread state is not a reading of one, and the wait then polls as it did before this existed.
+    None too where a login that reads as the reviewer's but is spelled otherwise answers, since
+    a drifted login would otherwise read a recorded request as an unrecorded one, and the poll
+    this skips is what reports the drift.
     """
     if "reviewRequests" not in after or "timelineItems" not in after:
         return None
+    nodes = (after["reviewRequests"] or {}).get("nodes") or []
+    nodes = nodes + ((after["timelineItems"] or {}).get("nodes") or [])
+    for n in nodes:
+        login = (n.get("requestedReviewer") or {}).get("login") or ""
+        if login != REVIEWER and READS_AS_REVIEWER.search(login):
+            return None
     if reviewer_requested(after):
         return True
     return newest_request_event(after) != newest_request_event(before)
