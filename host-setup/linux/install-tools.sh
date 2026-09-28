@@ -229,6 +229,25 @@ apt_missing() {
     return 0
 }
 
+# Whether dpkg owns the file at a path, checking the path as given and, when that misses, its directory canonicalized.
+# On a merged-usr host built after that host's own usrmerge, /bin and /sbin are symlinks into their /usr counterparts and a package records only the canonical /usr/bin or /usr/sbin spelling, so a path spelled through the symlinked directory (/bin/jq) answers "no path found" from dpkg-query -S even when /usr/bin/jq, the same file, is dpkg-owned.
+# A package that predates that host's usrmerge, common on Debian bookworm and Ubuntu jammy/noble, keeps its file list under the pre-merge /bin or /sbin spelling instead, so the given path is checked first rather than only a canonicalized one.
+# Only the directory is canonicalized, never the file name: resolving the leaf too would make a plain, unowned symlink that happens to point at a dpkg-owned file (a hand-installed /usr/local/bin/jq -> /usr/bin/jq, say) misreport as owned.
+# Propagates dpkg-query's own exit status (0 owned, 1 not found, anything else an error) from whichever of the two lookups actually ran, so a caller distinguishing them still can.
+dpkg_owns_path() {
+    local path="$1" status dir canonical_dir
+    dpkg-query -S "$path" >/dev/null 2>&1
+    status=$?
+    [[ $status -ne 1 ]] && return "$status"
+
+    dir="${path%/*}"
+    [[ $dir == "$path" ]] && return 1
+    canonical_dir=$(realpath -e -- "$dir" 2>/dev/null) || return 1
+    [[ $canonical_dir == "$dir" ]] && return 1
+
+    dpkg-query -S "$canonical_dir/${path##*/}" >/dev/null 2>&1
+}
+
 # Install a package that displaces distro packages, asking apt what it would remove and putting that in front of the operator first.
 # Asking apt beats naming the conflicts here, because the conflict set belongs to the upstream package and changes without notice.
 # Orphaned dependencies are left for a later apt autoremove rather than swept here, since autoremove reaches the whole host.
@@ -530,7 +549,7 @@ ripgrep_download_path() {
     local resolved
     resolved=$(type -P rg 2>/dev/null || true)
     [[ $resolved == /* ]] || return 0
-    dpkg-query -S "$resolved" >/dev/null 2>&1 || printf '%s' "$resolved"
+    dpkg_owns_path "$resolved" || printf '%s' "$resolved"
 }
 
 ripgrep_remove_download() {
@@ -790,7 +809,7 @@ powershell_install() {
 # This applies the same ownership test as tool_unshadow to a shadowing copy.
 powershell_path_is_unowned() {
     local path="$1" status=0
-    dpkg-query -S "$path" >/dev/null 2>&1 || status=$?
+    dpkg_owns_path "$path" || status=$?
     case "$status" in
     0) return 1 ;;
     1) return 0 ;;
@@ -1045,7 +1064,7 @@ tool_unshadow() {
 
             # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
             # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
-            if dpkg-query -S "$resolved" >/dev/null 2>&1; then
+            if dpkg_owns_path "$resolved"; then
                 warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
                 break
             fi
