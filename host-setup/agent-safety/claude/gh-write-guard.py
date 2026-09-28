@@ -1742,16 +1742,29 @@ def _bound_in_condition(cond):
     The two forms are `[ "$i" -lt 120 ]` and `(( SECONDS < 600 ))`, where a shift compares nothing.
     A comparison operator counts only as an argument of a `[`, `[[`, or `test` invocation.
     A `&&` inside `[[ ]]` joins two tests rather than ending one, so only `]]` closes it.
+    A `$(...)` operand is a command of its own, so its flags compare nothing and its parentheses end no test.
+    An escaped grouping parenthesis inside the test neither ends it nor hides its comparison.
     Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
     The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
     """
     if _ARITHMETIC_BOUND.search(" ".join(cond)):
         return True
     closer = None
+    depth = 0
     for k, tok in enumerate(cond):
+        name = tok.rsplit("/", 1)[-1]
         if closer is None:
-            if tok in _TEST_CLOSERS and _opens_command(cond, k):
-                closer = _TEST_CLOSERS[tok]
+            if name in _TEST_CLOSERS and (
+                _opens_command(cond, k)
+                or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
+            ):
+                closer = _TEST_CLOSERS[name]
+                depth = 0
+        elif tok and set(tok) <= set("()"):
+            if depth or cond[k - 1] == "$":
+                depth = max(0, depth + tok.count("(") - tok.count(")"))
+        elif depth:
+            continue
         elif tok in _TEST_COMPARISONS:
             return True
         elif tok == closer or (closer != "]]" and _is_separator(tok)):
@@ -4188,6 +4201,46 @@ _WAIT_CASES = [
         "while ! [ -f x ] && ls -lt out; do sleep 30; done",
         "deny",
         "a separator closes a `[` test, so a flag after it is still no bound",
+    ),
+    (
+        "until [ $(date +%s) -ge $end ]; do sleep 5; done",
+        "allow",
+        "a command substitution operand does not end the test before its comparison",
+    ),
+    (
+        "while [ $((i)) -lt 10 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "an arithmetic expansion operand does not end the test before its comparison",
+    ),
+    (
+        "while [ $(a $(b)) -lt 1 ]; do sleep 1; done",
+        "allow",
+        "a nested substitution closing on one `))` token leaves the comparison after it credited",
+    ),
+    (
+        'while [ \\( "$i" -lt 3 \\) ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a grouping parenthesis inside the test neither ends it nor hides its comparison",
+    ),
+    (
+        "while ! [[ $(ls -lt out) == *x* ]]; do sleep 30; done",
+        "deny",
+        "a flag inside a substitution in a `[[ ]]` operand is that command's flag, not a comparison",
+    ),
+    (
+        'while ! [ -n "$(ls -lt out)" ]; do sleep 30; done',
+        "deny",
+        "a quoted substitution is one operand, so its flag compares nothing",
+    ),
+    (
+        "while /usr/bin/test $i -lt 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a path-qualified `test` is the same test",
+    ),
+    (
+        "while builtin test $i -lt 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "`builtin test` runs the same test builtin",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
