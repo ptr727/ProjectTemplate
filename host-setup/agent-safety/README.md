@@ -230,18 +230,17 @@ text says, because the harm it covers was never in the text.
    launcher this does not name, and what those cost is a leak requirement 8 reports after the fact
    rather than a deny before it.
 
-   Each is read over the whole text being checked at that point, a top-level command or a nested
-   `timeout`-run payload alike, rather than tied to the one loop inside it: a fork anywhere in that
-   same text counts, even outside the loop's own clause, but a fork sitting beside the `timeout`
-   call that runs a payload, outside that payload, does not. That is
-   coarser than it could be. Deciding which `&` backgrounds which compound needs a parse this rule
-   does not have, and four rounds of narrowing a scan that tried each closed the shapes it was shown
-   and left the next one: a statement between the loop and its group's closer, a `disown` before a
-   `wait`, a subshell the sequencing had already reaped. Reading any fork as fatal costs a false
-   deny on `<loop> & wait`, a bound nothing in the command text can verify. A `timeout` the command
-   backgrounds as a whole still bounds what it runs, since
-   that `timeout` process outlives the shell that started it, so the ordinary
-   `timeout 900 <command> &` is unaffected.
+   This scan is coarser than it could be, deliberately: it does not carve out which loop a fork
+   sits near, only whether one is anywhere in the text being read at all. Deciding which `&`
+   backgrounds which compound needs a parse this rule does not have, and four rounds of narrowing
+   a scan that tried each closed the shapes it was shown and left the next one: a statement between
+   the loop and its group's closer, a `disown` before a `wait`, a subshell the sequencing had
+   already reaped. Reading any fork as fatal costs a false deny on `<loop> & wait`, a bound nothing
+   in the command text can verify. A fork between `timeout` and the wrapper it runs puts that
+   wrapper's own payload out of reach the same way a fork inside the payload does, since neither
+   leaves anything for a signal to the `timeout` process to reach. A `timeout` the command
+   backgrounds as a whole still bounds what it runs, since that `timeout` process outlives the
+   shell that started it, so the ordinary `timeout 900 <command> &` is unaffected.
 
    Two heredoc limits are known and unclosed rather than accepted, both narrow and both written
    here so a reader does not have to find them. A body kept because a shell reads it has its own
