@@ -35,9 +35,9 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-# Each hook's file name, and the substring identifying its registration in settings.json.
-# Named once, since a registration written under one spelling and searched for under another is reported absent forever.
-# The guard was spelled by hand on the search side and by position on the deploy side, which is that same drift one rename away.
+# NAME serves both the writer (DEPLOYED_HOOKS, hook_dst/sweep_dst) and the reader (`names_hook`).
+# A rename made on one side and not the other reports the registration absent forever.
+# STEM is read by the test suite alone now, as a substring convenience over a real command.
 GUARD_NAME = "gh-write-guard.py"
 GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
@@ -114,6 +114,39 @@ def runs_hook(command, path):
     return any(
         re.search(rf"(?:^|[\s\"'(]){re.escape(sp)}(?=$|[\s\"')|&;])", text) for sp in spellings
     )
+
+
+def names_hook(command, name):
+    """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME), at any path.
+
+    Matched with `runs_hook`'s own boundary characters rather than by tokenizing the command.
+    A command `runs_hook` already treats as running the deployed hook, such as one wrapped in
+    `bash -c "..."`, in `(...)`, or followed by `; true`, carries those wrapping characters
+    attached to the path with no separating space, which `shlex.split` folds into the token and
+    a plain whitespace split (its own fallback on an unbalanced quote) leaves attached to a quote
+    character, so neither reads the trailing path segment as `name` alone.
+
+    Matched as a trailing path segment rather than a bare substring, so a maintainer's own hook
+    whose file name merely contains this kit's stem, such as `my-gh-write-guard-audit.sh`
+    containing `gh-write-guard`, is not claimed: the character right after the stem there is
+    `-`, not one of the boundary characters this match requires.
+
+    A quoted path is read to its closing quote rather than through the same boundary characters,
+    since those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
+    `runs_hook` accepts whole, and the bare-word boundary class below cannot cross the space or
+    the parentheses inside it to reach the deployed name.
+
+    Known gap, not chased further here: an unquoted path whose own directory holds one of the
+    bare-word boundary characters, and a handful of shell compositions `runs_hook` itself only
+    accepts because it is handed the exact literal path rather than discovering one (a backtick,
+    a no-space redirect, a quote escaped inside an outer quote). Closing those needs `runs_hook`
+    widened too, which is a design change on its own rather than a local match.
+    """
+    text = str(command).replace("\\", "/")
+    escaped = re.escape(name)
+    quoted = rf'"(?:[^"]*/)?{escaped}"' + "|" + rf"'(?:[^']*/)?{escaped}'"
+    bare = rf"(?:^|[\s\"'(])(?:[^\s\"'()|&;]*/)?{escaped}(?=$|[\s\"')|&;])"
+    return re.search(quoted, text) is not None or re.search(bare, text) is not None
 
 
 def matcher_sees_bash(matcher):
@@ -577,7 +610,7 @@ def registration_problems(claude_home):
         if not isinstance(group, dict):
             continue
         for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or GUARD_STEM not in str(hook.get("command", "")):
+            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), GUARD_NAME):
                 continue
             named += 1
             if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
@@ -612,7 +645,7 @@ def registration_problems(claude_home):
             continue
         sweep_path = claude_home / "hooks" / SWEEP_NAME
         for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or SWEEP_STEM not in str(hook.get("command", "")):
+            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), SWEEP_NAME):
                 continue
             sweeps_named += 1
             if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
@@ -971,7 +1004,9 @@ def main():
     for g in pre:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if GUARD_STEM not in str(h.get("command", ""))]
+            hooks_list[:] = [
+                h for h in hooks_list if not names_hook(h.get("command", ""), GUARD_NAME)
+            ]
     group = next((g for g in pre if g.get("matcher") == "Bash"), None)
     if group is None:
         group = {"matcher": "Bash", "hooks": []}
@@ -985,7 +1020,9 @@ def main():
     for g in ends:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if SWEEP_STEM not in str(h.get("command", ""))]
+            hooks_list[:] = [
+                h for h in hooks_list if not names_hook(h.get("command", ""), SWEEP_NAME)
+            ]
     end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
     if end_group is None:
         end_group = {"hooks": []}

@@ -504,7 +504,7 @@ class TestRegistration(StampCase):
         for label, entry, expected in (
             (
                 "decoy",
-                {"type": "command", "command": "echo stray-process-sweep"},
+                {"type": "command", "command": "echo /tmp/stray-process-sweep.py"},
                 "does not run the deployed one",
             ),
             ("timeout", dict(good, timeout=1), "carries timeout 1"),
@@ -596,15 +596,14 @@ class TestRegistration(StampCase):
                 matcher_lines = [p for p in problems if "matcher" in p and event in p]
                 self.assertEqual(len(matcher_lines), 1, problems)
 
-    def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
-        """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
+    def test_the_guard_is_deployed_and_registered_under_one_name(self):
+        """The deployed file and the registered command both name GUARD_NAME, or a rename on
+        one side and not the other reports the registration absent forever."""
         self.install()
-        self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
         live = self.home / "hooks" / install.GUARD_NAME
         self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
-        self.assertIn(
-            install.GUARD_STEM, self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        )
+        registered = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertTrue(install.names_hook(registered, install.GUARD_NAME))
 
     def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
         """A budget larger than this installer writes is better than it, not worse."""
@@ -714,6 +713,45 @@ class TestRegistration(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 1)
         self.install()
         self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_wrapper_merely_containing_a_stem_is_not_the_kits_registration(self):
+        """A maintainer's own hook whose command merely contains a stem, such as
+        `my-gh-write-guard-audit.sh`, is neither counted by `--report` as this kit's registration
+        nor removed by a re-run. A substring test on the whole command claimed both; judging
+        ownership by the file name a token names does neither."""
+        for event, wrapper_name in (
+            ("PreToolUse", "my-gh-write-guard-audit.sh"),
+            ("SessionEnd", "my-stray-process-sweep-audit.sh"),
+        ):
+            with self.subTest(event=event):
+                self.install()
+                data = self._settings()
+                wrapper = {"type": "command", "command": f"bash /usr/local/bin/{wrapper_name}"}
+                data["hooks"][event][0]["hooks"].append(wrapper)
+                self._write(data)
+                self.assertEqual(install.registration_problems(self.home), [])
+                self.install()
+                hooks = self._settings()["hooks"][event][0]["hooks"]
+                self.assertIn(wrapper, hooks, "the wrapper was removed by a re-run")
+
+    def test_names_hook_agrees_with_runs_hook_on_every_shape_it_accepts(self):
+        """A command `runs_hook` already treats as running the deployed hook must count as
+        named too, or a re-run leaves a duplicate registration in place while `--report` calls
+        the hook absent."""
+        plain = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")
+        metachars = pathlib.Path("/opt/Program Files (x86)/a&b;c|d/gh-write-guard.py")
+        for label, path, command in (
+            ("bare", plain, f'"python3" "{plain}"'),
+            ("trailing-semicolon", plain, f'"python3" "{plain}"; true'),
+            ("parenthesized", plain, f"(python3 {plain})"),
+            ("bash-c", plain, f'bash -c "python3 {plain} --x"'),
+            ("unbalanced-quote-comment", plain, f'"python3" "{plain}" # it\'s'),
+            ("double-quoted-metacharacters", metachars, f'"python3" "{metachars}"'),
+            ("single-quoted-metacharacters", metachars, f"'python3' '{metachars}'"),
+        ):
+            with self.subTest(shape=label):
+                self.assertTrue(install.runs_hook(command, path), command)
+                self.assertTrue(install.names_hook(command, install.GUARD_NAME), command)
 
 
 class TestContainmentPrefix(StampCase):
