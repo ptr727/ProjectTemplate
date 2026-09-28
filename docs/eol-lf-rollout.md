@@ -27,7 +27,8 @@ file the new default touches, in the pull request that added this doc.
 For a `release` repo, or an operational repo whose `lineEndings` is already `lf`: pull the hub's
 new `.editorconfig`, confirm `.gitattributes` needs no change (it doesn't, per the policy above),
 renormalize every tracked file the new default now covers from CRLF to LF (skip anything with
-a genuine reason to stay CRLF, there is none known outside `Vantage-Config`, see below), run
+a genuine reason to stay CRLF, pinned narrowly by file type rather than kept as a whole-repo
+default, per `Vantage-Config`'s own `*.dc` pin below), run
 `editorconfig-checker` clean, and open the PR through the repo's normal branching model
 ([`branching-and-release-model`][branching-and-release-model] Skill). Isolate the
 renormalization from any content edit in its own commit, verified with
@@ -36,10 +37,13 @@ discipline". After merge, check the box below and reconcile the repo's `registry
 entry per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] if the
 conversion surfaced anything the registry didn't already record.
 
-For an operational repo whose `lineEndings` is `crlf` (only `Vantage-Config` today): no
-conversion. Its global default follows its consuming Windows-native app, not the fleet default,
-per [`references/line-endings.md`][line-endings] "Operational (config) repos". Its box below is
-checked as **not applicable**, not as converted.
+For an operational repo whose `lineEndings` is `crlf`: no conversion, since its global default
+follows its consuming Windows-native app rather than the fleet default, per
+[`references/line-endings.md`][line-endings] "Operational (config) repos", and its box below is
+checked as **not applicable** rather than as converted. None currently do: `Vantage-Config` was
+the one operational repo recording `crlf`, and it has since converted to the fleet `lf` default
+with only its Design Center `.dc` exports pinned CRLF (ptr727/Vantage-Config#28), so its box
+below is checked as converted rather than not applicable.
 
 ## Rollout Checklist
 
@@ -70,7 +74,9 @@ registry as of this doc's authorship, except where an entry records a later recl
 - [ ] **PhotoCleaner** (`release`)
 - [ ] **MediaTools** (`release`)
 - [ ] **AudioCleaner** (`release`)
-- [x] **Vantage-Config** (`operational`, `lineEndings: crlf`): not applicable, stays CRLF
+- [x] **Vantage-Config** (`operational`, `lineEndings: lf` since its ptr727/Vantage-Config#28
+      conversion): converted outside this rollout, with only its Design Center `.dc` exports
+      pinned CRLF, not the "not applicable" case above
 - [ ] **HolidayLights** (`release`)
 - [ ] **Blog** (`release`, `lineEndings: lf`): already on the new default's value, a documented
       release-repo exception before this rollout, per its `registry/repos.json` `driftNotes`.
