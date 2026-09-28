@@ -8,8 +8,8 @@ often differs, and when it does, adapt these fields to match the repo's actual t
 than copying verbatim (a verbatim copy that misdescribes the repo is inaccurate and gets rejected
 in review). The axes that commonly vary per repo:
 
-- **Type checker in CI**: pyright strict, mypy in CI with pyright editor-only (Pylance), or both.
-  Whichever runs in CI is the one the clean-compile and the CI gate invoke.
+- **Type checker in CI**: pyright strict, mypy with its strict flags in CI and the editor with
+  pyright editor-only (Pylance), or both. The clean-compile runs every checker CI runs.
 - **Dependency declaration**: `[dependency-groups]`, or PEP 621 `[project.optional-dependencies]`
   (dev tools installed with `uv sync --extra <group>`).
 - **Versioning / publishing**: a published package (`_version.py` plus a version source,
