@@ -739,13 +739,16 @@ class TestRegistration(StampCase):
         """A command `runs_hook` already treats as running the deployed hook must count as
         named too, or a re-run leaves a duplicate registration in place while `--report` calls
         the hook absent."""
-        path = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")
-        for label, command in (
-            ("bare", f'"python3" "{path}"'),
-            ("trailing-semicolon", f'"python3" "{path}"; true'),
-            ("parenthesized", f"(python3 {path})"),
-            ("bash-c", f'bash -c "python3 {path} --x"'),
-            ("unbalanced-quote-comment", f'"python3" "{path}" # it\'s'),
+        plain = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")
+        metachars = pathlib.Path("/opt/Program Files (x86)/a&b;c|d/gh-write-guard.py")
+        for label, path, command in (
+            ("bare", plain, f'"python3" "{plain}"'),
+            ("trailing-semicolon", plain, f'"python3" "{plain}"; true'),
+            ("parenthesized", plain, f"(python3 {plain})"),
+            ("bash-c", plain, f'bash -c "python3 {plain} --x"'),
+            ("unbalanced-quote-comment", plain, f'"python3" "{plain}" # it\'s'),
+            ("double-quoted-metacharacters", metachars, f'"python3" "{metachars}"'),
+            ("single-quoted-metacharacters", metachars, f"'python3' '{metachars}'"),
         ):
             with self.subTest(shape=label):
                 self.assertTrue(install.runs_hook(command, path), command)

@@ -35,9 +35,6 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-# Each hook's file name, and the substring identifying its registration in settings.json.
-# Named once, since a registration written under one spelling and searched for under another is reported absent forever.
-# The guard was spelled by hand on the search side and by position on the deploy side, which is that same drift one rename away.
 GUARD_NAME = "gh-write-guard.py"
 GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
@@ -130,10 +127,17 @@ def names_hook(command, name):
     whose file name merely contains this kit's stem, such as `my-gh-write-guard-audit.sh`
     containing `gh-write-guard`, is not claimed: the character right after the stem there is
     `-`, not one of the boundary characters this match requires.
+
+    A quoted path is read to its closing quote rather than through the same boundary characters,
+    since those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
+    `runs_hook` accepts whole, and the bare-word boundary class below cannot cross the space or
+    the parentheses inside it to reach the deployed name.
     """
     text = str(command).replace("\\", "/")
-    pattern = rf"(?:^|[\s\"'(])(?:[^\s\"'()|&;]*/)?{re.escape(name)}(?=$|[\s\"')|&;])"
-    return re.search(pattern, text) is not None
+    escaped = re.escape(name)
+    quoted = rf'"(?:[^"]*/)?{escaped}"' + "|" + rf"'(?:[^']*/)?{escaped}'"
+    bare = rf"(?:^|[\s\"'(])(?:[^\s\"'()|&;]*/)?{escaped}(?=$|[\s\"')|&;])"
+    return re.search(quoted, text) is not None or re.search(bare, text) is not None
 
 
 def matcher_sees_bash(matcher):
