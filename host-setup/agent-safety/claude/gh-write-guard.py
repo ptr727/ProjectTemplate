@@ -1742,15 +1742,14 @@ def _bound_in_condition(cond):
     The two forms are `[ "$i" -lt 120 ]` and `(( SECONDS < 600 ))`, where a shift compares nothing.
     A comparison operator counts only as an argument of a `[`, `[[`, or `test` invocation.
     A `&&` inside `[[ ]]` joins two tests rather than ending one, so only `]]` closes it.
-    A `$(...)` operand is a command of its own, so its flags compare nothing and its parentheses end no test.
-    An escaped grouping parenthesis inside the test neither ends it nor hides its comparison.
+    A `$(...)`, `<(...)`, or backtick operand is a command of its own, so its flags compare nothing.
+    Its parentheses, and a test's own grouping ones, end no test.
     Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
     The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
     """
     if _ARITHMETIC_BOUND.search(" ".join(cond)):
         return True
     closer = None
-    depth = 0
     for k, tok in enumerate(cond):
         name = tok.rsplit("/", 1)[-1]
         if closer is None:
@@ -1759,15 +1758,29 @@ def _bound_in_condition(cond):
                 or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
             ):
                 closer = _TEST_CLOSERS[name]
-                depth = 0
-        elif tok and set(tok) <= set("()"):
-            if depth or cond[k - 1] == "$":
-                depth = max(0, depth + tok.count("(") - tok.count(")"))
-        elif depth:
+                depth = group = 0
+                tick = False
             continue
+        opens, closes = tok.count("("), tok.count(")")
+        if "`" in tok:
+            tick ^= tok.count("`") % 2 == 1
+        elif tick:
+            pass
+        elif (opens or closes) and set(tok) <= set("()|&;<>"):
+            if depth:
+                depth = max(0, depth + opens - closes)
+            elif opens and (cond[k - 1] == "$" or tok in ("<(", ">(")):
+                depth = opens
+            else:
+                group += opens
+                if closes > group:
+                    closer = None
+                group = max(0, group - closes)
+        elif depth:
+            pass
         elif tok in _TEST_COMPARISONS:
             return True
-        elif tok == closer or (closer != "]]" and _is_separator(tok)):
+        elif (closer and tok == closer) or (closer != "]]" and _is_separator(tok)):
             closer = None
     return False
 
@@ -4241,6 +4254,36 @@ _WAIT_CASES = [
         "while builtin test $i -lt 3; do sleep 1; i=$((i+1)); done",
         "allow",
         "`builtin test` runs the same test builtin",
+    ),
+    (
+        "while ! [ -n `ls -lt out` ]; do sleep 30; done",
+        "deny",
+        "a flag inside a backtick substitution is that command's flag, not a comparison",
+    ),
+    (
+        "while [ `cat n` -lt 3 ]; do sleep 1; done",
+        "allow",
+        "a backtick operand ends before the comparison after it",
+    ),
+    (
+        "while ! [[ -s <(ls -lt out) ]]; do sleep 30; done",
+        "deny",
+        "a flag inside a process substitution is that command's flag, not a comparison",
+    ),
+    (
+        "while ! [[ $(true |(cat) | ls -lt out) ]]; do sleep 30; done",
+        "deny",
+        "a subshell fused to a pipe inside a substitution keeps the substitution open",
+    ),
+    (
+        'while test "" != "$x" -a $i -lt 3; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an empty operand does not close a `test` invocation",
+    ),
+    (
+        "while ! (test -f x) && ls -lt out; do sleep 30; done",
+        "deny",
+        "a subshell's closing parenthesis ends the `test` inside it, so a later flag is no bound",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
