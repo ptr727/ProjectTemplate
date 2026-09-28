@@ -31,7 +31,7 @@ Read the repo's `OPERATIONS.md` local-verification commands before substituting 
 Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
 
 - **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
-  pyright strict (or mypy where the repo requires it).
+  pyright strict, mypy strict, or both.
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
@@ -72,8 +72,9 @@ than one checker is normal when each serves a purpose (the .NET side pairs CShar
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
 editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
-command joins the clean-compile. A repo with no such need stays pyright-only, which is lighter and
-inherently consistent.
+command joins the clean-compile. mypy may also be a build repo's only CI checker, run strict
+(`strict = true`) with pyright kept editor-only, and a repo with no need for both runs one checker,
+which is lighter and inherently consistent.
 
 ## Local development loop
 
