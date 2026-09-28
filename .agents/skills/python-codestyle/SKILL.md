@@ -56,9 +56,10 @@ declaration, versioning, VS Code config), see `references/profiles.md`.
 | [pytest][docs-link] | test runner (build profile only, lint-only uses `unittest`) | `pyproject.toml` `[tool.pytest.ini_options]` |
 
 **Type checking targets strongly typed, deterministic code.** pyright in strict mode is the
-default baseline on first-party code (a repo may instead run mypy in CI and keep pyright
-editor-only via Pylance, per the next paragraph): `[tool.pyright]` `strict = ["src"]`, or the
-integration package for a Home Assistant repo, with tests run in standard mode. pyright is the
+default baseline on first-party code (a repo may instead run mypy strict in CI and keep
+pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
+`strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
+standard mode. pyright is the
 anchor because Pylance embeds it, so the editor and the CLI/CI (`uv run pyright`) run the same
 engine and never disagree. The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
@@ -72,9 +73,10 @@ than one checker is normal when each serves a purpose (the .NET side pairs CShar
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
 editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
-command joins the clean-compile. mypy may also be a build repo's only CI checker, run strict
-(`strict = true`) with pyright kept editor-only, and a repo with no need for both runs one checker,
-which is lighter and inherently consistent.
+command joins the clean-compile. mypy may also be a build repo's only CI checker, run with its
+strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A
+pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
+engine.
 
 ## Local development loop
 

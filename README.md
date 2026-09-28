@@ -258,7 +258,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ### If a Python Project
 
-- Configure ruff and a type checker in `pyproject.toml`, either pyright strict or mypy in CI with pyright editor-only. Whichever runs in CI is the gate.
+- Configure ruff and a type checker in `pyproject.toml`: pyright strict, mypy strict in CI with pyright editor-only, or both. Whichever runs in CI is the gate.
 
 ### If Both C# and Python
 
