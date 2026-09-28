@@ -31,7 +31,7 @@ Read the repo's `OPERATIONS.md` local-verification commands before substituting 
 Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
 
 - **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
-  pyright strict, mypy strict, or both.
+  and pyright strict, mypy strict, or both as the CI type checker.
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
