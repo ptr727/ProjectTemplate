@@ -17,7 +17,7 @@ Prerequisite: complete [host setup][host-setup] first. Without git config, an SS
 | --------- | ------ | ------- |
 | `gh` CLI | `ghcr.io/devcontainers/features/github-cli:1` | Issue/PR/release management from inside the container |
 | Common utilities | `ghcr.io/devcontainers/features/common-utils:2` | bash, curl, wget, sudo, `vscode` user |
-| VS Code extensions | `customizations.vscode.extensions` in each `devcontainer.json` | The standard set, the container's language defaults, and the Docker extension, so the container has the workspace's tooling |
+| VS Code extensions | `customizations.vscode.extensions` in each `devcontainer.json` | The standard set, the container's language defaults, and the Docker extension |
 
 The .NET container additionally ships the `csharpier`/`dotnet-outdated` local tools (restored by `catalog/snippets/devcontainer/dotnet/post-create.sh`). The Python container additionally ships `uv` (installed by `catalog/snippets/devcontainer/python/post-create.sh` from a version-pinned URL) and pre-syncs the Python package venv where one is present.
 
