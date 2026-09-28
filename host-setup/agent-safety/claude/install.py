@@ -35,6 +35,9 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 
+# NAME serves both the writer (DEPLOYED_HOOKS, hook_dst/sweep_dst) and the reader (`names_hook`).
+# A rename made on one side and not the other reports the registration absent forever.
+# STEM is read by the test suite alone now, as a substring convenience over a real command.
 GUARD_NAME = "gh-write-guard.py"
 GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
@@ -132,6 +135,12 @@ def names_hook(command, name):
     since those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
     `runs_hook` accepts whole, and the bare-word boundary class below cannot cross the space or
     the parentheses inside it to reach the deployed name.
+
+    Known gap, not chased further here: an unquoted path whose own directory holds one of the
+    bare-word boundary characters, and a handful of shell compositions `runs_hook` itself only
+    accepts because it is handed the exact literal path rather than discovering one (a backtick,
+    a no-space redirect, a quote escaped inside an outer quote). Closing those needs `runs_hook`
+    widened too, which is a design change on its own rather than a local match.
     """
     text = str(command).replace("\\", "/")
     escaped = re.escape(name)

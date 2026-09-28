@@ -596,15 +596,14 @@ class TestRegistration(StampCase):
                 matcher_lines = [p for p in problems if "matcher" in p and event in p]
                 self.assertEqual(len(matcher_lines), 1, problems)
 
-    def test_the_guard_is_deployed_and_searched_for_under_one_name(self):
-        """The sweep routes both halves through a constant, and the guard spelled one half by hand."""
+    def test_the_guard_is_deployed_and_registered_under_one_name(self):
+        """The deployed file and the registered command both name GUARD_NAME, or a rename on
+        one side and not the other reports the registration absent forever."""
         self.install()
-        self.assertTrue(install.GUARD_NAME.startswith(install.GUARD_STEM))
         live = self.home / "hooks" / install.GUARD_NAME
         self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
-        self.assertIn(
-            install.GUARD_STEM, self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        )
+        registered = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertTrue(install.names_hook(registered, install.GUARD_NAME))
 
     def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
         """A budget larger than this installer writes is better than it, not worse."""
