@@ -350,6 +350,8 @@ _GIT_GLOBAL_VALUE_OPTS = {
 _PUNCTUATION_CHARS = "();<>|&\n"
 _SHELL_OP_CHARS = set(_PUNCTUATION_CHARS)
 _EXTGLOB_PREFIX = "@?*+!"
+_WORD_BREAK_CHARS = " \t\n;&|<>("
+_CASE_KEYWORD = re.compile(r"(?:case|esac)(?=[ \t\n;&|<>()]|$)")
 _COND_PRECEDERS = {"!", "if", "then", "elif", "else", "while", "until", "do", "time", "{"}
 _DQ_ESCAPE = re.compile(r'\\([$`"\\\n])')
 
@@ -387,7 +389,7 @@ def _skip_quote_body(cmd, i, closer):
 
 
 _HEREDOC_IN_GROUP = re.compile(
-    r"<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Za-z_][A-Za-z0-9_.\-]*))"
+    r"(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Za-z_][A-Za-z0-9_.\-]*))"
 )
 
 
@@ -429,7 +431,7 @@ def _skip_nested(cmd, i):
     if cmd.startswith("$(", i):
         return _skip_group(cmd, i + 2, "(", ")", comments=True)
     if cmd.startswith("${", i):
-        return _skip_group(cmd, i + 2, "{", "}", comments=False)
+        return _skip_group(cmd, i + 2, None, "}", comments=False)
     return None
 
 
@@ -439,9 +441,10 @@ def _skip_group(cmd, i, opener, closer, comments):
     as in a command substitution, a `#` opening a word hides the rest of its line, a `closer`
     included, and a heredoc's body is skipped line by line to its delimiter, so a quote in the body
     does not span past it. A parameter expansion, arithmetic, or an extglob pattern passes False,
-    since a `#` there is text and a `<<` is no heredoc.
+    since a `#` there is text and a `<<` is no heredoc. Bash counts no nested `{` inside `${`, so
+    a brace group passes None as its `opener`. A `)` ending a `case` pattern closes nothing.
     """
-    depth = 0
+    depth = cases = 0
     pending = []
     while i < len(cmd):
         opened = _HEREDOC_IN_GROUP.match(cmd, i) if comments else None
@@ -460,13 +463,18 @@ def _skip_group(cmd, i, opener, closer, comments):
             i = nxt
             continue
         ch = cmd[i]
+        word_start = cmd[i - 1] in _WORD_BREAK_CHARS
+        if comments and word_start and _CASE_KEYWORD.match(cmd, i):
+            cases += 1 if cmd.startswith("case", i) else -1 if cases else 0
+            i += 4
+            continue
         if ch == opener:
             depth += 1
         elif ch == closer:
-            if not depth:
+            if not depth and not (cases and closer == ")"):
                 return i + 1
-            depth -= 1
-        elif comments and ch == "#" and (cmd[i - 1] in " \t\r" or cmd[i - 1] in _SHELL_OP_CHARS):
+            depth -= 1 if depth else 0
+        elif comments and ch == "#" and word_start:
             end = cmd.find("\n", i)
             if end < 0:
                 break
@@ -476,13 +484,16 @@ def _skip_group(cmd, i, opener, closer, comments):
     raise ValueError("unterminated group")
 
 
-def _arith_depth(run, depth):
-    """The arithmetic nesting after an operator `run`, None outside `(( ))`, else the open parens."""
+def _arith_depth(run, depth, cmd, at):
+    """The arithmetic nesting after an operator `run` found at `cmd[at]`, None outside `(( ))`, else
+    the open parens. A `((` whose group closes on a lone `)` is nested subshells, as bash reads it.
+    """
     k = 0
     while k < len(run):
         if depth is None:
             if run.startswith("((", k):
-                depth = 0
+                if _closes_as_arithmetic(cmd, at + k + 2):
+                    depth = 0
                 k += 2
                 continue
         elif run[k] == "(":
@@ -496,6 +507,20 @@ def _arith_depth(run, depth):
                 continue
         k += 1
     return depth
+
+
+def _closes_as_arithmetic(cmd, i):
+    """True where the parens opened just before `cmd[i]` close together, on `))`."""
+    depth = 0
+    while i < len(cmd):
+        if cmd[i] == "(":
+            depth += 1
+        elif cmd[i] == ")":
+            if not depth:
+                return cmd[i + 1 : i + 2] == ")"
+            depth -= 1
+        i += 1
+    return True
 
 
 def _heredoc_line_tokens(line):
@@ -524,6 +549,7 @@ def _context_lex(cmd, comments=True):
     """
     toks, word, heredocs = [], [], []
     started = quoted = False
+    cmd_pos = True
     word_at = 0
     arith = None  # paren depth inside `(( ))`, None outside it
     in_cond = False  # inside `[[ ]]`
@@ -531,20 +557,21 @@ def _context_lex(cmd, comments=True):
     tag_wanted = None  # (index the `<<` ended at, dash form) until its delimiter word arrives
 
     def flush():
-        nonlocal started, quoted, in_cond, regex, tag_wanted
+        nonlocal started, quoted, in_cond, regex, tag_wanted, cmd_pos
         if not started:
             return
         tok = "".join(word)
         bare = not quoted
         word.clear()
         started = quoted = False
-        at_command = not toks or _is_shell_op(toks[-1]) or toks[-1] in _COND_PRECEDERS
+        at_command = cmd_pos
+        cmd_pos = at_command and bare and tok in _COND_PRECEDERS
         toks.append(tok)
         if tag_wanted is not None:
             end, dash = tag_wanted
             if word_at == end and tok.startswith("-"):
                 dash, tok = True, tok[1:]
-            if tok:
+            if tok or not bare:
                 heredocs.append((tok, dash))
                 tag_wanted = None
             else:
@@ -560,7 +587,7 @@ def _context_lex(cmd, comments=True):
     while i < n:
         ch = cmd[i]
         if regex is not None and (
-            ch in "(|<>#" or (ch == ")" and regex) or (regex and ch in " \t\r")
+            ch in "(|<>#" or (ch == ")" and regex) or (regex and ch in " \t")
         ):
             regex += (ch == "(") - (ch == ")")
             if not started:
@@ -569,11 +596,11 @@ def _context_lex(cmd, comments=True):
             word.append(ch)
             i += 1
             continue
-        if ch in " \t\r":
+        if ch in " \t":
             flush()
             i += 1
             continue
-        if ch == "#" and comments and not started and arith is None:
+        if ch == "#" and comments and not started and arith is None and cmd[i - 1 : i] != ")":
             end = cmd.find("\n", i)
             i = n if end < 0 else end
             continue
@@ -603,7 +630,8 @@ def _context_lex(cmd, comments=True):
             regex = None
             if arith is None and "<<" in run and "<<<" not in run:
                 tag_wanted = (j, False)
-            arith = _arith_depth(run, arith)
+            arith = _arith_depth(run, arith, cmd, i)
+            cmd_pos = not _is_redir_op(run)
             i = j
             if "\n" in run:
                 tag_wanted = None
@@ -4236,6 +4264,46 @@ _WAIT_CASES = [
         "a quoted `[[` argument opens no conditional, so a later `=~` swallows nothing",
     ),
     (
+        "echo \"$(case $x in a) echo \"'\";; esac)\"\nwhile true; do sleep 1; done\n# it's $'\\''",
+        "deny",
+        "a `case` pattern's `)` inside a substitution does not close it",
+    ),
+    (
+        "((git fetch) && echo x) # it's\nwhile true; do sleep 1; done\n# it's $'\\''",
+        "deny",
+        "a `((` that closes on a lone `)` is nested subshells, not arithmetic",
+    ),
+    (
+        "cat <<''\nit's\n\nwhile true; do sleep 1; done\n# it's $'\\''",
+        "deny",
+        "an empty quoted heredoc delimiter still opens a heredoc, ending at the first empty line",
+    ),
+    (
+        "out=\"$(tr a b <<<'EOF'\n)\"\nwhile true; do sleep 1; done\nEOF\n)\" # it's $'\\''",
+        "deny",
+        "a herestring inside a substitution is not a heredoc",
+    ),
+    (
+        "echo a\r# ; while true; do sleep 1; done\n# it's",
+        "deny",
+        "a carriage return is a word character, so a `#` after one opens no comment",
+    ),
+    (
+        "echo $(date)#x ; while true; do sleep 1; done\n# it's",
+        "deny",
+        "a `#` glued to a substitution's `)` is text, not a comment",
+    ),
+    (
+        "echo do [[ x =~ a|while true; do sleep 1; done # it's",
+        "deny",
+        "a keyword spelled as an argument does not put a later `[[` in command position",
+    ),
+    (
+        "echo ${x:-{}\nwhile true; do sleep 1; done\necho } # it's $'\\''",
+        "deny",
+        "a `{` inside a parameter expansion does not nest, so its first `}` closes it",
+    ),
+    (
         "bash -c 'until [ -f /tmp/done ]; do sleep 10; done'",
         "deny",
         "a wrapper payload is read the same as a bare command line",
@@ -4744,6 +4812,11 @@ _CONTEXT_LEX_CASES = [
         "[[ $x =~ a|#b ]] # it's",
         ["[[", "$x", "=~", "a|#b", "]]"],
         "a `=~` operand holds `|` and `#`",
+    ),
+    (
+        "x; [[ $x =~ a|#b ]] # it's",
+        ["x", ";", "[[", "$x", "=~", "a|#b", "]]"],
+        "a `[[` after a separator opens a conditional",
     ),
     (
         "[[ $x =~ (a b|c) ]]; y # it's",
