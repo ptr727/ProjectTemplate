@@ -1930,12 +1930,21 @@ def _code_view(text):
     A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
     way, so its body is dropped too, keeping only the `key:` line itself.
     An `if:` body is kept, since its value is always an expression and a multi-line one is written `if: >-`.
+    It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
     """
     out = []
     skip_indent = None
+    fold_indent = None
     for ln in text.splitlines():
         if ln.lstrip().startswith("#"):
             continue
+        if fold_indent is not None:
+            if not ln.strip():
+                continue
+            if (len(ln) - len(ln.lstrip())) > fold_indent:
+                out[-1] += " " + ln.strip()
+                continue
+            fold_indent = None
         if skip_indent is not None:
             if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
                 skip_indent = None  # a dedent back to (or past) the key column ends the block body
@@ -1951,7 +1960,9 @@ def _code_view(text):
             key_col += dash.end()
             stripped = stripped[dash.end() :]
         if _BLOCK_SCALAR_KEY.match(stripped):
-            if not _IF_KEY.match(stripped):
+            if _IF_KEY.match(stripped):
+                fold_indent = key_col
+            else:
                 skip_indent = key_col
         elif dash and _BARE_BLOCK_SCALAR.match(stripped):
             # A bare `- |` has no key, so its own boundary is the dash's column, not a key past it.
@@ -3510,6 +3521,17 @@ def _selftest():
             0,
         ),
         (
+            "publish-release.yml stub whose folded if: >- wraps inside the required token",
+            publish_stub.replace(
+                "    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}\n",
+                "    if: >-\n"
+                "      ${{ needs.plan.outputs.publish == 'true' && needs.validate.result\n"
+                "      == 'success' }}\n",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
             "publish-release.yml stub naming the validation token only in a name: | body",
             publish_stub.replace(
                 "    name: Publish project release job\n",
@@ -3769,14 +3791,14 @@ def _selftest():
             "  include:\n    - |",
         ),
         (
-            "a folded `if: >-` keeps its body, an expression rather than prose",
-            "  publish:\n    if: >-\n      ${{ a\n      && b }}\n    uses: x\n",
-            "  publish:\n    if: >-\n      ${{ a\n      && b }}\n    uses: x",
+            "a folded `if: >-` keeps its body, folded onto the key line",
+            "  publish:\n    if: >-\n      ${{ a\n\n      && b }}\n    uses: x\n",
+            "  publish:\n    if: >- ${{ a && b }}\n    uses: x",
         ),
         (
             "a step's folded `- if: >-` keeps its body too",
             "      - if: >-\n          ${{ a }}\n        run: echo\n",
-            "      - if: >-\n          ${{ a }}\n        run: echo",
+            "      - if: >- ${{ a }}\n        run: echo",
         ),
     ]
     for label, text, want in code_view_cases:
