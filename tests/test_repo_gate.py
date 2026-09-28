@@ -132,13 +132,13 @@ class TestShaPin(TreeCase):
         self.assertIn("w.yml:5:", repo_gate.check_sha_pin(self.tmp, files)[0])
 
     def test_a_value_continued_on_the_next_line_is_still_read(self) -> None:
-        files = self.workflow(
-            "jobs:\n  a:\n    steps:\n      - uses:\n          actions/checkout@v4\n"
-        )
-        hits = repo_gate.check_sha_pin(self.tmp, files)
-        self.assertEqual(1, len(hits))
-        self.assertIn("w.yml:4:", hits[0])
-        self.assertIn("floating ref", hits[0])
+        for gap in ("\n", "\n\n", "\r\n\r\n"):
+            with self.subTest(gap=gap):
+                body = f"jobs:\n  a:\n    steps:\n      - uses:{gap}          actions/checkout@v4\n"
+                hits = repo_gate.check_sha_pin(self.tmp, self.workflow(body))
+                self.assertEqual(1, len(hits))
+                self.assertIn("w.yml:4:", hits[0])
+                self.assertIn("floating ref", hits[0])
 
     def test_a_quoted_external_pin_is_read_without_its_quotes(self) -> None:
         files = self.workflow(
