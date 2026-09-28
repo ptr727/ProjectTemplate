@@ -41,7 +41,7 @@ from pathlib import Path
 
 # GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {"dotnet/nbgv"}
-USES = re.compile(r"^[ \t]*-?[ \t]*uses:[ \t]*(?P<ref>[^\s#]+)", re.MULTILINE)
+USES = re.compile(r"^[ \t]*-?[ \t]*uses:[ \t]*(?:\r?\n[ \t]+)?(?P<ref>[^\s#]+)", re.MULTILINE)
 PIN = re.compile(r"^[0-9a-f]{40}$")
 WORKFLOW = re.compile(r"workflows/.*\.ya?ml$")
 # What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.
