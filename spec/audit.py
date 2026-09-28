@@ -2162,6 +2162,16 @@ def python_directories_caller_findings(path, text, entry):
                 ),
             )
         ]
+    if re.search(r'^[ \t]*python-directories:[ \t]*"[^"\n]*\\', validate_job, re.MULTILINE):
+        return unread + [
+            (
+                "DRIFT",
+                (
+                    f"python-directories: {path} passes a double-quoted value carrying a backslash "
+                    "escape. Write it unquoted, or as a literal (|) block, one directory per line."
+                ),
+            )
+        ]
     declared_text = workflow_input_text(validate_job, "python-directories") or ""
     declared = sorted(
         {
@@ -6232,6 +6242,18 @@ def _selftest():
             print(
                 f"  FAIL python_directories_caller_findings [{label}] -> {got} finding(s), expected {expected}"
             )
+    py_caller_escaped = py_caller_plain.replace(
+        "python-directories: Tools", 'python-directories: "Tools\\nOther"'
+    )
+    escaped_got = python_directories_caller_findings(
+        py_caller_path, py_caller_escaped, {"pythonDirectories": ["Other", "Tools"]}
+    )
+    if len(escaped_got) != 1 or "backslash escape" not in escaped_got[0][1]:
+        ok = False
+        python_caller_ok = False
+        print(
+            f"  FAIL python_directories_caller_findings [an escaped double-quoted value is refused] -> {escaped_got}"
+        )
     if python_caller_ok:
         print(
             "  ok   python_directories_caller_findings: a caller's declared python-directories input is compared against the registry"
