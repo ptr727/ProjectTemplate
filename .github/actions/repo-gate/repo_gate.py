@@ -218,9 +218,10 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
-    A local (`./`) or self-repository (`$/`) ref names no ref to pin and is skipped, and so is
-    one starting with a bare `.github/`, unvalidated. References under another owner are
-    shape-checked but not resolved.
+    A local (`./`) or self-repository (`$/`) ref names no ref to pin and is skipped, once any
+    surrounding YAML quotes are stripped. A ref starting with a bare `.github/` is reported,
+    because GitHub reads it as `owner/repo` rather than as a path and it fails at run time.
+    References under another owner are shape-checked but not resolved.
 
     Resolution is scoped to the scanned repository's own owner, because that is where the fleet's
     own actions live and where the decay this catches comes from: a squash merge deletes the
@@ -241,7 +242,15 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
             continue
         for m in USES.finditer(text):
             ref = m.group("ref")
-            if ref.startswith(("$/", "./", ".github/")):
+            if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'":
+                ref = ref[1:-1]
+            if ref.startswith(("$/", "./")):
+                continue
+            if ref.startswith(".github/"):
+                line = text[: m.start()].count("\n") + 1
+                bad.append(
+                    f"{rel}:{line}: `uses: {ref}` names no local path without a leading `./`"
+                )
                 continue
             if "@" not in ref:
                 bad.append(f"{rel}: `uses: {ref}` has no ref at all")

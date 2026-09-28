@@ -99,14 +99,34 @@ class TestShaPin(TreeCase):
     def test_a_local_or_self_repository_ref_needs_no_pin(self) -> None:
         for workflow in (
             "./.github/workflows/validate-task.yml",
-            ".github/workflows/validate-task.yml",
             "$/.github/workflows/validate-task.yml",
+            '"./.github/workflows/validate-task.yml"',
+            "'./.github/actions/build'",
         ):
             with self.subTest(ref=workflow):
                 files = self.workflow(f"jobs:\n  a:\n    uses: {workflow}\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
         files = self.workflow(
             "jobs:\n  a:\n    steps:\n      - uses: $/.github/actions/validate-default\n"
+        )
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
+
+    def test_a_bare_github_prefix_is_flagged_as_no_local_path(self) -> None:
+        """GitHub reads `.github/...` as `owner/repo`, so it fails at run time, not a skip."""
+        for workflow in (
+            ".github/workflows/validate-task.yml",
+            '".github/actions/build"',
+            ".github/actions/build@main",
+        ):
+            with self.subTest(ref=workflow):
+                files = self.workflow(f"jobs:\n  a:\n    uses: {workflow}\n")
+                hits = repo_gate.check_sha_pin(self.tmp, files)
+                self.assertEqual(1, len(hits))
+                self.assertIn("no local path", hits[0])
+
+    def test_a_quoted_external_pin_is_read_without_its_quotes(self) -> None:
+        files = self.workflow(
+            f'jobs:\n  a:\n    steps:\n      - uses: "actions/checkout@{PINNED}"\n'
         )
         self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
 
