@@ -347,7 +347,7 @@ jobs:
           fi
 
       # GITHUB_TOKEN cannot hold the workflows scope, so its tag create answers 403 once the branch head carries different workflow files, per D4.7.
-      # The calling publisher is dispatched to release the head instead, and this run cancels itself so no package push follows an untagged version.
+      # Where the head differs only under .github/, the calling publisher is dispatched to release it instead, and this run cancels itself so no package push follows an untagged version.
       - name: Supersede a release the token cannot tag step
         if: ${{ steps.release-exists.outputs.exists == 'false' }}
         env:
@@ -361,6 +361,11 @@ jobs:
           if [[ "$built" == "$head" ]]; then
             echo "Workflows at the built commit match $BRANCH's head; creating the release."
             exit 0
+          fi
+          changed=$(git diff --name-only HEAD FETCH_HEAD)
+          if grep -qv '^\.github/' <<<"$changed"; then
+            echo "::error::$BRANCH moved to $(git rev-parse FETCH_HEAD) with different workflow files and changes outside .github/, so GITHUB_TOKEN cannot tag $(git rev-parse HEAD) and only a new publish may release the head."
+            exit 1
           fi
           publisher="${GITHUB_WORKFLOW_REF%@*}"
           publisher="${publisher##*/}"

@@ -379,7 +379,7 @@ class ReleaseGuardCase(unittest.TestCase):
             lines.append(line[10:])
         script = "\n".join(lines)
 
-        def publish(later_path: str) -> tuple[int, list[str]]:
+        def publish(*later_paths: str) -> tuple[int, list[str]]:
             with tempfile.TemporaryDirectory() as scratch:
                 root = Path(scratch)
                 bin_dir = root / "bin"
@@ -417,7 +417,8 @@ class ReleaseGuardCase(unittest.TestCase):
                 git(work, "push", "origin", "main")
                 built = root / "built"
                 git(root, "clone", str(origin), str(built))
-                (work / later_path).write_text("two\n", encoding="utf-8")
+                for later_path in later_paths:
+                    (work / later_path).write_text("two\n", encoding="utf-8")
                 git(work, "commit", "-am", "later")
                 git(work, "push", "origin", "main")
                 verdict = run(
@@ -440,6 +441,7 @@ class ReleaseGuardCase(unittest.TestCase):
                 return verdict.returncode, logged
 
         self.assertEqual((0, []), publish("src/app.py"))
+        self.assertEqual((1, []), publish(".github/workflows/ci.yml", "src/app.py"))
         self.assertEqual(
             (
                 1,
