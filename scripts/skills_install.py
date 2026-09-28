@@ -229,25 +229,30 @@ def same_directory(a, b):
     return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
 
 
-def registered_elsewhere():
-    """The directory another registration of this marketplace names, where one would be moved.
+def existing_registration():
+    """This marketplace's current registration, as (where it is, whether an add may move it).
 
     `claude plugin marketplace add` re-points an existing registration at the new directory
     without failing, so running it from a worktree would leave Claude Code loading a tree that is
-    about to be removed. A registration whose directory is gone serves nothing, so moving it loses
-    nothing and is left to the add. Raises LookupError where the CLI gives no listing.
+    about to be removed. Only a directory registration whose directory is gone may be moved, since
+    it serves nothing. A directory that cannot be read is kept, as a present one is. Returns None
+    where nothing is registered, and raises LookupError where the CLI gives no listing.
     """
     entry = marketplace_entry()
     if entry is None:
         raise LookupError("`claude plugin marketplace list --json` gave no listing")
     if not entry:
         return None
+    if entry.get("source") != "directory":
+        return f"a {entry.get('source') or 'non-directory'} source", False
     location = entry_location(entry)
     if location is None:
-        return "a source that names no directory"
-    if not Path(location).is_dir() or same_directory(location, ROOT):
-        return None
-    return location
+        return "a directory source naming no directory", False
+    try:
+        gone = not Path(location).is_dir()
+    except OSError:
+        gone = False
+    return location, gone or same_directory(location, ROOT)
 
 
 def register_claude_marketplace():
@@ -262,7 +267,7 @@ def register_claude_marketplace():
     command that moves it, since the add would move it silently.
     """
     try:
-        elsewhere = registered_elsewhere()
+        existing = existing_registration()
     except LookupError as exc:
         print(
             f"{exc}, so whether registering here would move an existing registration is unknown. "
@@ -270,14 +275,22 @@ def register_claude_marketplace():
             file=sys.stderr,
         )
         return False
-    if elsewhere:
-        print(
-            f"Claude Code marketplace '{MARKETPLACE_NAME}' is registered from {elsewhere}, "
-            "left in place. To load it from this checkout instead, run: "
-            f'claude plugin marketplace add "{ROOT}"',
-            file=sys.stderr,
-        )
-        return install_claude_plugin()
+    if existing:
+        location, movable = existing
+        if not movable:
+            print(
+                f"Claude Code marketplace '{MARKETPLACE_NAME}' is registered from {location}, "
+                "left in place. To load it from this checkout instead, run: "
+                f'claude plugin marketplace add "{ROOT}"',
+                file=sys.stderr,
+            )
+            return install_claude_plugin()
+        if not same_directory(location, ROOT):
+            print(
+                f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
+                f"which no longer exists. Registering it from {ROOT}.",
+                file=sys.stderr,
+            )
 
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],

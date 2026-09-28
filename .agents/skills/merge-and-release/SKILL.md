@@ -122,8 +122,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    retried.
 7. In the hub, when the chosen scope includes a release, refresh this machine's Codex and opencode
    copy from the promoted `main` in a detached worktree of its own, never by switching an existing
-   checkout to `main`, since the primary checkout stays on `develop` and the write guard refuses
-   the switch there. Run `git fetch origin main`, then `git worktree add --detach
+   checkout to `main`, since the checkout Claude Code loads in place would move with it. Run `git fetch origin main`, then `git worktree add --detach
    <worktree> origin/main` at a new path in the fleet worktree layout, and from that worktree run
    `python3 scripts/skills_install.py --snapshot-only`, then `python3 scripts/skills_install.py
    --report`, and confirm its snapshot reads current. A fresh worktree holds nothing uncommitted
@@ -143,10 +142,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
    reach this step, the merge in step 3 already landed by then. Two parts, both required, neither
    optional:
-   - The promotion PR's own worktree: fetch and prune, remove the worktree, then fast-forward the
-     base clone to `develop`. Removing first, not after, matters: the base clone cannot check out
-     `develop` while the promotion worktree still has it checked out, one branch checked out in
-     two worktrees at once is refused outright. Never delete `develop`, it is the promotion PR's
+   - The promotion PR's own worktree: fetch and prune, remove the worktree, then bring the base
+     clone to current `develop`, checking `develop` out first only where it sits on another
+     branch, and fast-forwarding it with `git merge --ff-only origin/develop`. Where that checkout
+     is needed, removing first, not after, matters: the base clone cannot check out `develop`
+     while the promotion worktree still has it checked out, one branch checked out in two
+     worktrees at once is refused outright. Never delete `develop`, it is the promotion PR's
      own head, and the repo's auto-delete-head-branches setting is kept off fleet-wide for exactly
      this reason, so nothing does this automatically.
    - A defensive sweep for anything drive-pr's own cleanup should already have removed but might

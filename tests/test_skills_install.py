@@ -722,15 +722,36 @@ class RegisterCase(unittest.TestCase):
         self.assertIn(str(self.elsewhere), self.stderr)
         self.assertIn("claude plugin marketplace add", self.stderr)
 
-    def test_a_registration_whose_directory_is_gone_is_replaced(self) -> None:
+    def test_a_registration_whose_directory_is_gone_is_replaced_and_says_so(self) -> None:
         self.registered_at(self.elsewhere / "removed")
         self.assertTrue(self.run_register())
         self.assertTrue(self.added())
+        self.assertIn(str(self.elsewhere / "removed"), self.stderr)
+        self.assertIn("no longer exists", self.stderr)
 
-    def test_a_registration_naming_no_directory_is_left_in_place(self) -> None:
-        self.entries = [{"name": skills_install.MARKETPLACE_NAME, "source": "github"}]
+    def test_a_registration_whose_directory_cannot_be_read_is_left_in_place(self) -> None:
+        self.registered_at(self.elsewhere)
+        mock.patch("pathlib.Path.is_dir", side_effect=PermissionError).start()
         self.assertTrue(self.run_register())
         self.assertFalse(self.added())
+
+    def test_a_github_registration_is_left_in_place_whether_or_not_its_cache_exists(
+        self,
+    ) -> None:
+        for location in (self.elsewhere, self.elsewhere / "cleared"):
+            with self.subTest(location=location):
+                self.calls.clear()
+                self.entries = [
+                    {
+                        "name": skills_install.MARKETPLACE_NAME,
+                        "source": "github",
+                        "repo": "example/marketplace",
+                        "installLocation": str(location),
+                    }
+                ]
+                self.assertTrue(self.run_register())
+                self.assertFalse(self.added())
+                self.assertIn("github source", self.stderr)
 
     def test_no_listing_registers_nothing_and_fails(self) -> None:
         self.entries = None
