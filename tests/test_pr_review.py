@@ -82,6 +82,31 @@ def review(
     }
 
 
+def request_state(pending: bool = False, events: tuple[str, ...] = ()) -> dict:
+    """What a review request leaves on a pull request, in the shape `REQUEST_STATE` reads it.
+
+    `events` are the ids of review-request events naming the reviewer, oldest first. The request
+    set carries the reviewer where `pending` is true.
+    """
+    bot = {"__typename": "Bot", "login": pr_review.REVIEWER}
+    return {
+        "reviewRequests": {"nodes": [{"requestedReviewer": bot}] if pending else []},
+        "timelineItems": {"nodes": [{"id": e, "requestedReviewer": bot} for e in events]},
+    }
+
+
+RECORDED = (request_state(events=("RRE_1",)), request_state(True, ("RRE_1", "RRE_2")))
+
+
+def answer_request(query: str, variables: dict, states: tuple[dict, dict]) -> dict | None:
+    """The pre-request read and the mutation, answered from `states`, or None for any other document."""
+    if "requestReviews" in query:
+        return {"requestReviews": {"pullRequest": {"id": variables.get("pr"), **states[1]}}}
+    if "REVIEW_REQUESTED_EVENT" in query:
+        return {"repository": {"pullRequest": {"id": "PR_test", **states[0]}}}
+    return None
+
+
 def hist_review(number: int, body: str, at: str = LATE) -> dict:
     """One `pullRequests.nodes` entry in the shape `copilot_history` reads it: a pull request
     number paired with one reviewer review, for the repo-wide reading `wire_history` drives.
@@ -4677,7 +4702,9 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["status", "7"]))
         self.assertIn("repo=o/r pr=7", self.out.getvalue())
 
-    def wire_history(self, prs: list[dict]) -> list[tuple[str, dict]]:
+    def wire_history(
+        self, prs: list[dict], states: tuple[dict, dict] = RECORDED
+    ) -> list[tuple[str, dict]]:
         """Route `gh_graphql` calls after `self.answer(...)`, answering the bot-id/history query
         with `prs` verbatim as `pullRequests.nodes`, and recording every call made.
 
@@ -4693,17 +4720,20 @@ class TestCli(GqlCase):
             calls.append((query, variables))
             if "pullRequests(first:$prs" in query:
                 return {"repository": {"pullRequests": {"nodes": prs}}}
-            if "requestReviews" in query:
-                return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
+            answered = answer_request(query, variables, states)
+            if answered is not None:
+                return answered
             raise AssertionError(f"unexpected document: {query[:60]}")
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
         return calls
 
-    def wire_bot(self, bot_id: str | None) -> list[tuple[str, dict]]:
+    def wire_bot(
+        self, bot_id: str | None, states: tuple[dict, dict] = RECORDED
+    ) -> list[tuple[str, dict]]:
         """`wire_history` narrowed to just an id, for the tests that need nothing else."""
         if bot_id is None:
-            return self.wire_history([])
+            return self.wire_history([], states)
         node = {
             "number": 1,
             "reviews": {
@@ -4712,7 +4742,7 @@ class TestCli(GqlCase):
                 ]
             },
         }
-        return self.wire_history([node])
+        return self.wire_history([node], states)
 
     def test_a_resolved_bot_id_issues_the_request_before_the_first_poll(self) -> None:
         """The gap this closed: nothing outstanding and nothing ever asked for, twice measured."""
@@ -4742,6 +4772,7 @@ class TestCli(GqlCase):
         bot id once the narrow window has aged out, rather than falling back to polling only."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         calls: list[tuple[str, dict]] = []
+        states = RECORDED
 
         def fake(query: str, **variables: object) -> dict:
             calls.append((query, variables))
@@ -4763,8 +4794,9 @@ class TestCli(GqlCase):
                     },
                 }
                 return {"repository": {"pullRequests": {"nodes": [node]}}}
-            if "requestReviews" in query:
-                return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
+            answered = answer_request(query, variables, states)
+            if answered is not None:
+                return answered
             raise AssertionError(f"unexpected document: {query[:60]}")
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
@@ -4782,6 +4814,73 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertFalse(calls)
         self.assertNotIn("auto-request:", self.out.getvalue())
+
+    def test_a_request_that_records_nothing_ends_the_wait_at_once(self) -> None:
+        """The shape an exhausted allowance left: the mutation succeeds and leaves nothing behind.
+
+        No pending reviewer and no new review-request event, so no review is coming, and polling
+        --timeout out only reports that as patience 45 minutes later.
+        """
+        self.answer(payload([review(oid=OLD)]))
+        unchanged = request_state(events=("RRE_1",))
+        calls = self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("the request recorded nothing on the pull request", out)
+        self.assertIn("status=REQUEST_NOT_RECORDED", out)
+        self.assertNotIn("status=PENDING", out)
+
+    def test_a_first_request_that_records_nothing_is_read_the_same(self) -> None:
+        """A pull request with no request event before it has no id to compare against."""
+        self.answer(payload([review(oid=OLD)]))
+        self.wire_bot("BOT_123", (request_state(), request_state()))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_new_event_alone_counts_as_recorded(self) -> None:
+        """A request the reviewer already left the pending set for still added its event."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        self.wire_bot("BOT_123", (request_state(), request_state(events=("RRE_1",))))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertNotIn("REQUEST_NOT_RECORDED", self.out.getvalue())
+
+    def test_a_pending_reviewer_alone_counts_as_recorded(self) -> None:
+        """The pending set is read as well, so an event past the window does not decide it."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        same = ("RRE_1",)
+        self.wire_bot("BOT_123", (request_state(events=same), request_state(True, same)))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("REQUEST_NOT_RECORDED", self.out.getvalue())
+
+    def test_a_review_on_the_final_read_outranks_an_unrecorded_request(self) -> None:
+        """A review covering the head is concrete, so it decides the code over the inference."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+
+    def test_an_unrecorded_request_outranks_the_repo_wide_quota_signal(self) -> None:
+        """Read on this pull request, so it ranks above the reading from elsewhere."""
+        self.answer(payload([]))
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_history([hist_review(962, QUOTA_REFUSED)], (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+
+    def test_an_answer_carrying_no_request_state_is_not_read_as_unrecorded(self) -> None:
+        """An unread state is not a reading of one, so the wait polls as it did before."""
+        before = request_state(events=("RRE_1",))
+        self.assertIsNone(pr_review.request_recorded(before, {"id": "PR_test"}))
+        self.assertIsNone(pr_review.request_recorded(before, {"reviewRequests": {"nodes": []}}))
 
     def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
         """The shape observed live on two consecutive pull requests: no Copilot activity at all on
