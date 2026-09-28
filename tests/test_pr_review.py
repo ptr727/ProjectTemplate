@@ -4501,6 +4501,23 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
         slept.assert_called_once()
 
+    def test_min_rounds_does_not_credit_a_refusal_as_the_fresh_round(self) -> None:
+        """The round satisfying `min_rounds` and the round satisfying coverage must be the same
+        round, or a refusal answering the re-request reads as done off an untouched, older
+        genuine round instead. One genuine round already sits on the head, matching a `status`
+        read of `rounds=1`. The caller re-requests and runs `wait --min-rounds 1`, and the round
+        that comes back is a refusal, not the fresh genuine round the re-request was for.
+        Checking `reviewed_head` and the count as two independent clauses would read this as
+        done, since the untouched round0 still satisfies `reviewed_head` and the refusal at
+        round1 still pushes the count past 1, returning 0 on a round that declined. Walking one
+        list for a single round satisfying both instead falls through to the refusal this newest
+        round actually is, which is the correct, narrower failure `refusing_review` names.
+        """
+        self.answer(payload([review(rid="PRR_one"), review(body=REFUSED, rid="PRR_ref", at=LATE)]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(41, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=REVIEW_IS_A_REFUSAL", self.out.getvalue())
+
     def test_min_rounds_survives_a_push_moving_the_head(self) -> None:
         """A head-scoped count resets to zero the moment a push moves the head, so it reads a
         brand new head's first genuine round as still short of a baseline that was measured
@@ -4509,8 +4526,9 @@ class TestCli(GqlCase):
         round that lands on the head after the push is the second, which is what
         `--min-rounds 1` was asked to hold out for.
         """
-        stale = payload([review(oid=OLD)], pending=True)
+        stale = payload([review(oid=OLD, rid="PRR_stale")], pending=True)
         stale["headRefOid"] = OLD
+        stale["commits"]["nodes"][0]["commit"]["oid"] = OLD
         self.answer(
             stale, payload([review(oid=OLD, rid="PRR_stale"), review(rid="PRR_two", at=LATE)])
         )

@@ -1182,31 +1182,42 @@ def reviewed_head(pr: dict) -> bool:
 
 
 def head_review_done(pr: dict, min_rounds: int) -> bool:
-    """True once the head is covered by a round beyond the `min_rounds` a caller already knew of.
+    """True once a round past position `min_rounds` in the reviewer's own history covers the head.
 
-    `min_rounds` defaults to 0, where this is `reviewed_head` exactly: `reviewed_head` true makes
-    `reviewer_nodes(pr, "reviews")` non-empty too, since `head_reviews` only narrows it, so the
-    second clause holds whenever the first does and this reduces to the first alone. A caller
-    that already read a `rounds=` count from `status`, then re-requested a review on that same,
-    already-covered head, passes that count through `wait --min-rounds` instead, so this holds
-    out for a round beyond it.
+    Positions are read off `reviewer_nodes(pr, "reviews")`, every one of the reviewer's own
+    reviews on this pull request, on any head, refusals included, oldest first: the exact list
+    `status` counts for its own `rounds=`. A caller that already read that count, then
+    re-requested a review on an already-covered head, passes it through `wait --min-rounds`
+    instead, so this holds out for a round sitting past it.
 
-    The count is `reviewer_nodes(pr, "reviews")`, every one of the reviewer's own reviews on this
-    pull request, on any head, refusals included, the exact quantity `status` prints as `rounds=`
-    rather than `len(head_reviews(pr))`, the head-scoped, refusal-excluded count `reviewed_head`
-    itself narrows to. Two failures follow from comparing `min_rounds` against that narrower
-    count instead: a push during the wait moves the head, which resets a head-scoped count to
-    zero and reads a brand new head's first genuine round as still short of a baseline measured
-    against a head that no longer exists, where the unscoped count carries forward since it
-    never resets; and a refusal on the head sits in `rounds=` but not in the head-scoped count,
-    so a caller who read `rounds=1` off one refusal and reached `--min-rounds 1` once a genuine
-    round then landed alongside it would see the head-scoped count stay at 1, never exceeding the
-    baseline, although the genuine round is exactly the fresh one the wait was for. `reviewed_head`
-    stays the separate, unaffected gate: it is what requires the round satisfying the count to
-    actually be on the current head and not itself a refusal, so a rising count from other heads
-    or from further refusals alone never reads as done on its own.
+    The round satisfying `min_rounds` and the round satisfying coverage must be the same round,
+    which is why this walks one list rather than checking `reviewed_head(pr)` and a count as two
+    independent clauses. Two clauses would let a refusal past the baseline satisfy the count
+    while an untouched, older genuine round still satisfies `reviewed_head`, reporting done on a
+    round that answered the re-request by declining it. A caller passing 0, every pre-`--min-
+    rounds` caller among them, reduces to `reviewed_head` exactly, since position 0 is every
+    position a non-empty list has.
+
+    Counting `reviewer_nodes(pr, "reviews")` rather than `head_reviews(pr)`, the head-scoped,
+    refusal-excluded list `reviewed_head` itself narrows to, matters independently of the above:
+    a push during the wait moves the head, which empties a head-scoped list and reads a brand
+    new head's first genuine round as still short of a baseline measured against a head that no
+    longer exists, where this list carries forward since a push adds to it rather than resetting
+    it. Positions still land past `min_rounds` correctly once the head moves, since a review on
+    the superseded head sits at an earlier position than one on the new head, never a later one.
+
+    The same `last:100` window both `Q_LIVE` and `Q_FULL` place on their own `reviews`
+    connection bounds this the way it bounds `status`'s own `rounds=`: a pull request whose
+    Copilot rounds have aged out of that window under other reviewers' own traffic undercounts
+    here exactly as `status` would, reading a landed round as still short of the baseline rather
+    than crediting it, so this fails toward a caller waiting longer, not toward a false success.
     """
-    return reviewed_head(pr) and len(reviewer_nodes(pr, "reviews")) > min_rounds
+    revs = reviewer_nodes(pr, "reviews")
+    head = pr["headRefOid"]
+    return any(
+        i >= min_rounds and (n.get("commit") or {}).get("oid") == head and not refusal_of(n)
+        for i, n in enumerate(revs)
+    )
 
 
 def review_effort(pr: dict) -> tuple[str, str]:
