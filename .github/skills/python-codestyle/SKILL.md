@@ -32,8 +32,8 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
 
 - **build** (Project): third-party runtime dependencies, or the repo's deliverable. Either a uv
   project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
-  `pyproject.toml` beside a `requirements*.txt`, installed with pip. Uses pytest, pyright strict
-  (or mypy where the repo requires it).
+  `pyproject.toml` beside a `requirements*.txt` and no `uv.lock`, installed with pip. Uses pytest,
+  pyright strict (or mypy where the repo requires it).
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
@@ -97,25 +97,25 @@ uv build                         # produce wheel + sdist in ./dist (published pa
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
 `uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is
 the CI checker, or both where the repo runs both (see Type checking above). Run it, plus
-`uv run pytest`, before committing. A pip-form directory runs the same tools from the environment
-its `requirements*.txt` installed, per `references/profiles.md`. A **lint-only** profile's
-clean-compile substitutes its `uvx` and `unittest` equivalents, per Two Profiles above, and has no
-such command to run before committing beyond those. These are documented commands, and the hub's
-`vscode-tasks-python.json` snippet carries the VS Code tasks mirror that the fleet baseline expects.
-Every command-executing task in it is `type: process`, and every aggregator is `dependsOn`-only.
-Neither chains with `&&`, so the mirror runs the same on any task shell. CI runs the same
-clean-compile commands as the authoritative backstop. A repo that keeps no .NET tool manifest
-declaring Husky.Net, or one that prefers the `pre-commit` framework, wires its local hook from the
-canonical `catalog/snippets/pre-commit/` directory, hub-local and not carried into every fleet repo.
-Any repo may instead wire an equivalent hook of its own at `.husky/pre-commit`, enabled with
-`core.hooksPath` and sourcing nothing. That path and `.pre-commit-config.yaml` are the two the audit
-reads. The runner is bounded by the toolchain the repo already keeps rather than by the languages
-the hook checks, so a repo keeping a Husky.Net manifest may run these same Python checks from the
-`catalog/snippets/husky/` shape instead. Each shape carries whichever language checks its own repo
-keeps. The `pre-commit` directory's own README names the second file to copy alongside the config.
-GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
-the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
-steps.
+`uv run pytest`, before committing. A pip-form directory runs pytest from the environment its
+`requirements*.txt` installed and ruff and the type checker through `uvx`, per
+`references/profiles.md`. A **lint-only** profile's clean-compile substitutes its `uvx` and
+`unittest` equivalents, per Two Profiles above, and has no such command to run before committing
+beyond those. These are documented commands, and the hub's `vscode-tasks-python.json` snippet
+carries the VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it
+is `type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the
+mirror runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
+backstop. A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers the
+`pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/`
+directory, hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent
+hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That
+path and `.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the
+toolchain the repo already keeps rather than by the languages the hook checks, so a repo keeping a
+Husky.Net manifest may run these same Python checks from the `catalog/snippets/husky/` shape
+instead. Each shape carries whichever language checks its own repo keeps. The `pre-commit`
+directory's own README names the second file to copy alongside the config. GOVERNANCE.md's hub-only
+"Running the Linters Locally (Known-Working Invocations)" section carries the obligation itself,
+what the hook must cover, its audit treatment, and the per-clone enablement steps.
 
 A restricted executor gives each task a cache directory under a writable temporary root. Point
 `UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before

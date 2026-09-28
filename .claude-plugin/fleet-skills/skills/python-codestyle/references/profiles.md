@@ -36,8 +36,11 @@ there:
   `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings"
   section). CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions. The
   pip form is a `pyproject.toml` beside a `requirements*.txt`, installed with pip, whether or not
-  it carries a `[project]` table. Its tools run from the environment pip installed them into,
-  so CI runs `.venv/bin/python -m pytest` there rather than `uv run pytest`.
+  it carries a `[project]` table. A committed `uv.lock` makes a directory the uv form even where a
+  `requirements*.txt` sits beside it. In the pip form CI runs pytest from the installed
+  environment, as `.venv/bin/python -m pytest`, runs ruff through `uvx`, and runs the type checker
+  through `uvx` pointed at that environment, or runs mypy from the environment where it is
+  installed there.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
