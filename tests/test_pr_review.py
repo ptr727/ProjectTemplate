@@ -4430,6 +4430,112 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertEqual(1, slept.call_count)
 
+    def test_min_rounds_holds_out_past_a_round_status_already_reported(self) -> None:
+        """`status`'s guidance for unstated coverage is to re-request on the same head, which
+        leaves an earlier round covering it while the fresh one this wait was called to watch
+        for is still outstanding. Naming that earlier `rounds=` count on `--min-rounds` is what
+        `wait` needs to hold out for one beyond it, rather than reading `reviewed_head` alone and
+        reporting the earlier round as done at once without ever waiting for the fresh one the
+        re-request was for. The first poll here carries that shape: one review already on the
+        head, a request still pending. Without the flag,
+        `wait` returns on it unpolled, per `test_wait_returns_zero_once_the_review_lands_on_the_head`.
+        """
+        self.answer(
+            payload([review()], pending=True),
+            payload([review(), review(rid="PRR_two", at=LATE)]),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_times_out_rather_than_crediting_the_round_it_was_told_to_skip(self) -> None:
+        """A round no higher than `--min-rounds` must not report success at the timeout either,
+        or the exit code repeats the bug the polling half of this fix already closes."""
+        self.answer(payload([review()], pending=True))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=PENDING", self.out.getvalue())
+
+    def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
+        """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
+        reviewer's own reviews on this pull request, on any head. A count narrowed to the
+        current head disagrees with that whenever a stale, off-head round sits in the history,
+        and undercounts every round after it forever, since the off-head round it excludes never
+        ages out. Two rounds already exist here, one off the current head, matching a `status`
+        read of `rounds=2` before the re-request. The one that lands after it is the third, on
+        the head, and is what `--min-rounds 2` was asked to hold out for.
+        """
+        self.answer(
+            payload([review(oid=OLD, rid="PRR_stale"), review(rid="PRR_head_one")], pending=True),
+            payload(
+                [
+                    review(oid=OLD, rid="PRR_stale"),
+                    review(rid="PRR_head_one"),
+                    review(rid="PRR_head_two", at=LATE),
+                ]
+            ),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "2"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_counts_a_head_refusal_the_way_status_does(self) -> None:
+        """A refusal sits in `status`'s `rounds=` but not in a head-scoped count, since a refusal
+        covers nothing and `reviewed_head` excludes it. A caller reading `rounds=1` off one
+        refusal and reaching `--min-rounds 1` once a genuine round then lands beside it must see
+        that genuine round as the fresh one it asked for, not read the head-scoped count, still 1
+        because it never counted the refusal to begin with, as still short of the baseline.
+
+        The first poll is bodyless, the shape the liveness query itself carries: `refusal_of`
+        reads nothing there and counts the refusal as ordinary coverage, same as
+        `test_the_liveness_reading_ends_the_wait_and_the_full_read_refuses_it` above. The full
+        read that follows carries the body and is where the refusal is actually read as one,
+        alongside the genuine round that answers it.
+        """
+        bodyless_refusal = {k: v for k, v in review(rid="PRR_refusal").items() if k != "body"}
+        self.answer(
+            payload([bodyless_refusal], pending=True),
+            payload([review(body=REFUSED, rid="PRR_refusal"), review(rid="PRR_genuine", at=LATE)]),
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
+    def test_min_rounds_does_not_credit_a_refusal_as_the_fresh_round(self) -> None:
+        """The round satisfying `min_rounds` and the round satisfying coverage must be the same
+        round, or a refusal answering the re-request reads as done off an untouched, older
+        genuine round instead. One genuine round already sits on the head, matching a `status`
+        read of `rounds=1`. The caller re-requests and runs `wait --min-rounds 1`, and the round
+        that comes back is a refusal, not the fresh genuine round the re-request was for.
+        Checking `reviewed_head` and the count as two independent clauses would read this as
+        done, since the untouched round0 still satisfies `reviewed_head` and the refusal at
+        round1 still pushes the count past 1, returning 0 on a round that declined. Walking one
+        list for a single round satisfying both instead falls through to the refusal this newest
+        round actually is, which is the correct, narrower failure `refusing_review` names.
+        """
+        self.answer(payload([review(rid="PRR_one"), review(body=REFUSED, rid="PRR_ref", at=LATE)]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(41, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=REVIEW_IS_A_REFUSAL", self.out.getvalue())
+
+    def test_min_rounds_survives_a_push_moving_the_head(self) -> None:
+        """A head-scoped count resets to zero the moment a push moves the head, so it reads a
+        brand new head's first genuine round as still short of a baseline that was measured
+        against a head that no longer exists. The unscoped count `status` prints never resets:
+        one round already sits on the old head, matching a `status` read of `rounds=1`, and the
+        round that lands on the head after the push is the second, which is what
+        `--min-rounds 1` was asked to hold out for.
+        """
+        stale = payload([review(oid=OLD, rid="PRR_stale")], pending=True)
+        stale["headRefOid"] = OLD
+        stale["commits"]["nodes"][0]["commit"]["oid"] = OLD
+        self.answer(
+            stale, payload([review(oid=OLD, rid="PRR_stale"), review(rid="PRR_two", at=LATE)])
+        )
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--min-rounds", "1"]))
+        slept.assert_called_once()
+
     def test_wait_exits_thirty_at_the_timeout_rather_than_reporting_success(self) -> None:
         """Pending is not failure and not success, so it takes a code of its own."""
         self.answer(payload([review(oid=OLD)]))
@@ -5821,6 +5927,12 @@ class TestContract(unittest.TestCase):
             pr_review.main(["wait", "7", "--repo", "o/r", "--pickup-grace", "-1"])
         # The repository is named, or this exits on the missing argument and proves nothing.
         self.assertIn("pickup-grace", err.getvalue())
+
+    def test_a_negative_min_rounds_is_rejected_rather_than_read_as_any_round(self) -> None:
+        """A negative count is satisfied by the same `rounds=0` a caller naming none would see."""
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--min-rounds", "-1"])
+        self.assertIn("min-rounds", err.getvalue())
 
     def test_a_negative_check_threshold_is_rejected_rather_than_firing_on_every_check(self) -> None:
         """Below zero, every check in that state reports stuck from the first read.
