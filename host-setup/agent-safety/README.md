@@ -230,7 +230,7 @@ text says, because the harm it covers was never in the text.
    launcher this does not name, and what those cost is a leak requirement 8 reports after the fact
    rather than a deny before it.
 
-   Both are read over the whole command rather than tied to one loop, deliberately, and that is
+   Each is read over the whole command rather than tied to one loop, deliberately, and that is
    coarser than it could be. Deciding which `&` backgrounds which compound needs a parse this rule
    does not have, and four rounds of narrowing a scan that tried each closed the shapes it was shown
    and left the next one: a statement between the loop and its group's closer, a `disown` before a
@@ -315,7 +315,7 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\ntimeout, no arithmetic\nguard and no read\nof an input redirect?"}
+    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nread of an input\nredirect, and no timeout\nor forks out of its reach?"}
     iswait -- yes --> deny7["DENY - requirement 7"]
     iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
