@@ -357,6 +357,100 @@ class ReleaseGuardCase(unittest.TestCase):
             2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
         )
 
+    def test_release_the_token_cannot_tag_is_superseded(self) -> None:
+        """github-release re-dispatches the publisher and cancels itself once the head's workflows differ, per D4.7.
+
+        GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree matches no
+        branch head, so the step must decide before the create step runs, and only then.
+        """
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        marker = "      - name: Supersede a release the token cannot tag step\n"
+        self.assertIn(marker, workflow)
+        self.assertLess(
+            workflow.index(marker), workflow.index("      - name: Create GitHub release step\n")
+        )
+        body = workflow.split(marker, 1)[1]
+        opener = re.search(r"(?m)^        run: \|-?\n", body)
+        assert opener is not None
+        lines: list[str] = []
+        for line in body[opener.end() :].splitlines():
+            if line and not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+
+        def publish(later_path: str) -> tuple[int, list[str]]:
+            with tempfile.TemporaryDirectory() as scratch:
+                root = Path(scratch)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                calls = root / "calls"
+                (bin_dir / "gh").write_text(
+                    f'#!/bin/sh\necho "$*" >> "{calls}"\n', encoding="utf-8"
+                )
+                (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                for stub in bin_dir.iterdir():
+                    stub.chmod(0o755)
+                env = {
+                    **os.environ,
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_AUTHOR_NAME": "t",
+                    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                    "GIT_COMMITTER_NAME": "t",
+                    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+                }
+
+                def git(cwd: Path, *args: str) -> None:
+                    run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+                origin = root / "origin.git"
+                git(root, "init", "--bare", "-b", "main", str(origin))
+                work = root / "work"
+                git(root, "clone", str(origin), str(work))
+                git(work, "checkout", "-b", "main")
+                for relative in (".github/workflows/ci.yml", "src/app.py"):
+                    (work / relative).parent.mkdir(parents=True, exist_ok=True)
+                    (work / relative).write_text("one\n", encoding="utf-8")
+                git(work, "add", ".")
+                git(work, "commit", "-m", "built")
+                git(work, "push", "origin", "main")
+                built = root / "built"
+                git(root, "clone", str(origin), str(built))
+                (work / later_path).write_text("two\n", encoding="utf-8")
+                git(work, "commit", "-am", "later")
+                git(work, "push", "origin", "main")
+                verdict = run(
+                    ["bash", "-c", script],
+                    cwd=built,
+                    env={
+                        **env,
+                        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+                        "BRANCH": "main",
+                        "GITHUB_REPOSITORY": "example/widget",
+                        "GITHUB_RUN_ID": "42",
+                        "GITHUB_WORKFLOW_REF": "example/widget/.github/workflows/publish-release.yml@refs/heads/main",
+                    },
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                logged = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+                return verdict.returncode, logged
+
+        self.assertEqual((0, []), publish("src/app.py"))
+        self.assertEqual(
+            (
+                1,
+                [
+                    "workflow run publish-release.yml --repo example/widget --ref main",
+                    "run cancel 42 --repo example/widget",
+                ],
+            ),
+            publish(".github/workflows/ci.yml"),
+        )
+
     def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
         """validate-release refuses a branch git would not accept as a name, on a smoke run too.
 

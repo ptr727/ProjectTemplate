@@ -346,6 +346,31 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # GITHUB_TOKEN cannot hold the workflows scope, so its tag create answers 403 once the branch head carries different workflow files, per D4.7.
+      # The calling publisher is dispatched to release the head instead, and this run cancels itself so no package push follows an untagged version.
+      - name: Supersede a release the token cannot tag step
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags --depth=1 origin "refs/heads/$BRANCH"
+          built=$(git rev-parse --verify --quiet "HEAD:.github/workflows" || true)
+          head=$(git rev-parse --verify --quiet "FETCH_HEAD:.github/workflows" || true)
+          if [[ "$built" == "$head" ]]; then
+            echo "Workflows at the built commit match $BRANCH's head; creating the release."
+            exit 0
+          fi
+          publisher="${GITHUB_WORKFLOW_REF%@*}"
+          publisher="${publisher##*/}"
+          echo "::warning::$BRANCH moved to $(git rev-parse FETCH_HEAD) with different workflow files, so GITHUB_TOKEN cannot tag $(git rev-parse HEAD). Dispatching $publisher on $BRANCH to release the head, and cancelling this run."
+          gh workflow run "$publisher" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+          sleep 300
+          echo "::error::Run $GITHUB_RUN_ID was not cancelled within 300s; failing so no release or package push follows."
+          exit 1
+
       # The target_commitish input must be set explicitly, or GitHub's REST API tags the release on the default branch.
       # Pin it to GitCommitId so the tag is on the exact built commit, consistent with the SemVer2 tag and artifacts.
       # Skip when the release already exists, but always let a manual workflow_dispatch through to refresh it.
