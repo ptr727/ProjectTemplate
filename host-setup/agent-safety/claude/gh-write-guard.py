@@ -1729,11 +1729,34 @@ _COMMAND_POSITION_WORDS = {
     "ionice",
 }
 
-# The two bounds this rule reads as written into the loop's own condition.
-# - the test-builtin form, `[ "$i" -lt 120 ]`.
-# - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
-# Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
-_BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+_ARITHMETIC_BOUND = re.compile(r"\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+
+_TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
+
+_TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
+
+
+def _bound_in_condition(cond):
+    """True if the loop condition `cond` carries a comparison bound, as a test builtin or as arithmetic.
+
+    The two forms are `[ "$i" -lt 120 ]` and `(( SECONDS < 600 ))`, where a shift compares nothing.
+    A comparison operator counts only as an argument of a `[`, `[[`, or `test` invocation.
+    A `&&` inside `[[ ]]` joins two tests rather than ending one, so only `]]` closes it.
+    Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
+    The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
+    """
+    if _ARITHMETIC_BOUND.search(" ".join(cond)):
+        return True
+    closer = None
+    for k, tok in enumerate(cond):
+        if closer is None:
+            if tok in _TEST_CLOSERS and _opens_command(cond, k):
+                closer = _TEST_CLOSERS[tok]
+        elif tok in _TEST_COMPARISONS:
+            return True
+        elif tok == closer or (closer != "]]" and _is_separator(tok)):
+            closer = None
+    return False
 
 
 def _names_a_stream(target):
@@ -2118,7 +2141,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
             )
-            if sleeps and not bounded and not _BOUND_IN_CONDITION.search(" ".join(cond)):
+            if sleeps and not bounded and not _bound_in_condition(cond):
                 # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
                 quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
                 return " ".join([tok] + quoted)
@@ -4130,6 +4153,41 @@ _WAIT_CASES = [
         "while (( 1 << 1 )); do sleep 1; done",
         "deny",
         "a shift inside the arithmetic form is not a comparison and bounds nothing",
+    ),
+    (
+        "while ! ls -lt out | grep -q result; do sleep 30; done",
+        "deny",
+        "a command flag spelling a comparison is no test builtin's operand and bounds nothing",
+    ),
+    (
+        "while ! grep -le done log; do sleep 30; done",
+        "deny",
+        "`grep -le` names a pattern rather than comparing anything",
+    ),
+    (
+        "while ! echo [ 1 -lt 2 ] | grep -q x; do sleep 30; done",
+        "deny",
+        "a bracket that is an argument rather than the command runs no test",
+    ),
+    (
+        "until test $i -ge 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "the `test` spelling of the test builtin carries the same bound",
+    ),
+    (
+        "while [[ $i -lt 10 && ! -f x ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a comparison inside `[[ ]]` bounds the loop, the `&&` inside it joining two tests",
+    ),
+    (
+        "while [[ -f x && $i -lt 10 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `&&` inside `[[ ]]` does not close it before a later comparison",
+    ),
+    (
+        "while ! [ -f x ] && ls -lt out; do sleep 30; done",
+        "deny",
+        "a separator closes a `[` test, so a flag after it is still no bound",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
