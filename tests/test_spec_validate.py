@@ -149,7 +149,7 @@ class CarriedRelativeLinkCase(unittest.TestCase):
 
 
 class VersionLiteralCase(unittest.TestCase):
-    """The hub's instruction documents name no version value, verbatim sections included."""
+    """The hub's instruction documents name no three-part version or commit SHA, verbatim sections included."""
 
     def setUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
