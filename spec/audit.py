@@ -1929,7 +1929,8 @@ def _code_view(text):
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
     A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
     way, so its body is dropped too, keeping only the `key:` line itself.
-    An `if:` body is kept, since its value is always an expression and a multi-line one is written `if: >-`.
+    A block-scalar `if:` body, the form the Workflow YAML convention sets for a multi-line condition, is kept,
+    since an `if:` value is always an expression.
     It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
     """
     out = []
