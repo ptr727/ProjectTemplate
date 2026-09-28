@@ -24,10 +24,11 @@ in review). The axes that commonly vary per repo:
 ## Two profiles: full specification
 
 A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated
-against the `pyproject.toml` shape. Most of the `SKILL.md` rules (uv project, `uv.lock`, `uv run`,
-src layout, pytest coverage) describe the Project shape (the `build` profile). The two differ by
-whether the Python has third-party runtime dependencies, which shows up structurally in
-`pyproject.toml`, so the fleet's audit reads the shape there:
+against the `pyproject.toml` shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
+describe the Project shape (the `build` profile), and its uv project, `uv.lock`, and `uv run` rules
+describe that shape's uv form. The two differ by whether the Python has third-party runtime
+dependencies, which shows up structurally in `pyproject.toml`, so the fleet's audit reads the shape
+there:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
   repo's deliverable. It takes one of two forms. The uv form is a PEP 621 project: `[project]`
@@ -35,7 +36,8 @@ whether the Python has third-party runtime dependencies, which shows up structur
   `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings"
   section). CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions. The
   pip form is a `pyproject.toml` beside a `requirements*.txt`, installed with pip, whether or not
-  it carries a `[project]` table.
+  it carries a `[project]` table. Its tools run from the environment pip installed them into,
+  so CI runs `.venv/bin/python -m pytest` there rather than `uv run pytest`.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
