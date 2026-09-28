@@ -193,8 +193,10 @@ text says, because the harm it covers was never in the text.
    '<the loop>'`. That placement is the only one that works, since `timeout` takes a command and
    a loop keyword is not one, so `timeout 600 until ...; do sleep 30; done` is a syntax error
    rather than a bounded wait. A `-s`/`--signal` option leaves it a bound, except signal 0 in any
-   spelling GNU `timeout` accepts (`-s 0`, `--signal=0`, `-s0`, `EXIT`), which is delivered to no
-   process, so the `timeout` expires and leaves its child running. The second is an arithmetic guard in the
+   spelling GNU `timeout` reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number
+   it masks to 0, such as `128`). Signal 0 is delivered to no process, so the `timeout` goes on
+   waiting for a child that keeps running, unless a non-zero `-k`/`--kill-after` follows it with a
+   SIGKILL. The second is an arithmetic guard in the
    loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a

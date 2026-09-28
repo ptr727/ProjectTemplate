@@ -1834,7 +1834,20 @@ def _reads_its_input(cond, after_done):
 # A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
 _TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
 
-_TIMEOUT_SIGNAL_ZERO = re.compile(r"^(?:sig)?(?:0+|exit)$", re.IGNORECASE)
+_TIMEOUT_SIGNAL_ZERO_NAME = re.compile(r"^(?:sig)?(?:0+|exit)$", re.IGNORECASE)
+
+
+def _is_timeout_signal_zero(val):
+    """True if GNU `timeout` reads the `-s` value as signal 0, which is delivered to no process.
+
+    A bare number is masked the way GNU `timeout` masks it to accept a shell exit status, 0xFF from
+    255 up and 0x7F below, so `128` and `256` are signal 0 as surely as `0` is. A number past the
+    range of an int is rejected as no signal at all, so it is never read as 0.
+    """
+    if re.fullmatch(r"[0-9]+", val):
+        n = int(val)
+        return n <= 0x7FFFFFFF and n & (0xFF if n >= 0xFF else 0x7F) == 0
+    return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
 
 
 def _timeout_option(tok):
@@ -1943,8 +1956,9 @@ def _timeout_bounds_wrapper(toks, w):
     bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
     `echo` in a run of its own.
 
-    A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound,
-    since signal 0 is delivered to no process and the `timeout` expires leaving its child running.
+    A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
+    unless a non-zero `-k` follows it with a SIGKILL, since signal 0 is delivered to no process and
+    the `timeout` goes on waiting for a child that keeps running.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -1964,7 +1978,7 @@ def _timeout_bounds_wrapper(toks, w):
     if _forks_out_of_reach(toks[start:w]):
         return False
     i = start + 1
-    signal = ""
+    signal = kill_after = ""
     while i < w:
         tok = toks[i]
         if tok.startswith("-"):
@@ -1974,9 +1988,13 @@ def _timeout_bounds_wrapper(toks, w):
                 val = toks[i] if i < w else ""
             if opt == "s":
                 signal = val  # getopt keeps the last one given
+            elif opt == "k":
+                kill_after = val
             i += 1
             continue
-        return bool(_TIMEOUT_DURATION.match(tok)) and not _TIMEOUT_SIGNAL_ZERO.match(signal)
+        if not _TIMEOUT_DURATION.match(tok):
+            return False
+        return not _is_timeout_signal_zero(signal) or bool(_TIMEOUT_DURATION.match(kill_after))
     return False
 
 
@@ -4146,6 +4164,36 @@ _WAIT_CASES = [
         "timeout --signal=TERM 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "in the inline long spelling too",
+    ),
+    (
+        "timeout -s 128 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a number GNU timeout masks to 0 is signal 0 too, as 128 is",
+    ),
+    (
+        "timeout -s 256 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and 256, masked from 255 up",
+    ),
+    (
+        "timeout -s 129 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while one masking to a real signal, as 129 does to HUP, is a bound",
+    ),
+    (
+        "timeout -s 0 -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a kill-after follows signal 0 with a SIGKILL, so the pair is a bound",
+    ),
+    (
+        "timeout --kill-after=30 --signal 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "in either order and either spelling",
+    ),
+    (
+        "timeout -s 0 -k 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while a zero kill-after disables it and bounds nothing",
     ),
     (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
