@@ -142,7 +142,7 @@ ruleset_id() {
     # Fail loud rather than silently narrow, because a full page means the single-fetch assumption no longer holds.
     # A missed lookup would make apply create a duplicate ruleset by name.
     # Abort so the caller stops, since it treats a non-zero return as "stop" and never as "not found".
-    if [ "$(jq 'length' <<<"$out")" -eq 100 ]; then
+    if [ "$(jqr 'length' <<<"$out")" -eq 100 ]; then
         echo "Failed for $repo: 100 rulesets returned (the per_page cap), so the single-fetch lookup is unreliable. Reduce rulesets or add pagination before applying." >&2
         return 1
     fi
