@@ -381,9 +381,12 @@ def _strip_comments(cmd):
     return "".join(out) if found else None
 
 
-def _operator_lex(text):
-    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse."""
-    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+def _operator_lex(text, posix=True):
+    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse.
+
+    `posix=False` keeps each token's quotes, so a caller can tell a quoted `";"` from a separator.
+    """
+    lex = shlex.shlex(text, posix=posix, punctuation_chars=_PUNCTUATION_CHARS)
     lex.whitespace_split = True
     # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
     # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
@@ -1736,37 +1739,74 @@ _TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
 _TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
 
 
-def _bound_in_condition(cond):
+def _quoted_mask(cmd, toks):
+    """Per token of `toks`, whether `cmd` spelled it quoted or escaped, or None where that is unknown.
+
+    The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
+    A second, quote-keeping lex says which is which, and is trusted only where it aligns token for token.
+    """
+    try:
+        raw = _operator_lex(cmd, posix=False)
+    except (ValueError, TypeError):
+        return None
+    if len(raw) != len(toks):
+        return None
+    mask = [any(c in r for c in "'\"\\") for r in raw]
+    if any(r != t for r, t, q in zip(raw, toks, mask) if not q):
+        return None
+    return mask
+
+
+def _bound_in_condition(cond, quoted=None):
     """True if the loop condition `cond` carries a comparison bound, as a test builtin or as arithmetic.
 
     The two forms are `[ "$i" -lt 120 ]` and `(( SECONDS < 600 ))`, where a shift compares nothing.
     A comparison operator counts only as an argument of a `[`, `[[`, or `test` invocation.
-    A `&&` inside `[[ ]]` joins two tests rather than ending one, so only `]]` closes it.
+    Inside `[[ ]]` a `&&` joins two tests and a `|` alternates a pattern, so only `]]` closes it.
     A `$(...)`, `<(...)`, or backtick operand is a command of its own, so its flags compare nothing.
     Its parentheses, and a test's own grouping ones, end no test.
     A substitution glued to a word, `x$(...)`, is a command of its own all the same.
-    A separator fused to a parenthesis, `;(` or `|(`, ends a test as a bare one does.
+    A separator fused to a parenthesis, `;(` or `);`, ends a `[` or `test` as a bare one does.
     A `case` pattern's `)` inside a substitution closes no parenthesis, so it ends no substitution.
-    A backtick with no partner after it is a quoted literal, since an unquoted one does not parse.
+    A quoted token, given by `quoted`, is an operand, so a quoted `;`, `(`, or backtick is no syntax.
+    Inside `[[ ]]` a quoted word is a string, never its comparison or its closer.
+    Where that is unknown, a backtick with no partner after it is a quoted literal all the same.
     Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
     The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
     """
     if _ARITHMETIC_BOUND.search(" ".join(cond)):
         return True
+
+    def literal(j):
+        return quoted is not None and quoted[j]
+
     closer = None
     for k, tok in enumerate(cond):
         name = tok.rsplit("/", 1)[-1]
         if closer is None:
-            if name in _TEST_CLOSERS and (
-                _opens_command(cond, k)
-                or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
+            if (
+                name in _TEST_CLOSERS
+                and not (k and literal(k - 1))
+                and (
+                    _opens_command(cond, k)
+                    or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
+                )
             ):
                 closer = _TEST_CLOSERS[name]
                 depth = group = cases = 0
                 tick = False
             continue
         opens, closes = tok.count("("), tok.count(")")
-        if "`" in tok:
+        if literal(k) and (tick or depth):
+            pass
+        elif literal(k):
+            if closer == "]]":
+                pass
+            elif tok in _TEST_COMPARISONS:
+                return True
+            elif closer and tok == closer:
+                closer = None
+        elif "`" in tok:
             if tok.count("`") % 2:
                 tick = not tick and any(t.count("`") % 2 for t in cond[k + 1 :])
         elif tick:
@@ -1776,7 +1816,10 @@ def _bound_in_condition(cond):
                 if not cases:
                     depth = max(0, depth + opens - closes)
                 cases = cases if depth else 0
-            elif set(tok) & set(";|&\n") and not (closer == "]]" and tok in ("&&", "||")):
+                tail = tok[tok.rfind(")") + 1 :]
+                if not depth and closer != "]]" and set(tail) & set(";|&\n"):
+                    closer = None
+            elif closer != "]]" and set(tok) & set(";|&\n"):
                 closer = None
             elif opens and (cond[k - 1].endswith("$") or tok in ("<(", ">(")):
                 depth = opens
@@ -2140,6 +2183,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     if _depth > 4:
         return None
     toks = _shell_tokens(cmd)
+    mask = _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
@@ -2179,7 +2223,8 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
             )
-            if sleeps and not bounded and not _bound_in_condition(cond):
+            quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
+            if sleeps and not bounded and not _bound_in_condition(cond, quoted):
                 # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
                 quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
                 return " ".join([tok] + quoted)
@@ -4331,6 +4376,51 @@ _WAIT_CASES = [
         "while [[ -f x || $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
         "allow",
         "a `||` inside `[[ ]]` joins two tests rather than ending one",
+    ),
+    (
+        "while ! test -n $(cat f); ls -lt out | grep -q x; do sleep 30; done",
+        "deny",
+        "a separator fused to a substitution's close ends the `test` too",
+    ),
+    (
+        "while [[ $x =~ ^(a|b)$ && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a regex alternation's `|` inside `[[ ]]` does not end it",
+    ),
+    (
+        "while [[ $x == @(a|b) && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "an extglob alternation's `|` inside `[[ ]]` does not end it",
+    ),
+    (
+        'while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `;` is an operand rather than a separator",
+    ),
+    (
+        'while [ "$c" != ")" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `)` is an operand rather than a grouping parenthesis",
+    ),
+    (
+        'while [[ $x != "|" && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `|` inside `[[ ]]` is a string",
+    ),
+    (
+        'while ! ls $(test -f "(") -lt out; do sleep 30; done',
+        "deny",
+        "a quoted `(` opens no group to keep a substitution's `test` open past its close",
+    ),
+    (
+        'while ! test -f "`"; grep "`" -le x log; do sleep 30; done',
+        "deny",
+        "two quoted backticks pair into no substitution to hide the separator between them",
+    ),
+    (
+        'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
+        "deny",
+        "a bracket after a quoted `;` is an argument rather than a command",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
