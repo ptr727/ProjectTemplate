@@ -902,18 +902,8 @@ TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructi
 # The undeclared-H2 scan reads the same set.
 UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
-# The version-literal scan reads the four instruction documents a repo owns prose in.
-# .github/copilot-instructions.md is left out, since its disproved-claims records name the revision a proof was read against by design.
-VERSION_LITERAL_SCANNED = ("AGENTS.md", "GOVERNANCE.md", "CODESTYLE.md", "WORKFLOW.md")
-
-# A three-part version, a full commit SHA, or an abbreviated one standing alone as a token.
-# The lookarounds keep a dotted quad, such as an address, from matching as a version.
-# An abbreviated SHA must mix a digit and a letter, so an all-letter word such as "facade" is not one.
-VERSION_LITERAL = re.compile(
-    r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)"
-    r"|\b[0-9a-fA-F]{40}\b"
-    r"|(?<![0-9A-Za-z#_])(?=[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-]))(?=[a-fA-F]*[0-9])(?=[0-9]*[a-fA-F])[0-9a-fA-F]{7,12}(?![0-9A-Za-z_-])"
-)
+VERSION_LITERAL_SCANNED = validate.VERSION_LITERAL_SCANNED
+VERSION_LITERAL = validate.VERSION_LITERAL
 
 
 def strip_sections(text, names, keep_pins=False):
