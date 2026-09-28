@@ -729,11 +729,35 @@ class RegisterCase(unittest.TestCase):
         self.assertIn(str(self.elsewhere / "removed"), self.stderr)
         self.assertIn("no longer exists", self.stderr)
 
+    @unittest.skipIf(
+        sys.platform == "win32" or os.geteuid() == 0,
+        "needs POSIX permissions that bind the running user",
+    )
     def test_a_registration_whose_directory_cannot_be_read_is_left_in_place(self) -> None:
-        self.registered_at(self.elsewhere)
-        mock.patch("pathlib.Path.is_dir", side_effect=PermissionError).start()
+        locked = self.elsewhere / "locked"
+        (locked / "checkout").mkdir(parents=True)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        self.registered_at(locked / "checkout")
         self.assertTrue(self.run_register())
         self.assertFalse(self.added())
+
+    def test_a_registration_on_a_symlink_loop_is_left_in_place(self) -> None:
+        loop = self.elsewhere / "loop"
+        try:
+            loop.symlink_to(loop)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.registered_at(loop)
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+
+    def test_a_registration_on_a_file_is_replaced(self) -> None:
+        stray = self.elsewhere / "stray"
+        stray.write_text("", encoding="utf-8")
+        self.registered_at(stray)
+        self.assertTrue(self.run_register())
+        self.assertTrue(self.added())
 
     def test_a_github_registration_is_left_in_place_whether_or_not_its_cache_exists(
         self,

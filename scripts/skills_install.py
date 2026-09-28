@@ -39,6 +39,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -225,8 +226,21 @@ def entry_location(entry):
 
 
 def same_directory(a, b):
-    """Whether two paths name one directory, however each is spelled."""
-    return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
+    """Whether two paths name one directory, however each is spelled, False where either cannot be resolved."""
+    try:
+        return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
+def directory_gone(location):
+    """Whether nothing is at `location` to serve, judged by stat so an unreadable path is never gone."""
+    try:
+        return not stat.S_ISDIR(os.stat(location).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
 
 
 def existing_registration():
@@ -248,11 +262,7 @@ def existing_registration():
     location = entry_location(entry)
     if location is None:
         return "a directory source naming no directory", False
-    try:
-        gone = not Path(location).is_dir()
-    except OSError:
-        gone = False
-    return location, gone or same_directory(location, ROOT)
+    return location, directory_gone(location) or same_directory(location, ROOT)
 
 
 def register_claude_marketplace():
