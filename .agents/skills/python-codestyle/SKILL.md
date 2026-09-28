@@ -31,7 +31,7 @@ Read the repo's `OPERATIONS.md` local-verification commands before substituting 
 Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
 
 - **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
-  and pyright strict, mypy strict, or both as the CI type checker.
+  and pyright strict, mypy with its strict flags, or both as the CI type checker.
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
@@ -56,12 +56,12 @@ declaration, versioning, VS Code config), see `references/profiles.md`.
 | [pytest][docs-link] | test runner (build profile only, lint-only uses `unittest`) | `pyproject.toml` `[tool.pytest.ini_options]` |
 
 **Type checking targets strongly typed, deterministic code.** pyright in strict mode is the
-default baseline on first-party code (a repo may instead run mypy strict in CI and keep
-pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
+default baseline on first-party code (a repo may instead run mypy with its strict flags in CI
+and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
 `strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
-standard mode. pyright is the
-anchor because Pylance embeds it, so the editor and the CLI/CI (`uv run pyright`) run the same
-engine and never disagree. The standalone `ms-pyright.pyright` extension stays in
+standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
+editor and the CLI/CI (`uv run pyright`) run the same engine and never disagree.
+The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
 `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
