@@ -21,7 +21,7 @@ Prerequisite: complete [host setup][host-setup] first. Without git config, an SS
 
 The .NET container additionally ships the `csharpier`/`dotnet-outdated` local tools (restored by `catalog/snippets/devcontainer/dotnet/post-create.sh`). The Python container additionally ships `uv` (installed by `catalog/snippets/devcontainer/python/post-create.sh` from a version-pinned URL) and pre-syncs the Python package venv where one is present.
 
-Each devcontainer's extension list is the workspace catalog's `base.jsonc` set plus the matching language fragment and `docker.jsonc`. A repo carrying one keeps it identical to its own workspace's `recommendations`, so it drops the Docker extension where it ships no Docker target, and an extension it adds to one it adds to the other.
+Each devcontainer's extension list is the workspace catalog's `base.jsonc` set plus that container's own language fragment and `docker.jsonc`, and a repo carrying one drops the Docker extension where it ships no Docker target.
 
 ## Bind Mounts (Both Containers)
 
