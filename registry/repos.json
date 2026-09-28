@@ -166,7 +166,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model; Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425); the -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Windows/CRLF Vantage-Config repo, not carried here; the legacy Vantage/ subtree is stripped."]
+            "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model; Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425); the -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Vantage-Config repo (lf default, only `.dc` pinned CRLF), not carried here; the legacy Vantage/ subtree is stripped."]
         },
         {
             "name": "KiCadLibrary",
@@ -282,13 +282,13 @@
             "types": ["source-only"],
             "groundTruthBranch": "main",
             "workflowModel": "operational",
-            "lineEndings": "crlf",
+            "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Vantage InFusion / Design Center controller config edited on Windows (UTF-8 CRLF .dc XML, really special XML), so lineEndings crlf.", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
+            "driftNotes": ["Follows the fleet LF default and pins only `*.dc` to CRLF (`.gitattributes` `*.dc text eol=crlf`, `.editorconfig` `[*.dc] end_of_line = crlf`), a repo-local exception for Design Center's own Windows-native XML export format (ptr727/Vantage-Config#28).", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
         },
         {
             "name": "HolidayLights",
