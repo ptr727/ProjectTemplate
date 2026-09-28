@@ -1194,8 +1194,8 @@ def head_review_done(pr: dict, min_rounds: int) -> bool:
     which is why this walks one list rather than checking `reviewed_head(pr)` and a count as two
     independent clauses. Two clauses would let a refusal past the baseline satisfy the count
     while an untouched, older genuine round still satisfies `reviewed_head`, reporting done on a
-    round that answered the re-request by declining it. A caller passing 0, every pre-`--min-
-    rounds` caller among them, reduces to `reviewed_head` exactly, since position 0 is every
+    round that answered the re-request by declining it. A caller passing 0, every caller that
+    predates this flag among them, reduces to `reviewed_head` exactly, since position 0 is every
     position a non-empty list has.
 
     Counting `reviewer_nodes(pr, "reviews")` rather than `head_reviews(pr)`, the head-scoped,
