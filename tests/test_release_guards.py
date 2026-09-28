@@ -379,14 +379,17 @@ class ReleaseGuardCase(unittest.TestCase):
             lines.append(line[10:])
         script = "\n".join(lines)
 
-        def publish(*later_paths: str) -> tuple[int, list[str]]:
+        def publish(authors: str, *later_paths: str) -> tuple[int, list[str]]:
             with tempfile.TemporaryDirectory() as scratch:
                 root = Path(scratch)
                 bin_dir = root / "bin"
                 bin_dir.mkdir()
                 calls = root / "calls"
                 (bin_dir / "gh").write_text(
-                    f'#!/bin/sh\necho "$*" >> "{calls}"\n', encoding="utf-8"
+                    "#!/bin/sh\n"
+                    f'if [ "$1" = api ]; then echo api >> "{calls}"; printf "%s\\n" "$AUTHORS"; exit 0; fi\n'
+                    f'echo "$*" >> "{calls}"\n',
+                    encoding="utf-8",
                 )
                 (bin_dir / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 for stub in bin_dir.iterdir():
@@ -430,6 +433,7 @@ class ReleaseGuardCase(unittest.TestCase):
                         "BRANCH": "main",
                         "GITHUB_REPOSITORY": "example/widget",
                         "GITHUB_RUN_ID": "42",
+                        "AUTHORS": authors,
                         "GITHUB_WORKFLOW_REF": "example/widget/.github/workflows/publish-release.yml@refs/heads/main",
                     },
                     capture_output=True,
@@ -440,17 +444,21 @@ class ReleaseGuardCase(unittest.TestCase):
                 logged = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
                 return verdict.returncode, logged
 
-        self.assertEqual((0, []), publish("src/app.py"))
-        self.assertEqual((1, []), publish(".github/workflows/ci.yml", "src/app.py"))
+        bots = "dependabot[bot]\nptr727-codegen[bot]"
+        self.assertEqual((0, []), publish(bots, "src/app.py"))
+        for authors in ("dependabot[bot]\nmaintainer", "unknown", ""):
+            with self.subTest(authors=authors):
+                self.assertEqual((1, ["api"]), publish(authors, ".github/workflows/ci.yml"))
         self.assertEqual(
             (
                 1,
                 [
+                    "api",
                     "workflow run publish-release.yml --repo example/widget --ref main",
                     "run cancel 42 --repo example/widget",
                 ],
             ),
-            publish(".github/workflows/ci.yml"),
+            publish(bots, ".github/workflows/ci.yml", "src/app.py"),
         )
 
     def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
