@@ -155,8 +155,21 @@ class VersionLiteralCase(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
     def test_rejects_a_bare_tag_example_inside_a_verbatim_section(self) -> None:
+        heading = "Workflow YAML Conventions"
+        governance = next(
+            item
+            for item in validate.load("spec/files.json")["baseline"]
+            if item["path"] == "GOVERNANCE.md"
+        )
+        self.assertIn(
+            {"name": heading, "fidelity": "verbatim"},
+            [
+                {"name": s.get("name"), "fidelity": s.get("fidelity")}
+                for s in governance["sections"]
+            ],
+        )
         (self.root / "GOVERNANCE.md").write_text(
-            "# Governance\n\n## Rule\n\nWrite the bare tag, such as `# 2.7.1`, as published.\n",
+            f"# Governance\n\n## {heading}\n\nWrite the bare tag, such as `# 2.7.1`, as published.\n",
             encoding="utf-8",
         )
 
