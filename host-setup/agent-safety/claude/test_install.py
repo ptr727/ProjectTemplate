@@ -735,6 +735,22 @@ class TestRegistration(StampCase):
                 hooks = self._settings()["hooks"][event][0]["hooks"]
                 self.assertIn(wrapper, hooks, "the wrapper was removed by a re-run")
 
+    def test_names_hook_agrees_with_runs_hook_on_every_shape_it_accepts(self):
+        """A command `runs_hook` already treats as running the deployed hook must count as
+        named too, or a re-run leaves a duplicate registration in place while `--report` calls
+        the hook absent."""
+        path = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")
+        for label, command in (
+            ("bare", f'"python3" "{path}"'),
+            ("trailing-semicolon", f'"python3" "{path}"; true'),
+            ("parenthesized", f"(python3 {path})"),
+            ("bash-c", f'bash -c "python3 {path} --x"'),
+            ("unbalanced-quote-comment", f'"python3" "{path}" # it\'s'),
+        ):
+            with self.subTest(shape=label):
+                self.assertTrue(install.runs_hook(command, path), command)
+                self.assertTrue(install.names_hook(command, install.GUARD_NAME), command)
+
 
 class TestContainmentPrefix(StampCase):
     """The shell prefix is set where the host can contain a command, and owned only while it names ours."""

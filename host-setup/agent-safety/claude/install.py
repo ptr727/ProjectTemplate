@@ -28,7 +28,6 @@ import os
 import pathlib
 import platform
 import re
-import shlex
 import shutil
 import socket
 import subprocess
@@ -118,22 +117,23 @@ def runs_hook(command, path):
 
 
 def names_hook(command, name):
-    """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME).
+    """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME), at any path.
 
-    Judged on each token's file name exactly, the way `kit_prefix` judges
-    `CLAUDE_CODE_SHELL_PREFIX`: a substring test on the whole command string also claims a
-    maintainer's own hook whose file name merely contains this kit's stem, such as
-    `my-gh-write-guard-audit.sh` containing `gh-write-guard`. Every token is checked rather than
-    trusting position, since a hand-written or UI-added command need not put the path last.
-    `shlex.split` fails open to whitespace splitting on an unbalanced quote, since a hand-edited
-    command is data to judge rather than something this check may raise on.
+    Matched with `runs_hook`'s own boundary characters rather than by tokenizing the command.
+    A command `runs_hook` already treats as running the deployed hook, such as one wrapped in
+    `bash -c "..."`, in `(...)`, or followed by `; true`, carries those wrapping characters
+    attached to the path with no separating space, which `shlex.split` folds into the token and
+    a plain whitespace split (its own fallback on an unbalanced quote) leaves attached to a quote
+    character, so neither reads the trailing path segment as `name` alone.
+
+    Matched as a trailing path segment rather than a bare substring, so a maintainer's own hook
+    whose file name merely contains this kit's stem, such as `my-gh-write-guard-audit.sh`
+    containing `gh-write-guard`, is not claimed: the character right after the stem there is
+    `-`, not one of the boundary characters this match requires.
     """
     text = str(command).replace("\\", "/")
-    try:
-        tokens = shlex.split(text)
-    except ValueError:
-        tokens = text.split()
-    return any(os.path.basename(t) == name for t in tokens)
+    pattern = rf"(?:^|[\s\"'(])(?:[^\s\"'()|&;]*/)?{re.escape(name)}(?=$|[\s\"')|&;])"
+    return re.search(pattern, text) is not None
 
 
 def matcher_sees_bash(matcher):
