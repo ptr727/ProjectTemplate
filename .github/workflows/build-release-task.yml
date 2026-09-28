@@ -347,7 +347,7 @@ jobs:
           fi
 
       # GITHUB_TOKEN cannot hold the workflows scope, so its tag create answers 403 once the branch head carries different workflow files, per D4.7.
-      # Where every pull request landing since was merged by a release bot on publish-plan-task.yml's actor allowlist, the calling publisher is dispatched to release the head and this run cancels itself.
+      # Where every push since was a release bot's, the actor allowlist publish-plan-task.yml gates on, the calling publisher is dispatched to release the head and this run cancels itself.
       - name: Supersede a release the token cannot tag step
         if: ${{ steps.release-exists.outputs.exists == 'false' }}
         env:
@@ -368,16 +368,17 @@ jobs:
             echo "::error::$BRANCH moved to $head_sha with different workflow files and $1, so GITHUB_TOKEN cannot tag $built_sha and only a deliberate dispatch may release the head."
             exit 1
           }
-          landings=$(BASE_SHA="$built_sha" HEAD_SHA="$head_sha" gh api "repos/$GITHUB_REPOSITORY/compare/$built_sha...$head_sha" \
-            --jq 'if .status != "ahead" or .total_commits != (.commits | length) then "unknown" else .commits | map({key: .sha, value: .parents[0].sha}) | from_entries | def chain(s): if s == env.BASE_SHA then empty elif s != null and has(s) then s, chain(.[s]) else "unknown" end; chain(env.HEAD_SHA) end')
-          [[ -n "$landings" ]] || refuse "no commit between them"
-          for sha in $landings; do
-            [[ "$sha" != "unknown" ]] || refuse "a history the compare could not walk"
-            number=$(SHA="$sha" gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --jq '[.[] | select(.merge_commit_sha == env.SHA) | .number] | first // empty')
-            [[ -n "$number" ]] || refuse "$sha landing without a pull request"
-            merger=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq '.merged_by.login // ""')
-            [[ "$merger" == "ptr727-codegen[bot]" || "$merger" == "dependabot[bot]" ]] || refuse "pull request $number merged by '$merger'"
+          pushes=$(gh api "repos/$GITHUB_REPOSITORY/activity?ref=refs/heads/$BRANCH&per_page=100" \
+            --jq '.[] | "\(.after) \(.before) \(.activity_type) \(.actor.login // "none")"')
+          sha="$head_sha"
+          for _ in $(seq 100); do
+            [[ "$sha" != "$built_sha" ]] || break
+            read -r _ before type actor <<<"$(awk -v sha="$sha" '$1 == sha { print; exit }' <<<"$pushes")"
+            [[ "$type" == "push" || "$type" == "pr_merge" ]] || refuse "no push or merge recorded producing $sha"
+            [[ "$actor" == "ptr727-codegen[bot]" || "$actor" == "dependabot[bot]" ]] || refuse "$sha pushed by '$actor'"
+            sha="$before"
           done
+          [[ "$sha" == "$built_sha" ]] || refuse "more pushes since than the check reads"
           [[ "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" == "$head_sha" ]] || refuse "a further push since the check"
           publisher="${GITHUB_WORKFLOW_REF%@*}"
           publisher="${publisher##*/}"

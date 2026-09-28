@@ -10,6 +10,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from subprocess import run
 from typing import NamedTuple
@@ -362,8 +363,8 @@ class ReleaseGuardCase(unittest.TestCase):
 
         GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree matches no
         branch head, so the step decides before the create step runs. It dispatches only where
-        every landing since was a pull request a release bot merged, which the stub proves by
-        running the step's own --jq filters against constructed API responses.
+        every push since was a release bot's, which the stub proves by running the step's own --jq
+        filter against a constructed repository activity response.
         """
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         marker = "      - name: Supersede a release the token cannot tag step\n"
@@ -384,32 +385,33 @@ class ReleaseGuardCase(unittest.TestCase):
         plan = (REPO / ".github/workflows/publish-plan-task.yml").read_text(encoding="utf-8")
         allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
         self.assertTrue(allowed)
-        self.assertEqual(allowed, set(re.findall(r'"\$merger" == "([^"]+)"', script)))
+        self.assertEqual(allowed, set(re.findall(r'"\$actor" == "([^"]+)"', script)))
+
+        bot = {"login": "ptr727-codegen[bot]"}
+        middle = "e" * 40
+
+        def one_push(built: str, head: str) -> list[dict[str, object]]:
+            return [{"after": head, "before": built, "activity_type": "pr_merge", "actor": bot}]
 
         def publish(
             later_path: str,
-            merger: str | None = "ptr727-codegen[bot]",
-            status: str = "ahead",
-            extra_total: int = 0,
-            pull_merge_sha: str | None = None,
+            pushes: Callable[[str, str], list[dict[str, object]]] = one_push,
             push_during_check: bool = False,
-            off_first_parent: bool = False,
         ) -> tuple[int, list[str]]:
             with tempfile.TemporaryDirectory() as scratch:
                 root = Path(scratch)
                 bin_dir = root / "bin"
                 bin_dir.mkdir()
-                fixtures = root / "fixtures"
-                fixtures.mkdir()
+                activity = root / "activity.json"
                 calls = root / "calls"
                 work = root / "work"
                 (bin_dir / "gh").write_text(
                     "#!/bin/sh\n"
                     'if [ "$1" = api ]; then\n'
-                    f'  echo "api" >> "{calls}"\n'
-                    '  case "$2" in */pulls/*) [ -n "$PUSH_DURING_CHECK" ] && '
-                    f'git -C "{work}" commit -q --allow-empty -m again && git -C "{work}" push -q origin main ;; esac\n'
-                    f'  exec jq -r "$4" "{fixtures}/$(echo "$2" | tr / _).json"\n'
+                    f'  echo "api $2" >> "{calls}"\n'
+                    '  if [ -n "$PUSH_DURING_CHECK" ]; then '
+                    f'git -C "{work}" commit -q --allow-empty -m again && git -C "{work}" push -q origin main; fi\n'
+                    f'  exec jq -r "$4" "{activity}"\n'
                     "fi\n"
                     f'echo "$*" >> "{calls}"\n',
                     encoding="utf-8",
@@ -455,28 +457,7 @@ class ReleaseGuardCase(unittest.TestCase):
                 git(work, "commit", "-am", "later")
                 git(work, "push", "origin", "main")
                 head_sha = git(work, "rev-parse", "HEAD")
-                responses = {
-                    f"repos/example/widget/compare/{built_sha}...{head_sha}": {
-                        "status": status,
-                        "total_commits": 1 + extra_total,
-                        "commits": [
-                            {
-                                "sha": head_sha,
-                                "parents": [{"sha": "f" * 40 if off_first_parent else built_sha}],
-                            }
-                        ],
-                    },
-                    f"repos/example/widget/commits/{head_sha}/pulls": [
-                        {"number": 7, "merge_commit_sha": pull_merge_sha or head_sha}
-                    ],
-                    "repos/example/widget/pulls/7": {
-                        "merged_by": None if merger is None else {"login": merger}
-                    },
-                }
-                for path, response in responses.items():
-                    (fixtures / f"{path.replace('/', '_')}.json").write_text(
-                        json.dumps(response), encoding="utf-8"
-                    )
+                activity.write_text(json.dumps(pushes(built_sha, head_sha)), encoding="utf-8")
                 verdict = run(
                     ["bash", "-c", script],
                     cwd=built,
@@ -497,34 +478,49 @@ class ReleaseGuardCase(unittest.TestCase):
                 logged = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
                 return verdict.returncode, logged
 
+        query = "api repos/example/widget/activity?ref=refs/heads/main&per_page=100"
+        dispatched = [
+            query,
+            "workflow run publish-release.yml --repo example/widget --ref main",
+            "run cancel 42 --repo example/widget",
+        ]
         self.assertEqual((0, []), publish("src/app.py"))
-        self.assertEqual(
-            (
-                1,
-                [
-                    "api",
-                    "api",
-                    "api",
-                    "workflow run publish-release.yml --repo example/widget --ref main",
-                    "run cancel 42 --repo example/widget",
-                ],
-            ),
-            publish(".github/workflows/ci.yml"),
-        )
-        refusals = {
-            "human merger": {"merger": "maintainer"},
-            "no merger": {"merger": None},
-            "diverged": {"status": "diverged"},
-            "truncated": {"extra_total": 1},
-            "no pull request": {"pull_merge_sha": "0" * 40},
+        self.assertEqual((1, dispatched), publish(".github/workflows/ci.yml"))
+
+        def two_pushes(second: dict[str, str]) -> Callable[[str, str], list[dict[str, object]]]:
+            return lambda built, head: [
+                {"after": head, "before": middle, "activity_type": "push", "actor": bot},
+                {"after": middle, "before": built, "activity_type": "pr_merge", "actor": second},
+            ]
+
+        self.assertEqual((1, dispatched), publish(".github/workflows/ci.yml", two_pushes(bot)))
+        refusals: dict[str, dict[str, object]] = {
+            "human pusher": {"pushes": two_pushes({"login": "maintainer"})},
+            "no pusher": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": built, "activity_type": "push", "actor": None}
+                ]
+            },
+            "force push": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": built, "activity_type": "force_push", "actor": bot}
+                ]
+            },
+            "no record": {"pushes": lambda built, head: []},
+            "cycle": {
+                "pushes": lambda built, head: [
+                    {"after": head, "before": middle, "activity_type": "push", "actor": bot},
+                    {"after": middle, "before": head, "activity_type": "push", "actor": bot},
+                ]
+            },
             "push during check": {"push_during_check": True},
-            "off the first-parent line": {"off_first_parent": True},
         }
         for name, case in refusals.items():
             with self.subTest(name):
-                code, logged = publish(".github/workflows/ci.yml", **case)  # type: ignore[arg-type]
-                self.assertEqual(1, code)
-                self.assertEqual(["api"], sorted(set(logged)))
+                self.assertEqual(
+                    (1, [query]),
+                    publish(".github/workflows/ci.yml", **case),  # type: ignore[arg-type]
+                )
 
     def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
         """validate-release refuses a branch git would not accept as a name, on a smoke run too.
