@@ -361,8 +361,8 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_release_the_token_cannot_tag_is_superseded(self) -> None:
         """github-release re-dispatches the publisher and cancels itself once the head's workflows differ, per D4.7.
 
-        GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree matches no
-        branch head, so the step decides before the create step runs. It dispatches only where
+        GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree no longer
+        matches its branch's head, so the step decides before the create step runs. It dispatches only where
         every push since was a release bot's, which the stub proves by running the step's own --jq
         filter against a constructed repository activity response.
         """
