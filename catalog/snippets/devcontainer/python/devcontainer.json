@@ -42,18 +42,16 @@
 
     "customizations": {
         "vscode": {
-            // Mirror of `recommendations` in ProjectTemplate.code-workspace.
             "extensions": [
-                "arahata.linter-actionlint",
                 "charliermarsh.ruff",
                 "davidanson.vscode-markdownlint",
                 "editorconfig.editorconfig",
-                "github.vscode-github-actions",
-                "gruntfuggly.todo-tree",
+                "fanaticpythoner.better-todo-tree",
                 "ms-azuretools.vscode-docker",
+                "ms-python.mypy-type-checker",
                 "ms-python.python",
+                "ms-python.vscode-pylance",
                 "streetsidesoftware.code-spell-checker",
-                "timonwong.shellcheck",
                 "yzhang.markdown-all-in-one"
             ]
         }
