@@ -2082,7 +2082,11 @@ def workflow_input_text(job_text, key, raw=False):
     if raw:
         nested = []
         for ln in lines[key_at + 1 :]:
-            if ln.strip() and len(ln) - len(ln.lstrip()) <= child_indent:
+            if (
+                ln.strip()
+                and not ln.lstrip().startswith("#")
+                and len(ln) - len(ln.lstrip()) <= child_indent
+            ):
                 break
             nested.append(ln)
         return "\n".join([rest, *nested])
@@ -6190,6 +6194,13 @@ def _selftest():
             {},
             1,
             "an escaped double-quoted value on the next line is refused",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('\n      # a note at the key column\n        "Tools\\nOther"'),
+            {},
+            1,
+            "a comment at the key column hides no next-line value",
         ),
         (
             py_caller_path,
