@@ -5350,6 +5350,16 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         )
         self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
 
+    def test_a_pattern_copied_from_the_printed_unresolved_line_selects_its_own_thread(self) -> None:
+        """`describe()` collapses whitespace before printing an `unresolved:` line, so a pattern
+        copied verbatim from that line must still select the thread it was copied from, through
+        the line break and the run of spaces the raw body still carries."""
+        body = "The helper\nneeds to fold   whitespace before comparing bodies."
+        copied = pr_review.describe(rthread("t1", body=body)).split(": ", 1)[1]
+        self.wire(page([rthread("t1", body=body)]))
+        self.assertEqual(0, self.run_reply("--resolve", "--match", copied))
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
     def test_every_documented_character_selects_across_the_ascii_boundary(self) -> None:
         """Each of the issue's seven characters folds on its own, an expectation independent of
         `_TYPOGRAPHIC_FOLD` itself, so dropping one from that table still fails this."""
