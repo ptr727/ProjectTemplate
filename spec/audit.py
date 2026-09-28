@@ -1918,6 +1918,7 @@ _BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
 _BARE_BLOCK_SCALAR = re.compile(r"^(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
 # A step's `- key: |` sequence-item prefix, stripped before matching the two patterns above.
 _SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
+_IF_KEY = re.compile(r"^if\s*:")
 
 
 def _code_view(text):
@@ -1928,6 +1929,7 @@ def _code_view(text):
     both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
     A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
     way, so its body is dropped too, keeping only the `key:` line itself.
+    An `if:` body is kept, since its value is always an expression and a multi-line one is written `if: >-`.
     """
     out = []
     skip_indent = None
@@ -1949,7 +1951,8 @@ def _code_view(text):
             key_col += dash.end()
             stripped = stripped[dash.end() :]
         if _BLOCK_SCALAR_KEY.match(stripped):
-            skip_indent = key_col
+            if not _IF_KEY.match(stripped):
+                skip_indent = key_col
         elif dash and _BARE_BLOCK_SCALAR.match(stripped):
             # A bare `- |` has no key, so its own boundary is the dash's column, not a key past it.
             skip_indent = dash_col
@@ -3496,6 +3499,26 @@ def _selftest():
             1,
         ),
         (
+            "publish-release.yml stub carrying its publish condition in a folded if: >-",
+            publish_stub.replace(
+                "    if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}\n",
+                "    if: >-\n"
+                "      ${{ needs.plan.outputs.publish == 'true'\n"
+                "      && needs.validate.result == 'success' }}\n",
+            ),
+            publish_contract,
+            0,
+        ),
+        (
+            "publish-release.yml stub naming the validation token only in a name: | body",
+            publish_stub.replace(
+                "    name: Publish project release job\n",
+                "    name: |\n      needs.validate.result == 'success'\n",
+            ).replace(" && needs.validate.result == 'success'", ""),
+            publish_contract,
+            1,
+        ),
+        (
             "publish-release.yml stub whose publish job ignores failed validation",
             publish_stub.replace(" && needs.validate.result == 'success'", ""),
             publish_contract,
@@ -3744,6 +3767,16 @@ def _selftest():
             "a bare sequence-item block scalar (`- |`, a matrix string) still drops its body",
             "  include:\n    - |\n      TOKEN\n",
             "  include:\n    - |",
+        ),
+        (
+            "a folded `if: >-` keeps its body, an expression rather than prose",
+            "  publish:\n    if: >-\n      ${{ a\n      && b }}\n    uses: x\n",
+            "  publish:\n    if: >-\n      ${{ a\n      && b }}\n    uses: x",
+        ),
+        (
+            "a step's folded `- if: >-` keeps its body too",
+            "      - if: >-\n          ${{ a }}\n        run: echo\n",
+            "      - if: >-\n          ${{ a }}\n        run: echo",
         ),
     ]
     for label, text, want in code_view_cases:
