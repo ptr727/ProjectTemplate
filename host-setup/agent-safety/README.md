@@ -192,7 +192,9 @@ text says, because the harm it covers was never in the text.
    <duration>` running the `sh -c`/`bash -c` wrapper that holds the loop, `timeout 600 bash -c
    '<the loop>'`. That placement is the only one that works, since `timeout` takes a command and
    a loop keyword is not one, so `timeout 600 until ...; do sleep 30; done` is a syntax error
-   rather than a bounded wait. The second is an arithmetic guard in the
+   rather than a bounded wait. A `-s`/`--signal` option leaves it a bound, except signal 0 in any
+   spelling GNU `timeout` accepts (`-s 0`, `--signal=0`, `-s0`, `EXIT`), which is delivered to no
+   process, so the `timeout` expires and leaves its child running. The second is an arithmetic guard in the
    loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
@@ -247,19 +249,21 @@ text says, because the harm it covers was never in the text.
    than only the ones in command position, so `cat <<EOF | shellcheck -s bash -` keeps a body no
    shell runs and denies a document being linted.
 
-   Four shapes this deliberately does not reach, each for the same precision-over-recall reason
+   Some shapes are deliberately not reached, each for the same precision-over-recall reason
    requirements 1-3 and 6 give. A busy loop that polls with no `sleep` at all is not distinguishable
    from a loop doing ordinary work in its body. A guard comparing against a counter the body never
    increments is textually a bound and is infinite anyway. A wait inside a script file is unseen,
-   the same blind spot every requirement here has. And a redirect from a named pipe is a file path
-   in the command text, indistinguishable from a redirect from a file. A false deny on an ordinary
-   loop costs more work than those four leaks do, and each still falls under `AGENTS.md`
-   "Delegation", which states the prohibition for every agent whether or not a hook is installed.
+   the same blind spot every requirement here has. A redirect from a named pipe is a file path in
+   the command text, indistinguishable from a redirect from a file. And a `timeout` sending a signal
+   the payload handles and ignores is textually a bound, since which signals a payload ignores is
+   not decidable from the command text. A false deny on an ordinary loop costs more work than those
+   leaks do, and each still falls under `AGENTS.md` "Delegation", which states the prohibition for
+   every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
    being written, and requirement 9 stops what the session's own bounded commands leave behind. This
    one finds the leaks still running: the ones a session started before either reached this machine,
-   the four shapes requirement 7 deliberately does not reach, and anything else this agent left
+   the shapes requirement 7 deliberately does not reach, and anything else this agent left
    running outside requirement 9's groups, whether it leaked or not. At the end of a session, report every descendant
    of the agent process that runs outside the agent's own session, since a descendant sharing that
    session ends when the agent does and one in a session of its own does not. Report the root of

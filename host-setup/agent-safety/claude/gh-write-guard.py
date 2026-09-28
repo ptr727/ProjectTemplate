@@ -1834,8 +1834,27 @@ def _reads_its_input(cond, after_done):
 # A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
 _TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
 
-# The `timeout` options taking their value as a separate argument, which is therefore not the duration.
-_TIMEOUT_VALUE_OPTS = {"-k", "--kill-after", "-s", "--signal"}
+_TIMEOUT_SIGNAL_ZERO = re.compile(r"^(?:sig)?(?:0+|exit)$", re.IGNORECASE)
+
+
+def _timeout_option(tok):
+    """Split one `timeout` option token the way getopt reads it, as `(option, value)`.
+
+    `option` is `s` for the signal, `k` for the kill-after, or empty for any other flag. `value` is
+    the value the token carries itself, or None where the option takes the next token instead. A
+    long option matches by any prefix, as getopt_long does, so `--sig=0` is `--signal=0`, and a short
+    cluster such as `-vs0` ends at its first value-taking option, the rest being that value.
+    """
+    if tok.startswith("--"):
+        name, eq, val = tok[2:].partition("=")
+        for opt, full in (("s", "signal"), ("k", "kill-after")):
+            if name and full.startswith(name):
+                return opt, (val if eq else None)
+        return "", ""
+    for j, ch in enumerate(tok[1:], 1):
+        if ch in "ks":
+            return ch, (tok[j + 1 :] or None)
+    return "", ""
 
 
 def _is_timeout_exe(tok):
@@ -1924,6 +1943,9 @@ def _timeout_bounds_wrapper(toks, w):
     bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
     `echo` in a run of its own.
 
+    A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound,
+    since signal 0 is delivered to no process and the `timeout` expires leaving its child running.
+
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
     syntax error rather than a bounded loop, so a `timeout` earlier on the line bounds nothing that
@@ -1942,15 +1964,19 @@ def _timeout_bounds_wrapper(toks, w):
     if _forks_out_of_reach(toks[start:w]):
         return False
     i = start + 1
+    signal = ""
     while i < w:
         tok = toks[i]
-        if tok in _TIMEOUT_VALUE_OPTS:
-            i += 2  # the option's value is the next token, never the duration
-            continue
         if tok.startswith("-"):
-            i += 1  # a flag, or a long option carrying its own value
+            opt, val = _timeout_option(tok)
+            if val is None:
+                i += 1  # the option's value is the next token, never the duration
+                val = toks[i] if i < w else ""
+            if opt == "s":
+                signal = val  # getopt keeps the last one given
+            i += 1
             continue
-        return bool(_TIMEOUT_DURATION.match(tok))
+        return bool(_TIMEOUT_DURATION.match(tok)) and not _TIMEOUT_SIGNAL_ZERO.match(signal)
     return False
 
 
@@ -4060,6 +4086,76 @@ _WAIT_CASES = [
         "timeout -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "an option taking a separate value still leaves the duration findable",
+    ),
+    (
+        "timeout -s 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "signal 0 is delivered to no process, so a timeout sending it expires and leaves its child running",
+    ),
+    (
+        "timeout --signal 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and the long option spelling sends the same nothing",
+    ),
+    (
+        "timeout --signal=0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as does the long option carrying its value inline",
+    ),
+    (
+        "timeout -s0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and the short option carrying its value attached",
+    ),
+    (
+        "timeout -vs0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "including at the end of a short option cluster",
+    ),
+    (
+        "timeout --sig=0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a long option abbreviated as getopt_long accepts it",
+    ),
+    (
+        "timeout -s EXIT 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and EXIT, the name GNU timeout gives signal 0",
+    ),
+    (
+        "timeout -s sig00 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "in any case, with the SIG prefix and leading zeros",
+    ),
+    (
+        "timeout -s KILL -s 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "the last signal option given is the one timeout sends",
+    ),
+    (
+        "timeout -s 0 -s KILL 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "so a signal 0 overridden by a later one is still a bound",
+    ),
+    (
+        "timeout -s KILL 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "an ordinary signal is still a bound",
+    ),
+    (
+        "timeout --signal=TERM 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "in the inline long spelling too",
+    ),
+    (
+        "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a numbered signal only looks like zero when every digit is",
+    ),
+    (
+        "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "the same wait with no signal option is bounded",
     ),
     (
         "timeout 900 nice bash -c 'until [ -f x ]; do sleep 60; done'",
