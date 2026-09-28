@@ -4866,6 +4866,15 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7"]))
 
+    def test_a_reviewer_pending_on_the_final_read_is_not_unrecorded(self) -> None:
+        """The digest and the code come from one read, so a request it shows pending is no 48."""
+        self.answer(payload([review(oid=OLD)]), payload([review(oid=OLD)], pending=True))
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertNotIn("status=REQUEST_NOT_RECORDED", self.out.getvalue())
+
     def test_an_unrecorded_request_outranks_the_repo_wide_quota_signal(self) -> None:
         """Read on this pull request, so it ranks above the reading from elsewhere."""
         self.answer(payload([]))

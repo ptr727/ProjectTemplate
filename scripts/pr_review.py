@@ -199,7 +199,7 @@ Subcommands
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
            read and clearing the set and requesting again changed nothing. The poll is skipped,
            since no request exists to answer. It outranks 47, being read on this pull request,
-           and ranks under 0/40/41/42/43/45/46. `status` cannot report it, since a request that
+           and ranks under 0/40/41/42/43/44/45/46. `status` cannot report it, since a request that
            recorded nothing leaves nothing for a later read to find.
            64 = the write scope could not be established or excludes the target, checked before
            the auto-request or any poll, so a cross-owner target reads and writes nothing here.
@@ -994,8 +994,8 @@ def request_recorded(before: dict, after: dict) -> bool | None:
     added an event or a pending reviewer. None where the answer lacks either field, since an
     unread state is not a reading of one, and the wait then polls as it did before this existed.
     None too where a login that reads as the reviewer's but is spelled otherwise answers, since
-    a drifted login would otherwise read a recorded request as an unrecorded one, and the poll
-    this skips is what reports the drift.
+    a drifted login would otherwise read a recorded request as an unrecorded one and blame the
+    account for it.
     """
     if "reviewRequests" not in after or "timelineItems" not in after:
         return None
@@ -3825,14 +3825,13 @@ def main(argv: list[str] | None = None) -> int:
             "no review follows and re-requesting does not clear it"
         )
         return 40
-    if recorded is False:
+    if recorded is False and not reviewer_requested(final):
         print(
             "status=REQUEST_NOT_RECORDED the Copilot review request returned success and "
             "added neither a pending reviewer nor a review-request event to this pull request. "
-            "The likely cause is the Copilot allowance or entitlement of the requesting "
-            "account, which is the maintainer's to restore: clearing the request set and "
-            "requesting again does not clear it, so proceed on the coverage the other "
-            "reviewers already gave this pull request or hand it to the maintainer"
+            "The likely cause is an exhausted Copilot allowance on the requesting account, "
+            "which is the maintainer's to restore: clearing the request set and requesting "
+            "again does not clear it, so hand it to the maintainer"
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
