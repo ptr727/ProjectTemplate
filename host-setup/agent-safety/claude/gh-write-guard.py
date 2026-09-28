@@ -1744,6 +1744,7 @@ def _quoted_mask(cmd, toks):
 
     The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
     A second, quote-keeping lex says which is which, and is trusted only where it aligns token for token.
+    Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
     """
     try:
         raw = _operator_lex(cmd, posix=False)
@@ -1752,8 +1753,12 @@ def _quoted_mask(cmd, toks):
     if len(raw) != len(toks):
         return None
     mask = [any(c in r for c in "'\"\\") for r in raw]
-    if any(r != t for r, t, q in zip(raw, toks, mask) if not q):
-        return None
+    for r, t, q in zip(raw, toks, mask):
+        try:
+            if (shlex.split(r) if q else [r]) != [t]:
+                return None
+        except ValueError:
+            return None
     return mask
 
 
@@ -4421,6 +4426,11 @@ _WAIT_CASES = [
         'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
         "deny",
         "a bracket after a quoted `;` is an argument rather than a command",
+    ),
+    (
+        'while ! test -n "\\"";"grep" -le x log; do sleep 30; done',
+        "deny",
+        "an escaped quote inside quotes shifts no real separator into a quoted operand",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
