@@ -124,6 +124,13 @@ class TestShaPin(TreeCase):
                 self.assertEqual(1, len(hits))
                 self.assertIn("no local path", hits[0])
 
+    def test_a_reported_line_is_the_uses_line_after_a_blank_line(self) -> None:
+        """A pattern whose leading whitespace crosses a newline starts the match a line early."""
+        files = self.workflow("jobs:\n  a:\n\n    uses: .github/x\n")
+        self.assertIn("w.yml:4:", repo_gate.check_sha_pin(self.tmp, files)[0])
+        files = self.workflow("jobs:\n  a:\n    steps:\n\n      - uses: actions/checkout@v4\n")
+        self.assertIn("w.yml:5:", repo_gate.check_sha_pin(self.tmp, files)[0])
+
     def test_a_quoted_external_pin_is_read_without_its_quotes(self) -> None:
         files = self.workflow(
             f'jobs:\n  a:\n    steps:\n      - uses: "actions/checkout@{PINNED}"\n'
