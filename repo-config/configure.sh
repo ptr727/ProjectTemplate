@@ -154,8 +154,15 @@ ruleset_id() {
         return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    ids="$(jqr --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
+    if ! ids="$(jqr --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"; then
+        echo "Failed for $repo: could not read live ruleset state (an array element was not a ruleset object)." >&2
+        return 1
+    fi
     if [ -z "$ids" ]; then return 0; fi
+    if printf '%s\n' "$ids" | grep -qx null; then
+        echo "Failed for $repo: could not read live ruleset state (ruleset '$1' has no id)." >&2
+        return 1
+    fi
     # Pre-existing drift can leave more than one ruleset with the same name.
     # Use the first and warn, so the duplicates get resolved rather than silently operating on the wrong one.
     # Both grep -c and sed read all their input with no early pipe close, so neither SIGPIPEs jq under pipefail.
