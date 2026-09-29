@@ -260,9 +260,9 @@ text says, because the harm it covers was never in the text.
    the command text, indistinguishable from a redirect from a file. And a `timeout` sending any
    other signal that ends nothing is still read as a bound. That covers a signal whose default
    action ends nothing, such as `CONT`, `CHLD`, or a stop signal, and one the payload handles and
-   ignores, which is not decidable from the command text at all. A false deny on an ordinary loop costs more work than those
-   leaks do, and each still falls under `AGENTS.md` "Delegation", which states the prohibition for
-   every agent whether or not a hook is installed.
+   ignores, which is not decidable from the command text at all. A false deny on an ordinary loop
+   costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
+   states the prohibition for every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
    being written, and requirement 9 stops what the session's own bounded commands leave behind. This
