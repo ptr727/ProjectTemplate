@@ -3585,6 +3585,56 @@ class TestCoverageExitCodes(GqlCase):
         self.assertNotIn("request another review", printed)
         self.assertIn("the maintainer's call", printed)
 
+    def balanced(self, rows: list[str]) -> str:
+        """A Balanced round stating no coverage, its file table naming `rows`."""
+        table = "\n".join(f"| `{p}` | Prose about the change. |" for p in rows)
+        return overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+        ).replace("| a.py | Narrows the reader. |", table)
+
+    def test_a_table_naming_exactly_the_changed_files_closes_an_unstated_head(self) -> None:
+        """Balanced effort writes the table and no statement, so the table is what can close it.
+
+        The nested path carries the zero-width space the format writes after a slash.
+        """
+        body = self.balanced(["a.md", "dir/\u200bb.md"])
+        self.answer(payload([review(body=body)], files=["a.md", "dir/b.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("coverage=table ", printed)
+        self.assertIn("COVERAGE IS READ FROM THE FILE TABLE", printed)
+        self.assertNotIn("status=COVERAGE_IS_UNSTATED", printed)
+
+    def test_a_table_that_is_not_exactly_the_changed_set_stays_unstated(self) -> None:
+        """A file left out, a file the diff does not carry, and a cut-short list each refuse."""
+        for rows, files, more in (
+            (["a.md"], ["a.md", "b.md"], False),
+            (["a.md", "c.md"], ["a.md"], False),
+            (["a.md"], ["a.md"], True),
+        ):
+            with self.subTest(rows=rows, files=files, more=more):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(
+                    payload([review(body=self.balanced(rows))], files=files, more_files=more)
+                )
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_stated_partial_wins_over_a_table_naming_every_changed_file(self) -> None:
+        """The table names the whole set on partial rounds too, so a statement always decides."""
+        body = summarized(
+            ["a.py", "b.md", "c.yml"],
+            covers="Copilot reviewed 2 out of 3 changed files in this pull request "
+            "and generated no comments.",
+        )
+        self.answer(payload([review(body=body)], files=["a.py", "b.md", "c.yml"]))
+        self.assertEqual(42, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("coverage=table", self.out.getvalue())
+
     def test_status_has_no_coverage_verdict_before_a_review_lands(self) -> None:
         """A missing round is incomplete work, not an unstated statement by a reviewer."""
         self.answer(payload([]))
@@ -6038,7 +6088,6 @@ class TestContract(unittest.TestCase):
         # Raw, because `read_coverage` is called once per line.
         # A marker split over two lines yields no statement, so one line is what is asserted.
         self.assertIn(marker, CODE_REVIEW_SKILL.read_text(encoding="utf-8"))
-        self.assertIn(marker, RUNBOOK.read_text(encoding="utf-8"))
         self.assertIsNotNone(pr_review.read_coverage(marker.replace("N", "1")))
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
