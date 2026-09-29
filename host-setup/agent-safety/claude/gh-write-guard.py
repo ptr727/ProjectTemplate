@@ -2086,11 +2086,12 @@ def _timeout_bounds_wrapper(toks, w):
     A `-s` value the shell expands at run time, such as `"$SIG"`, is read the same way, since the
     text cannot say it is not signal 0.
 
-    Where a `timeout` runs another `timeout`, the run is bounded only when every outer one sends
-    signal 0 with no kill-after, which is inert, and the innermost one is a bound. Any other nesting
-    is read as no bound, since an outer signal can end the inner `timeout` before its deadline and
-    leave the loop under it running. That is a false deny wherever the outer signal would have
-    stopped the loop too.
+    Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
+    only when every outer one sends signal 0 with no kill-after, which is inert, and the innermost
+    one is a bound. Any other such nesting is read as no bound, since an outer signal can end the
+    inner `timeout` before its deadline and leave the loop under it running. That is a false deny
+    wherever the outer signal would have stopped the loop too, and wherever a prefix between the two
+    takes an argument, as `nice -n 5` does.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2130,11 +2131,11 @@ def _timeout_bounds_wrapper(toks, w):
         i += 1
         while i < w and _is_command_prefix(toks[i]):
             i += 1
-        if i >= w or not _is_timeout_exe(toks[i]):
+        if not any(_is_timeout_exe(t) for t in toks[i:w]):
             return kills or not (
                 _is_timeout_signal_zero(signal) or _is_timeout_signal_unknown(signal)
             )
-        if kills or not _is_timeout_signal_zero(signal):
+        if kills or not _is_timeout_signal_zero(signal) or not _is_timeout_exe(toks[i]):
             return False
         i += 1
         signal = kill_after = ""
@@ -4391,9 +4392,19 @@ _WAIT_CASES = [
         "a command prefix between the two changes nothing about the outer one",
     ),
     (
+        "timeout -s KILL 10 nice -n 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor does a prefix taking an argument between the two",
+    ),
+    (
+        "timeout -s 0 900 nice -n 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "which is read as no bound even behind a signal-0 outer one, a declared false deny",
+    ),
+    (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
-        "and a numbered signal only looks like zero when every digit is",
+        "and a number is signal 0 only where GNU timeout masks it to 0, which 10 is not",
     ),
     (
         "timeout -s \"$SIG\" 900 bash -c 'until [ -f x ]; do sleep 60; done'",

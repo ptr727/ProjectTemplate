@@ -198,13 +198,15 @@ text says, because the harm it covers was never in the text.
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
    where its value takes the form a duration takes here. A `-s` value the shell expands at run
    time, such as `"$SIG"`, is read the same way, since the text cannot say it is not signal 0.
-   Where a `timeout` runs another `timeout`, the run is bounded only when every outer one sends
-   signal 0 with no kill-after, which is inert, and the innermost one is a bound, so `timeout -s 0
-   900 timeout 800 bash -c '<the loop>'` is bounded. Every other nesting is read as no bound, since
-   an outer signal can end the inner `timeout` before its deadline and leave the loop running. That
-   is a false deny wherever the outer signal would have stopped the loop too, as it does in
-   `timeout 900 timeout -s 0 800 bash -c '<the loop>'`. The second is an arithmetic guard in the
-   loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
+   Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
+   only when every outer one sends signal 0 with no kill-after, which is inert, and the innermost
+   one is a bound, so `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other
+   such nesting is read as no bound, since an outer signal can end the inner `timeout` before its
+   deadline and leave the loop running. That is a false deny wherever the outer signal would have
+   stopped the loop too, as it does in `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, and
+   wherever a prefix between the two takes an argument, as `nice -n 5` does. The second is an
+   arithmetic guard in the loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`)
+   or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
