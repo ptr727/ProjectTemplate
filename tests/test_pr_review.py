@@ -4866,14 +4866,21 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7"]))
 
-    def test_a_reviewer_pending_on_the_final_read_is_not_unrecorded(self) -> None:
-        """The digest and the code come from one read, so a request it shows pending is no 48."""
-        self.answer(payload([review(oid=OLD)]), payload([review(oid=OLD)], pending=True))
+    def test_a_reviewer_pending_on_the_confirming_read_is_polled_for(self) -> None:
+        """An answer lagging the request it reports is corrected by the next read, so the wait polls."""
+        self.answer(
+            payload([review(oid=OLD)]),
+            payload([review(oid=OLD)], pending=True),
+            payload([review()]),
+        )
         unchanged = request_state(events=("RRE_1",))
         self.wire_bot("BOT_123", (unchanged, unchanged))
-        with mock.patch.object(pr_review.time, "sleep"):
-            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
-        self.assertNotIn("status=REQUEST_NOT_RECORDED", self.out.getvalue())
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        out = self.out.getvalue()
+        self.assertNotIn("recorded nothing", out)
+        self.assertNotIn("status=REQUEST_NOT_RECORDED", out)
 
     def test_an_unrecorded_request_outranks_the_repo_wide_quota_signal(self) -> None:
         """Read on this pull request, so it ranks above the reading from elsewhere."""
@@ -4903,6 +4910,32 @@ class TestCli(GqlCase):
         before = request_state(events=("RRE_1",))
         self.assertIsNone(pr_review.request_recorded(before, {"id": "PR_test"}))
         self.assertIsNone(pr_review.request_recorded(before, {"reviewRequests": {"nodes": []}}))
+
+    def test_a_null_answer_is_not_read_as_unrecorded(self) -> None:
+        """A field answered null was not read, the same as one left out."""
+        before = request_state(events=("RRE_1",))
+        read: dict = {"nodes": []}
+        self.assertIsNone(
+            pr_review.request_recorded(before, {"reviewRequests": None, "timelineItems": read})
+        )
+        self.assertIsNone(
+            pr_review.request_recorded(before, {"reviewRequests": read, "timelineItems": None})
+        )
+
+        def fake(query: str, **variables: object) -> dict:
+            if "requestReviews" in query:
+                return {"requestReviews": {"pullRequest": None}}
+            answered = answer_request(query, variables, (before, before))
+            assert answered is not None
+            return answered
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123")
+        self.assertIsNone(recorded)
+
+    def test_a_request_past_the_tenth_pending_reviewer_is_read(self) -> None:
+        """A busy pull request still shows the reviewer the request added."""
+        self.assertIn("reviewRequests(first:100)", pr_review.REQUEST_STATE)
 
     def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
         """The shape observed live on two consecutive pull requests: no Copilot activity at all on

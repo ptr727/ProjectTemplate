@@ -686,7 +686,7 @@ query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
 """
 
 REQUEST_STATE = """
-    reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
+    reviewRequests(first:100){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]){ nodes{
       ... on ReviewRequestedEvent{ id requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } }
 """
@@ -997,10 +997,10 @@ def request_recorded(before: dict, after: dict) -> bool | None:
     a drifted login would otherwise read a recorded request as an unrecorded one and blame the
     account for it.
     """
-    if "reviewRequests" not in after or "timelineItems" not in after:
+    if after.get("reviewRequests") is None or after.get("timelineItems") is None:
         return None
-    nodes = (after["reviewRequests"] or {}).get("nodes") or []
-    nodes = nodes + ((after["timelineItems"] or {}).get("nodes") or [])
+    nodes = after["reviewRequests"].get("nodes") or []
+    nodes = nodes + (after["timelineItems"].get("nodes") or [])
     for n in nodes:
         login = (n.get("requestedReviewer") or {}).get("login") or ""
         if login != REVIEWER and READS_AS_REVIEWER.search(login):
@@ -1042,14 +1042,10 @@ def request_copilot_review(
             None,
         )
     before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
-    after = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)["requestReviews"][
-        "pullRequest"
-    ]
-    recorded = request_recorded(before, after)
+    answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
+    after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
     line = f"requested a Copilot review on the current head (bot {bot_id})"
-    if recorded is False:
-        line += ", and the request recorded nothing on the pull request"
-    return line, recorded
+    return line, request_recorded(before, after)
 
 
 def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
@@ -3693,11 +3689,18 @@ def main(argv: list[str] | None = None) -> int:
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
-    recorded = None
+    recorded: bool | None = None
+    final: dict | None = None
     if not done and not answer and not drift and not reviewer_requested(pr):
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history)
         )
+        if recorded is False:
+            final = gql(Q_FULL, owner, repo, a.number)
+            if reviewer_requested(final):
+                recorded, final = None, None
+            else:
+                line += ", and the request recorded nothing on the pull request"
         print(f"auto-request: {line}")
         # No re-read here: Copilot never resolves within the round trip that just issued the request.
         # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
@@ -3737,7 +3740,8 @@ def main(argv: list[str] | None = None) -> int:
     # A reader resolves that by believing the code, dropping the review it was just shown.
     # The digest also earns its call at the timeout.
     # A bare PENDING line reports a broken wait and a slow reviewer identically.
-    final = gql(Q_FULL, owner, repo, a.number)
+    if final is None:
+        final = gql(Q_FULL, owner, repo, a.number)
     now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
@@ -3825,7 +3829,7 @@ def main(argv: list[str] | None = None) -> int:
             "no review follows and re-requesting does not clear it"
         )
         return 40
-    if recorded is False and not reviewer_requested(final):
+    if recorded is False:
         print(
             "status=REQUEST_NOT_RECORDED the Copilot review request returned success and "
             "added neither a pending reviewer nor a review-request event to this pull request. "
@@ -3835,7 +3839,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    # Any of the three above, being concrete evidence about this head, outranks it.
     if signal:
         number, hist_refusal = signal
         print(
