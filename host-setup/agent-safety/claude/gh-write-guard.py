@@ -86,6 +86,7 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
 
+import functools
 import json
 import os
 import posixpath
@@ -93,6 +94,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from urllib.parse import quote, urlsplit
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
@@ -354,6 +356,8 @@ _WORD_BREAK_CHARS = " \t\n;&|<>("
 _CASE_KEYWORD = re.compile(r"(?:case|esac)(?=[ \t\n;&|<>()]|$)")
 _COND_PRECEDERS = {"!", "if", "then", "elif", "else", "while", "until", "do", "time", "{"}
 _DQ_ESCAPE = re.compile(r'\\([$`"\\\n])')
+_COMMENT_SCAN_BAIL = ("\\", "`", "$(", "${", "$'", '$"', "<<", "((")
+_EXTGLOB_OPEN = re.compile(r"[@?*+!]\(")
 
 
 def _skip_backticks(cmd, i):
@@ -509,18 +513,24 @@ def _arith_depth(run, depth, cmd, at):
     return depth
 
 
+@functools.lru_cache(maxsize=4)
+def _paren_closers(cmd):
+    """Map each `(` in `cmd` to the index of the `)` closing it, counting raw characters. Built in
+    one pass and cached, since a run of `((` asks once per pair and a scan per ask is quadratic.
+    """
+    closers, stack = {}, []
+    for i, ch in enumerate(cmd):
+        if ch == "(":
+            stack.append(i)
+        elif ch == ")" and stack:
+            closers[stack.pop()] = i
+    return closers
+
+
 def _closes_as_arithmetic(cmd, i):
     """True where the parens opened just before `cmd[i]` close together, on `))`."""
-    depth = 0
-    while i < len(cmd):
-        if cmd[i] == "(":
-            depth += 1
-        elif cmd[i] == ")":
-            if not depth:
-                return cmd[i + 1 : i + 2] == ")"
-            depth -= 1
-        i += 1
-    return True
+    close = _paren_closers(cmd).get(i - 1)
+    return close is None or cmd[close + 1 : close + 2] == ")"
 
 
 def _heredoc_line_tokens(line):
@@ -733,28 +743,84 @@ def _operator_tokens(line):
         return line.split()
 
 
-def _shell_tokens(cmd):
-    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
-    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
-    of that token while a real redirection or line break is separated. A command whose quoting shlex
-    cannot follow, an apostrophe in a comment or a quote nested in `"$(...)"` being the usual cases,
-    is read by `_context_lex`, which drops its comments. Degrades to one
-    line at a time where the quoting still cannot be parsed.
+def _strip_comments(cmd):
+    """Return `cmd` with every comment bash reads cut away, or None where it holds none or holds
+    quoting, a heredoc, or a nested context such as arithmetic or an extglob pattern, where a `#`
+    is text, that this scan does not model. Only plain quotes are tracked, and their state
+    carries across lines as bash's does, so a `#` inside a quote an earlier line opened stays text.
     """
-    try:
-        return _operator_lex(cmd)
-    except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
-        pass
-    try:
-        return _context_lex(cmd)
-    except (ValueError, RecursionError):
-        pass
+    if any(s in cmd for s in _COMMENT_SCAN_BAIL) or _EXTGLOB_OPEN.search(cmd):
+        return None
+    out = []
+    quote = None
+    comment = found = False
+    for i, ch in enumerate(cmd):
+        if comment:
+            if ch != "\n":
+                continue
+            comment = False
+        elif quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t" or cmd[i - 1] in _SHELL_OP_CHARS):
+            comment = found = True
+            continue
+        out.append(ch)
+    return "".join(out) if found else None
+
+
+def _base_tokens(cmd):
+    """Split each line of `cmd` plainly, keeping a newline between lines."""
+    toks = []
+    for i, line in enumerate(cmd.split("\n")):
+        if i:
+            toks.append("\n")
+        try:
+            toks.extend(shlex.split(line, posix=True))
+        except ValueError:
+            toks.extend(line.split())
+    return toks
+
+
+def _line_fallback_tokens(cmd):
+    """The reading that predates `_context_lex`: the command with its comments stripped, followed
+    by each line split plainly, or where the strip does not apply, each line tokenized alone.
+    """
+    stripped = _strip_comments(cmd)
+    if stripped is not None:
+        try:
+            return [*_operator_lex(stripped), "\n", *_base_tokens(cmd)]
+        except (ValueError, TypeError):
+            pass
     toks = []
     for i, line in enumerate(cmd.split("\n")):
         if i:
             toks.append("\n")
         toks.extend(_operator_tokens(line))
     return toks
+
+
+def _shell_tokens(cmd):
+    """Tokenize like a shell, isolating operator runs (`|`, `&&`, `;`, newline, `>`, `2>&1`, ...) as
+    their own tokens even when glued to a word - so a `>` or a newline inside a quoted value stays part
+    of that token while a real redirection or line break is separated. A command whose quoting shlex
+    cannot follow, an apostrophe in a comment or a quote nested in `"$(...)"` being the usual cases,
+    is read both by `_line_fallback_tokens` and by `_context_lex`, and the tokens of both are
+    returned. The union means a context the scan misreads can never hide a command the line
+    fallback saw, at the cost of the line fallback's false denies, such as loop text inside a
+    quote an earlier line opened.
+    """
+    try:
+        return _operator_lex(cmd)
+    except (ValueError, TypeError):  # bad quoting, or punctuation_chars unsupported on old Python
+        pass
+    toks = _line_fallback_tokens(cmd)
+    try:
+        return [*toks, "\n", *_context_lex(cmd)]
+    except (ValueError, RecursionError):
+        return toks
 
 
 def _is_shell_op(tok):
@@ -2563,7 +2629,9 @@ def _heredoc_opener(line):
     The line is read twice, with its comments dropped and with a `#` read as text, and opens a
     heredoc only where both readings find one. The first keeps a `<<` inside a comment from opening
     one. The second keeps a line an earlier line's quote holds from opening one, since a quote
-    there usually leaves the line unparseable as text.
+    there usually leaves the line unparseable as text. Both must also agree with the line read
+    alone by `_operator_tokens`, as it was before `_context_lex`, so a context the scan misreads
+    never strips a body that reading kept.
     """
     readings = []
     for comments in (False, True):
@@ -2573,7 +2641,8 @@ def _heredoc_opener(line):
             readings.append(_operator_tokens(line))
     if _heredoc_opener_in(readings[0]) is None:
         return None
-    return _heredoc_opener_in(readings[1])
+    opener = _heredoc_opener_in(readings[1])
+    return opener if opener == _heredoc_opener_in(_operator_tokens(line)) else None
 
 
 def _heredoc_opener_in(toks):
@@ -4311,8 +4380,28 @@ _WAIT_CASES = [
     ),
     (
         "echo \"$(date)\" 'x\nwhile true; do sleep 5; done\n' # it's",
-        "allow",
-        "loop text inside a quote an earlier line opened is text, not a loop, beside a substitution and an apostrophe",
+        "deny",
+        "loop text inside a quote an earlier line opened still denies, since the line fallback's tokens are kept beside the scan's",
+    ),
+    (
+        "(true)#'\nwhile true; do sleep 1; done\n#'\n# it's",
+        "deny",
+        "a `#` the scan misreads as text after a subshell's `)` does not hide the loop the line fallback sees",
+    ),
+    (
+        "(true)#'\necho 'a\nb'; while true; do sleep 1; done # it's\n# don't",
+        "deny",
+        "a loop only the comment-stripped whole-command reading sees is still seen where the scan misreads a `#`",
+    ),
+    (
+        'echo "$(echo case) \'"\nwhile true; do sleep 1; done\necho "\' esac)" # it\'s',
+        "deny",
+        "a `case` argument the scan misreads as a keyword does not hide the loop the line fallback sees",
+    ),
+    (
+        'cat <<EOF "$(echo "\'")"\nwhile true; do sleep 1; done\nEOF',
+        "deny",
+        "a heredoc only the scan finds strips no body, so a heredoc the scan misreads hides nothing",
     ),
     (
         "while ! [[ $x =~ a|#b ]]; do sleep 30; done  # the PR's checks",
@@ -5414,6 +5503,14 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [lex  ] {label}")
+    parens = 20000
+    start = time.monotonic()
+    _context_lex("(" * parens + "x" + " )" * parens)
+    elapsed = time.monotonic() - start
+    mark = "ok  " if elapsed < 5 else "FAIL"
+    if elapsed >= 5:
+        ok = False
+    print(f"  {mark} [lex  ] a long run of `((` pairs is scanned in linear time ({elapsed:.2f}s)")
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
