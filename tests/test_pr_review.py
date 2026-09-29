@@ -6038,6 +6038,7 @@ class TestContract(unittest.TestCase):
         # Raw, because `read_coverage` is called once per line.
         # A marker split over two lines yields no statement, so one line is what is asserted.
         self.assertIn(marker, CODE_REVIEW_SKILL.read_text(encoding="utf-8"))
+        self.assertIn(marker, RUNBOOK.read_text(encoding="utf-8"))
         self.assertIsNotNone(pr_review.read_coverage(marker.replace("N", "1")))
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
