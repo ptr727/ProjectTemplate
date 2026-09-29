@@ -3772,7 +3772,7 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertIn("appears to state partial coverage", self.out.getvalue())
 
     def test_a_drifted_or_disguised_partial_still_keeps_the_table_out(self) -> None:
-        """Each shape here is one only a single guard catches, so each is pinned on its own."""
+        """Drifted, disguised, and hidden shapes of a partial, each of which once read as none."""
         for partial in (
             "<!-- fleet-review: changed=2 reviewed=1 findings=0 -->",
             "<!-- fleet-review: reviewed=1, changed=2, findings=0 -->",
@@ -3793,6 +3793,17 @@ class TestCoverageExitCodes(GqlCase):
             "<!-- fleet-review: reviewed=1" + " " * 185 + "changed=12 findings=0 -->",
             "Per fleet review, " + "x" * 180 + " <!-- fleet-review: reviewed=1 changed=12 -->",
             "Checks `i<n and j`.\nCopilot reviewed 1 out of 2 changed files.\nMaps `a -> b`.",
+            "Guards `i <n and j`, Copilot reviewed 1 out of 2 changed files, maps `a -> b`.",
+            "<fleet-review reviewed=1 changed=2 findings=0>",
+            "&lt;fleet-review reviewed=1 changed=2 findings=0&gt;",
+            '<span title="fleet-review: reviewed=1 changed=2 findings=0"></span>',
+            "fleet - review: reviewed=1 changed=2",
+            "fleet\\-review: reviewed=1 changed=2",
+            "fleet review reviewed 1 changed 2",
+            "fleet\u00a0review: reviewed=1 changed=2",
+            "\uff46\uff4c\uff45\uff45\uff54-review: reviewed=1 changed=2",
+            "<!-- fleet-review: reviewed=\u00b9 changed=\u00b2 -->",
+            "Per fleet review, " + "x" * 250 + " counted 1 against 2.",
         ):
             with self.subTest(partial=partial):
                 self.out.seek(0)
@@ -3803,6 +3814,10 @@ class TestCoverageExitCodes(GqlCase):
                 self.answer(pr)
                 self.assertIn(pr_review.main(["status", "7", "--repo", "o/r"]), (42, 45))
                 self.assertNotIn("coverage=table", self.out.getvalue())
+
+    def test_a_digit_past_the_marker_reach_is_not_read_with_the_mention(self) -> None:
+        body = self.balanced(["a.md"]) + "\nPer fleet review, " + "x" * 320 + " item 1 of 2.\n"
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
 
     def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
         """Prose about the marker and its placeholder are not statements, so they block nothing."""

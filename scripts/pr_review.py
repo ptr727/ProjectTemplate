@@ -422,8 +422,10 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
-MARKER_NAME = re.compile(r"fleet\W?review", re.IGNORECASE)
+HTML_TAG = re.compile(
+    r"</?[A-Za-z][\w-]*(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+)
+MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_REACH = 300
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
@@ -1973,9 +1975,11 @@ def partial_shaped(pr: dict) -> str:
     read as a statement, which is right where an unread count blocks as unstated and wrong here,
     where the table would otherwise pass a partial the coverage reader did not recognize.
 
-    The body is read with entities decoded, format characters, markup tags, and emphasis
-    dropped, and whitespace folded, a tag being a `<` followed by a letter and ending on its own
-    line, so a comparison in prose is not read as one. A well-formed marker counts where its two
+    The body is read with entities decoded, compatibility forms folded, format characters,
+    combining marks, markup tags, and emphasis dropped, and whitespace folded, a tag being a `<`
+    and a letter followed by attribute syntax on one line, so a comparison in prose is not read
+    as one. Mentions are looked for with the tags kept as well, since a marker can be written as
+    a tag or inside one. A well-formed marker counts where its two
     counts differ. Any other mention of the marker's name, in any spelling, counts where a digit
     follows it within `MARKER_REACH` characters, since a marker is written by a model from an
     instruction and a drifted one cannot be parsed reliably, so it is not parsed at all. A mention
@@ -1984,17 +1988,19 @@ def partial_shaped(pr: dict) -> str:
     of reading a table at all.
     """
     for node in reviewer_nodes(pr, "reviews"):
-        raw = "".join(
-            c for c in html.unescape(node.get("body") or "") if unicodedata.category(c) != "Cf"
+        decomposed = unicodedata.normalize("NFKD", html.unescape(node.get("body") or ""))
+        raw = unicodedata.normalize(
+            "NFKC", "".join(c for c in decomposed if unicodedata.category(c) not in ("Cf", "Mn"))
         )
         text = " ".join(EMPHASIS_MARK.sub("", HTML_TAG.sub("", raw)).split())
         for m in FLEET_REVIEW.finditer(text):
             if count_value(m.group(1)) != count_value(m.group(2)):
                 return m.group(0)[:200]
-        rest = FLEET_REVIEW.sub(" ", text)
-        for m in MARKER_NAME.finditer(rest):
-            if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
-                return rest[m.start() : m.end() + MARKER_REACH][:200]
+        for seen in (text, " ".join(EMPHASIS_MARK.sub("", raw).split())):
+            rest = FLEET_REVIEW.sub(" ", seen)
+            for m in MARKER_NAME.finditer(rest):
+                if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
+                    return rest[m.start() : m.end() + MARKER_REACH][:200]
         for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
             for m in pattern.finditer(text):
                 counts = [count_value(g) for g in m.groups() if g is not None][:2]
