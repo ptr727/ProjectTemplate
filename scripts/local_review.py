@@ -959,7 +959,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nRun the local-strict-review pass over this diff, then record it:\n"
         f"  python3 scripts/local_review.py record --reviewer agent-skill"
         f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
-        "Add --findings <count> to record how many it raised.\n"
+        "Add --findings '<count>' to record how many it raised.\n"
         f"That line records a pass against {target}, which is the branch this check measured rather"
         " than one it discovered. Where the review read this branch against a different base, that"
         " is the wrong scope and the line records content nobody looked at.",
