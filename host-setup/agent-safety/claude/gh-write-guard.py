@@ -1740,27 +1740,70 @@ _TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
 _TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
 
 
+def _marked_lex(cmd):
+    """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
+
+    It reads quotes and escapes as that POSIX lex does, so an escape cannot shift its tokens.
+    Outside quotes a backslash takes the next character literally.
+    Inside double quotes it escapes only a double quote or a backslash, and is kept before any other.
+    Raises ValueError where the quoting does not parse, as that lex does.
+    """
+    out = []
+    tok, marked, state, i = "", False, None, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        i += 1
+        if state in ("'", '"'):
+            if ch == state:
+                state = "word"
+            elif ch == "\\" and state == '"':
+                if i == len(cmd):
+                    raise ValueError("No escaped character")
+                tok += cmd[i] if cmd[i] in '"\\' else ch + cmd[i]
+                i += 1
+            else:
+                tok += ch
+            continue
+        if state == "op" and ch in _SHELL_OP_CHARS:
+            tok += ch
+            continue
+        if state is not None and (ch in " \t\r" or state == "op" or ch in _SHELL_OP_CHARS):
+            out.append((tok, marked))
+            tok, marked, state = "", False, None
+        if ch in " \t\r":
+            continue
+        if ch in _SHELL_OP_CHARS:
+            tok, state = ch, "op"
+        elif ch in "'\"":
+            marked, state = True, ch
+        elif ch == "\\":
+            if i == len(cmd):
+                raise ValueError("No escaped character")
+            tok, marked, state = tok + cmd[i], True, "word"
+            i += 1
+        else:
+            tok, state = tok + ch, "word"
+    if state in ("'", '"'):
+        raise ValueError("No closing quotation")
+    if state is not None:
+        out.append((tok, marked))
+    return out
+
+
 def _quoted_mask(cmd, toks):
     """Per token of `toks`, whether `cmd` spelled it quoted or escaped, or None where that is unknown.
 
     The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
-    A second, quote-keeping lex says which is which, and is trusted only where it aligns token for token.
-    Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
+    A second lex that marks quoting says which is which, and is trusted only where its tokens are
+    the shell tokens exactly, which a command the tokenizer's fallbacks split never gives.
     """
     try:
-        raw = _operator_lex(cmd, posix=False)
-    except (ValueError, TypeError):
+        marked = _marked_lex(cmd)
+    except ValueError:
         return None
-    if len(raw) != len(toks):
+    if [t for t, _ in marked] != toks:
         return None
-    mask = [any(c in r for c in "'\"\\") for r in raw]
-    for r, t, q in zip(raw, toks, mask):
-        try:
-            if (shlex.split(r) if q else [r]) != [t]:
-                return None
-        except ValueError:
-            return None
-    return mask
+    return [m for _, m in marked]
 
 
 def _bound_in_condition(cond, quoted=None):
@@ -4431,6 +4474,36 @@ _WAIT_CASES = [
         'while ! test -n "\\"";"grep" -le x log; do sleep 30; done',
         "deny",
         "an escaped quote inside quotes shifts no real separator into a quoted operand",
+    ),
+    (
+        'echo "say \\"hi\\""; while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped quote before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'find . -name x -exec rm {} \\; ; while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped `;` before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'while [ "$x" != ";" -a $i -lt 5 ]; do echo "\\"" ; sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped quote in the body leaves the condition's quoted `;` an operand",
+    ),
+    (
+        "echo 'it'\\''s'; while [ \"$x\" != \";\" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `'\\''` before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'find . -name x -exec rm {} \\; ; while [ "$x" != ";" -a -f y ]; do sleep 1; done',
+        "deny",
+        "an escape before a quoted-operator loop with no comparison bounds nothing",
+    ),
+    (
+        'echo "say \\"hi\\""; while [ "$x" != ";" ]; do sleep 1; done',
+        "deny",
+        "an escaped quote before a quoted-operator loop with no comparison bounds nothing",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
