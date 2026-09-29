@@ -47,7 +47,8 @@ Subcommands
            set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
            The table stands in wherever no statement reaches the head, a carry the bound refuses
-           included, and a statement that does reach it wins, since over the rounds measured the
+           on a measured change of file set included, though not one it could not measure, and a
+           statement that does reach it wins, since over the rounds measured the
            table names the whole changed set on partial rounds too.
            Copilot's Balanced review effort, the default since 2026-09-28, writes the table and
            almost never a statement, which is the case the table reading exists for.
@@ -1999,9 +2000,11 @@ def table_covers(pr: dict) -> bool:
     It is weaker than a statement, and `table_against_diff` says why: over the rounds measured,
     the table names the whole changed set on partial rounds as well as full ones. So any
     statement that reaches the head wins over it, a partial one blocking as before, and this is
-    read only where none does. A statement the carry bound refuses describes a diff this head no
-    longer has, so it does not reach the head, and the table stands in over it as it would over
-    a pull request no round ever stated coverage on. A table naming a file the diff does not carry, or leaving one
+    read only where none does. A statement the carry bound refuses on a measured change of file
+    set describes a diff this head no longer has, so the table stands in over it as it would over
+    a pull request no round ever stated coverage on. A refusal the bound could not measure, a
+    compare that failed or a stating round whose commit is gone, keeps the table out, since that
+    statement may still describe this diff and a partial one would otherwise pass unread. A table naming a file the diff does not carry, or leaving one
     out, is not this reading, and neither is a changed-file list the query cut short, since a
     path beyond the window reads like a path the table left out.
     """
@@ -2174,12 +2177,12 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
     # So this reads the same state and says nothing, two wordings being two places to keep true.
     # `carry_holds` is what bounds it, and it is read here for the same reason the state is.
     # Read as falsy where the bound could not be measured, so an unreadable compare refuses too.
-    carried = carried_coverage(pr) if state == UNSTATED else None
-    if carried is not None and not carry_holds(owner, repo, pr, carried[2]):
-        carried = None
+    candidate = carried_coverage(pr) if state == UNSTATED else None
+    held = carry_holds(owner, repo, pr, candidate[2]) if candidate is not None else None
+    carried = candidate if held else None
     if carried is not None:
         state, line, _from_head = carried
-    if state == UNSTATED and table_covers(pr):
+    if state == UNSTATED and (candidate is None or held is False) and table_covers(pr):
         state = TABLE
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
@@ -2786,7 +2789,12 @@ def digest(
             cover, cover_line, _carried_from = candidate
         else:
             carried = None
-    if cover == UNSTATED and on_head and table_covers(pr):
+    if (
+        cover == UNSTATED
+        and on_head
+        and (candidate is None or carry_kept is False)
+        and table_covers(pr)
+    ):
         cover = TABLE
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]

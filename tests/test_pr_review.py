@@ -2765,6 +2765,21 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("coverage=table", out)
         self.assertIn("COVERAGE IS NOT CARRIED", out)
 
+    def test_a_carry_the_bound_could_not_measure_keeps_the_table_out(self) -> None:
+        """A failed compare may hide a partial that still describes this diff, so it blocks."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(oid=HEAD, body=summarized(["a.py"], covers=""), at=LATE, rid="PRR_b"),
+            ],
+            files=["a.py"],
+        )
+        with self.compare(**{HEAD: ["a.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=unstated", out)
+
     def test_a_files_connection_the_query_did_not_return_is_not_an_empty_change_set(self) -> None:
         pr = payload([review(oid=HEAD, body=summarized(["a.py"], covers=""))], files=["a.py"])
         pr["files"] = None
