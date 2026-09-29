@@ -552,7 +552,8 @@ def _context_lex(cmd, comments=True):
     quotes. Quote state carries across lines, a backslash escapes, and a substitution or `$'...'` span
     is read whole, so a quote inside `"$(...)"` does not end the outer one. A `#` opening a word
     outside every quote is a comment and dropped, with `comments`, and is text inside arithmetic, an
-    extglob pattern, a `[[ =~ ]]` operand, and a heredoc body. A `=~` operand is one word holding
+    extglob pattern, a `[[ =~ ]]` operand, and a heredoc body. A `#` right after any `)` is kept
+    as text, which bash agrees with after a substitution's `)` and not after a subshell's. A `=~` operand is one word holding
     `|`, parens, and spaces inside parens, as bash reads it. A `!(` opening a word is a negated
     subshell rather than a pattern, since bash runs it so unless extglob is on. A `-` glued to `<<`
     is the dash form, where a spaced one is the delimiter itself. Raises ValueError where a quote or
