@@ -88,6 +88,7 @@ class LiveSettingsCase(unittest.TestCase):
     def test_an_object_body_passes_the_guard(self) -> None:
         result = self.run_check('{"delete_branch_on_merge": true, "private": false}')
         self.assertNotIn("were not one JSON object", result.stdout)
+        self.assertIn("ok   setting delete_branch_on_merge = true", result.stdout)
         self.assertIn("REACHED_END", result.stdout)
         self.assertEqual(result.returncode, 0, result.stderr)
 
