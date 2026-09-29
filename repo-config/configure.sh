@@ -683,6 +683,7 @@ check_environments() {
         if [ "$policy" != custom ] || [ "$got" != custom ]; then continue; fi
         # GitHub documents no character restriction on an environment name beyond 255 characters and uniqueness, so a name legitimately holds a space, a '#', a '?' or a '/'.
         # Raw interpolation would turn each of those into something other than one path segment, and a '/' into two.
+        # shellcheck disable=SC2016  # $s is a jq --arg variable, not a shell expansion
         ename_uri="$(jqr -n --arg s "$ename" '$s|@uri')"
         if ! policies="$(gh api --paginate "repos/$repo/environments/$ename_uri/deployment-branch-policies" --jq '.branch_policies[]' | jq -s '.')"; then
             fail "environment '$ename' - could not read its deployment branch policies"
