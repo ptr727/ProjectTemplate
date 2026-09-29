@@ -43,8 +43,10 @@ Subcommands
            none carries the newest round that states some forward, bounded on the change set,
            so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           Request another review only after confirming the head branch carries the current
-           review instructions.
+           Confirm the head branch carries the current review instructions, then hand the
+           state to the maintainer rather than retrying into it, since a round re-requested on
+           the same head states coverage only by chance and the second format's file table names the
+           whole changed set on partial rounds too.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -217,6 +219,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import unicodedata
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1733,6 +1736,10 @@ def file_table(body: str) -> list[str]:
 
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
+
+    Format characters are dropped from each cell, since the second overview format writes a
+    zero-width space after a path's slash and `str.strip` keeps it, so every nested path read
+    as one the diff does not carry while every root-level path matched.
     """
     paths, reading = [], False
     for line in strip_fences(body or "").splitlines():
@@ -1741,7 +1748,7 @@ def file_table(body: str) -> list[str]:
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = row.group(1)
+            cell = "".join(c for c in row.group(1) if unicodedata.category(c) != "Cf")
             paths.append(cell.strip().strip("`").strip())
     return [p for p in paths if p]
 
@@ -2056,8 +2063,12 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "means one of three things, and the digest above says which: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current fleet-code-review skill and Copilot instructions, then request another "
-            "review. Merging without coverage is the maintainer's decision, not the agent's."
+            "the current fleet-code-review skill and Copilot instructions, since a round states "
+            "no coverage without them. A re-request on this head is not the remedy it reads as, "
+            "because it returns a round stating coverage only by chance, and the file table the "
+            "second format carries names the whole changed set on partial rounds too, so it "
+            "cannot stand in. Otherwise this is the maintainer's call, and merging without "
+            "coverage is their decision, not the agent's."
         )
         return 45
     return 0

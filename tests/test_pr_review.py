@@ -3545,6 +3545,21 @@ class TestCoverageExitCodes(GqlCase):
         self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
+    def test_an_unstated_second_format_round_hands_off_rather_than_prescribing_a_re_request(
+        self,
+    ) -> None:
+        """A round in the second format stating no coverage is what a re-request often returns.
+
+        Prescribing another request looped the review with nothing able to close it, so the
+        message names the maintainer instead.
+        """
+        self.answer(payload([review(body=overview_v2(findings="**Findings:** None", covers=""))]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("status=COVERAGE_IS_UNSTATED", printed)
+        self.assertNotIn("request another review", printed)
+        self.assertIn("the maintainer's call", printed)
+
     def test_status_has_no_coverage_verdict_before_a_review_lands(self) -> None:
         """A missing round is incomplete work, not an unstated statement by a reviewer."""
         self.answer(payload([]))
@@ -3693,6 +3708,19 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertEqual(
             ["a.py", "docs/b.md"], pr_review.file_table(summarized(["a.py", "docs/b.md"]))
         )
+
+    def test_a_zero_width_space_in_a_second_format_path_is_not_part_of_the_path(self) -> None:
+        """The second format writes U+200B after a path's slash, and `str.strip` keeps it.
+
+        Kept, every nested path read as one the diff does not carry and every root-level path
+        matched, so the comparison named real files as omitted.
+        """
+        body = overview_v2(findings="**Findings:** None", covers="").replace(
+            "| a.py | Narrows the reader. |",
+            "| `a.md` | Prose about the change. |\n| `dir/\u200bb.md` | Prose about the change. |",
+        )
+        self.assertEqual(["a.md", "dir/b.md"], pr_review.file_table(body))
+        self.assertIn("names all 2 changed files", self.reading(body, ["a.md", "dir/b.md"]))
 
     def test_a_quoted_table_is_not_this_rounds_own(self) -> None:
         """The reason a quoted coverage line is not: this change puts a table in the diff.
