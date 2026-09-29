@@ -282,6 +282,20 @@ def ref_exists(ref: str, root: Path) -> bool:
     return True
 
 
+def remote_tracking_ref(name: str, root: Path) -> str | None:
+    """`refs/remotes/<name>` where that exact ref exists and resolves to a commit, else None.
+
+    `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
+    matches a local branch literally named that. `show-ref --verify` matches the name exactly.
+    """
+    ref = f"refs/remotes/{name}"
+    try:
+        git("show-ref", "--verify", "--quiet", ref, root=root)
+    except CannotRun:
+        return None
+    return ref if ref_exists(ref, root) else None
+
+
 def target_ref(target: str, root: Path) -> str:
     """The ref a target name means, preferring the remote-tracking one.
 
@@ -302,21 +316,20 @@ def target_ref(target: str, root: Path) -> str:
     fork-based flow name another remote's branch even when it is not already a remote-tracking
     ref (for example a local-only branch checked out from that remote).
 
-    A remote-tracking result is returned fully qualified, as `refs/remotes/...`. Git resolves a
-    short name such as `upstream/main` against `refs/heads/` before `refs/remotes/`, so a local
-    branch literally named that would otherwise define the review scope in place of the
-    remote-tracking ref this function chose.
+    A remote-tracking result is matched by its exact name and returned fully qualified, as
+    `refs/remotes/...`. Git resolves a short name such as `upstream/main` against `refs/heads/`
+    before `refs/remotes/`, so a local branch literally named that would otherwise define the
+    review scope in place of the remote-tracking ref this function chose.
     """
-    if ref_exists(f"refs/remotes/{target}", root):
-        return f"refs/remotes/{target}"
-    remote = f"origin/{target}"
-    if ref_exists(f"refs/remotes/{remote}", root):
-        return f"refs/remotes/{remote}"
+    for name in (target, f"origin/{target}"):
+        ref = remote_tracking_ref(name, root)
+        if ref is not None:
+            return ref
     if ref_exists(target, root):
         return target
     raise CannotRun(
-        f"neither {remote} nor {target} resolves in this checkout,"
-        " so the review scope cannot be determined"
+        f"neither refs/remotes/{target}, refs/remotes/origin/{target}, nor {target} resolves"
+        " in this checkout, so the review scope cannot be determined"
     )
 
 

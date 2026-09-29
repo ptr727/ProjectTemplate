@@ -283,6 +283,19 @@ class ContentKeyCase(RepoCase):
         self.assertNotEqual(base, tip, "fixture does not distinguish the two")
         self.assertEqual(local_review.merge_base("upstream/main", self.tmp), base)
 
+    def test_a_local_branch_named_like_a_qualified_remote_ref_is_not_remote_tracking(
+        self,
+    ) -> None:
+        """`rev-parse` also resolves a full name through `refs/heads/`, so the match is exact.
+
+        A local branch literally named `refs/remotes/upstream/main`, with no remote-tracking ref
+        of that name, must leave the target unresolved rather than be taken as remote-tracking.
+        """
+        run(self.tmp, "branch", "refs/remotes/upstream/main", "HEAD")
+        self.assertIsNone(local_review.remote_tracking_ref("upstream/main", self.tmp))
+        with self.assertRaises(local_review.CannotRun):
+            local_review.target_ref("upstream/main", self.tmp)
+
     def test_a_target_resolving_nowhere_is_a_boundary(self) -> None:
         with self.assertRaises(local_review.CannotRun):
             local_review.target_ref("no-such-branch-anywhere", self.tmp)
@@ -1153,7 +1166,8 @@ class BackendCase(RepoCase):
         argv = argv_log.read_text(encoding="utf-8").split("\n")
         self.assertIn("--agent", argv)
         self.assertIn(base, argv, f"the backend was not given the merge base: {argv}")
-        self.assertNotIn("origin/develop", argv, "the backend was given the target tip")
+        for tip in ("origin/develop", "refs/remotes/origin/develop"):
+            self.assertNotIn(tip, argv, "the backend was given the target tip")
         # The flag name matters as much as the value.
         # The CLI documents --base as taking a branch and --base-commit as taking a commit hash.
         # A sha handed to --base is the wrong call even though the sha itself is right.
