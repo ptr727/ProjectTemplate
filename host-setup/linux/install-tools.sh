@@ -914,9 +914,12 @@ tool_shadow_path() {
         # A trailing slash names the same directory, so strip it before comparing or building a path.
         # "/" itself is the one entry with none to strip.
         [[ $dir == / ]] || dir="${dir%/}"
-        [[ $dir == "$BIN_DIR" ]] && return 0
         is_absolute=false
         [[ $dir == /* ]] && is_absolute=true
+        [[ $dir == "$BIN_DIR" ]] && return 0
+        # A doubled slash or a dot segment matches $BIN_DIR by identity, not by literal spelling.
+        # Absolute only, so a relative entry can never short-circuit the walk past a real shadow.
+        [[ $is_absolute == true && $dir -ef $BIN_DIR ]] && return 0
         # A relative PATH entry (".", "./bin") makes this relative to the caller's current directory, not a real shadow.
         # What this returns gets removed by tool_unshadow, so only an absolute path is ever trusted as one.
         candidate="${dir:-.}/$name"

@@ -148,6 +148,51 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
 
 
+class VersionLiteralCase(unittest.TestCase):
+    """The hub's instruction documents name no three-part version or commit SHA, verbatim sections included."""
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_rejects_a_bare_tag_example_inside_a_verbatim_section(self) -> None:
+        heading = "Workflow YAML Conventions"
+        governance = next(
+            item
+            for item in validate.load("spec/files.json")["baseline"]
+            if item["path"] == "GOVERNANCE.md"
+        )
+        self.assertIn(
+            {"name": heading, "fidelity": "verbatim"},
+            [
+                {"name": s.get("name"), "fidelity": s.get("fidelity")}
+                for s in governance["sections"]
+            ],
+        )
+        (self.root / "GOVERNANCE.md").write_text(
+            f"# Governance\n\n## {heading}\n\nWrite the bare tag, such as `# 2.7.1`, as published.\n",
+            encoding="utf-8",
+        )
+
+        errors = validate.version_literal_errors(self.root)
+
+        self.assertEqual(1, len(errors))
+        self.assertIn("GOVERNANCE.md", errors[0])
+        self.assertIn("2.7.1", errors[0])
+
+    def test_accepts_a_placeholder_example(self) -> None:
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\nWrite `# vX.Y.Z` or the bare `# X.Y.Z`, or 1.0.N.\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(validate.version_literal_errors(self.root), [])
+
+    def test_hub_instruction_documents_name_no_version(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+
+        self.assertEqual(validate.version_literal_errors(root), [])
+
+
 class DescriptionErrorsCase(unittest.TestCase):
     """registry/repos.json's optional `description` (GOVERNANCE.md "Repository Details")."""
 

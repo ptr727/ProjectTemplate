@@ -3122,7 +3122,13 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
 
 
 def describe(thread: dict) -> str:
-    """One line naming a thread by what a reader recognizes it as, never by its id."""
+    """One line naming a thread by what a reader recognizes it as, never by its id.
+
+    The 120-character cutoff below is a display limit rather than a matching one: `--match`
+    itself compares against the whole body, so a pattern copied from past the cutoff has nothing
+    printed to copy from, and widening the words or adding `--path` is the way past that, not a
+    longer cutoff here.
+    """
     c = first_comment(thread)
     body = " ".join((c.get("body") or "").split())
     return (
@@ -3153,13 +3159,20 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     the text is quoted back out of a digest by a reader rather than compared by a machine. Both
     sides are folded through `_TYPOGRAPHIC_FOLD` first, since the pattern is a substring copied
     from a rendered finding whose typographic quotes, dashes, or ellipsis may not survive that
-    copy in ASCII.
+    copy in ASCII. Both sides also fold whitespace to a single space, the same collapse
+    `describe()` applies before printing a thread's body as an `unresolved:` line, so a pattern
+    copied from that printed line still matches the raw body it was copied from, whether the
+    whitespace the printed line flattened was a line break, a tab, or a run of spaces.
     """
-    needle = match.translate(_TYPOGRAPHIC_FOLD).lower()
+
+    def fold(text: str) -> str:
+        return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
+
+    needle = fold(match)
     return [
         t
         for t in threads
-        if needle in (first_comment(t).get("body") or "").translate(_TYPOGRAPHIC_FOLD).lower()
+        if needle in fold(first_comment(t).get("body") or "")
         and (path is None or t.get("path") == path)
     ]
 

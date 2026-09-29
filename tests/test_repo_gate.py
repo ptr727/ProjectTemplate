@@ -99,14 +99,50 @@ class TestShaPin(TreeCase):
     def test_a_local_or_self_repository_ref_needs_no_pin(self) -> None:
         for workflow in (
             "./.github/workflows/validate-task.yml",
-            ".github/workflows/validate-task.yml",
             "$/.github/workflows/validate-task.yml",
+            '"./.github/workflows/validate-task.yml"',
+            "'./.github/actions/build'",
         ):
             with self.subTest(ref=workflow):
                 files = self.workflow(f"jobs:\n  a:\n    uses: {workflow}\n")
                 self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
         files = self.workflow(
             "jobs:\n  a:\n    steps:\n      - uses: $/.github/actions/validate-default\n"
+        )
+        self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
+
+    def test_a_bare_github_prefix_is_flagged_as_no_local_path(self) -> None:
+        """GitHub reads `.github/...` as `owner/repo`, so it fails at run time, not a skip."""
+        for workflow in (
+            ".github/workflows/validate-task.yml",
+            '".github/actions/build"',
+            ".github/actions/build@main",
+        ):
+            with self.subTest(ref=workflow):
+                files = self.workflow(f"jobs:\n  a:\n    uses: {workflow}\n")
+                hits = repo_gate.check_sha_pin(self.tmp, files)
+                self.assertEqual(1, len(hits))
+                self.assertIn("no local path", hits[0])
+
+    def test_a_reported_line_is_the_uses_line_after_a_blank_line(self) -> None:
+        """A pattern whose leading whitespace crosses a newline starts the match a line early."""
+        files = self.workflow("jobs:\n  a:\n\n    uses: .github/x\n")
+        self.assertIn("w.yml:4:", repo_gate.check_sha_pin(self.tmp, files)[0])
+        files = self.workflow("jobs:\n  a:\n    steps:\n\n      - uses: actions/checkout@v4\n")
+        self.assertIn("w.yml:5:", repo_gate.check_sha_pin(self.tmp, files)[0])
+
+    def test_a_value_continued_on_the_next_line_is_still_read(self) -> None:
+        for gap in ("\n", "\n\n", "\r\n\r\n"):
+            with self.subTest(gap=gap):
+                body = f"jobs:\n  a:\n    steps:\n      - uses:{gap}          actions/checkout@v4\n"
+                hits = repo_gate.check_sha_pin(self.tmp, self.workflow(body))
+                self.assertEqual(1, len(hits))
+                self.assertIn("w.yml:4:", hits[0])
+                self.assertIn("floating ref", hits[0])
+
+    def test_a_quoted_external_pin_is_read_without_its_quotes(self) -> None:
+        files = self.workflow(
+            f'jobs:\n  a:\n    steps:\n      - uses: "actions/checkout@{PINNED}"\n'
         )
         self.assertEqual([], repo_gate.check_sha_pin(self.tmp, files))
 
