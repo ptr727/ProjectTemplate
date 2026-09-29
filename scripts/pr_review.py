@@ -422,8 +422,9 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-HTML_TAG = re.compile(r"<(?!!--)[^>]*>")
-MARKER_ANY = re.compile(r"fleet-review:[^>]*", re.IGNORECASE)
+HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+MARKER_ANY = re.compile(r"fleet[\W_]?review[^>]{0,200}", re.IGNORECASE)
+MARKER_FIELD = re.compile(r"\b(reviewed|changed)\s*[=:]\s*(\d+)", re.IGNORECASE)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -1955,18 +1956,20 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
 
 def partial_shaped(pr: dict) -> str:
-    """The first coverage-shaped count in any Copilot round's raw body that is not a full one, or "".
+    """The first coverage marker or count in any Copilot round's raw body that is not a full one.
 
-    Read over every round on the pull request, on any commit, with nothing masked, quotations
-    and emphasis included, since the table stands in only where no round even appears to have
+    Empty where there is none. Read over every round on the pull request, on any commit, with
+    no quotation masked, since the table stands in only where no round even appears to have
     read part of a diff. Masking and the line-start anchor are what keep a quoted count from
     being read as a statement, which is right where an unread count blocks as unstated and wrong
     here, where the table would otherwise pass a partial the coverage reader did not recognize.
 
-    Any `fleet-review` marker that does not read as a full statement counts, a drifted field
-    order or separator included, since a marker is written by a model from an instruction. The
-    counts are read with entities decoded, tags and format characters dropped, and line breaks
-    folded. Prose can word a partial in ways no pattern here anticipates, so this narrows the
+    Any `fleet-review` marker carrying a reviewed or changed count counts unless every reviewed
+    count it carries equals its changed count, a drifted field order, separator, or spelling
+    included, since a marker is written by a model from an instruction. A mention carrying no
+    count, prose or a placeholder, is not a statement and is skipped. The counts are read with
+    entities decoded, markup tags and format characters dropped, and line breaks folded, a tag
+    being a `<` followed by a letter, so a comparison in prose is not read as one. Prose can word a partial in ways no pattern here anticipates, so this narrows the
     gap rather than closing it, which is the cost of reading a table at all.
     """
     for node in reviewer_nodes(pr, "reviews"):
@@ -1974,15 +1977,17 @@ def partial_shaped(pr: dict) -> str:
             c for c in html.unescape(node.get("body") or "") if unicodedata.category(c) != "Cf"
         )
         for m in MARKER_ANY.finditer(raw):
-            full = FLEET_REVIEW.search("<!-- " + m.group(0).strip() + ">")
-            if full is None or full.group(1) != full.group(2):
-                return " ".join(m.group(0).split())
+            fields = MARKER_FIELD.findall(m.group(0))
+            reviewed = [int(n) for name, n in fields if name.lower() == "reviewed"]
+            changed = [int(n) for name, n in fields if name.lower() == "changed"]
+            if fields and (len(reviewed) != len(changed) or reviewed != changed):
+                return " ".join(m.group(0).split())[:200]
         text = " ".join(EMPHASIS_MARK.sub("", HTML_TAG.sub("", raw)).split())
         for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
             for m in pattern.finditer(text):
-                counts = [g for g in m.groups() if g is not None][:2]
+                counts = [int(g) for g in m.groups() if g is not None][:2]
                 if len(counts) == 2 and counts[0] != counts[1]:
-                    return " ".join(m.group(0).split())
+                    return " ".join(m.group(0).split())[:200]
     return ""
 
 
@@ -2015,7 +2020,7 @@ def table_shortfall(pr: dict) -> str:
     page = files.get("pageInfo")
     if (
         not isinstance(page, dict)
-        or "hasNextPage" not in page
+        or not isinstance(page.get("hasNextPage"), bool)
         or any(not (n or {}).get("path") for n in nodes)
     ):
         return "the changed-file list is malformed, so the table cannot be matched against it"

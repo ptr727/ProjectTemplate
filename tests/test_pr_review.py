@@ -3782,6 +3782,9 @@ class TestCoverageExitCodes(GqlCase):
             "Summary: Files revi\u200bewed: 1/2.",
             "Summary: reviewed 1 out\nof 2 changed files.",
             "So far this reviewed 1 of 2.",
+            "Guards `i <= n`.\n\nSummary: reviewed 1 out of 2 changed files.\n\n<details>",
+            "<!-- fleet-review reviewed=1 changed=2 findings=0 -->",
+            "<!-- fleet_review: reviewed=1 changed=2 findings=0 -->",
         ):
             with self.subTest(partial=partial):
                 self.out.seek(0)
@@ -3790,6 +3793,32 @@ class TestCoverageExitCodes(GqlCase):
                 self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("appears to state partial coverage", self.out.getvalue())
+
+    def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
+        """Prose about the marker and its placeholder are not statements, so they block nothing."""
+        for mention in (
+            "This reads any `fleet-review:` marker.",
+            "`<!-- fleet-review: reviewed=N changed=N findings=N -->`",
+        ):
+            with self.subTest(mention=mention):
+                body = self.balanced(["a.md"]) + "\n" + mention + "\n"
+                self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_full_marker_among_markup_does_not_read_as_a_partial(self) -> None:
+        body = (
+            self.balanced(["a.md"])
+            + "\nGuards `n < 0` and `Dict<str, int>`.\n"
+            + "<!-- fleet-review: reviewed=01 changed=1 findings=0 -->\n"
+            + '<a href="/x" class="Link--inTextBlock">Learn more</a>\n'
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_page_info_without_a_boolean_keeps_the_table_out(self) -> None:
+        for page in ({}, {"hasNextPage": None}):
+            with self.subTest(page=page):
+                pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+                pr["files"]["pageInfo"] = page
+                self.assertIn("malformed", pr_review.table_shortfall(pr))
 
     def test_a_full_marker_does_not_read_as_a_partial(self) -> None:
         body = (
