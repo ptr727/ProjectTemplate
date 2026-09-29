@@ -1969,8 +1969,11 @@ def _is_timeout_signal_zero(val):
 
 
 def _is_timeout_signal_unknown(val):
-    """True if the `-s` value is expanded by the shell at run time, so the text names no signal."""
-    return "$" in val or "`" in val
+    """True if the shell may rewrite the `-s` value at run time, so the text names no signal.
+
+    A substitution, a brace expansion, and a glob each can, as `$SIG`, `{0..0}`, and `[0]` do.
+    """
+    return any(ch in val for ch in "$`{[*?")
 
 
 def _timeout_option(tok):
@@ -2083,15 +2086,17 @@ def _timeout_bounds_wrapper(toks, w):
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
     process and the `timeout` goes on waiting for a child that keeps running.
 
-    A `-s` value the shell expands at run time, such as `"$SIG"`, is read the same way, since the
-    text cannot say it is not signal 0.
+    A `-s` value the shell may rewrite at run time, such as `"$SIG"` or `{0..0}`, is read the same
+    way, since the text cannot say it is not signal 0.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
-    only when every outer one sends signal 0 with no kill-after, which is inert, and the innermost
-    one is a bound. Any other such nesting is read as no bound, since an outer signal can end the
-    inner `timeout` before its deadline and leave the loop under it running. That is a false deny
-    wherever the outer signal would have stopped the loop too, and wherever a prefix between the two
-    takes an argument, as `nice -n 5` does.
+    only when every outer one sends signal 0 with no `-k` of any value, which is inert, and the
+    innermost one is a bound. Any other such nesting is read as no bound, since an outer signal can
+    end the inner `timeout` before its deadline and leave the loop under it running. A word naming
+    `timeout` anywhere between an outer duration and the wrapper is read as that nesting. That is a
+    false deny wherever the outer signal would have stopped the loop too, wherever a prefix between
+    the two takes an argument, as `nice -n 5` does, and wherever such an argument merely names
+    `timeout`, as a path ending in `/timeout` does.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2135,7 +2140,7 @@ def _timeout_bounds_wrapper(toks, w):
             return kills or not (
                 _is_timeout_signal_zero(signal) or _is_timeout_signal_unknown(signal)
             )
-        if kills or not _is_timeout_signal_zero(signal) or not _is_timeout_exe(toks[i]):
+        if kill_after or not _is_timeout_signal_zero(signal) or not _is_timeout_exe(toks[i]):
             return False
         i += 1
         signal = kill_after = ""
@@ -4402,6 +4407,11 @@ _WAIT_CASES = [
         "which is read as no bound even behind a signal-0 outer one, a declared false deny",
     ),
     (
+        "timeout -s 0 -k .5 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an outer kill-after counts in any spelling, since GNU timeout reads more than the duration form",
+    ),
+    (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "and a number is signal 0 only where GNU timeout masks it to 0, which 10 is not",
@@ -4415,6 +4425,11 @@ _WAIT_CASES = [
         "timeout -s \"$SIG\" -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "unless a kill-after follows it with a SIGKILL",
+    ),
+    (
+        "timeout -s {0..0} 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a brace expansion the shell rewrites to 0 is read the same way",
     ),
     (
         "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",

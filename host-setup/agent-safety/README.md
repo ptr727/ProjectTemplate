@@ -196,15 +196,18 @@ text says, because the harm it covers was never in the text.
    reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
-   where its value takes the form a duration takes here. A `-s` value the shell expands at run
-   time, such as `"$SIG"`, is read the same way, since the text cannot say it is not signal 0.
-   Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
-   only when every outer one sends signal 0 with no kill-after, which is inert, and the innermost
-   one is a bound, so `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other
-   such nesting is read as no bound, since an outer signal can end the inner `timeout` before its
-   deadline and leave the loop running. That is a false deny wherever the outer signal would have
-   stopped the loop too, as it does in `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, and
-   wherever a prefix between the two takes an argument, as `nice -n 5` does. The second is an
+   where its value takes the form a duration takes here. A `-s` value the shell may rewrite at run
+   time, by a substitution such as `"$SIG"`, a brace expansion, or a glob, is read the same way,
+   since the text cannot say it is not signal 0. Where a `timeout`'s command is another `timeout`,
+   past any command prefix, the run is bounded only when every outer one sends signal 0 with no
+   `-k` of any value, which is inert, and the innermost one is a bound, so `timeout -s 0 900
+   timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read as no bound,
+   since an outer signal can end the inner `timeout` before its deadline and leave the loop
+   running. A word naming `timeout` anywhere between an outer duration and the wrapper is read as
+   that nesting. That is a false deny wherever the outer signal would have stopped the loop too,
+   as it does in `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, wherever a prefix between the
+   two takes an argument, as `nice -n 5` does, and wherever such an argument merely names
+   `timeout`, as a path ending in `/timeout` does. The second is an
    arithmetic guard in the loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`)
    or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
