@@ -2048,9 +2048,10 @@ _WITH_INPUT_BLOCK_SCALAR = re.compile(r"^(&\S+[ \t]+)?[|>][0-9+-]*[ \t]*(#.*)?$"
 _WITH_KEY = re.compile(r"^([ \t]*)with:[ \t]*(#.*)?$")
 
 
-def workflow_input_text(job_text, key):
+def workflow_input_text(job_text, key, raw=False):
     """The raw text of a `with:` input on a workflow-call job: a block scalar's dedented body, or a plain
-    single value's own line, whichever shape the input was written in.
+    single value's own line, whichever shape the input was written in. With raw, the text after the key's
+    colon and every line nested under it instead, unprocessed, for a caller judging the value's shape.
 
     Structural, like split_jobs() and _code_view() above: it reads indentation, not YAML semantics, since
     a hand-written `with:` block stays inside this narrow shape everywhere the fleet writes one. Returns
@@ -2078,6 +2079,17 @@ def workflow_input_text(job_text, key):
     if key_at is None or child_indent is None:
         return None
     rest = lines[key_at][child_indent + len(key) + 1 :].strip()
+    if raw:
+        nested = []
+        for ln in lines[key_at + 1 :]:
+            if (
+                ln.strip()
+                and not ln.lstrip().startswith("#")
+                and len(ln) - len(ln.lstrip()) <= child_indent
+            ):
+                break
+            nested.append(ln)
+        return "\n".join([rest, *nested])
     if not rest or _WITH_INPUT_BLOCK_SCALAR.match(rest):
         body = []
         for ln in lines[key_at + 1 :]:
@@ -2151,14 +2163,29 @@ def python_directories_caller_findings(path, text, entry):
                 ),
             )
         ]
+    value = re.sub(
+        r"^(?:\s|[&!]\S*|#[^\n]*)*",
+        "",
+        workflow_input_text(validate_job, "python-directories", raw=True) or "",
+    )
     # A folded scalar's value depends on YAML's indentation rules, so it is refused rather than guessed.
-    if re.search(r"^[ \t]*python-directories:[ \t]*>", validate_job, re.MULTILINE):
+    if value.startswith(">"):
         return unread + [
             (
                 "DRIFT",
                 (
                     f"python-directories: {path} passes a folded (>) scalar. Write it as a literal "
                     "(|) block, one directory per line."
+                ),
+            )
+        ]
+    if value.startswith('"') and "\\" in value[1:].split('"', 1)[0]:
+        return unread + [
+            (
+                "DRIFT",
+                (
+                    f"python-directories: {path} passes a double-quoted value carrying a backslash "
+                    "escape. Write it unquoted, or as a literal (|) block, one directory per line."
                 ),
             )
         ]
@@ -6145,7 +6172,57 @@ def _selftest():
     py_caller_tabbed = py_caller_plain.replace(
         "python-directories: Tools", "python-directories: Too\tls"
     )
+    py_caller_value = py_caller_plain.replace("python-directories: Tools", "python-directories: {}")
     python_caller_cases += [
+        (
+            py_caller_path,
+            py_caller_value.format('&dirs "Tools\\nOther"'),
+            {},
+            1,
+            "an anchored escaped double-quoted value is refused",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('!!str "Tools\\nOther"'),
+            {},
+            1,
+            "a tagged escaped double-quoted value is refused",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('\n        "Tools\\nOther"'),
+            {},
+            1,
+            "an escaped double-quoted value on the next line is refused",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('\n      # a note at the key column\n        "Tools\\nOther"'),
+            {},
+            1,
+            "a comment at the key column hides no next-line value",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('"Tools\n        \\nOther"'),
+            {"pythonDirectories": ["Tools"]},
+            1,
+            "an escape on a double-quoted value's continuation line is refused",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format('"Tools"  # a\\b'),
+            {"pythonDirectories": ["Tools"]},
+            0,
+            "a backslash past the closing quote is not an escape",
+        ),
+        (
+            py_caller_path,
+            py_caller_value.format("&dirs >\n        Tools"),
+            {"pythonDirectories": ["Tools"]},
+            1,
+            "an anchored folded scalar is refused",
+        ),
         (
             py_caller_path,
             py_caller_folded,
@@ -6232,6 +6309,18 @@ def _selftest():
             print(
                 f"  FAIL python_directories_caller_findings [{label}] -> {got} finding(s), expected {expected}"
             )
+    py_caller_escaped = py_caller_plain.replace(
+        "python-directories: Tools", 'python-directories: "Tools\\nOther"'
+    )
+    escaped_got = python_directories_caller_findings(
+        py_caller_path, py_caller_escaped, {"pythonDirectories": ["Other", "Tools"]}
+    )
+    if len(escaped_got) != 1 or "backslash escape" not in escaped_got[0][1]:
+        ok = False
+        python_caller_ok = False
+        print(
+            f"  FAIL python_directories_caller_findings [an escaped double-quoted value is refused] -> {escaped_got}"
+        )
     if python_caller_ok:
         print(
             "  ok   python_directories_caller_findings: a caller's declared python-directories input is compared against the registry"

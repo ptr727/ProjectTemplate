@@ -87,7 +87,7 @@ jobs:
                 # It is either a human commit, legitimately not publishing but worth seeing.
                 # Or it is a release bot under a new identity, which would otherwise stop publishing silently.
                 # A schedule would keep releasing meanwhile, costing timeliness with no error raised.
-                echo "::warning::Push to main by unrecognized actor '$ACTOR'; not publishing. If this is a release bot under a new identity, update the allowlist in publish-plan-task.yml."
+                echo "::warning::Push to main by unrecognized actor '$ACTOR'; not publishing. If this is a release bot under a new identity, update the allowlist in publish-plan-task.yml and in build-release-task.yml's supersede step."
               fi
               ;;
           esac

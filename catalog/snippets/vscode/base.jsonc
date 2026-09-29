@@ -14,14 +14,10 @@
     },
     "extensions": {
         "recommendations": [
-            "anthropic.claude-code",
-            "arahata.linter-actionlint",
             "davidanson.vscode-markdownlint",
             "editorconfig.editorconfig",
             "fanaticpythoner.better-todo-tree",
-            "github.vscode-github-actions",
             "streetsidesoftware.code-spell-checker",
-            "timonwong.shellcheck",
             "yzhang.markdown-all-in-one"
         ]
     }

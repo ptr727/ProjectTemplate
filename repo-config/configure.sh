@@ -139,6 +139,13 @@ ruleset_id() {
         echo "Failed to list rulesets for $repo (check auth and repo access)." >&2
         return 1
     fi
+    # A non-array 2xx body (truncated or proxy-mangled) must not reach the length guard or the ids= extraction below.
+    # Depending on the shape, length or the .[] extraction below either errors or mis-reads it, inside this $(...) subshell where errexit does not propagate.
+    # Both call sites would then misread the unreadable response as "not found" instead of aborting.
+    if ! jq_has 'type == "array"' <<<"$out"; then
+        echo "Failed for $repo: could not read live ruleset state (the response was not a JSON array)." >&2
+        return 1
+    fi
     # Fail loud rather than silently narrow, because a full page means the single-fetch assumption no longer holds.
     # A missed lookup would make apply create a duplicate ruleset by name.
     # Abort so the caller stops, since it treats a non-zero return as "stop" and never as "not found".

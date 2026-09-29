@@ -75,7 +75,8 @@ dual-target bot wiring, and the operational-repo delta in full.
 The **two-phase model is the default**: PRs build fast, publishing is batched, a human merge
 never auto-publishes on its own. See [`WORKFLOW.md`](./WORKFLOW.md) for the full CI/CD contract.
 Publishing fires on a manual dispatch, a code-affecting bot push to `main`, or a `main`-only
-weekly schedule (Docker), and versioning is semantic and maintainer-controlled (NBGV owns the build number,
+weekly schedule (Docker). A publish overtaken by a release bot's workflow merge re-dispatches itself
+per `WORKFLOW.md` D4.7. Versioning is semantic and maintainer-controlled (NBGV owns the build number,
 the maintainer owns the `major.minor` floor). **Operational** repos differ, with a dispatch-only
 release and no auto-publish bots. See "Operational Repositories" below.
 
@@ -314,7 +315,7 @@ Contributors commit to this repo with signed commits. The SSH-signing setup live
 ## Editor and Tasks
 
 - **VS Code is the primary IDE, and the experience favors it.** Prefer VS Code tasks and launch configurations for building, running, and testing over ad-hoc shell scripts. A script is the fallback, not the default.
-- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. **All VS Code settings and extension recommendations live only here, never in a standalone `.vscode/settings.json` or `.vscode/extensions.json`** (`.vscode/` holds only `tasks.json` and `launch.json`). A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree, github-actions, actionlint, shellcheck, claude-code); **language-specific** extensions are added per project (.NET: csdevkit, csharpier; Python: python, pylance, ruff, mypy; Docker: the Docker extension).
+- The `.code-workspace` file carries the shared editor settings and the recommended-extension set. **All VS Code settings and extension recommendations live only here, never in a standalone `.vscode/settings.json` or `.vscode/extensions.json`** (`.vscode/` holds only `tasks.json` and `launch.json`). A **standard set** of extensions applies to every repo (markdownlint, cspell, editorconfig, markdown-all-in-one, better-todo-tree), kept to extensions that work without a separately installed tool. A repo shipping a language adds that language's **defaults** (.NET: csdevkit, csharpier. Python: python, pylance, ruff, mypy. Docker: the Docker extension). **Any repo can add further extensions** of its own on top of both.
 - The Table of Contents is maintained by the Markdown All in One extension, and `markdown.extension.toc.levels` in the workspace sets which heading levels it includes (see the Markdown rules for the authoring convention and the `<!-- omit from toc -->` exclusion marker).
 - **Agents: editing a `.code-workspace` that a VS Code window has loaded as its workspace can reload that window and drop an agent session running in it.** "Verification Discipline" holds the rule: leave that edit to the maintainer (a maintainer edit does not reload), and edit directly a workspace file that no window has loaded. Opening the folder rather than the workspace is what keeps a checkout's own file editable.
 

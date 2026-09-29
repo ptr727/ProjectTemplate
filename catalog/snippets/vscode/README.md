@@ -1,6 +1,6 @@
 # VS Code Workspace Catalog
 
-The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. Each piece is a copyable JSON fragment in this directory. `base.jsonc` carries the standard set, and `dotnet.jsonc`, `python.jsonc`, and `docker.jsonc` carry the per-type additions. A repo's `<Repo>.code-workspace` composes `base.jsonc` plus the fragments for the languages and targets it ships. Discovered from the fleet's workspace files.
+The shared `.code-workspace` set for the fleet: the standard extensions every repo recommends, the language-specific additions, and the settings that go with them. Each piece is a copyable JSON fragment in this directory. `base.jsonc` carries the standard set, and `dotnet.jsonc`, `python.jsonc`, and `docker.jsonc` carry the per-type additions. A repo's `<Repo>.code-workspace` composes `base.jsonc` plus the fragments for the languages and targets it ships.
 
 ## Standard Extensions (every repo)
 
@@ -9,10 +9,8 @@ The shared `.code-workspace` set for the fleet: the standard extensions every re
 - **`editorconfig.editorconfig`** - applies `.editorconfig`.
 - **`yzhang.markdown-all-in-one`** - Markdown editing and the auto-generated Table of Contents.
 - **`fanaticpythoner.better-todo-tree`** - surfaces TODO/FIXME markers.
-- **`github.vscode-github-actions`** - GitHub Actions authoring.
-- **`arahata.linter-actionlint`** - actionlint for workflow YAML.
-- **`timonwong.shellcheck`** - shellcheck for shell scripts.
-- **`anthropic.claude-code`** - the coding agent.
+
+The standard set holds only extensions that work without a separately installed tool. A repo can recommend any further extension it finds useful by adding it to its own workspace.
 
 ## Language and Target Additions
 
@@ -29,4 +27,4 @@ The shared `.code-workspace` set for the fleet: the standard extensions every re
 
 ## Composing a Workspace
 
-A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`) that merges `base.jsonc` with the per-type fragments for the languages and targets it ships: the merged `extensions.recommendations` is the standard set plus each type's additions, and the merged `settings` are the shared editor defaults plus each type's formatter block. This repo's own `ProjectTemplate.code-workspace` carries `base.jsonc` only, since it ships no application language.
+A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`) that merges `base.jsonc` with the per-type fragments for the languages and targets it ships: the merged `extensions.recommendations` is the standard set plus each type's additions, and the merged `settings` are the shared editor defaults plus each type's formatter block. This repo's own `ProjectTemplate.code-workspace` carries `base.jsonc` plus `python.jsonc`'s extensions and formatter block, for its Python scripts tree.
