@@ -103,11 +103,12 @@ The **build**-profile Python clean-compile, in its uv form, is `uv run ruff form
 `uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is
 the CI checker, or both where the repo runs both (see Type checking above). Run it, plus
 `uv run pytest`, before committing. A pip-form directory runs pytest from the environment its
-`requirements*.txt` installed and ruff and the type checker through `uvx`, per
-`references/profiles.md`. A **lint-only** profile's clean-compile substitutes its `uvx` and
-`unittest` equivalents, per Two Profiles above, and has no such command to run before committing
-beyond those. These are documented commands, and the hub's `vscode-tasks-python.json` snippet
-carries the VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it
+`requirements*.txt` installed, ruff through `uvx`, and the type checker pointed at that
+environment, per `references/profiles.md`. A **lint-only** profile's clean-compile substitutes its
+`uvx` and `unittest` equivalents, per Two Profiles above, and has no such command to run before
+committing beyond those. These are documented commands, and the hub's `vscode-tasks-python.json`
+snippet carries the VS Code tasks mirror of the uv form that the fleet baseline expects, which a
+pip-form repo adapts to the commands above rather than running its `uv run` tasks. Every command-executing task in it
 is `type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the
 mirror runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
 backstop. A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers the
@@ -193,9 +194,9 @@ Before pushing or opening a PR:
 - The **build**-profile CI gate, in its uv form, is `uv run ruff check`,
   `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy src`), and
   `uv run pytest`, the same commands as the local loop above, run from the Python project directory
-  (invoked as separate steps, not `&&`-chained, so the runner shell is irrelevant). A **lint-only**
-  profile's CI gate is its `uvx` equivalents plus its `unittest` suite, per
-  `references/profiles.md`.
+  (invoked as separate steps, not `&&`-chained, so the runner shell is irrelevant). The pip form's
+  CI gate is the pip-form commands, and a **lint-only** profile's is its `uvx` equivalents plus its
+  `unittest` suite, each per `references/profiles.md`.
 - Markdown in this directory follows CODESTYLE.md's repo-wide Markdown and Spelling rules,
   packaged as the `comment-and-doc-style` Skill.
 
