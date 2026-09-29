@@ -48,9 +48,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    both commits. Where no statement reaches the head either way, a round covering it whose own
    file table names exactly the changed files covers it, `coverage=table` in the digest, which is
    the reading a Copilot round at Balanced review effort gives, and a statement that reaches the
-   head, stated on it or carried to it, wins over that table. A statement the carry refuses
-   because the file set changed does not reach it, and a carry that could not be compared at
-   both commits keeps the table out, since that statement may still describe this diff. The
+   head, stated on it or carried to it, wins over that table. The table stands in only where no
+   Copilot round on the pull request, on any commit, states or appears to state partial
+   coverage, so a pull request that ever had a partial round goes to the maintainer. The
    coverage this item
    requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
    `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is

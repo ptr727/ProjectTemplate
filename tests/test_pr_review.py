@@ -2747,11 +2747,29 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("coverage=carried:PARTIAL", out)
         self.assertNotIn("coverage=table", out)
 
-    def test_a_partial_the_bound_refuses_does_not_keep_the_table_from_standing_in(self) -> None:
-        """A statement about a diff this head no longer has does not reach it, partial or not."""
+    def test_a_partial_the_bound_refuses_still_keeps_the_table_out(self) -> None:
+        """Any partial on record goes to the maintainer, whatever the carry bound made of it."""
         pr = payload(
             [
                 review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(
+                    oid=HEAD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="PRR_b"
+                ),
+            ],
+            files=["a.py", "b.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=unstated", out)
+        self.assertIn("appears to state partial coverage", out)
+
+    def test_a_full_statement_the_bound_refuses_lets_the_table_stand_in(self) -> None:
+        """A full statement on another diff says nothing went unread, so the table decides."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.FULL, at=EARLY, rid="PRR_a"),
                 review(
                     oid=HEAD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="PRR_b"
                 ),
@@ -2779,6 +2797,7 @@ class TestCoverageCarriesForward(GqlCase):
                 self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
             out, _ = pr_review.digest("o", "r", 7, pr=pr)
         self.assertIn("coverage=unstated", out)
+        self.assertIn("NO FILE TABLE STANDS IN: a Copilot round", out)
 
     def test_a_files_connection_the_query_did_not_return_is_not_an_empty_change_set(self) -> None:
         pr = payload([review(oid=HEAD, body=summarized(["a.py"], covers=""))], files=["a.py"])
@@ -3735,6 +3754,31 @@ class TestCoverageExitCodes(GqlCase):
         printed = self.out.getvalue()
         self.assertIn("NO FILE TABLE STANDS IN: the pull request changes more than", printed)
         self.assertIn("splitting the pull request is the remedy", printed)
+
+    def test_a_partial_the_coverage_reader_misses_still_keeps_the_table_out(self) -> None:
+        """Wrapped, mid-line, unprefixed, or fenced, a partial count is still on record."""
+        for partial in (
+            "_Copilot reviewed 1 out of 2 changed files in this pull request._",
+            "**Copilot reviewed 1 out of 2 changed files in this pull request.**",
+            "The change is narrow. Reviewed 1 out of 2 changed files.",
+            "```\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->",
+        ):
+            with self.subTest(partial=partial):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("appears to state partial coverage", self.out.getvalue())
+
+    def test_a_review_history_past_the_window_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"], older_reviews=True)
+        self.assertIn("review history is longer", pr_review.table_shortfall(pr))
+
+    def test_a_changed_file_entry_with_no_path_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+        pr["files"]["nodes"].append({"path": None})
+        self.assertIn("malformed", pr_review.table_shortfall(pr))
 
     def test_a_stated_partial_wins_over_a_table_naming_every_changed_file(self) -> None:
         """The table names the whole set on partial rounds too, so a statement always decides."""
