@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 import stat
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from test_configure_archived import lift, require
+from test_configure_archived import lift, run_bash
 
 MODEL_RESOLUTION = lift(r'(if \[ -z "\$model" \]; then\n.*?\nesac\n)(?=main_ruleset=)')
 
@@ -24,45 +24,53 @@ MODEL_RESOLUTION = lift(r'(if \[ -z "\$model" \]; then\n.*?\nesac\n)(?=main_rule
 class WorkflowModelCase(unittest.TestCase):
     """With no --model, the registry's model selects the develop ruleset."""
 
-    def run_region(
-        self, tmp: str, entry: dict[str, object], crlf: bool
-    ) -> subprocess.CompletedProcess[str]:
-        bash = require("bash", "jq", "sed")
+    def run_region(self, tmp: str, registry_text: str, crlf: bool) -> tuple[int, str, str]:
         registry = Path(tmp) / "repos.json"
-        registry.write_text(json.dumps({"repos": [entry]}), encoding="utf-8")
-        bin_dir = Path(tmp) / "bin"
-        bin_dir.mkdir()
+        registry.write_text(registry_text, encoding="utf-8")
+        path_line = ":"
         if crlf:
+            real_jq = shutil.which("jq")
+            if real_jq is None:
+                raise unittest.SkipTest("no jq on PATH, so the script's own lines cannot be run")
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
             shim = bin_dir / "jq"
+            if Path(real_jq).resolve() == shim.resolve():
+                raise AssertionError("the stand-in would call itself")
             shim.write_text(
-                '#!/bin/sh\nPATH="$REAL_PATH" jq "$@" | sed \'s/$/\\r/\'\n', encoding="utf-8"
+                f'#!/bin/sh\n{shlex.quote(real_jq)} "$@" | awk \'{{printf "%s\\r\\n", $0}}\'\n',
+                encoding="utf-8",
             )
             shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
-        options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
+            path_line = f'PATH={shlex.quote(str(bin_dir))}:"$PATH"'
         script = (
-            f'{options}\nexport REAL_PATH="$PATH"\n'
-            f"{'PATH=' + shlex.quote(str(bin_dir)) + ':"$PATH"' if crlf else ':'}\n"
-            f"registry={shlex.quote(str(registry))}\nname={shlex.quote(str(entry['name']))}\n"
+            f"{path_line}\nregistry={shlex.quote(str(registry))}\nname=Fixture\n"
             f"model=''\nscript_dir=/x\n{MODEL_RESOLUTION}echo \"$develop_ruleset\"\n"
         )
-        return subprocess.run(
-            [bash, "-c", script], capture_output=True, text=True, timeout=30, check=False
-        )
+        result = run_bash(script, "jq", "sed", "awk")
+        return result.returncode, result.stdout, result.stderr
+
+    def entry(self) -> str:
+        return json.dumps({"repos": [{"name": "Fixture", "workflowModel": "operational"}]})
 
     def test_a_crlf_jq_output_still_resolves_the_registry_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            result = self.run_region(tmp, {"name": "Fixture", "workflowModel": "operational"}, True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertNotIn("Unknown workflow model", result.stderr)
-            self.assertEqual(result.stdout, "/x/operational/develop.json\n")
+            code, out, err = self.run_region(tmp, self.entry(), True)
+            self.assertEqual(code, 0, err)
+            self.assertNotIn("Unknown workflow model", err)
+            self.assertEqual(out, "/x/operational/develop.json\n")
 
     def test_plain_lf_output_resolves_the_same(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            result = self.run_region(
-                tmp, {"name": "Fixture", "workflowModel": "operational"}, False
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, "/x/operational/develop.json\n")
+            code, out, err = self.run_region(tmp, self.entry(), False)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(out, "/x/operational/develop.json\n")
+
+    def test_a_registry_that_will_not_parse_fails_with_the_guards_own_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, _, err = self.run_region(tmp, "not json", False)
+            self.assertEqual(code, 1)
+            self.assertIn("Failed to read workflowModel", err)
 
 
 if __name__ == "__main__":
