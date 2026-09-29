@@ -33,7 +33,7 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
 - **build** (Project): third-party runtime dependencies, or the repo's deliverable. Either a uv
   project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
   `pyproject.toml` beside a `requirements*.txt` and no `uv.lock`, installed with pip. Uses pytest,
-  pyright strict (or mypy where the repo requires it).
+  and pyright strict, mypy with its strict flags, or both as the CI type checker.
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
@@ -58,11 +58,12 @@ declaration, versioning, VS Code config), see `references/profiles.md`.
 | [pytest][docs-link] | test runner (build profile only, lint-only uses `unittest`) | `pyproject.toml` `[tool.pytest.ini_options]` |
 
 **Type checking targets strongly typed, deterministic code.** pyright in strict mode is the
-default baseline on first-party code (a repo may instead run mypy in CI and keep pyright
-editor-only via Pylance, per the next paragraph): `[tool.pyright]` `strict = ["src"]`, or the
-integration package for a Home Assistant repo, with tests run in standard mode. pyright is the
-anchor because Pylance embeds it, so the editor and the CLI/CI (`uv run pyright`) run the same
-engine and never disagree. The standalone `ms-pyright.pyright` extension stays in
+default baseline on first-party code (a repo may instead run mypy with its strict flags in CI
+and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
+`strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
+standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
+editor and the CLI/CI (`uv run pyright`) run the same engine and never disagree.
+The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
 `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
@@ -74,8 +75,10 @@ than one checker is normal when each serves a purpose (the .NET side pairs CShar
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
 editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
-command joins the clean-compile. A repo with no such need stays pyright-only, which is lighter and
-inherently consistent.
+command joins the clean-compile. mypy may also be a build repo's only CI checker, run with its
+strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A
+pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
+engine.
 
 ## Local development loop
 

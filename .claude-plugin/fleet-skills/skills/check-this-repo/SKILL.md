@@ -44,8 +44,10 @@ repo.
 
 ## What it is safe to fix on its own
 
-- **Re-run the installer**, `python3 scripts/skills_install.py`, from that same `main` checkout,
-  when `--report` exits non-zero.
+- **Re-run the installer**, `python3 scripts/skills_install.py --snapshot-only`, from that same
+  `main` checkout, when `--report` exits non-zero. `--snapshot-only` refreshes the copy and leaves
+  the Claude Code registration alone, since a fetched checkout is not one that registration should
+  load from.
   This is a per-machine, local-only change, nothing in it touches this repo's git history or
   needs a review.
 
