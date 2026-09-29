@@ -4933,6 +4933,21 @@ class TestCli(GqlCase):
             _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123")
         self.assertIsNone(recorded)
 
+    def test_a_lagging_answer_is_read_again_by_the_same_predicate(self) -> None:
+        """A request whose event lands after the answer is recorded, not blamed on the account."""
+        before = request_state(events=("RRE_1",))
+        reads = [before, request_state(events=("RRE_1", "RRE_2"))]
+
+        def fake(query: str, **variables: object) -> dict:
+            if "requestReviews" in query:
+                return {"requestReviews": {"pullRequest": {"id": "PR_test", **before}}}
+            return {"repository": {"pullRequest": {"id": "PR_test", **reads.pop(0)}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123")
+        self.assertIs(True, recorded)
+        self.assertFalse(reads)
+
     def test_a_request_past_the_tenth_pending_reviewer_is_read(self) -> None:
         """A busy pull request still shows the reviewer the request added."""
         self.assertIn("reviewRequests(first:100)", pr_review.REQUEST_STATE)

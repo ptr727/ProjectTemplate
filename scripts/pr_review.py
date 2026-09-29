@@ -1029,7 +1029,9 @@ def request_copilot_review(
     the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty.
 
     The second value is `request_recorded` over the state read before the request and the one
-    the mutation answers with, and None where nothing was requested.
+    the mutation answers with, and None where nothing was requested. An answer reading as
+    unrecorded is read once more with the same query and judged the same way, since the answer
+    can lag the request it reports.
     """
     if not bot_id:
         return (
@@ -1044,8 +1046,12 @@ def request_copilot_review(
     before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
     answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
     after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
+    recorded = request_recorded(before, after)
+    if recorded is False:
+        again = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+        recorded = request_recorded(before, again or {})
     line = f"requested a Copilot review on the current head (bot {bot_id})"
-    return line, request_recorded(before, after)
+    return line, recorded
 
 
 def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
@@ -3702,8 +3708,6 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 line += ", and the request recorded nothing on the pull request"
         print(f"auto-request: {line}")
-        # No re-read here: Copilot never resolves within the round trip that just issued the request.
-        # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
     if recorded is False:
         print(
             "note: the review request returned success and recorded nothing on this pull "
