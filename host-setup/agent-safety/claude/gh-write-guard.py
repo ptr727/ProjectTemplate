@@ -93,6 +93,7 @@ import re
 import shlex
 import subprocess
 import sys
+import unicodedata
 from urllib.parse import quote, urlsplit
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
@@ -1900,8 +1901,7 @@ def _redirects_stdin(after_done):
         # A `{name}<` form names a variable rather than a literal and is never descriptor 0.
         if fd.startswith("{"):
             continue
-        # Compared as a number, since bash resolves `00<` to descriptor 0 while a text compare did not.
-        if fd and int(fd) != 0:
+        if any(unicodedata.decimal(c) for c in fd):
             continue  # a redirect on another descriptor leaves descriptor 0 where it was
         # The last binding wins, since bash applies redirections in order and each replaces the last.
         # Returning on the first let `< in.txt < /dev/zero` vouch for the stream that actually binds.
@@ -4659,6 +4659,16 @@ _WAIT_CASES = [
         "yes | while read l; do sleep 30; done 00< in.txt",
         "allow",
         "while a padded zero is descriptor 0, which bash resolves as a number",
+    ),
+    (
+        "while read l; do sleep 30; done " + "0" * 4400 + "< /dev/zero",
+        "deny",
+        "a zero-padded descriptor past int()'s digit limit is descriptor 0 and binds the stream",
+    ),
+    (
+        "yes | while read l; do sleep 30; done " + "0" * 4400 + "< in.txt",
+        "allow",
+        "and binds a file just as the bare form does, rather than reading as another descriptor",
     ),
     (
         "while read l; do sleep 30; done < f",
