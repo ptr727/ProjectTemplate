@@ -24,18 +24,25 @@ in review). The axes that commonly vary per repo:
 ## Two profiles: full specification
 
 A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated
-against the `pyproject.toml` shape. Most of the `SKILL.md` rules (uv project, `uv.lock`, `uv run`,
-src layout, pytest coverage) describe the Project shape (the `build` profile). The two differ by
-whether the Python has third-party runtime dependencies, which shows up structurally in
-`pyproject.toml`, so the fleet's audit reads the shape there:
+against the `pyproject.toml` shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
+describe the Project shape (the `build` profile), and its uv project, `uv.lock`, and `uv run` rules
+describe that shape's uv form. The two differ by whether the Python has third-party runtime
+dependencies, which shows up structurally in `pyproject.toml`, so the fleet's audit reads the shape
+there:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
-  repo's deliverable. It is a PEP 621 uv project: `[project]` with `dependencies` (dev tools in
-  `[project.optional-dependencies]` or `[dependency-groups]`), a `[build-system]`, and a committed
-  `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings" section). CI runs `uv sync --frozen` +
-  `uv run <tool>`, so the lockfile pins tool versions. A `pyproject.toml` beside a
-  `requirements*.txt` is this profile too, installed with pip, whether or not it carries a
-  `[project]` table.
+  repo's deliverable. It takes one of two forms. The uv form is a PEP 621 project: `[project]`
+  with `dependencies` (dev tools in `[project.optional-dependencies]` or `[dependency-groups]`), a
+  `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings"
+  section). CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions. The
+  pip form is a `pyproject.toml` beside a `requirements*.txt`, installed with pip, whether or not
+  it carries a `[project]` table. A committed `uv.lock` makes a directory the uv form even where a
+  `requirements*.txt` sits beside it. In the pip form CI runs pytest from the installed
+  environment, as `.venv/bin/python -m pytest`, and runs ruff through `uvx`. In a directory
+  declared in the hub validator's `python-directories` input it runs the type checker through
+  `uvx` pointed at that environment, or runs mypy from the environment where it is installed
+  there, while the undeclared default root runs a bare `uvx <checker>@latest` with nothing
+  installed.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and

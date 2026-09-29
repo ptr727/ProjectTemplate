@@ -38,6 +38,9 @@ def require(*tools: str) -> str:
     return str(shutil.which("bash"))
 
 
+JQR = r"^(jqr\(\) \{.*?\}$)"
+
+
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     """The script under the same shell options configure.sh sets, with a bounded wait.
 
@@ -95,15 +98,15 @@ class EnvironmentNameInAPathCase(unittest.TestCase):
         the encoder alone would pass against a call that still interpolated the raw name.
         """
         region = lift(
-            r'(        ename_uri="\$\(jq -rn --arg s "\$ename" \'\$s\|@uri\'\)"\n'
+            r'(        ename_uri="\$\(jqr -n --arg s "\$ename" \'\$s\|@uri\'\)"\n'
             r"        if ! policies=.*?\n        fi\n)"
         )
         stub = f"gh() {{\n  printf '%s\\n' \"$3\" >&2\n  return {gh_status}\n}}\n"
         script = (
-            f"{lift(REPORTERS)}\n{stub}repo=owner/name\n"
+            f"{lift(REPORTERS)}\n{lift(JQR)}\n{stub}repo=owner/name\n"
             f"for ename in {shlex.quote(name)} second; do\n{region}done\n"
         )
-        result = run_bash(script, "jq")
+        result = run_bash(script, "jq", "sed")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.stdout = result.stdout
         return result.stderr.strip().splitlines()
