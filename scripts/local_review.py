@@ -285,11 +285,12 @@ def ref_exists(ref: str, root: Path) -> bool:
 def target_ref(target: str, root: Path) -> str:
     """The ref a target name means, preferring the remote-tracking one.
 
-    A target that is already a remote-tracking ref as written, such as `upstream/main`, is used
-    as written before anything else is tried. Without that check first, the `origin/<target>`
-    preference below is unconditional and can mis-scope this exact case: if a branch literally
-    named `upstream/main` also exists on `origin`, `origin/upstream/main` would resolve and win,
-    silently measuring the caller's explicitly named remote against `origin` instead.
+    A target that is already a remote-tracking ref as written, such as `upstream/main`, is chosen
+    first, in its qualified form, before anything else is tried. Without that check first, the
+    `origin/<target>` preference below is unconditional and can mis-scope this exact case: if a
+    branch literally named `upstream/main` also exists on `origin`, `origin/upstream/main` would
+    resolve and win, silently measuring the caller's explicitly named remote against `origin`
+    instead.
 
     Otherwise, `origin/<target>` is tried next and used whenever it resolves, so an ordinary
     fleet branch name works and so does one holding a slash. Treating any slash as "already a
