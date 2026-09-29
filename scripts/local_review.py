@@ -83,16 +83,16 @@ A recorded pass means a review ran over exactly this content. It never means the
 Disposing of what a review found is judgment, per `pr-review-conduct`'s five outcomes, so a pass is
 recorded whether the pass raised findings or none.
 
-Usage: python3 scripts/local_review.py status [--target <branch>]
+Usage: python3 scripts/local_review.py status [--target '<branch>']
            what the current content digest is, and which backends hold a pass on it.
-       python3 scripts/local_review.py record --reviewer <id> --expect-digest <digest>
-                                             [--target <branch>] [--findings N]
+       python3 scripts/local_review.py record --reviewer '<id>' --expect-digest '<digest>'
+                                             [--target '<branch>'] [--findings '<count>']
            record that <id> reviewed the content `status` reported as <digest>, refusing when the
            content has moved since.
-       python3 scripts/local_review.py check [--target <branch>]
+       python3 scripts/local_review.py check [--target '<branch>']
            exit 0 covered, 1 not covered, 2 could not run. A branch holding no net content
            against its target is covered, there being nothing for a review to read.
-       python3 scripts/local_review.py run --backend coderabbit-cli [--target <branch>]
+       python3 scripts/local_review.py run --backend coderabbit-cli [--target '<branch>']
            execute a headless backend and record its pass.
 
 Exit codes are three-valued on purpose, per AGENTS.md "Report an execution boundary separately
@@ -959,7 +959,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         "\nRun the local-strict-review pass over this diff, then record it:\n"
         f"  python3 scripts/local_review.py record --reviewer agent-skill"
         f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
-        "Add --findings <count> to record how many it raised.\n"
+        "Add --findings '<count>' to record how many it raised.\n"
         f"That line records a pass against {target}, which is the branch this check measured rather"
         " than one it discovered. Where the review read this branch against a different base, that"
         " is the wrong scope and the line records content nobody looked at.",

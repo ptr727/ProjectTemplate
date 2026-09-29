@@ -1036,8 +1036,10 @@ NUMERIC = re.compile(r"[0-9]")
 SEMICOLON = re.compile(r";")
 
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
-# A compound word carries no spaces, a list marker nothing before it, and a range is digit-bounded.
+# A compound word carries no spaces, and a range is digit-bounded.
+# A list marker has only whitespace before it, once QUOTE_PREFIX blanks a blockquote's `>`.
 DASH = re.compile(r"(?<=[^\s\d])\s+-\s+(?=[^\s\d])")
+QUOTE_PREFIX = re.compile(r"^\s*(?:>\s*)+")
 
 # `- **Label** - explanation` is a definition separator, structurally a colon.
 # Flagging it would restructure the document format rather than the prose.
@@ -2386,8 +2388,9 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
                                 (i, "semicolon", "semicolon in prose -> a comma or two sentences")
                             )
             if "dash" in rules:
-                skip = LABEL_DASH.match(prose)
-                for m in DASH.finditer(prose):
+                unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
+                skip = LABEL_DASH.match(unquoted)
+                for m in DASH.finditer(unquoted):
                     if skip and m.start() < skip.end():
                         continue
                     out.append(

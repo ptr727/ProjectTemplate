@@ -88,7 +88,7 @@ dotnet build                                       # 0 warnings, 0 errors
 dotnet test                                        # tests pass
 ```
 
-**Python container** (in a repo that ships Python):
+**Python container** (in a repo whose Python is a uv project):
 
 ```shell
 uv --version                                       # uv 0.x

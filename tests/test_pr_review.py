@@ -82,6 +82,31 @@ def review(
     }
 
 
+def request_state(pending: bool = False, events: tuple[str, ...] = ()) -> dict:
+    """What a review request leaves on a pull request, in the shape `REQUEST_STATE` reads it.
+
+    `events` are the ids of review-request events naming the reviewer, oldest first. The request
+    set carries the reviewer where `pending` is true.
+    """
+    bot = {"__typename": "Bot", "login": pr_review.REVIEWER}
+    return {
+        "reviewRequests": {"nodes": [{"requestedReviewer": bot}] if pending else []},
+        "timelineItems": {"nodes": [{"id": e, "requestedReviewer": bot} for e in events]},
+    }
+
+
+RECORDED = (request_state(events=("RRE_1",)), request_state(True, ("RRE_1", "RRE_2")))
+
+
+def answer_request(query: str, variables: dict, states: tuple[dict, dict]) -> dict | None:
+    """The pre-request read and the mutation, answered from `states`, or None for any other document."""
+    if "requestReviews" in query:
+        return {"requestReviews": {"pullRequest": {"id": variables.get("pr"), **states[1]}}}
+    if "REVIEW_REQUESTED_EVENT" in query:
+        return {"repository": {"pullRequest": {"id": "PR_test", **states[0]}}}
+    return None
+
+
 def hist_review(number: int, body: str, at: str = LATE) -> dict:
     """One `pullRequests.nodes` entry in the shape `copilot_history` reads it: a pull request
     number paired with one reviewer review, for the repo-wide reading `wire_history` drives.
@@ -2706,6 +2731,79 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("the file table on this head is not read against them", out)
         self.assertNotIn("omits exactly", out)
 
+    def test_a_carried_partial_wins_over_a_head_table_naming_every_changed_file(self) -> None:
+        """A carried statement is still a statement, so the table is read only past the carry."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(oid=HEAD, body=summarized(["a.py"], covers=""), at=LATE, rid="PRR_b"),
+            ],
+            files=["a.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(42, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=carried:PARTIAL", out)
+        self.assertNotIn("coverage=table", out)
+
+    def test_a_partial_the_bound_refuses_still_keeps_the_table_out(self) -> None:
+        """Any partial on record goes to the maintainer, whatever the carry bound made of it."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(
+                    oid=HEAD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="PRR_b"
+                ),
+            ],
+            files=["a.py", "b.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=unstated", out)
+        self.assertIn("appears to state partial coverage", out)
+
+    def test_a_full_statement_the_bound_refuses_lets_the_table_stand_in(self) -> None:
+        """A full statement on another diff says nothing went unread, so the table decides."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.FULL, at=EARLY, rid="PRR_a"),
+                review(
+                    oid=HEAD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="PRR_b"
+                ),
+            ],
+            files=["a.py", "b.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=table", out)
+        self.assertIn("COVERAGE IS NOT CARRIED", out)
+
+    def test_a_partial_whose_carry_could_not_be_measured_keeps_the_table_out(self) -> None:
+        """The partial on record blocks, whatever a failed compare made of the carry."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(oid=HEAD, body=summarized(["a.py"], covers=""), at=LATE, rid="PRR_b"),
+            ],
+            files=["a.py"],
+        )
+        with self.compare(**{HEAD: ["a.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(45, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=unstated", out)
+        self.assertIn("NO FILE TABLE STANDS IN: a Copilot round", out)
+
+    def test_a_files_connection_the_query_did_not_return_is_not_an_empty_change_set(self) -> None:
+        pr = payload([review(oid=HEAD, body=summarized(["a.py"], covers=""))], files=["a.py"])
+        pr["files"] = None
+        self.assertIn("absent from the query", pr_review.table_shortfall(pr))
+
     def test_a_change_set_that_moved_since_that_round_carries_nothing(self) -> None:
         """The bound the carry has, and the state exit 45 is still for.
 
@@ -3545,6 +3643,287 @@ class TestCoverageExitCodes(GqlCase):
         self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
+    def test_an_unstated_second_format_round_hands_off_rather_than_prescribing_a_re_request(
+        self,
+    ) -> None:
+        """A round in the second format stating no coverage is what a re-request often returns.
+
+        Prescribing another request looped the review with nothing able to close it, so the
+        message names the maintainer instead.
+        """
+        self.answer(payload([review(body=overview_v2(findings="**Findings:** None", covers=""))]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("status=COVERAGE_IS_UNSTATED", printed)
+        self.assertNotIn("request another review", printed)
+        self.assertIn("the maintainer's call", printed)
+
+    def balanced(self, rows: list[str]) -> str:
+        """A Balanced round stating no coverage, its file table naming `rows`."""
+        table = "\n".join(f"| `{p}` | Prose about the change. |" for p in rows)
+        return overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+        ).replace("| a.py | Narrows the reader. |", table)
+
+    def test_a_table_naming_exactly_the_changed_files_closes_an_unstated_head(self) -> None:
+        """Balanced effort writes the table and no statement, so the table is what can close it.
+
+        The nested path carries the zero-width space the format writes after a slash.
+        """
+        body = self.balanced(["a.md", "dir/\u200bb.md"])
+        self.answer(payload([review(body=body)], files=["a.md", "dir/b.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("coverage=table ", printed)
+        self.assertIn("COVERAGE IS READ FROM THE FILE TABLE", printed)
+        self.assertNotIn("status=COVERAGE_IS_UNSTATED", printed)
+
+    def test_a_table_that_is_not_exactly_the_changed_set_stays_unstated(self) -> None:
+        """A file left out, a file the diff does not carry, and a cut-short list each refuse."""
+        for rows, files, more in (
+            (["a.md"], ["a.md", "b.md"], False),
+            (["a.md", "c.md"], ["a.md"], False),
+            (["a.md"], ["a.md"], True),
+        ):
+            with self.subTest(rows=rows, files=files, more=more):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(
+                    payload([review(body=self.balanced(rows))], files=files, more_files=more)
+                )
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_quoted_table_does_not_stand_in_for_coverage(self) -> None:
+        """An indented block and a fence left unclosed quote a table rather than write one."""
+        table = "| File | Description |\n| ---- | ---- |\n| a.md | Prose. |"
+        indented = "\n".join(f"    {ln}" for ln in table.splitlines())
+        for quoted in (f"Quoted:\n\n{indented}\n", f"Quoted:\n\n```markdown\n{table}\n"):
+            with self.subTest(quoted=quoted):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced([]).replace("| File | Description |", quoted, 1)
+                self.answer(payload([review(body=body)], files=["a.md"]))
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("NO FILE TABLE STANDS IN", self.out.getvalue())
+
+    def test_a_stray_backtick_in_a_row_does_not_hide_the_rest_of_the_table(self) -> None:
+        """A row's prose can carry a lone backtick, which pairs with the next row's path."""
+        body = self.balanced(["a.md", "b.md", "c.md"]).replace(
+            "| `a.md` | Prose about the change. |", "| `a.md` | Handles the ` character. |"
+        )
+        self.answer(payload([review(body=body)], files=["a.md", "b.md", "c.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 3 changed files in", self.out.getvalue())
+
+    def test_one_changed_file_reads_in_the_singular(self) -> None:
+        self.answer(payload([review(body=self.balanced(["a.md"]))], files=["a.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 1 changed file in", self.out.getvalue())
+
+    def test_the_shortfall_names_why_no_table_stands_in(self) -> None:
+        """Each reason takes a different remedy, so each is named rather than one for all."""
+        for rows, files, more, reason in (
+            ([], ["a.md"], False, "no round covering the head carries a file table"),
+            (["a.md"], ["a.md", "b.md"], False, "the table leaves out b.md"),
+            (["a.md", "x.md"], ["a.md"], False, "the table names x.md, which the diff does not"),
+            (["x.md"], ["a.md"], False, "the table leaves out a.md, and names x.md, which"),
+            (["a.md"], ["a.md"], True, "changes more than the 100 files this reads"),
+            (["a.md"], [], False, "the pull request changes no files"),
+        ):
+            with self.subTest(reason=reason):
+                body = (
+                    self.balanced(rows)
+                    if rows
+                    else overview_v2(findings="**Findings:** None", covers="", entries=0).replace(
+                        "| File | Description |\n| ---- | ----------- |\n| a.py | Narrows the reader. |",
+                        "",
+                    )
+                )
+                pr = payload([review(body=body)], files=files, more_files=more)
+                self.assertIn(reason, pr_review.table_shortfall(pr))
+
+    def test_the_unstated_message_names_splitting_for_a_list_past_the_window(self) -> None:
+        self.answer(
+            payload([review(body=self.balanced(["a.md"]))], files=["a.md"], more_files=True)
+        )
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("NO FILE TABLE STANDS IN: the pull request changes more than", printed)
+        self.assertIn("splitting the pull request is the remedy", printed)
+
+    def test_a_partial_the_coverage_reader_misses_still_keeps_the_table_out(self) -> None:
+        """Wrapped, mid-line, unprefixed, or fenced, a partial count is still on record."""
+        for partial in (
+            "_Copilot reviewed 1 out of 2 changed files in this pull request._",
+            "**Copilot reviewed 1 out of 2 changed files in this pull request.**",
+            "The change is narrow. Reviewed 1 out of 2 changed files.",
+            "```\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->",
+        ):
+            with self.subTest(partial=partial):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("appears to state partial coverage", self.out.getvalue())
+
+    def test_a_drifted_or_disguised_partial_still_keeps_the_table_out(self) -> None:
+        """Drifted, disguised, and hidden shapes of a partial, each of which once read as none."""
+        for partial in (
+            "<!-- fleet-review: changed=2 reviewed=1 findings=0 -->",
+            "<!-- fleet-review: reviewed=1, changed=2, findings=0 -->",
+            "<!-- fleet-review: reviewed=1 changed=2 -->",
+            "Summary: reviewed <b>1</b> out of <b>2</b> changed files.",
+            "Summary: reviewed 1&nbsp;out of 2 changed files.",
+            "Summary: Files revi\u200bewed: 1/2.",
+            "Summary: reviewed 1 out\nof 2 changed files.",
+            "So far this reviewed 1 of 2.",
+            "Guards `i <= n`.\n\nSummary: reviewed 1 out of 2 changed files.\n\n<details>",
+            "<!-- fleet-review reviewed=1 changed=2 findings=0 -->",
+            "<!-- fleet_review: reviewed=1 changed=2 findings=0 -->",
+            '<!-- fleet-review: reviewed="1" changed="2" findings="0" -->',
+            "<!-- fleet-review: reviewed 1 changed 2 findings 0 -->",
+            '<!-- fleet-review {"reviewed": 1, "changed": 2} -->',
+            "<!-- fleet-review: files_reviewed=1 files_changed=2 -->",
+            "<sub>fleet-review:</sub> reviewed=1 changed=2 findings=0",
+            "<!-- fleet-review: reviewed=1" + " " * 185 + "changed=12 findings=0 -->",
+            "Per fleet review, " + "x" * 180 + " <!-- fleet-review: reviewed=1 changed=12 -->",
+            "Checks `i<n and j`.\nCopilot reviewed 1 out of 2 changed files.\nMaps `a -> b`.",
+            "Guards `i <n and j`, Copilot reviewed 1 out of 2 changed files, maps `a -> b`.",
+            "<fleet-review reviewed=1 changed=2 findings=0>",
+            "&lt;fleet-review reviewed=1 changed=2 findings=0&gt;",
+            '<span title="fleet-review: reviewed=1 changed=2 findings=0"></span>',
+            "fleet - review: reviewed=1 changed=2",
+            "fleet\\-review: reviewed=1 changed=2",
+            "fleet review reviewed 1 changed 2",
+            "fleet\u00a0review: reviewed=1 changed=2",
+            "\uff46\uff4c\uff45\uff45\uff54-review: reviewed=1 changed=2",
+            "<!-- fleet-review: reviewed=\u00b9 changed=\u00b2 -->",
+            "Per fleet review, " + "x" * 250 + " counted 1 against 2.",
+        ):
+            with self.subTest(partial=partial):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                pr = payload([review(body=body)], files=["a.md", "b.md"])
+                self.assertTrue(pr_review.partial_shaped(pr))
+                self.answer(pr)
+                self.assertIn(pr_review.main(["status", "7", "--repo", "o/r"]), (42, 45))
+                self.assertNotIn("coverage=table", self.out.getvalue())
+
+    def test_every_reported_hiding_place_still_reads_as_a_partial(self) -> None:
+        """Each body here once hid a partial from one reading, so every reading is kept."""
+        for partial in (
+            "fleet\u2122review: reviewed=1 changed=2",
+            "fleet\u2057review: reviewed=1 changed=2",
+            "<!-- fleet-review: reviewed=1\u03002 changed=12 findings=0 -->",
+            "<!-- fleet-review: reviewed=1\u00b2 changed=12 findings=0 -->",
+            "<!-- fleet-review: reviewed=\u246b changed=12 findings=0 -->",
+            (
+                'Copilot reviewed <a href="https://example.invalid/path/x" title="a &quot;b&quot;">'
+                "1</a> out of 2 changed files."
+            ),
+            (
+                'Copilot reviewed <a href="https://example.invalid/aaaa"class="bbbbbbbbbbbb">1</a>'
+                " out of 2 changed files."
+            ),
+            (
+                'Copilot reviewed <a\nhref="https://example.invalid/aaaaaaaaaaaaaaaaaaaaaa">1</a>'
+                " out of 2 changed files."
+            ),
+            'Note <a title="x > Copilot reviewed 1 out of 2 changed files < y">z</a>.',
+            'Note \uff1cb x="Copilot reviewed 1 out of 2 changed files"\uff1e z.',
+            "Guards `i <= n`.\n\nSummary: reviewed 1 out of 2 changed files.\n\n<details>",
+        ):
+            with self.subTest(partial=partial):
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_count_split_by_footer_markup_still_reads(self) -> None:
+        footer = (
+            '<a href="/o/r/new/develop?filename=.github/skills/code-review/SKILL.md" '
+            'class="Link--inTextBlock" target="_blank" rel="noopener noreferrer">'
+        )
+        body = f"{OVERVIEW}\nCopilot reviewed {footer}1</a> out of {footer}2</a> changed files.\n"
+        self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_digit_past_the_marker_reach_is_not_read_with_the_mention(self) -> None:
+        body = self.balanced(["a.md"]) + "\nPer fleet review, " + "x" * 320 + " item 1 of 2.\n"
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
+        """Prose about the marker and its placeholder are not statements, so they block nothing."""
+        for mention in (
+            "This reads any `fleet-review:` marker.",
+            "`<!-- fleet-review: reviewed=N changed=N findings=N -->`",
+        ):
+            with self.subTest(mention=mention):
+                body = self.balanced(["a.md"]) + "\n" + mention + "\n"
+                self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_digit_run_past_the_int_limit_reads_without_crashing(self) -> None:
+        body = self.balanced(["a.md"]) + "\nSummary: reviewed 3 of " + "9" * 5000 + ".\n"
+        self.assertIn("reviewed 3 of", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_full_count_among_comparisons_does_not_read_as_a_partial(self) -> None:
+        body = (
+            OVERVIEW
+            + "\nGuards `n < 0` and `x<y and z`.\n"
+            + "Copilot reviewed 2 out of 2 changed files in this pull request.\n\n<details>\n"
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_full_marker_among_markup_does_not_read_as_a_partial(self) -> None:
+        body = (
+            self.balanced(["a.md"])
+            + "\nGuards `n < 0` and `Dict<str, int>`.\n"
+            + "<!-- fleet-review: reviewed=01 changed=1 findings=0 -->\n"
+            + '<a href="/x" class="Link--inTextBlock">Learn more</a>\n'
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_page_info_without_a_boolean_keeps_the_table_out(self) -> None:
+        for page in ({}, {"hasNextPage": None}):
+            with self.subTest(page=page):
+                pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+                pr["files"]["pageInfo"] = page
+                self.assertIn("malformed", pr_review.table_shortfall(pr))
+
+    def test_a_full_marker_does_not_read_as_a_partial(self) -> None:
+        body = (
+            self.balanced(["a.md"]) + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->\n"
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_page_info_that_says_nothing_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+        pr["files"]["pageInfo"] = None
+        self.assertIn("malformed", pr_review.table_shortfall(pr))
+
+    def test_a_review_history_past_the_window_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"], older_reviews=True)
+        self.assertIn("review history is longer", pr_review.table_shortfall(pr))
+
+    def test_a_changed_file_entry_with_no_path_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+        pr["files"]["nodes"].append({"path": None})
+        self.assertIn("malformed", pr_review.table_shortfall(pr))
+
+    def test_a_stated_partial_wins_over_a_table_naming_every_changed_file(self) -> None:
+        """The table names the whole set on partial rounds too, so a statement always decides."""
+        body = summarized(
+            ["a.py", "b.md", "c.yml"],
+            covers="Copilot reviewed 2 out of 3 changed files in this pull request "
+            "and generated no comments.",
+        )
+        self.answer(payload([review(body=body)], files=["a.py", "b.md", "c.yml"]))
+        self.assertEqual(42, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("coverage=table", self.out.getvalue())
+
     def test_status_has_no_coverage_verdict_before_a_review_lands(self) -> None:
         """A missing round is incomplete work, not an unstated statement by a reviewer."""
         self.answer(payload([]))
@@ -3693,6 +4072,25 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertEqual(
             ["a.py", "docs/b.md"], pr_review.file_table(summarized(["a.py", "docs/b.md"]))
         )
+
+    def test_a_zero_width_space_in_a_second_format_path_is_not_part_of_the_path(self) -> None:
+        """The second format writes U+200B after a path's slash, and `str.strip` keeps it.
+
+        Kept, every nested path read as one the diff does not carry and every root-level path
+        matched, so the comparison named real files as omitted.
+        """
+        body = overview_v2(findings="**Findings:** None", covers="").replace(
+            "| a.py | Narrows the reader. |",
+            "| `a.md` | Prose about the change. |\n| `dir/\u200bb.md` | Prose about the change. |",
+        )
+        self.assertEqual(["a.md", "dir/b.md"], pr_review.file_table(body))
+        self.assertIn("names all 2 changed files", self.reading(body, ["a.md", "dir/b.md"]))
+
+    def test_a_format_character_in_a_changed_path_matches_the_table_naming_it(self) -> None:
+        """A real file name can carry one, so the diff's side is reduced as the table's is."""
+        joined = "e\u200dmoji.md"
+        body = summarized([joined], covers="")
+        self.assertIn("names all 1 changed files", self.reading(body, [joined]))
 
     def test_a_quoted_table_is_not_this_rounds_own(self) -> None:
         """The reason a quoted coverage line is not: this change puts a table in the diff.
@@ -4677,7 +5075,9 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["status", "7"]))
         self.assertIn("repo=o/r pr=7", self.out.getvalue())
 
-    def wire_history(self, prs: list[dict]) -> list[tuple[str, dict]]:
+    def wire_history(
+        self, prs: list[dict], states: tuple[dict, dict] = RECORDED
+    ) -> list[tuple[str, dict]]:
         """Route `gh_graphql` calls after `self.answer(...)`, answering the bot-id/history query
         with `prs` verbatim as `pullRequests.nodes`, and recording every call made.
 
@@ -4693,17 +5093,20 @@ class TestCli(GqlCase):
             calls.append((query, variables))
             if "pullRequests(first:$prs" in query:
                 return {"repository": {"pullRequests": {"nodes": prs}}}
-            if "requestReviews" in query:
-                return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
+            answered = answer_request(query, variables, states)
+            if answered is not None:
+                return answered
             raise AssertionError(f"unexpected document: {query[:60]}")
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
         return calls
 
-    def wire_bot(self, bot_id: str | None) -> list[tuple[str, dict]]:
+    def wire_bot(
+        self, bot_id: str | None, states: tuple[dict, dict] = RECORDED
+    ) -> list[tuple[str, dict]]:
         """`wire_history` narrowed to just an id, for the tests that need nothing else."""
         if bot_id is None:
-            return self.wire_history([])
+            return self.wire_history([], states)
         node = {
             "number": 1,
             "reviews": {
@@ -4712,7 +5115,7 @@ class TestCli(GqlCase):
                 ]
             },
         }
-        return self.wire_history([node])
+        return self.wire_history([node], states)
 
     def test_a_resolved_bot_id_issues_the_request_before_the_first_poll(self) -> None:
         """The gap this closed: nothing outstanding and nothing ever asked for, twice measured."""
@@ -4742,6 +5145,7 @@ class TestCli(GqlCase):
         bot id once the narrow window has aged out, rather than falling back to polling only."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         calls: list[tuple[str, dict]] = []
+        states = RECORDED
 
         def fake(query: str, **variables: object) -> dict:
             calls.append((query, variables))
@@ -4763,8 +5167,9 @@ class TestCli(GqlCase):
                     },
                 }
                 return {"repository": {"pullRequests": {"nodes": [node]}}}
-            if "requestReviews" in query:
-                return {"requestReviews": {"pullRequest": {"id": variables.get("pr")}}}
+            answered = answer_request(query, variables, states)
+            if answered is not None:
+                return answered
             raise AssertionError(f"unexpected document: {query[:60]}")
 
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
@@ -4782,6 +5187,178 @@ class TestCli(GqlCase):
         self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertFalse(calls)
         self.assertNotIn("auto-request:", self.out.getvalue())
+
+    def test_a_request_that_records_nothing_ends_the_wait_after_one_interval(self) -> None:
+        """The shape an exhausted allowance left: the mutation succeeds and leaves nothing behind.
+
+        No pending reviewer and no new review-request event, so no review is coming, and polling
+        --timeout out only reports that as patience 45 minutes later. The one wait is the first
+        poll delay, which gives a request GitHub is slow to record the time to show up.
+        """
+        self.answer(payload([review(oid=OLD)]))
+        unchanged = request_state(events=("RRE_1",))
+        calls = self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(48, self.cli(["wait", "7"]))
+        slept.assert_called_once_with(15)
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("the request recorded nothing on the pull request", out)
+        self.assertIn("status=REQUEST_NOT_RECORDED", out)
+        self.assertNotIn("status=PENDING", out)
+
+    def test_a_first_request_that_records_nothing_is_read_the_same(self) -> None:
+        """A pull request with no request event before it has no id to compare against."""
+        self.answer(payload([review(oid=OLD)]))
+        self.wire_bot("BOT_123", (request_state(), request_state()))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_new_event_alone_counts_as_recorded(self) -> None:
+        """A request the reviewer already left the pending set for still added its event."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        self.wire_bot("BOT_123", (request_state(), request_state(events=("RRE_1",))))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertNotIn("REQUEST_NOT_RECORDED", self.out.getvalue())
+
+    def test_a_pending_reviewer_alone_counts_as_recorded(self) -> None:
+        """The pending set is read as well, so an event past the window does not decide it."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        same = ("RRE_1",)
+        self.wire_bot("BOT_123", (request_state(events=same), request_state(True, same)))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("REQUEST_NOT_RECORDED", self.out.getvalue())
+
+    def test_a_review_on_the_final_read_outranks_an_unrecorded_request(self) -> None:
+        """A review covering the head is concrete, so it decides the code over the inference."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+
+    def test_a_reviewer_pending_on_the_confirming_read_is_polled_for(self) -> None:
+        """An answer lagging the request it reports is corrected by the next read, so the wait polls."""
+        self.answer(
+            payload([review(oid=OLD)]),
+            payload([review(oid=OLD)], pending=True),
+            payload([review()]),
+        )
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_bot("BOT_123", (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(2, slept.call_count)
+        out = self.out.getvalue()
+        self.assertNotIn("recorded nothing", out)
+        self.assertNotIn("status=REQUEST_NOT_RECORDED", out)
+
+    def test_an_unrecorded_request_outranks_the_repo_wide_quota_signal(self) -> None:
+        """Read on this pull request, so it ranks above the reading from elsewhere."""
+        self.answer(payload([]))
+        unchanged = request_state(events=("RRE_1",))
+        self.wire_history([hist_review(962, QUOTA_REFUSED)], (unchanged, unchanged))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(48, self.cli(["wait", "7"]))
+        slept.assert_called_once_with(15)
+        out = self.out.getvalue()
+        self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("note: the review request returned success and recorded nothing", out)
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
+
+    def test_a_drifted_login_in_the_answer_is_not_read_as_unrecorded(self) -> None:
+        """A renamed reviewer is what the poll reports, so the request is not judged on its spelling."""
+        drifted = {"__typename": "Bot", "login": "copilot-pull-request-reviewer-v2"}
+        before = request_state(events=("RRE_1",))
+        after = {
+            "reviewRequests": {"nodes": [{"requestedReviewer": drifted}]},
+            "timelineItems": {"nodes": [{"id": "RRE_1", "requestedReviewer": drifted}]},
+        }
+        self.assertIsNone(pr_review.request_recorded(before, after))
+
+    def test_an_answer_carrying_no_request_state_is_not_read_as_unrecorded(self) -> None:
+        """An unread state is not a reading of one, so the wait polls as it did before."""
+        before = request_state(events=("RRE_1",))
+        self.assertIsNone(pr_review.request_recorded(before, {"id": "PR_test"}))
+        self.assertIsNone(pr_review.request_recorded(before, {"reviewRequests": {"nodes": []}}))
+
+    def test_a_null_answer_is_not_read_as_unrecorded(self) -> None:
+        """A field answered null was not read, the same as one left out."""
+        before = request_state(events=("RRE_1",))
+        read: dict = {"nodes": []}
+        self.assertIsNone(
+            pr_review.request_recorded(before, {"reviewRequests": None, "timelineItems": read})
+        )
+        self.assertIsNone(
+            pr_review.request_recorded(before, {"reviewRequests": read, "timelineItems": None})
+        )
+
+        def fake(query: str, **variables: object) -> dict:
+            if "requestReviews" in query:
+                return {"requestReviews": {"pullRequest": None}}
+            answered = answer_request(query, variables, (before, before))
+            assert answered is not None
+            return answered
+
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
+        self.assertIsNone(recorded)
+        slept.assert_not_called()
+
+    def test_a_lagging_answer_is_read_again_by_the_same_predicate(self) -> None:
+        """A request whose event lands after the answer is recorded, not blamed on the account.
+
+        The second read waits out the settle delay first, since a read straight after the answer
+        sees the same lag the answer did.
+        """
+        before = request_state(events=("RRE_1",))
+        reads = [before, request_state(events=("RRE_1", "RRE_2"))]
+        order: list[str] = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "requestReviews" in query:
+                order.append("request")
+                return {"requestReviews": {"pullRequest": {"id": "PR_test", **before}}}
+            order.append("read")
+            return {"repository": {"pullRequest": {"id": "PR_test", **reads.pop(0)}}}
+
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(
+                pr_review.time, "sleep", side_effect=lambda s: order.append(f"sleep {s}")
+            ),
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
+        self.assertIs(True, recorded)
+        self.assertFalse(reads)
+        self.assertEqual(["read", "request", "sleep 15", "read"], order)
+
+    def test_a_recorded_answer_is_not_waited_on(self) -> None:
+        """Only an answer reading as unrecorded pays the settle delay."""
+        before, after = RECORDED
+
+        def fake(query: str, **variables: object) -> dict:
+            answered = answer_request(query, variables, (before, after))
+            assert answered is not None
+            return answered
+
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
+        self.assertIs(True, recorded)
+        slept.assert_not_called()
+
+    def test_a_request_past_the_tenth_pending_reviewer_is_read(self) -> None:
+        """A busy pull request still shows the reviewer the request added."""
+        self.assertIn("reviewRequests(first:100)", pr_review.REQUEST_STATE)
 
     def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
         """The shape observed live on two consecutive pull requests: no Copilot activity at all on
@@ -6410,6 +6987,49 @@ class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
         ):
             pr_review.main([])
         self.assertEqual(set(captured_choices[0]), set(WRITE_COMMANDS) | set(READ_ONLY_COMMANDS))
+
+
+class TestConsoleIsUtf8(unittest.TestCase):
+    """Printing reviewer text must not depend on the host code page."""
+
+    SCRIPTS = str(Path(__file__).resolve().parent.parent / "scripts")
+
+    def run_child(self, code: str) -> subprocess.CompletedProcess[bytes]:
+        """Run code in a child whose stdout defaults to cp1252, as on a Windows host."""
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+        env["PYTHONIOENCODING"] = "cp1252"
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            check=False,
+            env=env,
+            timeout=60,
+        )
+
+    def test_a_character_outside_the_code_page_prints(self) -> None:
+        """A character cp1252 cannot map prints as UTF-8 once main starts."""
+        code = (
+            f"import sys; sys.path.insert(0, {self.SCRIPTS!r}); import pr_review; "
+            "pr_review.utf8_console(); print('\\u014d\\U0001f3af')"
+        )
+        got = self.run_child(code)
+        self.assertEqual(got.returncode, 0, got.stderr.decode("utf-8", "replace"))
+        self.assertEqual(got.stdout.decode("utf-8").strip(), "\u014d\U0001f3af")
+
+    def test_main_reconfigures_before_parsing(self) -> None:
+        """The entry point applies the reconfigure, so the helper is not dead code."""
+        with (
+            mock.patch.object(pr_review, "utf8_console") as called,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            pr_review.main([])
+        called.assert_called_once_with()
+
+    def test_a_stream_without_reconfigure_is_left_alone(self) -> None:
+        """A harness may substitute a stream with no reconfigure, which must not raise."""
+        with mock.patch.object(sys, "stdout", io.StringIO()):
+            pr_review.utf8_console()
 
 
 class TestHarness(unittest.TestCase):

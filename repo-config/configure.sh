@@ -79,7 +79,7 @@ if [ -z "$model" ]; then
         # Silently defaulting would hide a lookup that actually broke.
         # A repo simply absent from the registry is not an error.
         # The expression falls back through defaults.workflowModel to "release", so jq still exits 0 with a value.
-        if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry")"; then
+        if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry" | sed $'s/\r$//')"; then
             echo "Failed to read workflowModel from $registry (invalid JSON?). Pass the model explicitly (release|operational)." >&2
             exit 1
         fi
@@ -154,7 +154,10 @@ ruleset_id() {
         return 1
     fi
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    ids="$(jqr --arg n "$1" '.[] | select(.name==$n) | .id' <<<"$out")"
+    if ! ids="$(jqr --arg n "$1" '.[] | if type == "object" then select(.name == $n) | if (.id | type) == "number" and .id == (.id | floor) then .id else error("bad id") end else error("not an object") end' <<<"$out")"; then
+        echo "Failed for $repo: could not read live ruleset state (an array element was not a ruleset object, or a match had no integer id)." >&2
+        return 1
+    fi
     if [ -z "$ids" ]; then return 0; fi
     # Pre-existing drift can leave more than one ruleset with the same name.
     # Use the first and warn, so the duplicates get resolved rather than silently operating on the wrong one.
@@ -496,6 +499,10 @@ check_settings() {
         fail "could not read repository settings"
         return
     fi
+    if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
+        fail "live repository settings for '$repo' were not one JSON object"
+        return
+    fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
     # The payload is parsed into a variable before the loop rather than streamed from a process substitution, since a jq failure inside `done < <(...)` would leave the loop body unexecuted without tripping set -e and report every setting as checked and passing while nothing was compared, a false clean.
@@ -680,7 +687,8 @@ check_environments() {
         if [ "$policy" != custom ] || [ "$got" != custom ]; then continue; fi
         # GitHub documents no character restriction on an environment name beyond 255 characters and uniqueness, so a name legitimately holds a space, a '#', a '?' or a '/'.
         # Raw interpolation would turn each of those into something other than one path segment, and a '/' into two.
-        ename_uri="$(jq -rn --arg s "$ename" '$s|@uri')"
+        # shellcheck disable=SC2016  # $s is a jq --arg variable, not a shell expansion
+        ename_uri="$(jqr -n --arg s "$ename" '$s|@uri')"
         if ! policies="$(gh api --paginate "repos/$repo/environments/$ename_uri/deployment-branch-policies" --jq '.branch_policies[]' | jq -s '.')"; then
             fail "environment '$ename' - could not read its deployment branch policies"
             continue

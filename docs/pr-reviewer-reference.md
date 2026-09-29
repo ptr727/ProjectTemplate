@@ -24,7 +24,7 @@ The consequence a review loop actually needs: **a private repository has Copilot
 
 The repository already has first-class status, wait, comment, reply, resolution, coverage, and output-shape handling in `scripts/pr_review.py`.
 
-A review is requested by that script rather than by hand. `wait` requests one on the current head where nothing it reads already settles the round and nothing is outstanding, so an accepted request that is never picked up is a state it cannot clear for itself. Clearing the request set is what leaves the next `wait` nothing to defer to. Nothing in the commands below is the script, so none of its scope refusals reaches them, and the owner in the target is checked by whoever runs them:
+A review is requested by that script rather than by hand. `wait` requests one on the current head where nothing it reads already settles the round and nothing is outstanding, so an accepted request that is never picked up is a state it cannot clear for itself. Clearing the request set is what leaves the next `wait` nothing to defer to. A `wait` ending `REQUEST_NOT_RECORDED`, exit 48, is a different state and takes none of this recovery: the request returned success and left neither a pending reviewer nor a review-request event, which is how an exhausted Copilot allowance has shown itself, so clearing and requesting again does not clear it and it goes to the maintainer. Nothing in the commands below is the script, so none of its scope refusals reaches them, and the owner in the target is checked by whoever runs them:
 
 ```sh
 PR_NODE=$(gh pr view "<N>" --repo "<owner>/<repo>" --json id --jq '.id')
