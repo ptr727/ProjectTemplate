@@ -86,7 +86,6 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
 
-import functools
 import json
 import os
 import posixpath
@@ -488,15 +487,16 @@ def _skip_group(cmd, i, opener, closer, comments):
     raise ValueError("unterminated group")
 
 
-def _arith_depth(run, depth, cmd, at):
+def _arith_depth(run, depth, cmd, at, closers):
     """The arithmetic nesting after an operator `run` found at `cmd[at]`, None outside `(( ))`, else
     the open parens. A `((` whose group closes on a lone `)` is nested subshells, as bash reads it.
+    `closers` is `_paren_closers(cmd)`.
     """
     k = 0
     while k < len(run):
         if depth is None:
             if run.startswith("((", k):
-                if _closes_as_arithmetic(cmd, at + k + 2):
+                if _closes_as_arithmetic(cmd, at + k + 2, closers):
                     depth = 0
                 k += 2
                 continue
@@ -513,10 +513,9 @@ def _arith_depth(run, depth, cmd, at):
     return depth
 
 
-@functools.lru_cache(maxsize=4)
 def _paren_closers(cmd):
     """Map each `(` in `cmd` to the index of the `)` closing it, counting raw characters. Built in
-    one pass and cached, since a run of `((` asks once per pair and a scan per ask is quadratic.
+    one pass per command, since a run of `((` asks once per pair and a scan per ask is quadratic.
     """
     closers, stack = {}, []
     for i, ch in enumerate(cmd):
@@ -527,9 +526,11 @@ def _paren_closers(cmd):
     return closers
 
 
-def _closes_as_arithmetic(cmd, i):
-    """True where the parens opened just before `cmd[i]` close together, on `))`."""
-    close = _paren_closers(cmd).get(i - 1)
+def _closes_as_arithmetic(cmd, i, closers):
+    """True where the parens opened just before `cmd[i]` close together, on `))`, `closers` being
+    `_paren_closers(cmd)`.
+    """
+    close = closers.get(i - 1)
     return close is None or cmd[close + 1 : close + 2] == ")"
 
 
@@ -562,6 +563,7 @@ def _context_lex(cmd, comments=True):
     cmd_pos = True
     word_at = 0
     arith = None  # paren depth inside `(( ))`, None outside it
+    closers = None  # `_paren_closers(cmd)`, built at the first operator run
     in_cond = False  # inside `[[ ]]`
     regex = None  # paren depth inside a `=~` operand, None outside one
     tag_wanted = None  # (index the `<<` ended at, dash form) until its delimiter word arrives
@@ -640,7 +642,9 @@ def _context_lex(cmd, comments=True):
             regex = None
             if arith is None and "<<" in run and "<<<" not in run:
                 tag_wanted = (j, False)
-            arith = _arith_depth(run, arith, cmd, i)
+            if closers is None:
+                closers = _paren_closers(cmd)
+            arith = _arith_depth(run, arith, cmd, i, closers)
             cmd_pos = not _is_redir_op(run)
             i = j
             if "\n" in run:
@@ -2627,11 +2631,9 @@ def _heredoc_opener(line):
     holding both, which is vanishingly rare, where reading it wrong drops real commands.
 
     The line is read twice, with its comments dropped and with a `#` read as text, and opens a
-    heredoc only where both readings find one. The first keeps a `<<` inside a comment from opening
-    one. The second keeps a line an earlier line's quote holds from opening one, since a quote
-    there usually leaves the line unparseable as text. Both must also agree with the line read
-    alone by `_operator_tokens`, as it was before `_context_lex`, so a context the scan misreads
-    never strips a body that reading kept.
+    heredoc only where both readings find one, taking the first reading's. The first keeps a `<<`
+    inside a comment from opening one. A reading that does not parse is replaced by the line as
+    `_operator_tokens` reads it.
     """
     readings = []
     for comments in (False, True):
@@ -2641,8 +2643,12 @@ def _heredoc_opener(line):
             readings.append(_operator_tokens(line))
     if _heredoc_opener_in(readings[0]) is None:
         return None
-    opener = _heredoc_opener_in(readings[1])
-    return opener if opener == _heredoc_opener_in(_operator_tokens(line)) else None
+    return _heredoc_opener_in(readings[1])
+
+
+def _line_heredoc_opener(line):
+    """`_heredoc_opener` as it read a line before `_context_lex`, through `_operator_tokens` alone."""
+    return _heredoc_opener_in(_operator_tokens(line))
 
 
 def _heredoc_opener_in(toks):
@@ -2677,8 +2683,9 @@ def _heredoc_opener_in(toks):
     return None
 
 
-def _strip_heredoc_bodies(cmd):
+def _strip_heredoc_bodies(cmd, opener=_heredoc_opener):
     """`cmd` with every heredoc body removed, except one fed to a shell, which really is a script.
+    `opener` decides which lines open a heredoc.
 
     A heredoc body is data rather than a command line, so `cat > notes.md <<EOF` writing this rule's
     own forbidden shape into a document is not that shape being run. A body fed to `sh`/`bash` is
@@ -2693,7 +2700,7 @@ def _strip_heredoc_bodies(cmd):
     while i < len(lines):
         line = lines[i]
         kept.append(line)
-        opened = _heredoc_opener(line)
+        opened = opener(line)
         if opened and not opened[2]:
             tag, dash, _fed = opened
             # A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs.
@@ -2710,8 +2717,17 @@ def _strip_heredoc_bodies(cmd):
 
 
 def _check_unbounded_wait(cmd):
-    """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text."""
-    loop = _unbounded_wait_loop(_strip_heredoc_bodies(cmd))
+    """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text. The
+    command is judged with its heredoc bodies stripped twice, once by `_heredoc_opener` and once
+    by `_line_heredoc_opener`, and a loop either leaves standing is denied, so a heredoc the scan
+    misreads never hides a loop the line reading kept.
+    """
+    stripped = _strip_heredoc_bodies(cmd)
+    loop = _unbounded_wait_loop(stripped)
+    if loop is None:
+        line_stripped = _strip_heredoc_bodies(cmd, _line_heredoc_opener)
+        if line_stripped != stripped:
+            loop = _unbounded_wait_loop(line_stripped)
     if loop is None:
         return "allow", ""
     return "deny", (
@@ -4401,7 +4417,17 @@ _WAIT_CASES = [
     (
         'cat <<EOF "$(echo "\'")"\nwhile true; do sleep 1; done\nEOF',
         "deny",
-        "a heredoc only the scan finds strips no body, so a heredoc the scan misreads hides nothing",
+        "a loop the line reading's heredoc strip keeps is denied where the scan's strip removes it",
+    ),
+    (
+        "cat <<A | ${x:-;} bash\ncat <<B\nA\nwhile true; do sleep 1; done\nB",
+        "deny",
+        "a heredoc the scan reads as fed to a shell does not let a later body line's heredoc hide the loop",
+    ),
+    (
+        "cat <<A `x;` bash\ncat <<B\nA\nwhile true; do sleep 1; done\nB",
+        "deny",
+        "a backquote the line reading splits does not let a later body line's heredoc hide the loop",
     ),
     (
         "while ! [[ $x =~ a|#b ]]; do sleep 30; done  # the PR's checks",
@@ -5503,14 +5529,17 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [lex  ] {label}")
-    parens = 20000
-    start = time.monotonic()
-    _context_lex("(" * parens + "x" + " )" * parens)
-    elapsed = time.monotonic() - start
-    mark = "ok  " if elapsed < 5 else "FAIL"
-    if elapsed >= 5:
-        ok = False
-    print(f"  {mark} [lex  ] a long run of `((` pairs is scanned in linear time ({elapsed:.2f}s)")
+    for label, cmd in (
+        ("a long run of `((` pairs", "(" * 20000 + "x" + " )" * 20000),
+        ("`((` in many heredoc bodies", "(( 1 ))\ncat <<E\n((a\n((b\n((c\n((d\n((e\nE\n" * 4000),
+    ):
+        start = time.monotonic()
+        _context_lex(cmd)
+        elapsed = time.monotonic() - start
+        mark = "ok  " if elapsed < 5 else "FAIL"
+        if elapsed >= 5:
+            ok = False
+        print(f"  {mark} [lex  ] {label} is scanned in linear time ({elapsed:.2f}s)")
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
