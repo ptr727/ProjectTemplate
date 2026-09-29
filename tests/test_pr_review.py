@@ -2731,6 +2731,22 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("the file table on this head is not read against them", out)
         self.assertNotIn("omits exactly", out)
 
+    def test_a_carried_partial_wins_over_a_head_table_naming_every_changed_file(self) -> None:
+        """A carried statement is still a statement, so the table is read only past the carry."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(oid=HEAD, body=summarized(["a.py"], covers=""), at=LATE, rid="PRR_b"),
+            ],
+            files=["a.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(42, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=carried:PARTIAL", out)
+        self.assertNotIn("coverage=table", out)
+
     def test_a_change_set_that_moved_since_that_round_carries_nothing(self) -> None:
         """The bound the carry has, and the state exit 45 is still for.
 
@@ -3623,6 +3639,19 @@ class TestCoverageExitCodes(GqlCase):
                 )
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_quoted_table_does_not_stand_in_for_coverage(self) -> None:
+        """An indented block and a span over several lines quote a table rather than write one."""
+        table = "| File | Description |\n| ---- | ---- |\n| a.md | Prose. |"
+        indented = "\n".join(f"    {ln}" for ln in table.splitlines())
+        for quoted in (f"Quoted:\n\n{indented}\n", f"Quoted ``\n{table}\n`` here.\n"):
+            with self.subTest(quoted=quoted):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced([]).replace("| File | Description |", quoted, 1)
+                self.answer(payload([review(body=body)], files=["a.md"]))
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("NO FILE TABLE STANDS IN", self.out.getvalue())
 
     def test_a_stated_partial_wins_over_a_table_naming_every_changed_file(self) -> None:
         """The table names the whole set on partial rounds too, so a statement always decides."""
