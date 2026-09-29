@@ -1833,21 +1833,19 @@ def file_table(body: str) -> list[str]:
 
     Quotations are dropped for the reason a coverage line's are: this change puts a table into
     the diff and a review of it quotes one, and a quoted table read as this round's own names
-    files nobody reviewed. That is a fenced block, a line indented as a code block, and a code
-    span running over more than one line. A span on one line is kept, being how the second
-    format writes each path.
+    files nobody reviewed. That is a fenced block, an unclosed one running to the end of the
+    body as Markdown runs it, and a line indented as a code block. Code spans are kept, being how
+    the second format writes each path, and a span running over several lines is not masked
+    either, since a stray backtick in one row's prose pairs with the next row's path and would
+    hide the real table.
 
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
 
     Each cell is reduced by `bare_path`, for the reason it states.
     """
-    unquoted = CODE_SPAN.sub(
-        lambda m: re.sub(r"[^\n]", " ", m.group(0)) if "\n" in m.group(0) else m.group(0),
-        strip_fences(body or ""),
-    )
     paths, reading = [], False
-    for line in unquoted.splitlines():
+    for line in strip_fences(body or "", to_end=True).splitlines():
         if code_indented(line):
             reading = False
         elif TABLE_HEADER.match(line):
@@ -1967,7 +1965,7 @@ def table_shortfall(pr: dict) -> str:
             f"table cannot be compared against all of them, and no push or round clears that"
         )
     if not changed:
-        return "the changed-file list is absent from the query, so the table has nothing to match"
+        return "the pull request changes no files, so the table has nothing to match"
     diff = {bare_path(p) for p in changed}
     omitted = sorted(diff - set(named))
     invented = sorted(set(named) - diff)
@@ -1996,8 +1994,10 @@ def table_covers(pr: dict) -> bool:
 
     It is weaker than a statement, and `table_against_diff` says why: over the rounds measured,
     the table names the whole changed set on partial rounds as well as full ones. So any
-    statement wins over it, a partial one blocking as before, and this is read only where
-    nothing states coverage at all. A table naming a file the diff does not carry, or leaving one
+    statement that reaches the head wins over it, a partial one blocking as before, and this is
+    read only where none does. A statement the carry bound refuses describes a diff this head no
+    longer has, so it does not reach the head, and the table stands in over it as it would over
+    a pull request no round ever stated coverage on. A table naming a file the diff does not carry, or leaving one
     out, is not this reading, and neither is a changed-file list the query cut short, since a
     path beyond the window reads like a path the table left out.
     """
@@ -2224,7 +2224,7 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "newest round that states some forward, bounded on the change set, and failing "
             "that, a round covering the head whose own file table names exactly the changed "
             "files stands in. Reaching here means that table is missing, names a different set, "
-            "or the changed-file list was cut short, which the digest above names, and also one "
+            "or has no changed-file list to match, which the digest above names, and also one "
             "of three things it says which of: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
@@ -3026,7 +3026,8 @@ def digest(
         lines.append(
             f"  COVERAGE IS READ FROM THE FILE TABLE: no round states coverage of this head and "
             f"none carries to it, and a round covering it names exactly the "
-            f"{len(changed_paths(pr)[0])} changed files in its own table"
+            f"{len(changed_paths(pr)[0])} changed "
+            f"file{'' if len(changed_paths(pr)[0]) == 1 else 's'} in its own table"
         )
     elif cover == UNSTATED and on_head:
         lines.append(f"  NO FILE TABLE STANDS IN: {table_shortfall(pr)}")

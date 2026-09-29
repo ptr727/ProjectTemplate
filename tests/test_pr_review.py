@@ -3641,10 +3641,10 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertIn("coverage=unstated ", self.out.getvalue())
 
     def test_a_quoted_table_does_not_stand_in_for_coverage(self) -> None:
-        """An indented block and a span over several lines quote a table rather than write one."""
+        """An indented block and a fence left unclosed quote a table rather than write one."""
         table = "| File | Description |\n| ---- | ---- |\n| a.md | Prose. |"
         indented = "\n".join(f"    {ln}" for ln in table.splitlines())
-        for quoted in (f"Quoted:\n\n{indented}\n", f"Quoted ``\n{table}\n`` here.\n"):
+        for quoted in (f"Quoted:\n\n{indented}\n", f"Quoted:\n\n```markdown\n{table}\n"):
             with self.subTest(quoted=quoted):
                 self.out.seek(0)
                 self.out.truncate()
@@ -3652,6 +3652,51 @@ class TestCoverageExitCodes(GqlCase):
                 self.answer(payload([review(body=body)], files=["a.md"]))
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("NO FILE TABLE STANDS IN", self.out.getvalue())
+
+    def test_a_stray_backtick_in_a_row_does_not_hide_the_rest_of_the_table(self) -> None:
+        """A row's prose can carry a lone backtick, which pairs with the next row's path."""
+        body = self.balanced(["a.md", "b.md", "c.md"]).replace(
+            "| `a.md` | Prose about the change. |", "| `a.md` | Handles the ` character. |"
+        )
+        self.answer(payload([review(body=body)], files=["a.md", "b.md", "c.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 3 changed files in", self.out.getvalue())
+
+    def test_one_changed_file_reads_in_the_singular(self) -> None:
+        self.answer(payload([review(body=self.balanced(["a.md"]))], files=["a.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 1 changed file in", self.out.getvalue())
+
+    def test_the_shortfall_names_why_no_table_stands_in(self) -> None:
+        """Each reason takes a different remedy, so each is named rather than one for all."""
+        for rows, files, more, reason in (
+            ([], ["a.md"], False, "no round covering the head carries a file table"),
+            (["a.md"], ["a.md", "b.md"], False, "the table leaves out b.md"),
+            (["a.md", "x.md"], ["a.md"], False, "the table names x.md, which the diff does not"),
+            (["x.md"], ["a.md"], False, "the table leaves out a.md, and names x.md, which"),
+            (["a.md"], ["a.md"], True, "changes more than the 100 files this reads"),
+            (["a.md"], [], False, "the pull request changes no files"),
+        ):
+            with self.subTest(reason=reason):
+                body = (
+                    self.balanced(rows)
+                    if rows
+                    else overview_v2(findings="**Findings:** None", covers="", entries=0).replace(
+                        "| File | Description |\n| ---- | ----------- |\n| a.py | Narrows the reader. |",
+                        "",
+                    )
+                )
+                pr = payload([review(body=body)], files=files, more_files=more)
+                self.assertIn(reason, pr_review.table_shortfall(pr))
+
+    def test_the_unstated_message_names_splitting_for_a_list_past_the_window(self) -> None:
+        self.answer(
+            payload([review(body=self.balanced(["a.md"]))], files=["a.md"], more_files=True)
+        )
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("NO FILE TABLE STANDS IN: the pull request changes more than", printed)
+        self.assertIn("splitting the pull request is the remedy", printed)
 
     def test_a_stated_partial_wins_over_a_table_naming_every_changed_file(self) -> None:
         """The table names the whole set on partial rounds too, so a statement always decides."""
