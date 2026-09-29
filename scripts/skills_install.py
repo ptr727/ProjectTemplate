@@ -26,6 +26,7 @@ channel, it says which branch and commit the registered checkout is serving now.
 the snapshot's verdict alone, since the live channel following its checkout is the design.
 
 Usage: python3 scripts/skills_install.py            (installs)
+       python3 scripts/skills_install.py --snapshot-only   (refreshes the Codex/opencode copy alone)
        python3 scripts/skills_install.py --report   (read-only: what does each channel hold?)
        python3 scripts/skills_install.py --report --intended <rev>   (judge the snapshot against <rev>)
        AGENTS_HOME=/x python3 scripts/skills_install.py   (override the global skills target, for testing)
@@ -38,6 +39,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -84,7 +86,10 @@ def git_in(root, *args):
 
 def is_bootstrap_tree(root):
     """Whether `root` is a tree the bootstrap extracted, which carries the marker it writes."""
-    return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+    try:
+        return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+    except (OSError, ValueError):
+        return False
 
 
 def bootstrap_tree_commit(root):
@@ -223,6 +228,46 @@ def entry_location(entry):
     return location if isinstance(location, str) and location else None
 
 
+def same_directory(a, b):
+    """Whether two paths name one directory, however each is spelled, False where either cannot be resolved."""
+    try:
+        return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def directory_gone(location):
+    """Whether nothing is at `location` to serve, judged by stat so an unreadable path is never gone."""
+    try:
+        return not stat.S_ISDIR(os.stat(location).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def existing_registration():
+    """This marketplace's current registration, as (where it is, whether an add may move it).
+
+    `claude plugin marketplace add` re-points an existing registration at the new directory
+    without failing, so running it from a worktree would leave Claude Code loading a tree that is
+    about to be removed. Only a directory registration whose directory is gone may be moved, since
+    it serves nothing. A directory that cannot be read is kept, as a present one is. Returns None
+    where nothing is registered, and raises LookupError where the CLI gives no listing.
+    """
+    entry = marketplace_entry()
+    if entry is None:
+        raise LookupError("`claude plugin marketplace list --json` gave no listing")
+    if not entry:
+        return None
+    if entry.get("source") != "directory":
+        return f"a {entry.get('source') or 'non-directory'} source", False
+    location = entry_location(entry)
+    if location is None:
+        return "a directory source naming no directory", False
+    return location, directory_gone(location) or same_directory(location, ROOT)
+
+
 def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
@@ -230,7 +275,36 @@ def register_claude_marketplace():
     ~/.claude/plugins/known_marketplaces.json directly: that file's shape is the CLI's own
     internal state, not a documented contract, so writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
+
+    An existing registration the add would move is left in place, with a warning naming the command
+    that moves it, unless its directory is gone, where the move is made and announced.
     """
+    try:
+        existing = existing_registration()
+    except LookupError as exc:
+        print(
+            f"{exc}, so whether registering here would move an existing registration is unknown. "
+            "Not registering.",
+            file=sys.stderr,
+        )
+        return False
+    if existing:
+        location, movable = existing
+        if not movable:
+            print(
+                f"Claude Code marketplace '{MARKETPLACE_NAME}' is registered from {location}, "
+                "left in place. To load it from this checkout instead, run: "
+                f'claude plugin marketplace add "{ROOT}"',
+                file=sys.stderr,
+            )
+            return install_claude_plugin()
+        if not same_directory(location, ROOT):
+            print(
+                f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
+                f"which no longer exists. Registering it from {ROOT}.",
+                file=sys.stderr,
+            )
+
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
         capture_output=True,
@@ -247,7 +321,11 @@ def register_claude_marketplace():
     ):
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
         return False
+    return install_claude_plugin()
 
+
+def install_claude_plugin():
+    """Install this marketplace's plugin at user scope, from wherever the marketplace is registered."""
     install = subprocess.run(
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
         capture_output=True,
@@ -322,7 +400,7 @@ def live_channel():
     if location is None:
         return {"registered": True, "reason": "the listing names no location"}
     root = Path(location)
-    if not root.is_dir():
+    if directory_gone(root):
         return {
             "registered": True,
             "checkout": str(root),
@@ -418,9 +496,16 @@ def main():
         metavar="REV",
         help="with --report: the revision the snapshot should hold (default: the promoted main)",
     )
+    parser.add_argument(
+        "--snapshot-only",
+        action="store_true",
+        help="refresh only the Codex/opencode copy, leaving the Claude Code registration untouched",
+    )
     args = parser.parse_args()
     if args.intended and not args.report:
         parser.error("--intended only applies with --report")
+    if args.snapshot_only and args.report:
+        parser.error("--snapshot-only installs, and --report changes nothing")
     if args.intended and is_bootstrap_tree(ROOT):
         parser.error(
             "--intended needs a git checkout, and this is a bootstrap tree, which is judged against the commit its loader resolved"
@@ -437,6 +522,13 @@ def main():
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
+
+    if args.snapshot_only:
+        home.mkdir(parents=True, exist_ok=True)
+        stamp_path.write_text(json.dumps(build_stamp(None), indent=2) + "\n", encoding="utf-8")
+        print(f"Skills materialized to {home / 'skills'}.")
+        print("Claude Code marketplace left untouched (--snapshot-only).")
+        return 0
 
     claude_present = claude_available()
     claude_registered = register_claude_marketplace() if claude_present else False

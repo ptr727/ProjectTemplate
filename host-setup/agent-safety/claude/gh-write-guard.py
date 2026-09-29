@@ -381,9 +381,12 @@ def _strip_comments(cmd):
     return "".join(out) if found else None
 
 
-def _operator_lex(text):
-    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse."""
-    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+def _operator_lex(text, posix=True):
+    """Tokenize `text`, isolating operator runs, and raise where its quoting does not parse.
+
+    `posix=False` keeps each token's quotes, so a caller can tell a quoted `";"` from a separator.
+    """
+    lex = shlex.shlex(text, posix=posix, punctuation_chars=_PUNCTUATION_CHARS)
     lex.whitespace_split = True
     # `shlex.shlex`'s own default keeps `#` as a comment starter, unlike `shlex.split()`, which explicitly clears it, and confirmed live to otherwise fuse `git fetch origin # x\ngit reset --hard` into one invocation, hiding the second command from every tokenizer-based rule.
     # Cleared unconditionally: a truncated command is a far worse failure than an ordinary `#` becoming literal trailing argv words instead.
@@ -1729,11 +1732,117 @@ _COMMAND_POSITION_WORDS = {
     "ionice",
 }
 
-# The two bounds this rule reads as written into the loop's own condition.
-# - the test-builtin form, `[ "$i" -lt 120 ]`.
-# - the arithmetic form, `(( SECONDS < 600 ))`, where a shift is not a comparison and bounds nothing.
-# Matched against the condition alone, so arithmetic in a sleeping body is not mistaken for a guard.
-_BOUND_IN_CONDITION = re.compile(r"-(?:lt|le|gt|ge)\b|\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+_ARITHMETIC_BOUND = re.compile(r"\(\(.*(?:(?<!<)<(?!<)|(?<!>)>(?!>)).*\)\)")
+
+_TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
+
+_TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
+
+
+def _quoted_mask(cmd, toks):
+    """Per token of `toks`, whether `cmd` spelled it quoted or escaped, or None where that is unknown.
+
+    The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
+    A second, quote-keeping lex says which is which, and is trusted only where it aligns token for token.
+    Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
+    """
+    try:
+        raw = _operator_lex(cmd, posix=False)
+    except (ValueError, TypeError):
+        return None
+    if len(raw) != len(toks):
+        return None
+    mask = [any(c in r for c in "'\"\\") for r in raw]
+    for r, t, q in zip(raw, toks, mask):
+        try:
+            if (shlex.split(r) if q else [r]) != [t]:
+                return None
+        except ValueError:
+            return None
+    return mask
+
+
+def _bound_in_condition(cond, quoted=None):
+    """True if the loop condition `cond` carries a comparison bound, as a test builtin or as arithmetic.
+
+    The two forms are `[ "$i" -lt 120 ]` and `(( SECONDS < 600 ))`, where a shift compares nothing.
+    A comparison operator counts only as an argument of a `[`, `[[`, or `test` invocation.
+    Inside `[[ ]]` a `&&` joins two tests and a `|` alternates a pattern, so only `]]` closes it.
+    A `$(...)`, `<(...)`, or backtick operand is a command of its own, so its flags compare nothing.
+    Its parentheses, and a test's own grouping ones, end no test.
+    A substitution glued to a word, `x$(...)`, is a command of its own all the same.
+    A separator fused to a parenthesis, `;(` or `);`, ends a `[` or `test` as a bare one does.
+    A `case` pattern's `)` inside a substitution closes no parenthesis, so it ends no substitution.
+    A quoted token, given by `quoted`, is an operand, so a quoted `;`, `(`, or backtick is no syntax.
+    Inside `[[ ]]` a quoted word is a string, never its comparison or its closer.
+    Where that is unknown, a backtick with no partner after it is a quoted literal all the same.
+    Read anywhere in the condition, `ls -lt` and `grep -le` spelled a bound and waited forever.
+    The condition alone is read, so arithmetic in a sleeping body is not mistaken for a guard.
+    """
+    if _ARITHMETIC_BOUND.search(" ".join(cond)):
+        return True
+
+    def literal(j):
+        return quoted is not None and quoted[j]
+
+    closer = None
+    for k, tok in enumerate(cond):
+        name = tok.rsplit("/", 1)[-1]
+        if closer is None:
+            if (
+                name in _TEST_CLOSERS
+                and not (k and literal(k - 1))
+                and (
+                    _opens_command(cond, k)
+                    or (k > 0 and cond[k - 1] == "builtin" and _opens_command(cond, k - 1))
+                )
+            ):
+                closer = _TEST_CLOSERS[name]
+                depth = group = cases = 0
+                tick = False
+            continue
+        opens, closes = tok.count("("), tok.count(")")
+        if literal(k) and (tick or depth):
+            pass
+        elif literal(k):
+            if closer == "]]":
+                pass
+            elif tok in _TEST_COMPARISONS:
+                return True
+            elif closer and tok == closer:
+                closer = None
+        elif "`" in tok:
+            if tok.count("`") % 2:
+                tick = not tick and any(t.count("`") % 2 for t in cond[k + 1 :])
+        elif tick:
+            pass
+        elif _is_shell_op(tok):
+            if depth:
+                if not cases:
+                    depth = max(0, depth + opens - closes)
+                cases = cases if depth else 0
+                tail = tok[tok.rfind(")") + 1 :]
+                if not depth and closer != "]]" and set(tail) & set(";|&\n"):
+                    closer = None
+            elif closer != "]]" and set(tok) & set(";|&\n"):
+                closer = None
+            elif opens and (cond[k - 1].endswith("$") or tok in ("<(", ">(")):
+                depth = opens
+            else:
+                group += opens
+                if closes > group:
+                    closer = None
+                group = max(0, group - closes)
+        elif depth:
+            if tok == "case" and _opens_command(cond, k):
+                cases += 1
+            elif tok == "esac" and cases:
+                cases -= 1
+        elif tok in _TEST_COMPARISONS:
+            return True
+        elif closer and tok == closer:
+            closer = None
+    return False
 
 
 def _names_a_stream(target):
@@ -2127,6 +2236,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     if _depth > 4:
         return None
     toks = _shell_tokens(cmd)
+    mask = _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
@@ -2166,7 +2276,8 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
                 cond, toks[done_at + 1 :]
             )
-            if sleeps and not bounded and not _BOUND_IN_CONDITION.search(" ".join(cond)):
+            quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
+            if sleeps and not bounded and not _bound_in_condition(cond, quoted):
                 # The trailing separator is the `;` before `do`, which is punctuation rather than part of the condition being quoted back.
                 quoted = cond[:-1] if cond and _is_separator(cond[-1]) else cond
                 return " ".join([tok] + quoted)
@@ -4288,6 +4399,196 @@ _WAIT_CASES = [
         "while (( 1 << 1 )); do sleep 1; done",
         "deny",
         "a shift inside the arithmetic form is not a comparison and bounds nothing",
+    ),
+    (
+        "while ! ls -lt out | grep -q result; do sleep 30; done",
+        "deny",
+        "a command flag spelling a comparison is no test builtin's operand and bounds nothing",
+    ),
+    (
+        "while ! grep -le done log; do sleep 30; done",
+        "deny",
+        "`grep -le` names a pattern rather than comparing anything",
+    ),
+    (
+        "while ! echo [ 1 -lt 2 ] | grep -q x; do sleep 30; done",
+        "deny",
+        "a bracket that is an argument rather than the command runs no test",
+    ),
+    (
+        "until test $i -ge 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "the `test` spelling of the test builtin carries the same bound",
+    ),
+    (
+        "while [[ $i -lt 10 && ! -f x ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a comparison inside `[[ ]]` bounds the loop, the `&&` inside it joining two tests",
+    ),
+    (
+        "while [[ -f x && $i -lt 10 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `&&` inside `[[ ]]` does not close it before a later comparison",
+    ),
+    (
+        "while ! [ -f x ] && ls -lt out; do sleep 30; done",
+        "deny",
+        "a separator closes a `[` test, so a flag after it is still no bound",
+    ),
+    (
+        "until [ $(date +%s) -ge $end ]; do sleep 5; done",
+        "allow",
+        "a command substitution operand does not end the test before its comparison",
+    ),
+    (
+        "while [ $((i)) -lt 10 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "an arithmetic expansion operand does not end the test before its comparison",
+    ),
+    (
+        "while [ $(a $(b)) -lt 1 ]; do sleep 1; done",
+        "allow",
+        "a nested substitution closing on one `))` token leaves the comparison after it credited",
+    ),
+    (
+        'while [ \\( "$i" -lt 3 \\) ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a grouping parenthesis inside the test neither ends it nor hides its comparison",
+    ),
+    (
+        "while ! [[ $(ls -lt out) == *x* ]]; do sleep 30; done",
+        "deny",
+        "a flag inside a substitution in a `[[ ]]` operand is that command's flag, not a comparison",
+    ),
+    (
+        'while ! [ -n "$(ls -lt out)" ]; do sleep 30; done',
+        "deny",
+        "a quoted substitution is one operand, so its flag compares nothing",
+    ),
+    (
+        "while /usr/bin/test $i -lt 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a path-qualified `test` is the same test",
+    ),
+    (
+        "while builtin test $i -lt 3; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "`builtin test` runs the same test builtin",
+    ),
+    (
+        "while ! [ -n `ls -lt out` ]; do sleep 30; done",
+        "deny",
+        "a flag inside a backtick substitution is that command's flag, not a comparison",
+    ),
+    (
+        "while [ `cat n` -lt 3 ]; do sleep 1; done",
+        "allow",
+        "a backtick operand ends before the comparison after it",
+    ),
+    (
+        "while ! [[ -s <(ls -lt out) ]]; do sleep 30; done",
+        "deny",
+        "a flag inside a process substitution is that command's flag, not a comparison",
+    ),
+    (
+        "while ! [[ $(true |(cat) | ls -lt out) ]]; do sleep 30; done",
+        "deny",
+        "a subshell fused to a pipe inside a substitution keeps the substitution open",
+    ),
+    (
+        'while test "" != "$x" -a $i -lt 3; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an empty operand does not close a `test` invocation",
+    ),
+    (
+        "while ! (test -f x) && ls -lt out; do sleep 30; done",
+        "deny",
+        "a subshell's closing parenthesis ends the `test` inside it, so a later flag is no bound",
+    ),
+    (
+        "while ! [ -n x$(ls -lt out) ]; do sleep 30; done",
+        "deny",
+        "a substitution glued to a word is still a command of its own, so its flag compares nothing",
+    ),
+    (
+        "while ! test -f x;(ls -lt out); do sleep 30; done",
+        "deny",
+        "a separator fused to a subshell ends the `test`, so the subshell's flag is no bound",
+    ),
+    (
+        "while ! test -f x|(ls -lt out); do sleep 30; done",
+        "deny",
+        "a pipe fused to a subshell ends the `test`, so the subshell's flag is no bound",
+    ),
+    (
+        "while ! [[ $(case a in a) ls -lt out;; esac) ]]; do sleep 30; done",
+        "deny",
+        "a `case` pattern's parenthesis inside a substitution does not end the substitution",
+    ),
+    (
+        "while [ $(case a in (a) echo 1;; esac) -lt 3 ]; do sleep 1; done",
+        "allow",
+        "a substitution holding a `case` still ends at its own parenthesis before a comparison",
+    ),
+    (
+        "while [ \"$c\" != '`' -a $i -lt 3 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a quoted literal backtick with no partner opens no substitution to hide the comparison",
+    ),
+    (
+        "while [[ -f x || $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `||` inside `[[ ]]` joins two tests rather than ending one",
+    ),
+    (
+        "while ! test -n $(cat f); ls -lt out | grep -q x; do sleep 30; done",
+        "deny",
+        "a separator fused to a substitution's close ends the `test` too",
+    ),
+    (
+        "while [[ $x =~ ^(a|b)$ && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a regex alternation's `|` inside `[[ ]]` does not end it",
+    ),
+    (
+        "while [[ $x == @(a|b) && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "an extglob alternation's `|` inside `[[ ]]` does not end it",
+    ),
+    (
+        'while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `;` is an operand rather than a separator",
+    ),
+    (
+        'while [ "$c" != ")" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `)` is an operand rather than a grouping parenthesis",
+    ),
+    (
+        'while [[ $x != "|" && $i -lt 3 ]]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "a quoted `|` inside `[[ ]]` is a string",
+    ),
+    (
+        'while ! ls $(test -f "(") -lt out; do sleep 30; done',
+        "deny",
+        "a quoted `(` opens no group to keep a substitution's `test` open past its close",
+    ),
+    (
+        'while ! test -f "`"; grep "`" -le x log; do sleep 30; done',
+        "deny",
+        "two quoted backticks pair into no substitution to hide the separator between them",
+    ),
+    (
+        'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
+        "deny",
+        "a bracket after a quoted `;` is an argument rather than a command",
+    ),
+    (
+        'while ! test -n "\\"";"grep" -le x log; do sleep 30; done',
+        "deny",
+        "an escaped quote inside quotes shifts no real separator into a quoted operand",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
