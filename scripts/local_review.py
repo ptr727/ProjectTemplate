@@ -282,35 +282,68 @@ def ref_exists(ref: str, root: Path) -> bool:
     return True
 
 
+def remote_tracking_ref(name: str, root: Path) -> str | None:
+    """The exact `refs/remotes/<name>` ref, or None where `show-ref --verify` rejects that name.
+
+    `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
+    matches a local branch literally named that. `show-ref --verify` matches the name exactly.
+    Raises CannotRun where the ref it accepts does not resolve to a commit.
+    """
+    ref = f"refs/remotes/{name}"
+    try:
+        git("show-ref", "--verify", "--quiet", ref, root=root)
+    except CannotRun:
+        return None
+    if not ref_exists(ref, root):
+        raise CannotRun(
+            f"{ref} does not resolve to a commit, so the review scope cannot be determined"
+        )
+    return ref
+
+
 def target_ref(target: str, root: Path) -> str:
     """The ref a target name means, preferring the remote-tracking one.
 
-    A target that is already a remote-tracking ref as written, such as `upstream/main`, is used
-    as written before anything else is tried. Without that check first, the `origin/<target>`
-    preference below is unconditional and can mis-scope this exact case: if a branch literally
-    named `upstream/main` also exists on `origin`, `origin/upstream/main` would resolve and win,
-    silently measuring the caller's explicitly named remote against `origin` instead.
+    A target that is already a remote-tracking ref as written, such as `upstream/main`, is tried
+    first, in its qualified form, before anything else. Without that check first, the
+    `origin/<target>` preference below is unconditional and can mis-scope this exact case: if a
+    branch literally named `upstream/main` also exists on `origin`, `origin/upstream/main` would
+    resolve and win, silently measuring the caller's explicitly named remote against `origin`
+    instead.
 
-    Otherwise, `origin/<target>` is tried next and used whenever it resolves, so an ordinary
-    fleet branch name works and so does one holding a slash. Treating any slash as "already a
-    full ref", which an earlier version did, silently measured a target such as `release/v1`
-    against the local branch of that name rather than the remote one, and a local branch that
-    has moved on then defines the review scope with no error at all.
+    Otherwise, `origin/<target>` is tried next as a remote-tracking ref, so an ordinary fleet
+    branch name works and so does one holding a slash. Treating any slash as "already a full ref",
+    which an earlier version did, silently measured a target such as `release/v1` against the
+    local branch of that name rather than the remote one, and a local branch that has moved on
+    then defines the review scope with no error at all.
 
     A value that resolves only as written is used as written last, which is what lets a
     fork-based flow name another remote's branch even when it is not already a remote-tracking
     ref (for example a local-only branch checked out from that remote).
+
+    A remote-tracking result is matched by its exact name and returned fully qualified, as
+    `refs/remotes/...`. Git resolves a short name such as `upstream/main` against `refs/heads/`
+    before `refs/remotes/`, so a local branch literally named that would otherwise define the
+    review scope in place of the remote-tracking ref this function chose.
+
+    A target already written as `refs/remotes/...` is not also tried under `origin/`, where a
+    branch literally carrying that name would win.
     """
-    if ref_exists(f"refs/remotes/{target}", root):
-        return target
-    remote = f"origin/{target}"
-    if ref_exists(remote, root):
-        return remote
+    prefix = "refs/remotes/"
+    if target.startswith(prefix):
+        names: tuple[str, ...] = (target.removeprefix(prefix),)
+    else:
+        names = (target, f"origin/{target}")
+    for name in names:
+        ref = remote_tracking_ref(name, root)
+        if ref is not None:
+            return ref
     if ref_exists(target, root):
         return target
+    tried = " or ".join(f"{prefix}{name}" for name in names)
     raise CannotRun(
-        f"neither {remote} nor {target} resolves in this checkout,"
-        " so the review scope cannot be determined"
+        f"no remote-tracking ref of a commit exists at {tried}, and {target} does not resolve"
+        " in this checkout, so the review scope cannot be determined"
     )
 
 
@@ -1039,8 +1072,9 @@ def main(argv: list[str] | None = None) -> int:
             "--target",
             default=None,
             help=(
-                f"target branch (default {DEFAULT_TARGET}). Resolved as origin/<value> where that"
-                " exists, else as written, so another remote's branch can be named directly"
+                f"target branch (default {DEFAULT_TARGET}). Resolved as the remote-tracking ref"
+                " <value>, then as origin/<value> unless <value> already starts with"
+                " refs/remotes/, else as written, so another remote's branch can be named directly"
             ),
         )
 
