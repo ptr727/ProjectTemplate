@@ -24,7 +24,7 @@ For every review:
 2. Follow `.github/skills/fleet-code-review/SKILL.md` and every skill it selects.
 3. Publish every supported finding. Never suppress a finding or place it in a low-confidence or hidden findings block.
 4. Use an inline comment when a changed line can anchor the finding. Use the review body only when no valid inline anchor exists.
-5. End the review body with the exact machine-readable marker required by the `fleet-code-review` skill.
+5. End the review body with exactly one line holding `<!-- fleet-review: reviewed=N changed=N findings=N -->` as a bare HTML comment, outside any code span or block, with each `N` replaced by a measured count: the changed files actually reviewed, the total changed files, and the published findings including body-only ones. Emit it at every review effort level, including when the review body has its own overview format. The `fleet-code-review` skill states the rules behind each count.
 
 The review automation is `scripts/pr_review.py`, run from a hub checkout. Use its `status`, `wait`, `comment`, and `reply --resolve` commands instead of reconstructing GraphQL queries or copying review identifiers by hand. Use `comment` for a suppressed-finding answer in the pull request conversation. Its status gate verifies the current head, diff coverage, output shape, inline threads, body-only findings, and required checks.
 
