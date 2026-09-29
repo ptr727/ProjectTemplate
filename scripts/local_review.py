@@ -324,17 +324,25 @@ def target_ref(target: str, root: Path) -> str:
     `refs/remotes/...`. Git resolves a short name such as `upstream/main` against `refs/heads/`
     before `refs/remotes/`, so a local branch literally named that would otherwise define the
     review scope in place of the remote-tracking ref this function chose.
+
+    A target already written as `refs/remotes/...` names that exact ref, so it is tried alone
+    rather than also under `origin/`, where a branch literally carrying that name would win.
     """
-    for name in (target, f"origin/{target}"):
+    prefix = "refs/remotes/"
+    if target.startswith(prefix):
+        names: tuple[str, ...] = (target.removeprefix(prefix),)
+    else:
+        names = (target, f"origin/{target}")
+    for name in names:
         ref = remote_tracking_ref(name, root)
         if ref is not None:
             return ref
     if ref_exists(target, root):
         return target
+    tried = " or ".join(f"{prefix}{name}" for name in names)
     raise CannotRun(
-        f"neither refs/remotes/{target} nor refs/remotes/origin/{target} exists as a"
-        f" remote-tracking ref of a commit, and {target} does not resolve in this checkout,"
-        " so the review scope cannot be determined"
+        f"no remote-tracking ref of a commit exists at {tried}, and {target} does not resolve"
+        " in this checkout, so the review scope cannot be determined"
     )
 
 

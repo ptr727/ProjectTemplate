@@ -299,6 +299,22 @@ class ContentKeyCase(RepoCase):
         self.assertNotEqual(base, tip, "fixture does not distinguish the two")
         self.assertEqual(local_review.merge_base("feat", self.tmp), base)
 
+    def test_a_qualified_target_is_not_also_tried_under_origin(self) -> None:
+        """An origin branch literally named `refs/remotes/origin/main` must not replace the ref.
+
+        The requested `refs/remotes/origin/main` sits at the base commit, and the nested
+        `refs/remotes/origin/refs/remotes/origin/main` sits at the task tip.
+        """
+        base = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/origin/main", base)
+        (self.tmp / "moved.txt").write_text("task moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "task work")
+        run(self.tmp, "update-ref", "refs/remotes/origin/refs/remotes/origin/main", "HEAD")
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("refs/remotes/origin/main", self.tmp), base)
+
     def test_a_remote_tracking_ref_naming_a_non_commit_refuses_rather_than_falls_through(
         self,
     ) -> None:
