@@ -1740,11 +1740,102 @@ _TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
 _TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
 
 
+class _UnmodeledSyntax(ValueError):
+    """Syntax bash reads differently from the POSIX lex the shell tokens come from."""
+
+
+_HEREDOC_OPERATOR = re.compile(r"(?<!<)<<(?!<)")
+
+
+def _marked_lex(cmd):
+    """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
+
+    It reads quotes and escapes as that POSIX lex does, so an escape cannot shift its tokens.
+    Outside quotes a backslash takes the next character literally.
+    Inside double quotes it escapes only a double quote or a backslash, and is kept before any other.
+    Raises ValueError where the quoting does not parse, as that lex does.
+    Raises `_UnmodeledSyntax` where bash reads a character as syntax that lex does not model.
+    A backtick outside single quotes opens a substitution, whose quotes nest.
+    A `$(` or `${` inside double quotes opens one too, with nested quotes of its own.
+    A `$'` opens one string, in which a backslash escapes a single quote.
+    A `#` starting a word opens a comment, which hides every character up to the newline.
+    An unquoted heredoc fed to a shell is read twice, the first unescaping what the second parses.
+    Any `<<` outside a `<<<` raises, quoted or in arithmetic too, since no heredoc then goes unseen.
+    """
+    if _HEREDOC_OPERATOR.search(cmd):
+        raise _UnmodeledSyntax("heredoc")
+    out = []
+    tok, marked, state, i = "", False, None, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        i += 1
+        if state != "'" and ch == "`":
+            raise _UnmodeledSyntax("backtick substitution")
+        if state == '"' and ch == "$" and cmd[i : i + 1] in ("(", "{"):
+            raise _UnmodeledSyntax("nested quoting inside double quotes")
+        if state in ("'", '"'):
+            if ch == state:
+                state = "word"
+            elif ch == "\\" and state == '"':
+                if i == len(cmd):
+                    raise ValueError("No escaped character")
+                tok += cmd[i] if cmd[i] in '"\\' else ch + cmd[i]
+                i += 1
+            else:
+                tok += ch
+            continue
+        if state == "op" and ch in _SHELL_OP_CHARS:
+            tok += ch
+            continue
+        if state is not None and (ch in " \t\r" or state == "op" or ch in _SHELL_OP_CHARS):
+            out.append((tok, marked))
+            tok, marked, state = "", False, None
+        if ch in " \t\r":
+            continue
+        if ch == "#" and state is None:
+            raise _UnmodeledSyntax("comment")
+        if ch in _SHELL_OP_CHARS:
+            tok, state = ch, "op"
+        elif ch == "'" and tok.endswith("$"):
+            raise _UnmodeledSyntax("ANSI-C quoting")
+        elif ch in "'\"":
+            marked, state = True, ch
+        elif ch == "\\":
+            if i == len(cmd):
+                raise ValueError("No escaped character")
+            tok, marked, state = tok + cmd[i], True, "word"
+            i += 1
+        else:
+            tok, state = tok + ch, "word"
+    if state in ("'", '"'):
+        raise ValueError("No closing quotation")
+    if state is not None:
+        out.append((tok, marked))
+    return out
+
+
 def _quoted_mask(cmd, toks):
     """Per token of `toks`, whether `cmd` spelled it quoted or escaped, or None where that is unknown.
 
     The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
-    A second, quote-keeping lex says which is which, and is trusted only where it aligns token for token.
+    A second lex that marks quoting says which is which, and is trusted only where its tokens are
+    the shell tokens exactly, which a command the tokenizer's fallbacks split never gives.
+    Where bash reads syntax that lex does not model, the mask is the quote-keeping lex's own.
+    """
+    try:
+        marked = _marked_lex(cmd)
+    except _UnmodeledSyntax:
+        return _quote_kept_mask(cmd, toks)
+    except ValueError:
+        return None
+    if [t for t, _ in marked] != toks:
+        return None
+    return [m for _, m in marked]
+
+
+def _quote_kept_mask(cmd, toks):
+    """The mask a quote-keeping lex gives, or None where it does not align with `toks`.
+
     Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
     """
     try:
@@ -2184,11 +2275,12 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     `timeout <duration>` runs. A `timeout` never bounds a loop at its own level, since `timeout`
     takes a command and a loop keyword is not one. A nested loop is judged on its own terms, so an
     unbounded inner wait is denied even inside a bounded outer one, which is what it is: unbounded.
+    A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
     """
     if _depth > 4:
         return None
     toks = _shell_tokens(cmd)
-    mask = _quoted_mask(cmd, toks)
+    mask = _quote_kept_mask(cmd, toks) if _depth else _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
@@ -4431,6 +4523,66 @@ _WAIT_CASES = [
         'while ! test -n "\\"";"grep" -le x log; do sleep 30; done',
         "deny",
         "an escaped quote inside quotes shifts no real separator into a quoted operand",
+    ),
+    (
+        'echo "say \\"hi\\""; while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped quote before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'find . -name x -exec rm {} \\; ; while [ "$x" != ";" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped `;` before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'while [ "$x" != ";" -a $i -lt 5 ]; do echo "\\"" ; sleep 1; i=$((i+1)); done',
+        "allow",
+        "an escaped quote in the body leaves the condition's quoted `;` an operand",
+    ),
+    (
+        "echo 'it'\\''s'; while [ \"$x\" != \";\" -a $i -lt 5 ]; do sleep 1; i=$((i+1)); done",
+        "allow",
+        "a `'\\''` before the loop leaves its quoted `;` an operand",
+    ),
+    (
+        'find . -name x -exec rm {} \\; ; while [ "$x" != ";" -a -f y ]; do sleep 1; done',
+        "deny",
+        "an escape before a quoted-operator loop with no comparison bounds nothing",
+    ),
+    (
+        'echo "say \\"hi\\""; while [ "$x" != ";" ]; do sleep 1; done',
+        "deny",
+        "an escaped quote before a quoted-operator loop with no comparison bounds nothing",
+    ),
+    (
+        'while [ "`echo "a -lt " x`" ]; do sleep 1; done',
+        "deny",
+        "a comparison inside a backtick that opens within double quotes bounds nothing",
+    ),
+    (
+        "echo \\; ; while [ x = $'\\' ';' -lt $'\\' ] ; true; do sleep 1; done",
+        "deny",
+        "a `;` after a `$'` string that a backslash does not close is a separator",
+    ),
+    (
+        'while [ "x"`true -lt 5` ]; do sleep 1; done',
+        "deny",
+        "a comparison inside a backtick glued to a quoted word bounds nothing",
+    ),
+    (
+        'echo \\; ; while [ -f y ";" # -lt\ntrue; do sleep 1; done',
+        "deny",
+        "a comparison in a comment after an escape bounds nothing",
+    ),
+    (
+        'echo \\; ; bash <<EOF\nuntil [ -f y \\\\"b" ";" \\\\"c" -lt 5 ]; do sleep 1; done\nEOF',
+        "deny",
+        "a quoted `;` in a heredoc a shell reads twice is a separator once the heredoc unescapes it",
+    ),
+    (
+        'echo \\; ; bash -c "until [ -f y \\`\\";\\" -lt 5 \\` ]; do sleep 1; done"',
+        "deny",
+        "a comparison inside an escaped backtick in a `bash -c` payload bounds nothing",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
