@@ -2271,7 +2271,11 @@ def _redirects_stdin(after_done):
             i += 1
             continue
         target = after_done[i + 1] if i + 1 < len(after_done) else ""
-        i += 2
+        if _is_shell_op(target):
+            target = ""
+            i += 1
+        else:
+            i += 2
         if "<" not in tok:
             continue  # an output redirect leaves descriptor 0 where it was
         # A `{name}<` form names a variable rather than a literal and is never descriptor 0.
@@ -2281,7 +2285,7 @@ def _redirects_stdin(after_done):
             continue  # a redirect on another descriptor leaves descriptor 0 where it was
         # The last binding wins, since bash applies redirections in order and each replaces the last.
         # Returning on the first let `< in.txt < /dev/zero` vouch for the stream that actually binds.
-        bound = not ("&" in tok or _names_a_stream(target))
+        bound = bool(target) and not ("&" in tok or _names_a_stream(target))
     return bound
 
 
@@ -5054,6 +5058,16 @@ _WAIT_CASES = [
         "yes | while read l; do sleep 30; done " + "0" * 4400 + "< in.txt",
         "allow",
         "and binds a file just as the bare form does, rather than reading as another descriptor",
+    ),
+    (
+        '< f cat "$(echo "\'")" ; (true)#\'\nyes | while read l ; do sleep 30 ; done #\' >',
+        "deny",
+        "a dangling redirect never takes the next separator as its target and reads on to a `< f`",
+    ),
+    (
+        "yes | while read l; do sleep 30; done <",
+        "deny",
+        "a redirect with no target names no source, so it bounds nothing",
     ),
     (
         "while read l; do sleep 30; done < f",
