@@ -1759,7 +1759,8 @@ def _marked_lex(cmd):
     A `$(` or `${` inside double quotes opens one too, with nested quotes of its own.
     A `$'` opens one string, in which a backslash escapes a single quote.
     A `#` starting a word opens a comment, which hides every character up to the newline.
-    A `<<` heredoc fed to a shell is read twice, the first read unescaping what the second parses.
+    A heredoc fed to a shell is read twice, the first read unescaping what the second parses.
+    Any `<<` outside a `<<<` raises, quoted or in arithmetic too, since no heredoc then goes unseen.
     """
     if _HEREDOC_OPERATOR.search(cmd):
         raise _UnmodeledSyntax("heredoc")
