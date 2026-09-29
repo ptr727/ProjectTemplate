@@ -499,6 +499,10 @@ check_settings() {
         fail "could not read repository settings"
         return
     fi
+    if ! jq_has 'type == "object"' <<<"$live"; then
+        fail "live repository settings for '$repo' did not parse"
+        return
+    fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
     # The payload is parsed into a variable before the loop rather than streamed from a process substitution, since a jq failure inside `done < <(...)` would leave the loop body unexecuted without tripping set -e and report every setting as checked and passing while nothing was compared, a false clean.
