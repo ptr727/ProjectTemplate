@@ -38,9 +38,11 @@ there:
   pip form is a `pyproject.toml` beside a `requirements*.txt`, installed with pip, whether or not
   it carries a `[project]` table. A committed `uv.lock` makes a directory the uv form even where a
   `requirements*.txt` sits beside it. In the pip form CI runs pytest from the installed
-  environment, as `.venv/bin/python -m pytest`, runs ruff through `uvx`, and runs the type checker
-  through `uvx` pointed at that environment, or runs mypy from the environment where it is
-  installed there.
+  environment, as `.venv/bin/python -m pytest`, and runs ruff through `uvx`. In a directory
+  declared in the hub validator's `python-directories` input it runs the type checker through
+  `uvx` pointed at that environment, or runs mypy from the environment where it is installed
+  there, while the undeclared default root runs a bare `uvx <checker>@latest` with nothing
+  installed.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and

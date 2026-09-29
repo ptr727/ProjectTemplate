@@ -82,9 +82,11 @@ engine.
 
 ## Local development loop
 
-From inside a **build**-profile Python project directory. A **lint-only** Scripts profile has no
-`uv.lock` to sync and no pytest to run, substitute `uvx` per tool and `unittest` per the Two
-Profiles section above:
+From inside a **build**-profile Python project directory in its uv form. A pip-form directory runs
+neither `uv sync` nor `uv run`, since either writes a `uv.lock` that, once committed, makes the
+directory the uv form, and runs its tools as the clean-compile below states. A **lint-only** Scripts
+profile has no `uv.lock` to sync and no pytest to run, substitute `uvx` per tool and `unittest` per
+the Two Profiles section above:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
