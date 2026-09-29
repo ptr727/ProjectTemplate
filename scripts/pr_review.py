@@ -43,10 +43,11 @@ Subcommands
            none carries the newest round that states some forward, bounded on the change set,
            so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           Confirm the head branch carries the current review instructions, then hand the
-           state to the maintainer rather than retrying into it, since a round re-requested on
-           the same head states coverage only by chance and the second format's file table names the
-           whole changed set on partial rounds too.
+           Where the head branch lacks the current review instructions, bring them onto it and
+           push, and where the comparison could not be read, run `status` again. Past those,
+           hand the state to the maintainer rather than retrying into it, since a round
+           re-requested on the same head states coverage only by chance and a round's file
+           table names the whole changed set on partial rounds too.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -1727,6 +1728,18 @@ def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
     return max(manifest[0] - manifest[1], 0)
 
 
+def bare_path(path: str) -> str:
+    """The path with its Unicode format characters dropped, the form a table and a diff compare in.
+
+    The second overview format writes a zero-width space after a path's slash, and `str.strip`
+    keeps it, so every nested path read as one the diff does not carry while every root-level
+    path matched. Both sides are reduced, since a real file name can carry a format character of
+    its own, a zero-width joiner in an emoji sequence being one, and reducing only the table's
+    side would name that file as omitted.
+    """
+    return "".join(c for c in path if unicodedata.category(c) != "Cf")
+
+
 def file_table(body: str) -> list[str]:
     """The paths the round's own file summary table names, in the order it names them.
 
@@ -1737,9 +1750,7 @@ def file_table(body: str) -> list[str]:
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
 
-    Format characters are dropped from each cell, since the second overview format writes a
-    zero-width space after a path's slash and `str.strip` keeps it, so every nested path read
-    as one the diff does not carry while every root-level path matched.
+    Each cell is reduced by `bare_path`, for the reason it states.
     """
     paths, reading = [], False
     for line in strip_fences(body or "").splitlines():
@@ -1748,7 +1759,7 @@ def file_table(body: str) -> list[str]:
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = "".join(c for c in row.group(1) if unicodedata.category(c) != "Cf")
+            cell = bare_path(row.group(1))
             paths.append(cell.strip().strip("`").strip())
     return [p for p in paths if p]
 
@@ -1817,8 +1828,8 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    omitted = [p for p in changed if p not in named]
-    invented = [p for p in named if p not in changed]
+    omitted = [p for p in changed if bare_path(p) not in named]
+    invented = [p for p in named if p not in {bare_path(c) for c in changed}]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
         return (
@@ -2064,11 +2075,13 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
             "the current fleet-code-review skill and Copilot instructions, since a round states "
-            "no coverage without them. A re-request on this head is not the remedy it reads as, "
-            "because it returns a round stating coverage only by chance, and the file table the "
-            "second format carries names the whole changed set on partial rounds too, so it "
-            "cannot stand in. Otherwise this is the maintainer's call, and merging without "
-            "coverage is their decision, not the agent's."
+            "no coverage without them, and where they are missing bring them onto the branch "
+            "and push, which raises a round on a new head. Where the digest says the comparison "
+            "could not be read, run status again, since a failed API read is one cause of that. "
+            "A re-request on this same head is not the remedy it reads as, because it returns a "
+            "round stating coverage only by chance, and a round's file table names the whole "
+            "changed set on partial rounds too, so it cannot stand in. Past those, this is the "
+            "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45
     return 0

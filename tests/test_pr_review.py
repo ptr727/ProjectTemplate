@@ -3722,6 +3722,12 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertEqual(["a.md", "dir/b.md"], pr_review.file_table(body))
         self.assertIn("names all 2 changed files", self.reading(body, ["a.md", "dir/b.md"]))
 
+    def test_a_format_character_in_a_changed_path_matches_the_table_naming_it(self) -> None:
+        """A real file name can carry one, so the diff's side is reduced as the table's is."""
+        joined = "e\u200dmoji.md"
+        body = summarized([joined], covers="")
+        self.assertIn("names all 1 changed files", self.reading(body, [joined]))
+
     def test_a_quoted_table_is_not_this_rounds_own(self) -> None:
         """The reason a quoted coverage line is not: this change puts a table in the diff.
 
