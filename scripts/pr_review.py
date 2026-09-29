@@ -43,8 +43,12 @@ Subcommands
            none carries the newest round that states some forward, bounded on the change set,
            so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           Request another review only after confirming the head branch carries the current
-           review instructions.
+           Where the head branch lacks the current review instructions, bring them onto it,
+           push, and run `wait`, which requests a round on the new head, and where the
+           comparison could not be read, run `status` again. Past those,
+           hand the state to the maintainer rather than retrying into it, since a round
+           re-requested on the same head states coverage only by chance and a round's file
+           table names the whole changed set on partial rounds too.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -194,6 +198,14 @@ Subcommands
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
+           48 = the auto-request returned success and recorded nothing on the pull request,
+           neither a pending reviewer nor a review-request event. Observed once, while the
+           requesting account's Copilot allowance was exhausted, where no refusal was posted to
+           read and clearing the set and requesting again changed nothing. It is decided one
+           poll interval after the request, and the rest of the poll is skipped, since no
+           request exists to answer. It outranks 47, being read on this pull request,
+           and ranks under 0/40/41/42/43/44/45/46. `status` cannot report it, since a request that
+           recorded nothing leaves nothing for a later read to find.
            64 = the write scope could not be established or excludes the target, checked before
            the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
@@ -217,6 +229,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import unicodedata
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -678,10 +691,19 @@ query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
       } } } }
 """
 
+REQUEST_STATE = """
+    reviewRequests(first:100){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
+    timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]){ nodes{
+      ... on ReviewRequestedEvent{ id requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } }
+"""
+Q_REQUEST_STATE = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ id __REQUEST_STATE__ }}}
+""".replace("__REQUEST_STATE__", REQUEST_STATE)
 M_REQUEST_REVIEWS = """
 mutation($pr:ID!,$bot:ID!){
-  requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id } }}
-"""
+  requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id __REQUEST_STATE__ } }}
+""".replace("__REQUEST_STATE__", REQUEST_STATE)
 
 # Full query: run once on transition, not per poll.
 # The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
@@ -955,7 +977,48 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     return match.group(1) if match else None
 
 
-def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
+def newest_request_event(pr: dict) -> str | None:
+    """The id of the newest review-request event naming the reviewer, or None where there is none.
+
+    The id is compared rather than a count, since a count over a bounded window stops moving once
+    the window is full.
+    """
+    ids = [
+        n.get("id")
+        for n in ((pr.get("timelineItems") or {}).get("nodes") or [])
+        if (n.get("requestedReviewer") or {}).get("login") == REVIEWER
+    ]
+    return ids[-1] if ids else None
+
+
+def request_recorded(before: dict, after: dict) -> bool | None:
+    """Whether a review request that returned success left anything on the pull request.
+
+    True where the reviewer sits in the pending set afterwards, or where a review-request event
+    naming it is newer than the newest one read before the request. False where neither holds,
+    which is the shape an exhausted Copilot allowance left: every mutation succeeded, and none
+    added an event or a pending reviewer. None where the answer lacks either field, since an
+    unread state is not a reading of one, and the wait then polls as it did before this existed.
+    None too where a login that reads as the reviewer's but is spelled otherwise answers, since
+    a drifted login would otherwise read a recorded request as an unrecorded one and blame the
+    account for it.
+    """
+    if after.get("reviewRequests") is None or after.get("timelineItems") is None:
+        return None
+    nodes = after["reviewRequests"].get("nodes") or []
+    nodes = nodes + (after["timelineItems"].get("nodes") or [])
+    for n in nodes:
+        login = (n.get("requestedReviewer") or {}).get("login") or ""
+        if login != REVIEWER and READS_AS_REVIEWER.search(login):
+            return None
+    if reviewer_requested(after):
+        return True
+    return newest_request_event(after) != newest_request_event(before)
+
+
+def request_copilot_review(
+    owner: str, repo: str, num: int, pr_node_id: str, bot_id: str | None, settle: float
+) -> tuple[str, bool | None]:
     """Ask Copilot to review the current head, and say in one line what happened.
 
     This exists because `wait` used to only ever poll, never request, so a PR whose auto-seed
@@ -970,16 +1033,32 @@ def request_copilot_review(pr_node_id: str, bot_id: str | None) -> str:
     anywhere carries nothing to read the id from. The id itself is the caller's to find, via
     `copilot_bot_id` over a `copilot_history` read it already paid for, which already tried both
     the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty.
+
+    The second value is `request_recorded` over the state read before the request and the one
+    the mutation answers with, and None where nothing was requested. An answer reading as
+    unrecorded is read once more with the same query and judged the same way, `settle` seconds
+    later, since GitHub can take a moment to record a request it has already accepted.
     """
     if not bot_id:
         return (
-            f"no Copilot review found across the last {HISTORY_PRS} or, widened once for "
-            f"exactly this reason, the last {HISTORY_PRS_WIDE} most-recently-updated pull "
-            "requests to read the reviewer bot id from, so nothing was requested here, "
-            "polling only. Seed one via the UI if this repository has never had one at all."
+            (
+                f"no Copilot review found across the last {HISTORY_PRS} or, widened once for "
+                f"exactly this reason, the last {HISTORY_PRS_WIDE} most-recently-updated pull "
+                "requests to read the reviewer bot id from, so nothing was requested here, "
+                "polling only. Seed one via the UI if this repository has never had one at all."
+            ),
+            None,
         )
-    gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
-    return f"requested a Copilot review on the current head (bot {bot_id})"
+    before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+    answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
+    after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
+    recorded = request_recorded(before, after)
+    if recorded is False:
+        time.sleep(settle)
+        again = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+        recorded = request_recorded(before, again or {})
+    line = f"requested a Copilot review on the current head (bot {bot_id})"
+    return line, recorded
 
 
 def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
@@ -1724,6 +1803,18 @@ def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
     return max(manifest[0] - manifest[1], 0)
 
 
+def bare_path(path: str) -> str:
+    """The path with its Unicode format characters dropped, the form a table and a diff compare in.
+
+    The second overview format writes a zero-width space after a path's slash, and `str.strip`
+    keeps it, so every nested path read as one the diff does not carry while every root-level
+    path matched. Both sides are reduced, since a real file name can carry a format character of
+    its own, a zero-width joiner in an emoji sequence being one, and reducing only the table's
+    side would name that file as omitted.
+    """
+    return "".join(c for c in path if unicodedata.category(c) != "Cf")
+
+
 def file_table(body: str) -> list[str]:
     """The paths the round's own file summary table names, in the order it names them.
 
@@ -1733,6 +1824,8 @@ def file_table(body: str) -> list[str]:
 
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
+
+    Each cell is reduced by `bare_path`, for the reason it states.
     """
     paths, reading = [], False
     for line in strip_fences(body or "").splitlines():
@@ -1741,7 +1834,7 @@ def file_table(body: str) -> list[str]:
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = row.group(1)
+            cell = bare_path(row.group(1))
             paths.append(cell.strip().strip("`").strip())
     return [p for p in paths if p]
 
@@ -1810,8 +1903,8 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    omitted = [p for p in changed if p not in named]
-    invented = [p for p in named if p not in changed]
+    omitted = [p for p in changed if bare_path(p) not in named]
+    invented = [p for p in named if p not in {bare_path(c) for c in changed}]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
         return (
@@ -2056,8 +2149,15 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "means one of three things, and the digest above says which: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current fleet-code-review skill and Copilot instructions, then request another "
-            "review. Merging without coverage is the maintainer's decision, not the agent's."
+            "the current fleet-code-review skill and Copilot instructions, since a round states "
+            "no coverage without them, and where they are missing bring them onto the branch, "
+            "push, and run wait, which requests a round on the new head. Where the digest says "
+            "the comparison could not be read, run status again, since a failed API read is "
+            "one cause of that. "
+            "A re-request on this same head is not the remedy it reads as, because it returns a "
+            "round stating coverage only by chance, and a round's file table names the whole "
+            "changed set on partial rounds too, so it cannot stand in. Past those, this is the "
+            "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45
     return 0
@@ -3623,11 +3723,26 @@ def main(argv: list[str] | None = None) -> int:
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    recorded: bool | None = None
+    final: dict | None = None
     if not done and not answer and not drift and not reviewer_requested(pr):
-        print(f"auto-request: {request_copilot_review(pr['id'], copilot_bot_id(history))}")
-        # No re-read here: Copilot never resolves within the round trip that just issued the request.
-        # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
-    if signal:
+        line, recorded = request_copilot_review(
+            owner, repo, a.number, pr["id"], copilot_bot_id(history), delays[0]
+        )
+        if recorded is False:
+            final = gql(Q_FULL, owner, repo, a.number)
+            if reviewer_requested(final):
+                recorded, final = None, None
+            else:
+                line += ", and the request recorded nothing on the pull request"
+        print(f"auto-request: {line}")
+    if recorded is False:
+        print(
+            "note: the review request returned success and recorded nothing on this pull "
+            "request, no pending reviewer and no review-request event, so this wait stops here "
+            "rather than polling --timeout out against a request that does not exist."
+        )
+    elif signal:
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
@@ -3657,7 +3772,8 @@ def main(argv: list[str] | None = None) -> int:
     # A reader resolves that by believing the code, dropping the review it was just shown.
     # The digest also earns its call at the timeout.
     # A bare PENDING line reports a broken wait and a slow reviewer identically.
-    final = gql(Q_FULL, owner, repo, a.number)
+    if final is None:
+        final = gql(Q_FULL, owner, repo, a.number)
     now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
@@ -3745,8 +3861,16 @@ def main(argv: list[str] | None = None) -> int:
             "no review follows and re-requesting does not clear it"
         )
         return 40
+    if recorded is False:
+        print(
+            "status=REQUEST_NOT_RECORDED the Copilot review request returned success and "
+            "added neither a pending reviewer nor a review-request event to this pull request. "
+            "The likely cause is an exhausted Copilot allowance on the requesting account, "
+            "which is the maintainer's to restore: clearing the request set and requesting "
+            "again does not clear it, so hand it to the maintainer"
+        )
+        return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    # Any of the three above, being concrete evidence about this head, outranks it.
     if signal:
         number, hist_refusal = signal
         print(

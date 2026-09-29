@@ -30,7 +30,9 @@ profiles, the toolchain, layout, and the language-level conventions.
 Read the repo's `OPERATIONS.md` local-verification commands before substituting a generic command.
 Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
 
-- **build** (Project): `[project]` + `[build-system]` + committed `uv.lock`. Uses `uv run`, pytest,
+- **build** (Project): third-party runtime dependencies, or the repo's deliverable. Either a uv
+  project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
+  `pyproject.toml` beside a `requirements*.txt` and no `uv.lock`, installed with pip. Uses pytest,
   and pyright strict, mypy with its strict flags, or both as the CI type checker.
 - **lint-only** (Scripts): no `[project]`, no lockfile, no `requirements*.txt` (the hub validator runs
   pytest wherever one sits). Uses `uvx` for third-party tools, unittest
@@ -80,9 +82,11 @@ engine.
 
 ## Local development loop
 
-From inside a **build**-profile Python project directory. A **lint-only** Scripts profile has no
-`uv.lock` to sync and no pytest to run, substitute `uvx` per tool and `unittest` per the Two
-Profiles section above:
+From inside a **build**-profile Python project directory in its uv form. A pip-form directory runs
+neither `uv sync` nor `uv run`, since either writes a `uv.lock` that, once committed, makes the
+directory the uv form, and runs its tools as the clean-compile below states. A **lint-only** Scripts
+profile has no `uv.lock` to sync and no pytest to run, substitute `uvx` per tool and `unittest` per
+the Two Profiles section above:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
@@ -95,27 +99,29 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
 
-The **build**-profile Python clean-compile is `uv run ruff format` + `uv run ruff check` + the
-repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is the CI checker, or both
-where the repo runs both (see Type checking above). Run it, plus `uv run pytest`, before
-committing. A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest`
-equivalents, per Two Profiles above, and has no such command to run before committing beyond
-those. These are documented commands, and the hub's `vscode-tasks-python.json` snippet carries the
-VS Code tasks mirror that the fleet baseline expects. Every command-executing task in it is
-`type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the mirror
-runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
+The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
+`uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is
+the CI checker, or both where the repo runs both (see Type checking above). Run it, plus
+`uv run pytest`, before committing. A pip-form directory runs pytest from the environment its
+`requirements*.txt` installed, ruff through `uvx`, and the type checker pointed at that
+environment, per `references/profiles.md`. A **lint-only** profile's clean-compile substitutes its
+`uvx` and `unittest` equivalents, per Two Profiles above, and has no such command to run before
+committing beyond those. These are documented commands, and the hub's `vscode-tasks-python.json`
+snippet carries the VS Code tasks mirror of the uv form that the fleet baseline expects, which a
+pip-form repo adapts to the commands above rather than running its `uv run` tasks. Every command-executing task in it
+is `type: process`, and every aggregator is `dependsOn`-only. Neither chains with `&&`, so the
+mirror runs the same on any task shell. CI runs the same clean-compile commands as the authoritative
 backstop. A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers the
-`pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/` directory,
-hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent hook of
-its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That path and
-`.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the toolchain the
-repo already keeps rather than by the languages the hook checks, so a repo keeping a Husky.Net
-manifest may run these same Python checks from the `catalog/snippets/husky/` shape instead. Each
-shape carries whichever language checks its own repo keeps. The `pre-commit` directory's own
-README names the second file to copy alongside the config.
-GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section carries
-the obligation itself, what the hook must cover, its audit treatment, and the per-clone enablement
-steps.
+`pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/`
+directory, hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent
+hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That
+path and `.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the
+toolchain the repo already keeps rather than by the languages the hook checks, so a repo keeping a
+Husky.Net manifest may run these same Python checks from the `catalog/snippets/husky/` shape
+instead. Each shape carries whichever language checks its own repo keeps. The `pre-commit`
+directory's own README names the second file to copy alongside the config. GOVERNANCE.md's hub-only
+"Running the Linters Locally (Known-Working Invocations)" section carries the obligation itself,
+what the hook must cover, its audit treatment, and the per-clone enablement steps.
 
 A restricted executor gives each task a cache directory under a writable temporary root. Point
 `UV_CACHE_DIR`, `RUFF_CACHE_DIR`, `MYPY_CACHE_DIR`, and `COVERAGE_FILE` into that directory before
@@ -164,12 +170,13 @@ For comments, docstrings, full type-hint rules, naming, imports, and all pattern
 
 ## Tests
 
-`uv run pytest` for a build profile, `unittest` for a lint-only Scripts profile (see Two Profiles
-above). One test file per module (`test_<module>.py`). A build profile prefers fixtures over
-`unittest`'s `setUp`/`tearDown` lifecycle hooks. A lint-only profile uses those hooks directly,
-since `unittest` has no fixture-injection mechanism of its own. Fakes over mocks either way. Test
-the docstring's contract, not implementation details. See `references/testing.md` for the full
-build-profile conventions, and `references/profiles.md` for the lint-only `unittest` conventions.
+`uv run pytest` for a build profile (`python -m pytest` from the installed environment in its pip
+form), `unittest` for a lint-only Scripts profile (see Two Profiles above). One test file per module
+(`test_<module>.py`). A build profile prefers fixtures over `unittest`'s `setUp`/`tearDown`
+lifecycle hooks. A lint-only profile uses those hooks directly, since `unittest` has no
+fixture-injection mechanism of its own. Fakes over mocks either way. Test the docstring's contract,
+not implementation details. See `references/testing.md` for the full build-profile conventions, and
+`references/profiles.md` for the lint-only `unittest` conventions.
 
 ## Versioning
 
@@ -184,11 +191,12 @@ Before pushing or opening a PR:
 - VS Code's Problems pane should be quiet for the files you touched. The relevant linters are ruff
   (via the `charliermarsh.ruff` extension) and pyright (via the `ms-python.python` extension's
   bundled Pylance).
-- The **build**-profile CI gate is `uv run ruff check`, `uv run ruff format --check`, the repo's
-  type checker (`uv run pyright` or `uv run mypy src`), and `uv run pytest`, the same commands as
-  the local loop above, run from the Python project directory (invoked as separate steps, not
-  `&&`-chained, so the runner shell is irrelevant). A **lint-only** profile's CI gate is its `uvx`
-  equivalents plus its `unittest` suite, per `references/profiles.md`.
+- The **build**-profile CI gate, in its uv form, is `uv run ruff check`,
+  `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy src`), and
+  `uv run pytest`, the same commands as the local loop above, run from the Python project directory
+  (invoked as separate steps, not `&&`-chained, so the runner shell is irrelevant). The pip form's
+  CI gate is the pip-form commands, and a **lint-only** profile's is its `uvx` equivalents plus its
+  `unittest` suite, each per `references/profiles.md`.
 - Markdown in this directory follows CODESTYLE.md's repo-wide Markdown and Spelling rules,
   packaged as the `comment-and-doc-style` Skill.
 
