@@ -1842,10 +1842,14 @@ def _is_timeout_signal_zero(val):
 
     A bare number is masked the way GNU `timeout` masks it to accept a shell exit status, 0xFF from
     255 up and 0x7F below, so `128` and `256` are signal 0 as surely as `0` is. A number past the
-    range of an int is rejected as no signal at all, so it is never read as 0.
+    range of an int is rejected as no signal at all, so it is never read as 0. The length is checked
+    before `int()`, which raises on a digit string past 4300 digits and would crash the hook.
     """
     if re.fullmatch(r"[0-9]+", val):
-        n = int(val)
+        digits = val.lstrip("0")
+        if len(digits) > 10:
+            return False
+        n = int(digits or "0")
         return n <= 0x7FFFFFFF and n & (0xFF if n >= 0xFF else 0x7F) == 0
     return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
 
@@ -4174,6 +4178,16 @@ _WAIT_CASES = [
         "timeout -s 256 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "and 256, masked from 255 up",
+    ),
+    (
+        "timeout -s " + "0" * 5000 + " 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a zero past the digits int() converts is still signal 0, and still read without a crash",
+    ),
+    (
+        "timeout -s 1" + "0" * 5000 + " 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while a number that long past its leading zeros is no signal at all",
     ),
     (
         "timeout -s 129 900 bash -c 'until [ -f x ]; do sleep 60; done'",
