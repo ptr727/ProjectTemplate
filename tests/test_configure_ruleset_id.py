@@ -121,6 +121,13 @@ class RulesetIdCase(unittest.TestCase):
             ("numbers", json.dumps([1, 2])),
             ("strings", json.dumps(["x"])),
             ("a matching object with no id", json.dumps([{"name": "fixture"}])),
+            ("null", json.dumps([None])),
+            ("null then a match", json.dumps([None, {"name": "fixture", "id": 3}])),
+            ("an empty id", json.dumps([{"name": "fixture", "id": ""}])),
+            ("a boolean id", json.dumps([{"name": "fixture", "id": False}])),
+            ("a fractional id", json.dumps([{"name": "fixture", "id": 1.5}])),
+            ("an object id", json.dumps([{"name": "fixture", "id": {"a": 1}}])),
+            ("a match then a non-object", json.dumps([{"name": "fixture", "id": 1}, 2])),
         ):
             with self.subTest(label=label):
                 result = self.lookup(response)
