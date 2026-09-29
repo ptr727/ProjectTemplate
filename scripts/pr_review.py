@@ -3553,7 +3553,20 @@ def check_claims(owner: str, repo: str, num: int) -> int:
     return 0
 
 
+def utf8_console() -> None:
+    """Write the console streams as UTF-8, whatever the host code page is.
+
+    Reviewer-authored text carries characters such as emoji badges, which a Windows ANSI code
+    page cannot encode. A stream without `reconfigure` is one a test harness substituted.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["claims", "comment", "status", "reply", "wait"])
     ap.add_argument("number", type=int)

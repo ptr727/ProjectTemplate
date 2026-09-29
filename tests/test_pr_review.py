@@ -6650,6 +6650,49 @@ class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
         self.assertEqual(set(captured_choices[0]), set(WRITE_COMMANDS) | set(READ_ONLY_COMMANDS))
 
 
+class TestConsoleIsUtf8(unittest.TestCase):
+    """Printing reviewer text must not depend on the host code page."""
+
+    SCRIPTS = str(Path(__file__).resolve().parent.parent / "scripts")
+
+    def run_child(self, code: str) -> subprocess.CompletedProcess[bytes]:
+        """Run code in a child whose stdout defaults to cp1252, as on a Windows host."""
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+        env["PYTHONIOENCODING"] = "cp1252"
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            check=False,
+            env=env,
+            timeout=60,
+        )
+
+    def test_a_character_outside_the_code_page_prints(self) -> None:
+        """A character cp1252 cannot map prints as UTF-8 once main starts."""
+        code = (
+            f"import sys; sys.path.insert(0, {self.SCRIPTS!r}); import pr_review; "
+            "pr_review.utf8_console(); print('\\u014d\\U0001f3af')"
+        )
+        got = self.run_child(code)
+        self.assertEqual(got.returncode, 0, got.stderr.decode("utf-8", "replace"))
+        self.assertEqual(got.stdout.decode("utf-8").strip(), "\u014d\U0001f3af")
+
+    def test_main_reconfigures_before_parsing(self) -> None:
+        """The entry point applies the reconfigure, so the helper is not dead code."""
+        with (
+            mock.patch.object(pr_review, "utf8_console") as called,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            pr_review.main([])
+        called.assert_called_once_with()
+
+    def test_a_stream_without_reconfigure_is_left_alone(self) -> None:
+        """A harness may substitute a stream with no reconfigure, which must not raise."""
+        with mock.patch.object(sys, "stdout", io.StringIO()):
+            pr_review.utf8_console()
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
