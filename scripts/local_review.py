@@ -328,8 +328,9 @@ def target_ref(target: str, root: Path) -> str:
     if ref_exists(target, root):
         return target
     raise CannotRun(
-        f"neither refs/remotes/{target}, refs/remotes/origin/{target}, nor {target} resolves"
-        " in this checkout, so the review scope cannot be determined"
+        f"neither refs/remotes/{target} nor refs/remotes/origin/{target} exists as a"
+        f" remote-tracking ref of a commit, and {target} does not resolve in this checkout,"
+        " so the review scope cannot be determined"
     )
 
 
@@ -1058,8 +1059,9 @@ def main(argv: list[str] | None = None) -> int:
             "--target",
             default=None,
             help=(
-                f"target branch (default {DEFAULT_TARGET}). Resolved as origin/<value> where that"
-                " exists, else as written, so another remote's branch can be named directly"
+                f"target branch (default {DEFAULT_TARGET}). Resolved as the remote-tracking ref"
+                " <value>, then origin/<value>, where one exists, else as written, so another"
+                " remote's branch can be named directly"
             ),
         )
 

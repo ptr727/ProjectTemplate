@@ -283,6 +283,22 @@ class ContentKeyCase(RepoCase):
         self.assertNotEqual(base, tip, "fixture does not distinguish the two")
         self.assertEqual(local_review.merge_base("upstream/main", self.tmp), base)
 
+    def test_a_local_branch_named_origin_target_cannot_shadow_the_origin_ref(self) -> None:
+        """The `origin/<target>` step is qualified too, since the fleet default takes it.
+
+        `refs/remotes/origin/feat` sits at the base commit, and a local branch literally named
+        `origin/feat` sits at the task tip, which the short name would resolve to first.
+        """
+        base = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/origin/feat", base)
+        (self.tmp / "moved.txt").write_text("task moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "task work")
+        run(self.tmp, "branch", "origin/feat", "HEAD")
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("feat", self.tmp), base)
+
     def test_a_local_branch_named_like_a_qualified_remote_ref_is_not_remote_tracking(
         self,
     ) -> None:
