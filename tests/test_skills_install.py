@@ -507,6 +507,46 @@ class LiveChannelCase(unittest.TestCase):
         self.assertIn("does not exist", live["reason"])
         self.assertNotIn("commit", live)
 
+    def registered_live(self, location: Path) -> dict[str, object]:
+        self.listing(
+            json.dumps(
+                [
+                    {
+                        "name": skills_install.MARKETPLACE_NAME,
+                        "source": "directory",
+                        "path": str(location),
+                    }
+                ]
+            )
+        )
+        with mock.patch("skills_install.git_in", return_value=None):
+            return skills_install.live_channel()
+
+    def test_a_symlink_loop_is_judged_as_the_installer_judges_it(self) -> None:
+        loop = Path(self.enterContext(tempfile.TemporaryDirectory())) / "loop"
+        try:
+            loop.symlink_to(loop)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertFalse(skills_install.directory_gone(loop))
+        live = self.registered_live(loop)
+        self.assertNotIn("reason", live)
+        self.assertIsNone(live["commit"])
+
+    @unittest.skipIf(
+        sys.platform == "win32" or os.geteuid() == 0,
+        "needs POSIX permissions that bind the running user",
+    )
+    def test_an_unreadable_registered_checkout_is_reported_rather_than_crashing(self) -> None:
+        locked = Path(self.enterContext(tempfile.TemporaryDirectory())) / "locked"
+        (locked / "checkout").mkdir(parents=True)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        live = self.registered_live(locked / "checkout")
+        self.assertTrue(live["registered"])
+        self.assertNotIn("reason", live)
+        self.assertIsNone(live["commit"])
+
     def test_the_registered_checkout_is_the_one_measured(self) -> None:
         self.listing(
             json.dumps(
@@ -522,7 +562,7 @@ class LiveChannelCase(unittest.TestCase):
 
         with (
             mock.patch("skills_install.git_in", side_effect=fake),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             live = skills_install.live_channel()
         self.assertEqual(
@@ -553,7 +593,7 @@ class LiveChannelCase(unittest.TestCase):
 
         with (
             mock.patch("skills_install.git_in", side_effect=fake),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             skills_install.live_channel()
         status = next(c for c in calls if c[0] == "status")
@@ -569,7 +609,7 @@ class LiveChannelCase(unittest.TestCase):
         answers = {"symbolic-ref": None, "rev-parse": "sha", "status": None}
         with (
             mock.patch("skills_install.git_in", side_effect=lambda _r, *a: answers[a[0]]),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             live = skills_install.live_channel()
         self.assertIsNone(live["dirty"])
@@ -650,6 +690,143 @@ class MainExitCodeCase(unittest.TestCase):
         lines = out.getvalue().splitlines()
         self.assertIn(f"Skills materialized to {self.tmp / 'skills'}.", lines)
         self.assertIn("Claude Code marketplace registered: True.", lines)
+
+    def test_snapshot_only_never_touches_the_claude_registration(self) -> None:
+        mock.patch("sys.argv", ["skills_install.py", "--snapshot-only"]).start()
+        mock.patch("skills_install.claude_available", return_value=True).start()
+        register = mock.patch("skills_install.register_claude_marketplace").start()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(skills_install.main(), 0)
+        register.assert_not_called()
+        stamp = json.loads((self.tmp / "skills-install-stamp.json").read_text(encoding="utf-8"))
+        self.assertIsNone(stamp["claudeRegistered"])
+
+    def test_snapshot_only_is_refused_with_report(self) -> None:
+        mock.patch("sys.argv", ["skills_install.py", "--snapshot-only", "--report"]).start()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            skills_install.main()
+        self.assertEqual(caught.exception.code, 2)
+
+
+class RegisterCase(unittest.TestCase):
+    """`claude plugin marketplace add` moves an existing registration without failing, so the
+    installer decides from the listing whether an add would move one."""
+
+    def setUp(self) -> None:
+        self.addCleanup(mock.patch.stopall)
+        self.elsewhere = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.calls: list[list[str]] = []
+        self.entries: list[dict[str, str]] | None = []
+
+    def run_register(self) -> bool:
+        def fake_run(cmd: list[str], **_: object) -> mock.Mock:
+            self.calls.append(cmd)
+            if cmd[1:4] == ["plugin", "marketplace", "list"]:
+                if self.entries is None:
+                    return mock.Mock(returncode=1, stdout="", stderr="")
+                return mock.Mock(returncode=0, stdout=json.dumps(self.entries), stderr="")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        mock.patch("subprocess.run", side_effect=fake_run).start()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            result = skills_install.register_claude_marketplace()
+        self.stderr = err.getvalue()
+        return result
+
+    def registered_at(self, location: Path) -> None:
+        self.entries = [
+            {"name": skills_install.MARKETPLACE_NAME, "source": "directory", "path": str(location)}
+        ]
+
+    def added(self) -> bool:
+        return any(cmd[1:4] == ["plugin", "marketplace", "add"] for cmd in self.calls)
+
+    def installed(self) -> bool:
+        return any(cmd[1:3] == ["plugin", "install"] for cmd in self.calls)
+
+    def test_an_unregistered_marketplace_is_added_and_installed(self) -> None:
+        self.assertTrue(self.run_register())
+        self.assertTrue(self.added())
+        self.assertTrue(self.installed())
+
+    def test_a_registration_from_this_checkout_is_re_added(self) -> None:
+        self.registered_at(skills_install.ROOT)
+        self.assertTrue(self.run_register())
+        self.assertTrue(self.added())
+
+    def test_a_registration_from_another_checkout_is_left_in_place(self) -> None:
+        self.registered_at(self.elsewhere)
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+        self.assertTrue(self.installed())
+        self.assertIn(str(self.elsewhere), self.stderr)
+        self.assertIn("claude plugin marketplace add", self.stderr)
+
+    def test_a_registration_whose_directory_is_gone_is_replaced_and_says_so(self) -> None:
+        self.registered_at(self.elsewhere / "removed")
+        self.assertTrue(self.run_register())
+        self.assertTrue(self.added())
+        self.assertIn(str(self.elsewhere / "removed"), self.stderr)
+        self.assertIn("no longer exists", self.stderr)
+
+    @unittest.skipIf(
+        sys.platform == "win32" or os.geteuid() == 0,
+        "needs POSIX permissions that bind the running user",
+    )
+    def test_a_registration_whose_directory_cannot_be_read_is_left_in_place(self) -> None:
+        locked = self.elsewhere / "locked"
+        (locked / "checkout").mkdir(parents=True)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        self.registered_at(locked / "checkout")
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+
+    def test_a_registration_on_a_symlink_loop_is_left_in_place(self) -> None:
+        loop = self.elsewhere / "loop"
+        try:
+            loop.symlink_to(loop)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.registered_at(loop)
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+
+    def test_a_registration_naming_an_impossible_path_is_left_in_place(self) -> None:
+        self.registered_at(self.elsewhere / "nul\0byte")
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+
+    def test_a_registration_on_a_file_is_replaced(self) -> None:
+        stray = self.elsewhere / "stray"
+        stray.write_text("", encoding="utf-8")
+        self.registered_at(stray)
+        self.assertTrue(self.run_register())
+        self.assertTrue(self.added())
+
+    def test_a_github_registration_is_left_in_place_whether_or_not_its_cache_exists(
+        self,
+    ) -> None:
+        for location in (self.elsewhere, self.elsewhere / "cleared"):
+            with self.subTest(location=location):
+                self.calls.clear()
+                self.entries = [
+                    {
+                        "name": skills_install.MARKETPLACE_NAME,
+                        "source": "github",
+                        "repo": "example/marketplace",
+                        "installLocation": str(location),
+                    }
+                ]
+                self.assertTrue(self.run_register())
+                self.assertFalse(self.added())
+                self.assertIn("github source", self.stderr)
+
+    def test_no_listing_registers_nothing_and_fails(self) -> None:
+        self.entries = None
+        self.assertFalse(self.run_register())
+        self.assertFalse(self.added())
+        self.assertFalse(self.installed())
 
 
 class IntendedInBootstrapTreeCase(unittest.TestCase):
