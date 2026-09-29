@@ -499,8 +499,8 @@ check_settings() {
         fail "could not read repository settings"
         return
     fi
-    if ! jq_has 'type == "object"' <<<"$live"; then
-        fail "live repository settings for '$repo' did not parse"
+    if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
+        fail "live repository settings for '$repo' were not one JSON object"
         return
     fi
     # Static settings are driven from settings.json, so the check never drifts from the file.

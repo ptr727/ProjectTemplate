@@ -69,18 +69,27 @@ class LiveSettingsCase(unittest.TestCase):
 
     def test_a_non_json_body_is_one_named_fail_and_the_run_continues(self) -> None:
         result = self.run_check("<html>proxy</html>")
-        self.assertIn("FAIL live repository settings for 'o/r' did not parse", result.stdout)
+        self.assertIn(
+            "FAIL live repository settings for 'o/r' were not one JSON object", result.stdout
+        )
         self.assertIn("REACHED_END", result.stdout)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_non_object_body_is_a_named_fail(self) -> None:
         result = self.run_check("[]")
-        self.assertIn("did not parse", result.stdout)
+        self.assertIn("were not one JSON object", result.stdout)
+        self.assertIn("REACHED_END", result.stdout)
+
+    def test_a_stream_ending_in_an_object_is_a_named_fail(self) -> None:
+        result = self.run_check("[] {}")
+        self.assertIn("were not one JSON object", result.stdout)
         self.assertIn("REACHED_END", result.stdout)
 
     def test_an_object_body_passes_the_guard(self) -> None:
         result = self.run_check('{"delete_branch_on_merge": true, "private": false}')
-        self.assertNotIn("did not parse", result.stdout)
+        self.assertNotIn("were not one JSON object", result.stdout)
+        self.assertIn("REACHED_END", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
