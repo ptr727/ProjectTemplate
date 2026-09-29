@@ -81,8 +81,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      against a condition that could never become true, until they were killed by PID by hand. A shell
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
-     shell, which is the script that shell runs. A line holding `((` beside a `<<` is read every way
-     it can open a heredoc, and any reading holding an unbounded wait denies.
+     shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
+     opening nothing and once per `<<` whose body a later line closes, and any reading holding an
+     unbounded wait denies.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -2293,7 +2294,7 @@ def _heredoc_openers(line):
     return openers[:1] or [None]
 
 
-_HEREDOC_READING_LIMIT = 64
+_HEREDOC_READING_LIMIT = 16
 
 
 def _heredoc_body_end(lines, start, opener):
@@ -2318,16 +2319,18 @@ def _heredoc_readings(cmd):
     kept, since there it is the script the shell executes. This is precision over recall in the same
     direction the kit takes elsewhere: a wait inside a script file is likewise unseen.
 
-    A line `_heredoc_openers` reads more than one way forks the text, one reading per way, so the
-    reading the shell takes is among those returned and a caller denying on any one of them errs
-    toward a false deny. Each such line multiplies the readings, so past `_HEREDOC_READING_LIMIT`
-    of them this returns None rather than building every one.
+    A line `_heredoc_openers` reads more than one way forks the text, one reading per `<<` whose
+    tag closes a body on a later line, beside the reading that strips nothing there. A caller
+    denying on any reading then needs no guess at which `<<` is the shift. A `<<` with no closing
+    line forks nothing, since stripping to the end dropped the rest of a quoted payload holding a
+    shift. Past `_HEREDOC_READING_LIMIT` readings this returns None rather than building them all.
     """
     if "<<" not in cmd:
         return [cmd]
     lines = cmd.split("\n")
     readings = []
     pending = [(0, [])]
+    count = 1
     while pending:
         i, kept = pending.pop()
         while i < len(lines):
@@ -2335,9 +2338,12 @@ def _heredoc_readings(cmd):
             i += 1
             first, *others = _heredoc_openers(lines[i - 1])
             for opener in others:
-                if len(readings) + len(pending) >= _HEREDOC_READING_LIMIT:
+                j, term = _heredoc_body_end(lines, i, opener)
+                if not term:
+                    continue
+                count += 1
+                if count > _HEREDOC_READING_LIMIT:
                     return None
-                j, term = (i, []) if opener is None else _heredoc_body_end(lines, i, opener)
                 pending.append((j, kept + term))
             if first is not None:
                 i, term = _heredoc_body_end(lines, i, first)
@@ -2349,16 +2355,18 @@ def _heredoc_readings(cmd):
 def _check_unbounded_wait(cmd):
     """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text.
 
-    Every heredoc reading is judged, and one holding an unbounded wait denies the command.
+    Every heredoc reading is judged, and one holding an unbounded wait denies the command. A
+    command naming no `sleep` once its quotes and backslashes are removed holds no such wait in any
+    reading, since every token is its text with some of those removed, so it is allowed unread.
     """
+    if "sleep" not in re.sub(r"[\"'\\]", "", cmd).lower():
+        return "allow", ""
     readings = _heredoc_readings(cmd)
     if readings is None:
-        if not _sleeps(_shell_tokens(cmd)):
-            return "allow", ""
         return "deny", (
-            "This command sleeps and holds more lines where `<<` could open a heredoc or shift "
-            "inside `(( ))` than the unbounded-wait rule reads every way a shell might. Split it "
-            'into shorter commands. See AGENTS.md "Delegation".'
+            "This command names `sleep` and holds more lines where `<<` could open a heredoc or "
+            "shift inside `(( ))` than the unbounded-wait rule reads every way a shell might. "
+            'Split it into shorter commands. See AGENTS.md "Delegation".'
         )
     loop = next((found for found in map(_unbounded_wait_loop, readings) if found), None)
     if loop is None:
@@ -4178,9 +4186,23 @@ _WAIT_CASES = [
         "and a bounded loop holding a heredoc and (( on one body line stays allowed",
     ),
     (
+        "timeout 600 bash -c '\nwhile ! [ -f /x ]; do sleep 1; done\necho $(( 1 << n ))\necho fin\n'",
+        "allow",
+        "a shift inside a quoted payload opens nothing when no later line closes it",
+    ),
+    (
         "\n".join(["echo $(( a << b ))", "b"] * 7 + ["sleep 1"]),
         "deny",
         "a sleeping command past the reading limit is denied rather than read one way",
+    ),
+    (
+        "\n".join(
+            ["echo $(( a << b ))", "b"] * 7
+            + ["cat > a.md <<EOF", "don't", "EOF", "while [ ! -f /x ]; do sleep 1; done"]
+            + ["cat > b.md <<EOF", "it's", "EOF"]
+        ),
+        "deny",
+        "nor does a quote pairing across two bodies hide the sleep from that limit",
     ),
     (
         "\n".join(["echo $(( a << b ))", "b"] * 7),
