@@ -20,7 +20,9 @@ Subcommands
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
            and full diff coverage is stated for this head, by the round covering it or by the
-           carry below. `review_on_head` and `rounds=`
+           carry below, or where nothing states or carries any, a round covering the head names
+           exactly the changed files in its own file table, `coverage=table` in the digest.
+           `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
            tracked other reviewer, named under `other_reviewed` below, can carry the exact head
@@ -39,16 +41,23 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = no statement of changed-file coverage describes this head. A round that states
-           none carries the newest round that states some forward, bounded on the change set,
-           so this covers three states: nothing ever stated coverage, the round that did
+           45 = no statement of changed-file coverage describes this head, and no file table
+           stands in for one. A round that
+           states none carries the newest round that states some forward, bounded on the change
+           set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           Where the head branch lacks the current review instructions, bring them onto it,
-           push, and run `wait`, which requests a round on the new head, and where the
+           Past those, a round covering the head whose own table names exactly the changed
+           files stands in, and only where no Copilot round on the pull request, on any commit,
+           states or appears to state partial coverage, quoted or not, and the whole review
+           history is in view, since over the rounds measured the table names the whole changed
+           set on partial rounds too. The digest names why no table stood in.
+           Copilot's Balanced review effort, the default since 2026-09-28, writes the table and
+           almost never a statement, which is the case the table reading exists for.
+           Where the head branch lacks the current review instructions, which a round at Lite
+           effort needs to state coverage, bring them onto it, push, and run `wait`, which requests a round on the new head, and where the
            comparison could not be read, run `status` again. Past those,
            hand the state to the maintainer rather than retrying into it, since a round
-           re-requested on the same head states coverage only by chance and a round's file
-           table names the whole changed set on partial rounds too.
+           re-requested on the same head states coverage or carries a table only by chance.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
@@ -221,6 +230,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import html
 import io
 import json
 import os
@@ -410,6 +420,16 @@ COVERAGE_COUNTS = re.compile(
     r"|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)(?:\s+changed files?)?",
     re.IGNORECASE,
 )
+LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
+EMPHASIS_MARK = re.compile(r"[*_`]")
+HTML_TAG = re.compile(
+    r"</?[A-Za-z][\w-]*(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+)
+MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
+MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
+LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
+BARE_TAG = re.compile(r"<(?!!--)[^<>]*>")
+MARKER_REACH = 300
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -461,12 +481,19 @@ UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
 # Not a state a round reports, but the reading that carries an earlier round's forward.
 # It ranks nowhere in `SEVERITY`, since it is one of the four wearing another round's name.
 CARRIED = "carried"
+TABLE = "table"
 SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
 # `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
 # What this script does not know is the separate `shapes` field, and one word for both hides it.
 # The constant carries that name too, so no reader has to map a name here onto another word.
-COVERAGE_FIELD = {UNVETTED: "UNVETTED", PARTIAL: "PARTIAL", FULL: "full", UNSTATED: "unstated"}
+COVERAGE_FIELD = {
+    UNVETTED: "UNVETTED",
+    PARTIAL: "PARTIAL",
+    FULL: "full",
+    UNSTATED: "unstated",
+    TABLE: "table",
+}
 
 # Every structural marker the reviewer's own bodies carry, measured over the same 333.
 # A body is read for these rather than trusted, because every reader below keys on one of them.
@@ -1820,7 +1847,11 @@ def file_table(body: str) -> list[str]:
 
     Quotations are dropped for the reason a coverage line's are: this change puts a table into
     the diff and a review of it quotes one, and a quoted table read as this round's own names
-    files nobody reviewed.
+    files nobody reviewed. That is a fenced block, an unclosed one running to the end of the
+    body as Markdown runs it, and a line indented as a code block. Code spans are kept, being how
+    the second format writes each path, and a span running over several lines is not masked
+    either, since a stray backtick in one row's prose pairs with the next row's path and would
+    hide the real table.
 
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
@@ -1828,8 +1859,10 @@ def file_table(body: str) -> list[str]:
     Each cell is reduced by `bare_path`, for the reason it states.
     """
     paths, reading = [], False
-    for line in strip_fences(body or "").splitlines():
-        if TABLE_HEADER.match(line):
+    for line in strip_fences(body or "", to_end=True).splitlines():
+        if code_indented(line):
+            reading = False
+        elif TABLE_HEADER.match(line):
             reading = True
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
@@ -1925,6 +1958,170 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
         + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
         + ", so it tracks the counts nowhere and names no unread file"
     )
+
+
+def count_value(digits: str) -> str:
+    """A count in a form two counts compare in, leading zeros dropped, and never through `int`.
+
+    `int` refuses a digit run past the interpreter's limit, so a body carrying one would crash
+    the digest rather than read as a partial.
+    """
+    return "".join(str(unicodedata.digit(c)) for c in digits).lstrip("0") or "0"
+
+
+def body_views(body: str) -> list[str]:
+    """The body as each reading of it that `partial_in` scans, every one of them folded.
+
+    Each transform that exposes one hiding place can also hide another: decoding an entity
+    can break a tag's quoting, folding a compatibility form can turn a separator into letters,
+    and stripping a tag can erase a marker written as one. So no transform replaces another.
+    The body is read raw, with entities decoded and format characters dropped, and with
+    compatibility forms folded and combining marks dropped too, and each of those with tags
+    kept and with tags stripped three ways, a partial found in any one of them counting.
+    """
+    decoded = "".join(c for c in html.unescape(body) if unicodedata.category(c) != "Cf")
+    folded = unicodedata.normalize(
+        "NFKC",
+        "".join(
+            c
+            for c in unicodedata.normalize("NFKD", decoded)
+            if unicodedata.category(c) not in ("Cf", "Mn")
+        ),
+    )
+    return [
+        " ".join(EMPHASIS_MARK.sub("", strip.sub("", base) if strip else base).split())
+        for base in (body, decoded, folded)
+        for strip in (None, HTML_TAG, LINE_TAG, BARE_TAG)
+    ]
+
+
+def partial_in(view: str) -> str:
+    """The first partial marker, marker mention, or count in one reading of a body, or ""."""
+    for m in FLEET_REVIEW.finditer(view):
+        if count_value(m.group(1)) != count_value(m.group(2)):
+            return m.group(0)[:200]
+    rest = FLEET_REVIEW.sub(" ", view)
+    for name in (MARKER_NAME, MARKER_NAME_TIGHT):
+        for m in name.finditer(rest):
+            if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
+                return rest[m.start() : m.end() + MARKER_REACH][:200]
+    for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
+        for m in pattern.finditer(view):
+            counts = [count_value(g) for g in m.groups() if g is not None][:2]
+            if len(counts) == 2 and counts[0] != counts[1]:
+                return m.group(0)[:200]
+    return ""
+
+
+def partial_shaped(pr: dict) -> str:
+    """The first coverage marker or count in any Copilot round's body that is not a full one.
+
+    Empty where there is none. Read over every round on the pull request, on any commit, with
+    no quotation masked, since the table stands in only where no round even appears to have read
+    part of a diff. Masking and the line-start anchor are what keep a quoted count from being
+    read as a statement, which is right where an unread count blocks as unstated and wrong here,
+    where the table would otherwise pass a partial the coverage reader did not recognize.
+
+    Every reading `body_views` gives is scanned, and a partial in any one of them counts, so a
+    reading added to catch one shape never hides a shape another reading catches. A well-formed marker counts where its two
+    counts differ. Any other mention of the marker's name, in any spelling, counts where a digit
+    follows it within `MARKER_REACH` characters, since a marker is written by a model from an
+    instruction and a drifted one cannot be parsed reliably, so it is not parsed at all. A mention
+    followed by no digit, prose or a placeholder, is skipped. Prose can word a partial in ways no
+    pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
+    of reading a table at all.
+    """
+    for node in reviewer_nodes(pr, "reviews"):
+        for view in body_views(node.get("body") or ""):
+            if found := partial_in(view):
+                return found
+    return ""
+
+
+def table_shortfall(pr: dict) -> str:
+    """Why no round covering the head names exactly this pull request's changed files, or "".
+
+    Empty where the table stands in, which is the coverage reading `table_covers` gives.
+    Otherwise the reason, which the digest prints under an unstated head, since the remedies
+    differ: a missing or mismatched table may be answered by another round, a changed-file list
+    longer than the window this reads by a push bringing it back within it, and a partial on
+    record by nothing but the maintainer's reading.
+    """
+    if reviews_truncated(pr):
+        return (
+            "the review history is longer than the window this reads, so a round stating "
+            "partial coverage may sit out of view"
+        )
+    if partial := partial_shaped(pr):
+        return (
+            f"a Copilot round on this pull request states or appears to state partial coverage, "
+            f"'{partial}', so the maintainer reads it rather than the table"
+        )
+    named = head_table(pr)
+    if not named:
+        return "no round covering the head carries a file table of its own"
+    files = pr.get("files")
+    if files is None:
+        return "the changed-file list is absent from the query, so the table has nothing to match"
+    nodes = files.get("nodes") or []
+    page = files.get("pageInfo")
+    if (
+        not isinstance(page, dict)
+        or not isinstance(page.get("hasNextPage"), bool)
+        or any(not (n or {}).get("path") for n in nodes)
+    ):
+        return "the changed-file list is malformed, so the table cannot be matched against it"
+    changed, truncated = changed_paths(pr)
+    if truncated:
+        return (
+            f"the pull request changes more than the {FILES_WINDOW} files this reads, so the "
+            f"table cannot be compared against all of them until a push brings the pull request "
+            f"back within that window"
+        )
+    if not changed:
+        return "the pull request changes no files, so the table has nothing to match"
+    diff = {bare_path(p) for p in changed}
+    if len(diff) != len(set(changed)):
+        return (
+            "two changed paths differ only by a format character, so the table cannot tell "
+            "them apart"
+        )
+    omitted = sorted(diff - set(named))
+    invented = sorted(set(named) - diff)
+    if not omitted and not invented:
+        return ""
+    return "the table " + ", and ".join(
+        part
+        for part in (
+            f"leaves out {', '.join(omitted)}" if omitted else "",
+            f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
+        )
+        if part
+    )
+
+
+def table_covers(pr: dict) -> bool:
+    """Whether a round covering the head names exactly this pull request's changed files in its table.
+
+    The reason it does not is `table_shortfall`, which this is the empty case of.
+
+    The coverage reading for a head that no round states coverage on and no earlier statement
+    carries to. Copilot's Balanced review effort, the default since 2026-09-28, writes the second
+    overview format with a file table and almost never a coverage statement, whatever the review
+    instructions ask, so without this reading no pull request reviewed at that effort could close
+    its loop.
+
+    It is weaker than a statement, and `table_against_diff` says why: over the rounds measured,
+    the table names the whole changed set on partial rounds as well as full ones. So it stands
+    in only where nothing on record says any round read part of a diff: no Copilot round on the
+    pull request, on any commit, carries a coverage-shaped count that is not a full one, quoted
+    or not, and the whole review history is in view. A pull request that ever had a partial
+    round goes to the maintainer, since whether that partial still describes this diff is what
+    a carry bound refusing, failing, or never reaching it cannot settle. A table naming a file
+    the diff does not carry, or leaving one out, is not this reading either, and neither is a
+    changed-file list the query cut short or returned malformed.
+    """
+    return not table_shortfall(pr)
 
 
 def badge_text(match: re.Match[str]) -> str:
@@ -2089,18 +2286,17 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
         return 0
     state, line = head_coverage(pr)
     # An earlier round's statement stands until something changes it.
-    # A pull request no round ever stated coverage on is the one left with nothing to carry.
-    # That is the case exit 45 still names.
     # The digest printed above this one says which round is carried and what changed since.
     # So this reads the same state and says nothing, two wordings being two places to keep true.
     # `carry_holds` is what bounds it, and it is read here for the same reason the state is.
-    # A carry the bound refuses leaves the state unstated, which is the case exit 45 still names.
     # Read as falsy where the bound could not be measured, so an unreadable compare refuses too.
     carried = carried_coverage(pr) if state == UNSTATED else None
     if carried is not None and not carry_holds(owner, repo, pr, carried[2]):
         carried = None
     if carried is not None:
         state, line, _from_head = carried
+    if state == UNSTATED and table_covers(pr):
+        state = TABLE
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -2145,18 +2341,22 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "status=COVERAGE_IS_UNSTATED no statement of changed-file coverage describes this "
             "head, so the review loop cannot prove any round read the full diff. A round that "
             "states none is the ordinary shape of the second overview format and carries the "
-            "newest round that states some forward, bounded on the change set. Reaching here "
-            "means one of three things, and the digest above says which: no round ever stated "
+            "newest round that states some forward, bounded on the change set, and failing "
+            "that, a round covering the head whose own file table names exactly the changed "
+            "files stands in, where no round on the pull request states or appears to state "
+            "partial coverage. Reaching here means no table stood in, for the reason the digest "
+            "above names, and also one of three things it says which of: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current fleet-code-review skill and Copilot instructions, since a round states "
-            "no coverage without them, and where they are missing bring them onto the branch, "
+            "the current fleet-code-review skill and Copilot instructions, since a round at Lite "
+            "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that. "
+            "one cause of that. Where the digest says the pull request changes more files than "
+            "this reads, the table cannot be matched at all, and splitting the pull request is "
+            "the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
-            "round stating coverage only by chance, and a round's file table names the whole "
-            "changed set on partial rounds too, so it cannot stand in. Past those, this is the "
+            "round stating coverage or carrying a table only by chance. Past those, this is the "
             "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45
@@ -2701,6 +2901,8 @@ def digest(
             cover, cover_line, _carried_from = candidate
         else:
             carried = None
+    if cover == UNSTATED and on_head and table_covers(pr):
+        cover = TABLE
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
     # True where the connection cut off before this pull request's actual thread count.
@@ -2922,7 +3124,6 @@ def digest(
         )
         lines.append(f"    {cover_line}")
     elif candidate is not None:
-        # The bound refused, so the state stays unstated.
         # The reader is told which round it declined and on what ground.
         # The alternative is a digest printing nothing about a statement it found and did not use.
         if not carried_from:
@@ -2941,6 +3142,15 @@ def digest(
             f"  COVERAGE IS NOT CARRIED: the newest round that states any is "
             f"{carried_from[:8] or 'a commit this cannot name'}, and {carried_since}, but {why}"
         )
+    if cover == TABLE:
+        lines.append(
+            f"  COVERAGE IS READ FROM THE FILE TABLE: no round states coverage of this head and "
+            f"none carries to it, and a round covering it names exactly the "
+            f"{len(changed_paths(pr)[0])} changed "
+            f"file{'' if len(changed_paths(pr)[0]) == 1 else 's'} in its own table"
+        )
+    elif cover == UNSTATED and on_head:
+        lines.append(f"  NO FILE TABLE STANDS IN: {table_shortfall(pr)}")
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
