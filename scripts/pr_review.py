@@ -426,6 +426,9 @@ HTML_TAG = re.compile(
     r"</?[A-Za-z][\w-]*(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
 )
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
+MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
+LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
+BARE_TAG = re.compile(r"<(?!!--)[^<>]*>")
 MARKER_REACH = 300
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
@@ -1966,6 +1969,50 @@ def count_value(digits: str) -> str:
     return "".join(str(unicodedata.digit(c)) for c in digits).lstrip("0") or "0"
 
 
+def body_views(body: str) -> list[str]:
+    """The body as each reading of it that `partial_in` scans, every one of them folded.
+
+    Each transform that exposes one hiding place can also hide another: decoding an entity
+    can break a tag's quoting, folding a compatibility form can turn a separator into letters,
+    and stripping a tag can erase a marker written as one. So no transform replaces another.
+    The body is read raw, with entities decoded and format characters dropped, and with
+    compatibility forms folded and combining marks dropped too, and each of those with tags
+    kept and with tags stripped three ways, a partial found in any one of them counting.
+    """
+    decoded = "".join(c for c in html.unescape(body) if unicodedata.category(c) != "Cf")
+    folded = unicodedata.normalize(
+        "NFKC",
+        "".join(
+            c
+            for c in unicodedata.normalize("NFKD", decoded)
+            if unicodedata.category(c) not in ("Cf", "Mn")
+        ),
+    )
+    return [
+        " ".join(EMPHASIS_MARK.sub("", strip.sub("", base) if strip else base).split())
+        for base in (body, decoded, folded)
+        for strip in (None, HTML_TAG, LINE_TAG, BARE_TAG)
+    ]
+
+
+def partial_in(view: str) -> str:
+    """The first partial marker, marker mention, or count in one reading of a body, or ""."""
+    for m in FLEET_REVIEW.finditer(view):
+        if count_value(m.group(1)) != count_value(m.group(2)):
+            return m.group(0)[:200]
+    rest = FLEET_REVIEW.sub(" ", view)
+    for name in (MARKER_NAME, MARKER_NAME_TIGHT):
+        for m in name.finditer(rest):
+            if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
+                return rest[m.start() : m.end() + MARKER_REACH][:200]
+    for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
+        for m in pattern.finditer(view):
+            counts = [count_value(g) for g in m.groups() if g is not None][:2]
+            if len(counts) == 2 and counts[0] != counts[1]:
+                return m.group(0)[:200]
+    return ""
+
+
 def partial_shaped(pr: dict) -> str:
     """The first coverage marker or count in any Copilot round's body that is not a full one.
 
@@ -1975,11 +2022,8 @@ def partial_shaped(pr: dict) -> str:
     read as a statement, which is right where an unread count blocks as unstated and wrong here,
     where the table would otherwise pass a partial the coverage reader did not recognize.
 
-    The body is read with entities decoded, compatibility forms folded, format characters,
-    combining marks, markup tags, and emphasis dropped, and whitespace folded, a tag being a `<`
-    and a letter followed by attribute syntax on one line, so a comparison in prose is not read
-    as one. Mentions are looked for with the tags kept as well, since a marker can be written as
-    a tag or inside one. A well-formed marker counts where its two
+    Every reading `body_views` gives is scanned, and a partial in any one of them counts, so a
+    reading added to catch one shape never hides a shape another reading catches. A well-formed marker counts where its two
     counts differ. Any other mention of the marker's name, in any spelling, counts where a digit
     follows it within `MARKER_REACH` characters, since a marker is written by a model from an
     instruction and a drifted one cannot be parsed reliably, so it is not parsed at all. A mention
@@ -1988,24 +2032,9 @@ def partial_shaped(pr: dict) -> str:
     of reading a table at all.
     """
     for node in reviewer_nodes(pr, "reviews"):
-        decomposed = unicodedata.normalize("NFKD", html.unescape(node.get("body") or ""))
-        raw = unicodedata.normalize(
-            "NFKC", "".join(c for c in decomposed if unicodedata.category(c) not in ("Cf", "Mn"))
-        )
-        text = " ".join(EMPHASIS_MARK.sub("", HTML_TAG.sub("", raw)).split())
-        for m in FLEET_REVIEW.finditer(text):
-            if count_value(m.group(1)) != count_value(m.group(2)):
-                return m.group(0)[:200]
-        for seen in (text, " ".join(EMPHASIS_MARK.sub("", raw).split())):
-            rest = FLEET_REVIEW.sub(" ", seen)
-            for m in MARKER_NAME.finditer(rest):
-                if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
-                    return rest[m.start() : m.end() + MARKER_REACH][:200]
-        for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
-            for m in pattern.finditer(text):
-                counts = [count_value(g) for g in m.groups() if g is not None][:2]
-                if len(counts) == 2 and counts[0] != counts[1]:
-                    return " ".join(m.group(0).split())[:200]
+        for view in body_views(node.get("body") or ""):
+            if found := partial_in(view):
+                return found
     return ""
 
 

@@ -3815,6 +3815,42 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertIn(pr_review.main(["status", "7", "--repo", "o/r"]), (42, 45))
                 self.assertNotIn("coverage=table", self.out.getvalue())
 
+    def test_every_reported_hiding_place_still_reads_as_a_partial(self) -> None:
+        """Each body here once hid a partial from one reading, so every reading is kept."""
+        for partial in (
+            "fleet\u2122review: reviewed=1 changed=2",
+            "fleet\u2057review: reviewed=1 changed=2",
+            "<!-- fleet-review: reviewed=1\u03002 changed=12 findings=0 -->",
+            "<!-- fleet-review: reviewed=1\u00b2 changed=12 findings=0 -->",
+            "<!-- fleet-review: reviewed=\u246b changed=12 findings=0 -->",
+            (
+                'Copilot reviewed <a href="https://example.invalid/path/x" title="a &quot;b&quot;">'
+                "1</a> out of 2 changed files."
+            ),
+            (
+                'Copilot reviewed <a href="https://example.invalid/aaaa"class="bbbbbbbbbbbb">1</a>'
+                " out of 2 changed files."
+            ),
+            (
+                'Copilot reviewed <a\nhref="https://example.invalid/aaaaaaaaaaaaaaaaaaaaaa">1</a>'
+                " out of 2 changed files."
+            ),
+            'Note <a title="x > Copilot reviewed 1 out of 2 changed files < y">z</a>.',
+            'Note \uff1cb x="Copilot reviewed 1 out of 2 changed files"\uff1e z.',
+            "Guards `i <= n`.\n\nSummary: reviewed 1 out of 2 changed files.\n\n<details>",
+        ):
+            with self.subTest(partial=partial):
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_count_split_by_footer_markup_still_reads(self) -> None:
+        footer = (
+            '<a href="/o/r/new/develop?filename=.github/skills/code-review/SKILL.md" '
+            'class="Link--inTextBlock" target="_blank" rel="noopener noreferrer">'
+        )
+        body = f"{OVERVIEW}\nCopilot reviewed {footer}1</a> out of {footer}2</a> changed files.\n"
+        self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
     def test_a_digit_past_the_marker_reach_is_not_read_with_the_mention(self) -> None:
         body = self.balanced(["a.md"]) + "\nPer fleet review, " + "x" * 320 + " item 1 of 2.\n"
         self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
