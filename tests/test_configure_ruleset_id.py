@@ -116,6 +116,29 @@ class RulesetIdCase(unittest.TestCase):
                 )
                 self.assertIn("could not read live ruleset state", result.stderr)
 
+    def test_a_malformed_array_element_aborts_rather_than_reading_as_not_found(self) -> None:
+        for label, response in (
+            ("numbers", json.dumps([1, 2])),
+            ("strings", json.dumps(["x"])),
+            ("a matching object with no id", json.dumps([{"name": "fixture"}])),
+            ("null", json.dumps([None])),
+            ("null then a match", json.dumps([None, {"name": "fixture", "id": 3}])),
+            ("an empty id", json.dumps([{"name": "fixture", "id": ""}])),
+            ("a boolean id", json.dumps([{"name": "fixture", "id": False}])),
+            ("a fractional id", json.dumps([{"name": "fixture", "id": 1.5}])),
+            ("an object id", json.dumps([{"name": "fixture", "id": {"a": 1}}])),
+            ("a match then a non-object", json.dumps([{"name": "fixture", "id": 1}, 2])),
+        ):
+            with self.subTest(label=label):
+                result = self.lookup(response)
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"ruleset_id must abort on {label} (stdout={result.stdout!r})",
+                )
+                self.assertIn("could not read live ruleset state", result.stderr)
+                self.assertNotIn("null", result.stdout)
+
     def test_a_gh_api_failure_still_aborts(self) -> None:
         """The pre-existing guard this fix sits beside: an outright gh failure already aborts."""
         result = self.lookup("", status=1)
