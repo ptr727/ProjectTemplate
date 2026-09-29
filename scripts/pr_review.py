@@ -43,8 +43,9 @@ Subcommands
            none carries the newest round that states some forward, bounded on the change set,
            so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           Where the head branch lacks the current review instructions, bring them onto it and
-           push, and where the comparison could not be read, run `status` again. Past those,
+           Where the head branch lacks the current review instructions, bring them onto it,
+           push, and run `wait`, which requests a round on the new head, and where the
+           comparison could not be read, run `status` again. Past those,
            hand the state to the maintainer rather than retrying into it, since a round
            re-requested on the same head states coverage only by chance and a round's file
            table names the whole changed set on partial rounds too.
@@ -2075,9 +2076,10 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
             "the current fleet-code-review skill and Copilot instructions, since a round states "
-            "no coverage without them, and where they are missing bring them onto the branch "
-            "and push, which raises a round on a new head. Where the digest says the comparison "
-            "could not be read, run status again, since a failed API read is one cause of that. "
+            "no coverage without them, and where they are missing bring them onto the branch, "
+            "push, and run wait, which requests a round on the new head. Where the digest says "
+            "the comparison could not be read, run status again, since a failed API read is "
+            "one cause of that. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage only by chance, and a round's file table names the whole "
             "changed set on partial rounds too, so it cannot stand in. Past those, this is the "
