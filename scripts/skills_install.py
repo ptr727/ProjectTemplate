@@ -86,7 +86,10 @@ def git_in(root, *args):
 
 def is_bootstrap_tree(root):
     """Whether `root` is a tree the bootstrap extracted, which carries the marker it writes."""
-    return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+    try:
+        return (root / BOOTSTRAP_OWNED_MARKER).is_file()
+    except (OSError, ValueError):
+        return False
 
 
 def bootstrap_tree_commit(root):
@@ -229,7 +232,7 @@ def same_directory(a, b):
     """Whether two paths name one directory, however each is spelled, False where either cannot be resolved."""
     try:
         return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return False
 
 
@@ -239,7 +242,7 @@ def directory_gone(location):
         return not stat.S_ISDIR(os.stat(location).st_mode)
     except (FileNotFoundError, NotADirectoryError):
         return True
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
@@ -273,8 +276,8 @@ def register_claude_marketplace():
     internal state, not a documented contract, so writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
 
-    An existing registration from another directory is left in place, with a warning naming the
-    command that moves it, since the add would move it silently.
+    An existing registration the add would move is left in place, with a warning naming the command
+    that moves it, unless its directory is gone, where the move is made and announced.
     """
     try:
         existing = existing_registration()
@@ -397,7 +400,7 @@ def live_channel():
     if location is None:
         return {"registered": True, "reason": "the listing names no location"}
     root = Path(location)
-    if not root.is_dir():
+    if directory_gone(root):
         return {
             "registered": True,
             "checkout": str(root),

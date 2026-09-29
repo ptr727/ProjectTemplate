@@ -507,6 +507,46 @@ class LiveChannelCase(unittest.TestCase):
         self.assertIn("does not exist", live["reason"])
         self.assertNotIn("commit", live)
 
+    def registered_live(self, location: Path) -> dict[str, object]:
+        self.listing(
+            json.dumps(
+                [
+                    {
+                        "name": skills_install.MARKETPLACE_NAME,
+                        "source": "directory",
+                        "path": str(location),
+                    }
+                ]
+            )
+        )
+        with mock.patch("skills_install.git_in", return_value=None):
+            return skills_install.live_channel()
+
+    def test_a_symlink_loop_is_judged_as_the_installer_judges_it(self) -> None:
+        loop = Path(self.enterContext(tempfile.TemporaryDirectory())) / "loop"
+        try:
+            loop.symlink_to(loop)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertFalse(skills_install.directory_gone(loop))
+        live = self.registered_live(loop)
+        self.assertNotIn("reason", live)
+        self.assertIsNone(live["commit"])
+
+    @unittest.skipIf(
+        sys.platform == "win32" or os.geteuid() == 0,
+        "needs POSIX permissions that bind the running user",
+    )
+    def test_an_unreadable_registered_checkout_is_reported_rather_than_crashing(self) -> None:
+        locked = Path(self.enterContext(tempfile.TemporaryDirectory())) / "locked"
+        (locked / "checkout").mkdir(parents=True)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        live = self.registered_live(locked / "checkout")
+        self.assertTrue(live["registered"])
+        self.assertNotIn("reason", live)
+        self.assertIsNone(live["commit"])
+
     def test_the_registered_checkout_is_the_one_measured(self) -> None:
         self.listing(
             json.dumps(
@@ -522,7 +562,7 @@ class LiveChannelCase(unittest.TestCase):
 
         with (
             mock.patch("skills_install.git_in", side_effect=fake),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             live = skills_install.live_channel()
         self.assertEqual(
@@ -553,7 +593,7 @@ class LiveChannelCase(unittest.TestCase):
 
         with (
             mock.patch("skills_install.git_in", side_effect=fake),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             skills_install.live_channel()
         status = next(c for c in calls if c[0] == "status")
@@ -569,7 +609,7 @@ class LiveChannelCase(unittest.TestCase):
         answers = {"symbolic-ref": None, "rev-parse": "sha", "status": None}
         with (
             mock.patch("skills_install.git_in", side_effect=lambda _r, *a: answers[a[0]]),
-            mock.patch("pathlib.Path.is_dir", return_value=True),
+            mock.patch("skills_install.directory_gone", return_value=False),
         ):
             live = skills_install.live_channel()
         self.assertIsNone(live["dirty"])
@@ -749,6 +789,11 @@ class RegisterCase(unittest.TestCase):
         except OSError:
             self.skipTest("symlinks unavailable")
         self.registered_at(loop)
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.added())
+
+    def test_a_registration_naming_an_impossible_path_is_left_in_place(self) -> None:
+        self.registered_at(self.elsewhere / "nul\0byte")
         self.assertTrue(self.run_register())
         self.assertFalse(self.added())
 
