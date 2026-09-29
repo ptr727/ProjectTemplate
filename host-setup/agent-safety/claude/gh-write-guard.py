@@ -1744,6 +1744,9 @@ class _UnmodeledSyntax(ValueError):
     """Syntax bash reads differently from the POSIX lex the shell tokens come from."""
 
 
+_HEREDOC_OPERATOR = re.compile(r"(?<!<)<<(?!<)")
+
+
 def _marked_lex(cmd):
     """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
 
@@ -1756,7 +1759,10 @@ def _marked_lex(cmd):
     A `$(` or `${` inside double quotes opens one too, with nested quotes of its own.
     A `$'` opens one string, in which a backslash escapes a single quote.
     A `#` starting a word opens a comment, which hides every character up to the newline.
+    A `<<` heredoc fed to a shell is read twice, the first read unescaping what the second parses.
     """
+    if _HEREDOC_OPERATOR.search(cmd):
+        raise _UnmodeledSyntax("heredoc")
     out = []
     tok, marked, state, i = "", False, None, 0
     while i < len(cmd):
@@ -2268,11 +2274,12 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     `timeout <duration>` runs. A `timeout` never bounds a loop at its own level, since `timeout`
     takes a command and a loop keyword is not one. A nested loop is judged on its own terms, so an
     unbounded inner wait is denied even inside a bounded outer one, which is what it is: unbounded.
+    A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
     """
     if _depth > 4:
         return None
     toks = _shell_tokens(cmd)
-    mask = _quoted_mask(cmd, toks)
+    mask = _quote_kept_mask(cmd, toks) if _depth else _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
@@ -4565,6 +4572,16 @@ _WAIT_CASES = [
         'echo \\; ; while [ -f y ";" # -lt\ntrue; do sleep 1; done',
         "deny",
         "a comparison in a comment after an escape bounds nothing",
+    ),
+    (
+        'echo \\; ; bash <<EOF\nuntil [ -f y \\\\"b" ";" \\\\"c" -lt 5 ]; do sleep 1; done\nEOF',
+        "deny",
+        "a quoted `;` in a heredoc a shell reads twice is a separator once the heredoc unescapes it",
+    ),
+    (
+        'echo \\; ; bash -c "until [ -f y \\`\\";\\" -lt 5 \\` ]; do sleep 1; done"',
+        "deny",
+        "a comparison inside an escaped backtick in a `bash -c` payload bounds nothing",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
