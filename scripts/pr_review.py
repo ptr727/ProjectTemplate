@@ -422,9 +422,9 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
-MARKER_ANY = re.compile(r"fleet[\W_]?review[^>]{0,200}", re.IGNORECASE)
-MARKER_FIELD = re.compile(r"\b(reviewed|changed)\s*[=:]\s*(\d+)", re.IGNORECASE)
+HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
+MARKER_NAME = re.compile(r"fleet\W?review", re.IGNORECASE)
+MARKER_REACH = 300
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -1955,37 +1955,49 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     )
 
 
+def count_value(digits: str) -> str:
+    """A count in a form two counts compare in, leading zeros dropped, and never through `int`.
+
+    `int` refuses a digit run past the interpreter's limit, so a body carrying one would crash
+    the digest rather than read as a partial.
+    """
+    return "".join(str(unicodedata.digit(c)) for c in digits).lstrip("0") or "0"
+
+
 def partial_shaped(pr: dict) -> str:
-    """The first coverage marker or count in any Copilot round's raw body that is not a full one.
+    """The first coverage marker or count in any Copilot round's body that is not a full one.
 
     Empty where there is none. Read over every round on the pull request, on any commit, with
-    no quotation masked, since the table stands in only where no round even appears to have
-    read part of a diff. Masking and the line-start anchor are what keep a quoted count from
-    being read as a statement, which is right where an unread count blocks as unstated and wrong
-    here, where the table would otherwise pass a partial the coverage reader did not recognize.
+    no quotation masked, since the table stands in only where no round even appears to have read
+    part of a diff. Masking and the line-start anchor are what keep a quoted count from being
+    read as a statement, which is right where an unread count blocks as unstated and wrong here,
+    where the table would otherwise pass a partial the coverage reader did not recognize.
 
-    Any `fleet-review` marker carrying a reviewed or changed count counts unless every reviewed
-    count it carries equals its changed count, a drifted field order, separator, or spelling
-    included, since a marker is written by a model from an instruction. A mention carrying no
-    count, prose or a placeholder, is not a statement and is skipped. The counts are read with
-    entities decoded, markup tags and format characters dropped, and line breaks folded, a tag
-    being a `<` followed by a letter, so a comparison in prose is not read as one. Prose can word a partial in ways no pattern here anticipates, so this narrows the
-    gap rather than closing it, which is the cost of reading a table at all.
+    The body is read with entities decoded, format characters, markup tags, and emphasis
+    dropped, and whitespace folded, a tag being a `<` followed by a letter and ending on its own
+    line, so a comparison in prose is not read as one. A well-formed marker counts where its two
+    counts differ. Any other mention of the marker's name, in any spelling, counts where a digit
+    follows it within `MARKER_REACH` characters, since a marker is written by a model from an
+    instruction and a drifted one cannot be parsed reliably, so it is not parsed at all. A mention
+    followed by no digit, prose or a placeholder, is skipped. Prose can word a partial in ways no
+    pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
+    of reading a table at all.
     """
     for node in reviewer_nodes(pr, "reviews"):
         raw = "".join(
             c for c in html.unescape(node.get("body") or "") if unicodedata.category(c) != "Cf"
         )
-        for m in MARKER_ANY.finditer(raw):
-            fields = MARKER_FIELD.findall(m.group(0))
-            reviewed = [int(n) for name, n in fields if name.lower() == "reviewed"]
-            changed = [int(n) for name, n in fields if name.lower() == "changed"]
-            if fields and (len(reviewed) != len(changed) or reviewed != changed):
-                return " ".join(m.group(0).split())[:200]
         text = " ".join(EMPHASIS_MARK.sub("", HTML_TAG.sub("", raw)).split())
+        for m in FLEET_REVIEW.finditer(text):
+            if count_value(m.group(1)) != count_value(m.group(2)):
+                return m.group(0)[:200]
+        rest = FLEET_REVIEW.sub(" ", text)
+        for m in MARKER_NAME.finditer(rest):
+            if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
+                return rest[m.start() : m.end() + MARKER_REACH][:200]
         for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
             for m in pattern.finditer(text):
-                counts = [int(g) for g in m.groups() if g is not None][:2]
+                counts = [count_value(g) for g in m.groups() if g is not None][:2]
                 if len(counts) == 2 and counts[0] != counts[1]:
                     return " ".join(m.group(0).split())[:200]
     return ""

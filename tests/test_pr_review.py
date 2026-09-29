@@ -3785,14 +3785,24 @@ class TestCoverageExitCodes(GqlCase):
             "Guards `i <= n`.\n\nSummary: reviewed 1 out of 2 changed files.\n\n<details>",
             "<!-- fleet-review reviewed=1 changed=2 findings=0 -->",
             "<!-- fleet_review: reviewed=1 changed=2 findings=0 -->",
+            '<!-- fleet-review: reviewed="1" changed="2" findings="0" -->',
+            "<!-- fleet-review: reviewed 1 changed 2 findings 0 -->",
+            '<!-- fleet-review {"reviewed": 1, "changed": 2} -->',
+            "<!-- fleet-review: files_reviewed=1 files_changed=2 -->",
+            "<sub>fleet-review:</sub> reviewed=1 changed=2 findings=0",
+            "<!-- fleet-review: reviewed=1" + " " * 185 + "changed=12 findings=0 -->",
+            "Per fleet review, " + "x" * 180 + " <!-- fleet-review: reviewed=1 changed=12 -->",
+            "Checks `i<n and j`.\nCopilot reviewed 1 out of 2 changed files.\nMaps `a -> b`.",
         ):
             with self.subTest(partial=partial):
                 self.out.seek(0)
                 self.out.truncate()
                 body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
-                self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
-                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
-                self.assertIn("appears to state partial coverage", self.out.getvalue())
+                pr = payload([review(body=body)], files=["a.md", "b.md"])
+                self.assertTrue(pr_review.partial_shaped(pr))
+                self.answer(pr)
+                self.assertIn(pr_review.main(["status", "7", "--repo", "o/r"]), (42, 45))
+                self.assertNotIn("coverage=table", self.out.getvalue())
 
     def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
         """Prose about the marker and its placeholder are not statements, so they block nothing."""
@@ -3803,6 +3813,18 @@ class TestCoverageExitCodes(GqlCase):
             with self.subTest(mention=mention):
                 body = self.balanced(["a.md"]) + "\n" + mention + "\n"
                 self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_digit_run_past_the_int_limit_reads_without_crashing(self) -> None:
+        body = self.balanced(["a.md"]) + "\nSummary: reviewed 3 of " + "9" * 5000 + ".\n"
+        self.assertIn("reviewed 3 of", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_full_count_among_comparisons_does_not_read_as_a_partial(self) -> None:
+        body = (
+            OVERVIEW
+            + "\nGuards `n < 0` and `x<y and z`.\n"
+            + "Copilot reviewed 2 out of 2 changed files in this pull request.\n\n<details>\n"
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
 
     def test_a_full_marker_among_markup_does_not_read_as_a_partial(self) -> None:
         body = (
