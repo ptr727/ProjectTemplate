@@ -230,6 +230,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import html
 import io
 import json
 import os
@@ -421,6 +422,8 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
+HTML_TAG = re.compile(r"<(?!!--)[^>]*>")
+MARKER_ANY = re.compile(r"fleet-review:[^>]*", re.IGNORECASE)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -1959,10 +1962,23 @@ def partial_shaped(pr: dict) -> str:
     read part of a diff. Masking and the line-start anchor are what keep a quoted count from
     being read as a statement, which is right where an unread count blocks as unstated and wrong
     here, where the table would otherwise pass a partial the coverage reader did not recognize.
+
+    Any `fleet-review` marker that does not read as a full statement counts, a drifted field
+    order or separator included, since a marker is written by a model from an instruction. The
+    counts are read with entities decoded, tags and format characters dropped, and line breaks
+    folded. Prose can word a partial in ways no pattern here anticipates, so this narrows the
+    gap rather than closing it, which is the cost of reading a table at all.
     """
     for node in reviewer_nodes(pr, "reviews"):
-        text = EMPHASIS_MARK.sub("", node.get("body") or "")
-        for pattern in (FLEET_REVIEW, COVERAGE_COUNTS, LOOSE_COUNTS):
+        raw = "".join(
+            c for c in html.unescape(node.get("body") or "") if unicodedata.category(c) != "Cf"
+        )
+        for m in MARKER_ANY.finditer(raw):
+            full = FLEET_REVIEW.search("<!-- " + m.group(0).strip() + ">")
+            if full is None or full.group(1) != full.group(2):
+                return " ".join(m.group(0).split())
+        text = " ".join(EMPHASIS_MARK.sub("", HTML_TAG.sub("", raw)).split())
+        for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
             for m in pattern.finditer(text):
                 counts = [g for g in m.groups() if g is not None][:2]
                 if len(counts) == 2 and counts[0] != counts[1]:
@@ -1996,7 +2012,12 @@ def table_shortfall(pr: dict) -> str:
     if files is None:
         return "the changed-file list is absent from the query, so the table has nothing to match"
     nodes = files.get("nodes") or []
-    if "pageInfo" not in files or any(not (n or {}).get("path") for n in nodes):
+    page = files.get("pageInfo")
+    if (
+        not isinstance(page, dict)
+        or "hasNextPage" not in page
+        or any(not (n or {}).get("path") for n in nodes)
+    ):
         return "the changed-file list is malformed, so the table cannot be matched against it"
     changed, truncated = changed_paths(pr)
     if truncated:

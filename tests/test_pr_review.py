@@ -2783,8 +2783,8 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("coverage=table", out)
         self.assertIn("COVERAGE IS NOT CARRIED", out)
 
-    def test_a_carry_the_bound_could_not_measure_keeps_the_table_out(self) -> None:
-        """A failed compare may hide a partial that still describes this diff, so it blocks."""
+    def test_a_partial_whose_carry_could_not_be_measured_keeps_the_table_out(self) -> None:
+        """The partial on record blocks, whatever a failed compare made of the carry."""
         pr = payload(
             [
                 review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
@@ -3770,6 +3770,37 @@ class TestCoverageExitCodes(GqlCase):
                 self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("appears to state partial coverage", self.out.getvalue())
+
+    def test_a_drifted_or_disguised_partial_still_keeps_the_table_out(self) -> None:
+        """Each shape here is one only a single guard catches, so each is pinned on its own."""
+        for partial in (
+            "<!-- fleet-review: changed=2 reviewed=1 findings=0 -->",
+            "<!-- fleet-review: reviewed=1, changed=2, findings=0 -->",
+            "<!-- fleet-review: reviewed=1 changed=2 -->",
+            "Summary: reviewed <b>1</b> out of <b>2</b> changed files.",
+            "Summary: reviewed 1&nbsp;out of 2 changed files.",
+            "Summary: Files revi\u200bewed: 1/2.",
+            "Summary: reviewed 1 out\nof 2 changed files.",
+            "So far this reviewed 1 of 2.",
+        ):
+            with self.subTest(partial=partial):
+                self.out.seek(0)
+                self.out.truncate()
+                body = self.balanced(["a.md", "b.md"]) + "\n" + partial + "\n"
+                self.answer(payload([review(body=body)], files=["a.md", "b.md"]))
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn("appears to state partial coverage", self.out.getvalue())
+
+    def test_a_full_marker_does_not_read_as_a_partial(self) -> None:
+        body = (
+            self.balanced(["a.md"]) + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->\n"
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+
+    def test_a_page_info_that_says_nothing_keeps_the_table_out(self) -> None:
+        pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"])
+        pr["files"]["pageInfo"] = None
+        self.assertIn("malformed", pr_review.table_shortfall(pr))
 
     def test_a_review_history_past_the_window_keeps_the_table_out(self) -> None:
         pr = payload([review(body=self.balanced(["a.md"]))], files=["a.md"], older_reviews=True)
