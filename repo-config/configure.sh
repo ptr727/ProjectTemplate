@@ -79,7 +79,7 @@ if [ -z "$model" ]; then
         # Silently defaulting would hide a lookup that actually broke.
         # A repo simply absent from the registry is not an error.
         # The expression falls back through defaults.workflowModel to "release", so jq still exits 0 with a value.
-        if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry")"; then
+        if ! model="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .workflowModel) // .defaults.workflowModel // "release"' "$registry" | sed $'s/\r$//')"; then
             echo "Failed to read workflowModel from $registry (invalid JSON?). Pass the model explicitly (release|operational)." >&2
             exit 1
         fi
