@@ -82,8 +82,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
      shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
-     opening nothing and once per `<<` whose body a later line closes, and any reading holding an
-     unbounded wait denies.
+     opening nothing and once per `<<` whose tag it accepts and whose body a later line closes, and
+     any reading holding an unbounded wait denies.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -2298,7 +2298,9 @@ _HEREDOC_READING_LIMIT = 16
 
 
 def _heredoc_body_end(lines, start, opener):
-    """(the index after the body `opener` opens at line `start`, the terminator line kept, if any).
+    """(the index after the line closing the body `opener` opens at `start`, [that line]).
+
+    Where no line closes the body, this is (the line count, []).
 
     A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs. Accepting
     any indentation instead ended the body early on a doc line that merely read as the tag, and the
