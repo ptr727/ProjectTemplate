@@ -1073,8 +1073,8 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             help=(
                 f"target branch (default {DEFAULT_TARGET}). Resolved as the remote-tracking ref"
-                " <value>, then as origin/<value> unless <value> already starts refs/remotes/,"
-                " else as written, so another remote's branch can be named directly"
+                " <value>, then as origin/<value> unless <value> already starts with"
+                " refs/remotes/, else as written, so another remote's branch can be named directly"
             ),
         )
 
