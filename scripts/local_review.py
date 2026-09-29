@@ -283,10 +283,11 @@ def ref_exists(ref: str, root: Path) -> bool:
 
 
 def remote_tracking_ref(name: str, root: Path) -> str | None:
-    """`refs/remotes/<name>` where `show-ref --verify` accepts that exact name, else None.
+    """The exact `refs/remotes/<name>` ref, or None where `show-ref --verify` rejects that name.
 
     `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
     matches a local branch literally named that. `show-ref --verify` matches the name exactly.
+    Raises CannotRun where the ref it accepts does not resolve to a commit.
     """
     ref = f"refs/remotes/{name}"
     try:
@@ -325,8 +326,8 @@ def target_ref(target: str, root: Path) -> str:
     before `refs/remotes/`, so a local branch literally named that would otherwise define the
     review scope in place of the remote-tracking ref this function chose.
 
-    A target already written as `refs/remotes/...` names that exact ref, so it is tried alone
-    rather than also under `origin/`, where a branch literally carrying that name would win.
+    A target already written as `refs/remotes/...` is not also tried under `origin/`, where a
+    branch literally carrying that name would win.
     """
     prefix = "refs/remotes/"
     if target.startswith(prefix):
@@ -1072,8 +1073,8 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             help=(
                 f"target branch (default {DEFAULT_TARGET}). Resolved as the remote-tracking ref"
-                " <value>, then origin/<value>, where one exists, else as written, so another"
-                " remote's branch can be named directly"
+                " <value>, then as origin/<value> unless <value> already starts refs/remotes/,"
+                " else as written, so another remote's branch can be named directly"
             ),
         )
 
