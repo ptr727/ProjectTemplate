@@ -283,12 +283,10 @@ def ref_exists(ref: str, root: Path) -> bool:
 
 
 def remote_tracking_ref(name: str, root: Path) -> str | None:
-    """`refs/remotes/<name>` where that exact ref exists, else None.
+    """`refs/remotes/<name>` where `show-ref --verify` accepts that exact name, else None.
 
     `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
     matches a local branch literally named that. `show-ref --verify` matches the name exactly.
-    An exact ref that does not resolve to a commit refuses rather than returning None, since the
-    lookup would otherwise fall through to a same-named local branch.
     """
     ref = f"refs/remotes/{name}"
     try:
@@ -297,8 +295,7 @@ def remote_tracking_ref(name: str, root: Path) -> str | None:
         return None
     if not ref_exists(ref, root):
         raise CannotRun(
-            f"{ref} exists but does not resolve to a commit,"
-            " so the review scope cannot be determined"
+            f"{ref} does not resolve to a commit, so the review scope cannot be determined"
         )
     return ref
 
@@ -306,18 +303,18 @@ def remote_tracking_ref(name: str, root: Path) -> str | None:
 def target_ref(target: str, root: Path) -> str:
     """The ref a target name means, preferring the remote-tracking one.
 
-    A target that is already a remote-tracking ref as written, such as `upstream/main`, is chosen
-    first, in its qualified form, before anything else is tried. Without that check first, the
+    A target that is already a remote-tracking ref as written, such as `upstream/main`, is tried
+    first, in its qualified form, before anything else. Without that check first, the
     `origin/<target>` preference below is unconditional and can mis-scope this exact case: if a
     branch literally named `upstream/main` also exists on `origin`, `origin/upstream/main` would
     resolve and win, silently measuring the caller's explicitly named remote against `origin`
     instead.
 
-    Otherwise, `origin/<target>` is tried next and used whenever it exists as a remote-tracking
-    ref, so an ordinary fleet branch name works and so does one holding a slash. Treating any
-    slash as "already a full ref", which an earlier version did, silently measured a target such
-    as `release/v1` against the local branch of that name rather than the remote one, and a local
-    branch that has moved on then defines the review scope with no error at all.
+    Otherwise, `origin/<target>` is tried next as a remote-tracking ref, so an ordinary fleet
+    branch name works and so does one holding a slash. Treating any slash as "already a full ref",
+    which an earlier version did, silently measured a target such as `release/v1` against the
+    local branch of that name rather than the remote one, and a local branch that has moved on
+    then defines the review scope with no error at all.
 
     A value that resolves only as written is used as written last, which is what lets a
     fork-based flow name another remote's branch even when it is not already a remote-tracking
