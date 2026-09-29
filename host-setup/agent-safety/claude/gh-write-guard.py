@@ -1740,6 +1740,10 @@ _TEST_COMPARISONS = frozenset({"-lt", "-le", "-gt", "-ge"})
 _TEST_CLOSERS = {"[": "]", "[[": "]]", "test": ""}
 
 
+class _UnmodeledQuoting(ValueError):
+    """Quoting bash reads differently from the POSIX lex the shell tokens come from."""
+
+
 def _marked_lex(cmd):
     """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
 
@@ -1747,12 +1751,17 @@ def _marked_lex(cmd):
     Outside quotes a backslash takes the next character literally.
     Inside double quotes it escapes only a double quote or a backslash, and is kept before any other.
     Raises ValueError where the quoting does not parse, as that lex does.
+    Raises `_UnmodeledQuoting` where bash reads quoting that neither lex models.
+    Bash nests quotes inside a backtick, `$(`, or `${` that opens within double quotes.
+    Bash also reads `$'...'` as one string, in which a backslash escapes a single quote.
     """
     out = []
     tok, marked, state, i = "", False, None, 0
     while i < len(cmd):
         ch = cmd[i]
         i += 1
+        if state == '"' and (ch == "`" or (ch == "$" and cmd[i : i + 1] in ("(", "{"))):
+            raise _UnmodeledQuoting("nested quoting inside double quotes")
         if state in ("'", '"'):
             if ch == state:
                 state = "word"
@@ -1774,6 +1783,8 @@ def _marked_lex(cmd):
             continue
         if ch in _SHELL_OP_CHARS:
             tok, state = ch, "op"
+        elif ch == "'" and tok.endswith("$"):
+            raise _UnmodeledQuoting("ANSI-C quoting")
         elif ch in "'\"":
             marked, state = True, ch
         elif ch == "\\":
@@ -1796,14 +1807,39 @@ def _quoted_mask(cmd, toks):
     The shell tokens drop their quoting, so a quoted `";"` reads exactly as a separator does.
     A second lex that marks quoting says which is which, and is trusted only where its tokens are
     the shell tokens exactly, which a command the tokenizer's fallbacks split never gives.
+    Where bash reads quoting neither lex models, the earlier quote-keeping reading is kept instead.
+    That reading reads no escape, so this change moves no verdict on such a command.
     """
     try:
         marked = _marked_lex(cmd)
+    except _UnmodeledQuoting:
+        return _quote_kept_mask(cmd, toks)
     except ValueError:
         return None
     if [t for t, _ in marked] != toks:
         return None
     return [m for _, m in marked]
+
+
+def _quote_kept_mask(cmd, toks):
+    """The mask a quote-keeping lex gives, or None where it does not align with `toks`.
+
+    Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
+    """
+    try:
+        raw = _operator_lex(cmd, posix=False)
+    except (ValueError, TypeError):
+        return None
+    if len(raw) != len(toks):
+        return None
+    mask = [any(c in r for c in "'\"\\") for r in raw]
+    for r, t, q in zip(raw, toks, mask):
+        try:
+            if (shlex.split(r) if q else [r]) != [t]:
+                return None
+        except ValueError:
+            return None
+    return mask
 
 
 def _bound_in_condition(cond, quoted=None):
@@ -4504,6 +4540,16 @@ _WAIT_CASES = [
         'echo "say \\"hi\\""; while [ "$x" != ";" ]; do sleep 1; done',
         "deny",
         "an escaped quote before a quoted-operator loop with no comparison bounds nothing",
+    ),
+    (
+        'while [ "`echo "a -lt " x`" ]; do sleep 1; done',
+        "deny",
+        "a comparison inside a backtick that opens within double quotes bounds nothing",
+    ),
+    (
+        "echo \\; ; while [ x = $'\\' ';' -lt $'\\' ] ; true; do sleep 1; done",
+        "deny",
+        "a `;` after a `$'` string that a backslash does not close is a separator",
     ),
     (
         "echo bash -c 'while true; do sleep 1; done'",
