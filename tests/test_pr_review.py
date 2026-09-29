@@ -4815,18 +4815,19 @@ class TestCli(GqlCase):
         self.assertFalse(calls)
         self.assertNotIn("auto-request:", self.out.getvalue())
 
-    def test_a_request_that_records_nothing_ends_the_wait_at_once(self) -> None:
+    def test_a_request_that_records_nothing_ends_the_wait_after_one_interval(self) -> None:
         """The shape an exhausted allowance left: the mutation succeeds and leaves nothing behind.
 
         No pending reviewer and no new review-request event, so no review is coming, and polling
-        --timeout out only reports that as patience 45 minutes later.
+        --timeout out only reports that as patience 45 minutes later. The one wait is the first
+        poll delay, which gives a request GitHub is slow to record the time to show up.
         """
         self.answer(payload([review(oid=OLD)]))
         unchanged = request_state(events=("RRE_1",))
         calls = self.wire_bot("BOT_123", (unchanged, unchanged))
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
-        slept.assert_not_called()
+            self.assertEqual(48, self.cli(["wait", "7"]))
+        slept.assert_called_once_with(15)
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
         out = self.out.getvalue()
         self.assertIn("the request recorded nothing on the pull request", out)
@@ -4877,7 +4878,7 @@ class TestCli(GqlCase):
         self.wire_bot("BOT_123", (unchanged, unchanged))
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
-        self.assertEqual(1, slept.call_count)
+        self.assertEqual(2, slept.call_count)
         out = self.out.getvalue()
         self.assertNotIn("recorded nothing", out)
         self.assertNotIn("status=REQUEST_NOT_RECORDED", out)
@@ -4888,8 +4889,8 @@ class TestCli(GqlCase):
         unchanged = request_state(events=("RRE_1",))
         self.wire_history([hist_review(962, QUOTA_REFUSED)], (unchanged, unchanged))
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
-        slept.assert_not_called()
+            self.assertEqual(48, self.cli(["wait", "7"]))
+        slept.assert_called_once_with(15)
         out = self.out.getvalue()
         self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("note: the review request returned success and recorded nothing", out)
@@ -4929,24 +4930,58 @@ class TestCli(GqlCase):
             assert answered is not None
             return answered
 
-        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
-            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123")
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
         self.assertIsNone(recorded)
+        slept.assert_not_called()
 
     def test_a_lagging_answer_is_read_again_by_the_same_predicate(self) -> None:
-        """A request whose event lands after the answer is recorded, not blamed on the account."""
+        """A request whose event lands after the answer is recorded, not blamed on the account.
+
+        The second read waits out the settle delay first, since a read straight after the answer
+        sees the same lag the answer did.
+        """
         before = request_state(events=("RRE_1",))
         reads = [before, request_state(events=("RRE_1", "RRE_2"))]
+        order: list[str] = []
 
         def fake(query: str, **variables: object) -> dict:
             if "requestReviews" in query:
+                order.append("request")
                 return {"requestReviews": {"pullRequest": {"id": "PR_test", **before}}}
+            order.append("read")
             return {"repository": {"pullRequest": {"id": "PR_test", **reads.pop(0)}}}
 
-        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
-            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123")
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(
+                pr_review.time, "sleep", side_effect=lambda s: order.append(f"sleep {s}")
+            ),
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
         self.assertIs(True, recorded)
         self.assertFalse(reads)
+        self.assertEqual(["read", "request", "sleep 15", "read"], order)
+
+    def test_a_recorded_answer_is_not_waited_on(self) -> None:
+        """Only an answer reading as unrecorded pays the settle delay."""
+        before, after = RECORDED
+
+        def fake(query: str, **variables: object) -> dict:
+            answered = answer_request(query, variables, (before, after))
+            assert answered is not None
+            return answered
+
+        with (
+            mock.patch.object(pr_review, "gh_graphql", side_effect=fake),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            _, recorded = pr_review.request_copilot_review("o", "r", 7, "PR_test", "BOT_123", 15)
+        self.assertIs(True, recorded)
+        slept.assert_not_called()
 
     def test_a_request_past_the_tenth_pending_reviewer_is_read(self) -> None:
         """A busy pull request still shows the reviewer the request added."""

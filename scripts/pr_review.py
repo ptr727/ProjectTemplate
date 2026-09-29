@@ -197,8 +197,9 @@ Subcommands
            48 = the auto-request returned success and recorded nothing on the pull request,
            neither a pending reviewer nor a review-request event. Observed once, while the
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
-           read and clearing the set and requesting again changed nothing. The poll is skipped,
-           since no request exists to answer. It outranks 47, being read on this pull request,
+           read and clearing the set and requesting again changed nothing. It is decided one
+           poll interval after the request, and the rest of the poll is skipped, since no
+           request exists to answer. It outranks 47, being read on this pull request,
            and ranks under 0/40/41/42/43/44/45/46. `status` cannot report it, since a request that
            recorded nothing leaves nothing for a later read to find.
            64 = the write scope could not be established or excludes the target, checked before
@@ -1011,7 +1012,7 @@ def request_recorded(before: dict, after: dict) -> bool | None:
 
 
 def request_copilot_review(
-    owner: str, repo: str, num: int, pr_node_id: str, bot_id: str | None
+    owner: str, repo: str, num: int, pr_node_id: str, bot_id: str | None, settle: float
 ) -> tuple[str, bool | None]:
     """Ask Copilot to review the current head, and say in one line what happened.
 
@@ -1030,8 +1031,8 @@ def request_copilot_review(
 
     The second value is `request_recorded` over the state read before the request and the one
     the mutation answers with, and None where nothing was requested. An answer reading as
-    unrecorded is read once more with the same query and judged the same way, since the answer
-    can lag the request it reports.
+    unrecorded is read once more with the same query and judged the same way, `settle` seconds
+    later, since GitHub can take a moment to record a request it has already accepted.
     """
     if not bot_id:
         return (
@@ -1048,6 +1049,7 @@ def request_copilot_review(
     after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
     recorded = request_recorded(before, after)
     if recorded is False:
+        time.sleep(settle)
         again = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
         recorded = request_recorded(before, again or {})
     line = f"requested a Copilot review on the current head (bot {bot_id})"
@@ -3699,7 +3701,7 @@ def main(argv: list[str] | None = None) -> int:
     final: dict | None = None
     if not done and not answer and not drift and not reviewer_requested(pr):
         line, recorded = request_copilot_review(
-            owner, repo, a.number, pr["id"], copilot_bot_id(history)
+            owner, repo, a.number, pr["id"], copilot_bot_id(history), delays[0]
         )
         if recorded is False:
             final = gql(Q_FULL, owner, repo, a.number)
