@@ -2071,8 +2071,10 @@ def _timeout_bounds_wrapper(toks, w):
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no process and
-    the `timeout` goes on waiting for a child that keeps running. Where such a `timeout` runs another
-    `timeout`, the inner one is read in its place, so `timeout -s 0 900 timeout 800 bash -c '<loop>'` is bounded.
+    the `timeout` goes on waiting for a child that keeps running. Where a `timeout` runs another
+    `timeout`, only the inner one is read, since it runs its child in a process group of its own, which
+    the outer one's SIGKILL never reaches. So `timeout -s 0 900 timeout 800 bash -c '<loop>'` is bounded
+    and `timeout -s KILL 900 timeout -s 0 800 bash -c '<loop>'` is not.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2108,13 +2110,12 @@ def _timeout_bounds_wrapper(toks, w):
             continue
         if not _TIMEOUT_DURATION.match(tok):
             return False
-        if not _is_timeout_signal_zero(signal) or _TIMEOUT_DURATION.match(kill_after):
-            return True
+        bounded = not _is_timeout_signal_zero(signal) or bool(_TIMEOUT_DURATION.match(kill_after))
         i += 1
         while i < w and _is_command_prefix(toks[i]):
             i += 1
         if i >= w or not _is_timeout_exe(toks[i]):
-            return False
+            return bounded
         i += 1
         signal = kill_after = ""
     return False
@@ -4338,6 +4339,16 @@ _WAIT_CASES = [
         "timeout -s 0 900 nice timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "while an inner timeout sending signal 0 too bounds nothing either",
+    ),
+    (
+        "timeout -s 0 -k 30 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an outer kill-after kills only the inner timeout, never the child in its own process group",
+    ),
+    (
+        "timeout -s KILL 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and neither does an outer SIGKILL, so only the inner timeout is read",
     ),
     (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",

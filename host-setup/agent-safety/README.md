@@ -196,9 +196,12 @@ text says, because the harm it covers was never in the text.
    reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
-   where its value takes the form a duration takes here. A signal-0 `timeout` that runs another
-   `timeout` is judged by that inner one, so `timeout -s 0 900 timeout 800 bash -c '<the loop>'`
-   is bounded. The second is an arithmetic guard in the
+   where its value takes the form a duration takes here. Where a `timeout` runs another `timeout`,
+   only the inner one is judged, since it runs its child in a process group of its own, which the
+   outer one's SIGKILL never reaches. So `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is
+   bounded and `timeout -s KILL 900 timeout -s 0 800 bash -c '<the loop>'` is not. That costs a
+   false deny where the outer one sends a signal the inner one passes on, as the default SIGTERM
+   is. The second is an arithmetic guard in the
    loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
