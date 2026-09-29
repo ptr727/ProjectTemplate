@@ -197,12 +197,16 @@ text says, because the harm it covers was never in the text.
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
    where its value takes the form a duration takes here. Where a `timeout` runs another `timeout`,
-   only the inner one is judged, since it runs its child in a process group of its own, which the
-   outer one's SIGKILL never reaches. So `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is
-   bounded and `timeout -s KILL 900 timeout -s 0 800 bash -c '<the loop>'` is not. That costs a
-   false deny where the outer one sends a signal the inner one passes on, as the default SIGTERM
-   is. The second is an arithmetic guard in the
-   loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
+   the outer one signals only the inner one, which runs its child in a process group of its own and
+   passes on `HUP`, `INT`, `QUIT`, and `TERM`, the default. Any other signal, or a kill-after's
+   SIGKILL, reaches no further than the inner `timeout`, and where it ends or stops that one, the
+   loop runs on with nothing left to stop it. An outer one sending either is therefore no bound and
+   bounds nothing beneath it, while one sending signal 0 with no kill-after is inert. That makes
+   `timeout -s 0 900 timeout 800 bash -c '<the loop>'` and `timeout 900 timeout -s 0 800 bash -c
+   '<the loop>'` bounded, and `timeout -s KILL 10 timeout 800 bash -c '<the loop>'` not. It costs a
+   false deny where the inner one would have stopped the loop before the outer one's signal, and
+   where a `-f`/`--foreground` inner one keeps its child in the outer one's process group.
+   The second is an arithmetic guard in the loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a

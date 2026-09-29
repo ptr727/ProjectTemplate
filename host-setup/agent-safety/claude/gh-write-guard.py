@@ -1946,21 +1946,39 @@ _TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
 _TIMEOUT_SIGNAL_ZERO_NAME = re.compile(r"^(?:sig)?(?:0+|exit)$", re.IGNORECASE)
 
 
-def _is_timeout_signal_zero(val):
-    """True if GNU `timeout` reads the `-s` value as signal 0, which is delivered to no process.
+def _timeout_signal_number(val):
+    """The signal GNU `timeout` reads a digit-string `-s` value as, or None where it reads none.
 
     A bare number is masked the way GNU `timeout` masks it to accept a shell exit status, 0xFF from
     255 up and 0x7F below, so `128` and `256` are signal 0 as surely as `0` is. A number past the
-    range of an int is rejected as no signal at all, so it is never read as 0. The length is checked
-    before `int()`, which raises on a digit string past 4300 digits and would crash the hook.
+    range of an int is rejected as no signal at all. The length is checked before `int()`, which
+    raises on a digit string past 4300 digits and would crash the hook.
     """
+    digits = val.lstrip("0")
+    if len(digits) > 10:
+        return None
+    n = int(digits or "0")
+    return n & (0xFF if n >= 0xFF else 0x7F) if n <= 0x7FFFFFFF else None
+
+
+def _is_timeout_signal_zero(val):
+    """True if GNU `timeout` reads the `-s` value as signal 0, which is delivered to no process."""
     if re.fullmatch(r"[0-9]+", val):
-        digits = val.lstrip("0")
-        if len(digits) > 10:
-            return False
-        n = int(digits or "0")
-        return n <= 0x7FFFFFFF and n & (0xFF if n >= 0xFF else 0x7F) == 0
+        return _timeout_signal_number(val) == 0
     return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
+
+
+def _is_timeout_signal_passed_on(val):
+    """True if a `timeout` receiving this `-s` value, the default SIGTERM when empty, passes it on.
+
+    GNU `timeout` catches HUP, INT, QUIT, and TERM and sends each on to its child. Their numbers are
+    the same on Linux and macOS.
+    """
+    if not val:
+        return True
+    if re.fullmatch(r"[0-9]+", val):
+        return _timeout_signal_number(val) in (1, 2, 3, 15)
+    return bool(re.fullmatch(r"(?:sig)?(?:hup|int|quit|term)", val, re.IGNORECASE))
 
 
 def _timeout_option(tok):
@@ -2071,10 +2089,14 @@ def _timeout_bounds_wrapper(toks, w):
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no process and
-    the `timeout` goes on waiting for a child that keeps running. Where a `timeout` runs another
-    `timeout`, only the inner one is read, since it runs its child in a process group of its own, which
-    the outer one's SIGKILL never reaches. So `timeout -s 0 900 timeout 800 bash -c '<loop>'` is bounded
-    and `timeout -s KILL 900 timeout -s 0 800 bash -c '<loop>'` is not.
+    the `timeout` goes on waiting for a child that keeps running.
+
+    Where a `timeout` runs another `timeout`, the outer one signals only the inner one, which runs its
+    child in a process group of its own and passes on only the signals `_is_timeout_signal_passed_on`
+    names. Any other signal, or a kill-after's SIGKILL, reaches no further than the inner `timeout`, and
+    where it ends or stops that one, its child runs on with nothing left to stop it. So an outer `timeout` sending such a signal, or carrying a
+    kill-after, leaves the run unbounded, one sending signal 0 with no kill-after is inert, and the run
+    is bounded when the innermost one is a bound or an outer one sends a signal the inner one passes on.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2095,6 +2117,7 @@ def _timeout_bounds_wrapper(toks, w):
         return False
     i = start + 1
     signal = kill_after = ""
+    bounded = False
     while i < w:
         tok = toks[i]
         if tok.startswith("-"):
@@ -2110,12 +2133,15 @@ def _timeout_bounds_wrapper(toks, w):
             continue
         if not _TIMEOUT_DURATION.match(tok):
             return False
-        bounded = not _is_timeout_signal_zero(signal) or bool(_TIMEOUT_DURATION.match(kill_after))
+        kills = bool(_TIMEOUT_DURATION.match(kill_after))
         i += 1
         while i < w and _is_command_prefix(toks[i]):
             i += 1
         if i >= w or not _is_timeout_exe(toks[i]):
-            return bounded
+            return bounded or kills or not _is_timeout_signal_zero(signal)
+        if kills or not (_is_timeout_signal_zero(signal) or _is_timeout_signal_passed_on(signal)):
+            return False
+        bounded = bounded or not _is_timeout_signal_zero(signal)
         i += 1
         signal = kill_after = ""
     return False
@@ -4348,7 +4374,27 @@ _WAIT_CASES = [
     (
         "timeout -s KILL 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "and neither does an outer SIGKILL, so only the inner timeout is read",
+        "and neither does an outer SIGKILL",
+    ),
+    (
+        "timeout -s KILL 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "which, sent before the inner deadline, ends the inner timeout and leaves the loop with no bound",
+    ),
+    (
+        "timeout -s USR1 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as any signal the inner timeout does not pass on does",
+    ),
+    (
+        "timeout 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while an outer SIGTERM, which the inner timeout passes on, bounds the loop itself",
+    ),
+    (
+        "timeout -s 129 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "as a number masking to HUP does",
     ),
     (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
