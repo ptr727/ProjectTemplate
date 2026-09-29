@@ -2071,7 +2071,8 @@ def _timeout_bounds_wrapper(toks, w):
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no process and
-    the `timeout` goes on waiting for a child that keeps running.
+    the `timeout` goes on waiting for a child that keeps running. Where such a `timeout` runs another
+    `timeout`, the inner one is read in its place, so `timeout -s 0 900 timeout 800 bash -c '<loop>'` is bounded.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2107,7 +2108,15 @@ def _timeout_bounds_wrapper(toks, w):
             continue
         if not _TIMEOUT_DURATION.match(tok):
             return False
-        return not _is_timeout_signal_zero(signal) or bool(_TIMEOUT_DURATION.match(kill_after))
+        if not _is_timeout_signal_zero(signal) or _TIMEOUT_DURATION.match(kill_after):
+            return True
+        i += 1
+        while i < w and _is_command_prefix(toks[i]):
+            i += 1
+        if i >= w or not _is_timeout_exe(toks[i]):
+            return False
+        i += 1
+        signal = kill_after = ""
     return False
 
 
@@ -4319,6 +4328,16 @@ _WAIT_CASES = [
         "timeout -s 0 -k 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "while a zero kill-after disables it and bounds nothing",
+    ),
+    (
+        "timeout -s 0 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a signal-0 timeout running another timeout is bounded by the inner one",
+    ),
+    (
+        "timeout -s 0 900 nice timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while an inner timeout sending signal 0 too bounds nothing either",
     ),
     (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
