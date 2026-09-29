@@ -46,12 +46,13 @@ Subcommands
            states none carries the newest round that states some forward, bounded on the change
            set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
-           The table stands in only past all three, since over the rounds measured it names the
-           whole changed set on partial rounds too, which is why any statement wins over it.
+           The table stands in wherever no statement reaches the head, a carry the bound refuses
+           included, and a statement that does reach it wins, since over the rounds measured the
+           table names the whole changed set on partial rounds too.
            Copilot's Balanced review effort, the default since 2026-09-28, writes the table and
            almost never a statement, which is the case the table reading exists for.
-           Where the head branch lacks the current review instructions, bring them onto it,
-           push, and run `wait`, which requests a round on the new head, and where the
+           Where the head branch lacks the current review instructions, which a round at Lite
+           effort needs to state coverage, bring them onto it, push, and run `wait`, which requests a round on the new head, and where the
            comparison could not be read, run `status` again. Past those,
            hand the state to the maintainer rather than retrying into it, since a round
            re-requested on the same head states coverage or carries a table only by chance.
@@ -1962,8 +1963,11 @@ def table_shortfall(pr: dict) -> str:
     if truncated:
         return (
             f"the pull request changes more than the {FILES_WINDOW} files this reads, so the "
-            f"table cannot be compared against all of them, and no push or round clears that"
+            f"table cannot be compared against all of them until a push brings the pull request "
+            f"back within that window"
         )
+    if not changed and pr.get("files") is None:
+        return "the changed-file list is absent from the query, so the table has nothing to match"
     if not changed:
         return "the pull request changes no files, so the table has nothing to match"
     diff = {bare_path(p) for p in changed}
@@ -2224,12 +2228,13 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "newest round that states some forward, bounded on the change set, and failing "
             "that, a round covering the head whose own file table names exactly the changed "
             "files stands in. Reaching here means that table is missing, names a different set, "
-            "or has no changed-file list to match, which the digest above names, and also one "
-            "of three things it says which of: no round ever stated "
+            "or has no changed-file list to match, the list being absent, empty, or longer than "
+            "this reads, which the digest above names, and also one of three things it says "
+            "which of: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current fleet-code-review skill and Copilot instructions, since a round states "
-            "no coverage without them, and where they are missing bring them onto the branch, "
+            "the current fleet-code-review skill and Copilot instructions, since a round at Lite "
+            "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
             "one cause of that. Where the digest says the pull request changes more files than "

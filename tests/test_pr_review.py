@@ -2747,6 +2747,29 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertIn("coverage=carried:PARTIAL", out)
         self.assertNotIn("coverage=table", out)
 
+    def test_a_partial_the_bound_refuses_does_not_keep_the_table_from_standing_in(self) -> None:
+        """A statement about a diff this head no longer has does not reach it, partial or not."""
+        pr = payload(
+            [
+                review(oid=OLD, body=self.PART, at=EARLY, rid="PRR_a"),
+                review(
+                    oid=HEAD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="PRR_b"
+                ),
+            ],
+            files=["a.py", "b.py"],
+        )
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, pr_review.report_verdict(pr, "o", "r"))
+            out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        self.assertIn("coverage=table", out)
+        self.assertIn("COVERAGE IS NOT CARRIED", out)
+
+    def test_a_files_connection_the_query_did_not_return_is_not_an_empty_change_set(self) -> None:
+        pr = payload([review(oid=HEAD, body=summarized(["a.py"], covers=""))], files=["a.py"])
+        pr["files"] = None
+        self.assertIn("absent from the query", pr_review.table_shortfall(pr))
+
     def test_a_change_set_that_moved_since_that_round_carries_nothing(self) -> None:
         """The bound the carry has, and the state exit 45 is still for.
 

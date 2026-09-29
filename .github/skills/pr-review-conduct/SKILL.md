@@ -47,8 +47,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    statement always wins, and `pr_review.py` refuses the carry where it cannot read that set at
    both commits. Where no statement reaches the head either way, a round covering it whose own
    file table names exactly the changed files covers it, `coverage=table` in the digest, which is
-   the reading a Copilot round at Balanced review effort gives, and any statement wins over that
-   table. The coverage this item
+   the reading a Copilot round at Balanced review effort gives, and a statement that reaches the
+   head, stated on it or carried to it, wins over that table. A statement the carry refuses does
+   not reach it. The coverage this item
    requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
    `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is
    a required reviewer: an advisory reviewer's absence blocks nothing, while its findings owe
