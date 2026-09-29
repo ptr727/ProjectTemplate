@@ -228,13 +228,17 @@ class ContentKeyCase(RepoCase):
         remote = run(self.tmp, "rev-parse", "origin/release/v1").strip()
         local = run(self.tmp, "rev-parse", "release/v1").strip()
         self.assertNotEqual(remote, local, "fixture does not distinguish the two")
-        self.assertEqual(local_review.target_ref("release/v1", self.tmp), "origin/release/v1")
+        self.assertEqual(
+            local_review.target_ref("release/v1", self.tmp), "refs/remotes/origin/release/v1"
+        )
         self.assertEqual(local_review.merge_base("release/v1", self.tmp), remote)
 
     def test_a_target_that_only_exists_on_another_remote_is_used_as_written(self) -> None:
         """This is what lets a fork-based flow name an upstream branch directly."""
         run(self.tmp, "update-ref", "refs/remotes/upstream/main", "HEAD")
-        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+        self.assertEqual(
+            local_review.target_ref("upstream/main", self.tmp), "refs/remotes/upstream/main"
+        )
 
     def test_an_explicit_remote_tracking_target_wins_over_a_same_named_origin_branch(self) -> None:
         """An explicitly named remote-tracking ref must not lose to the origin/ preference.
@@ -256,7 +260,26 @@ class ContentKeyCase(RepoCase):
             run(self.tmp, "rev-parse", "upstream/main").strip(),
             "fixture does not distinguish the two",
         )
-        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+        self.assertEqual(
+            local_review.target_ref("upstream/main", self.tmp), "refs/remotes/upstream/main"
+        )
+
+    def test_a_same_named_local_branch_cannot_shadow_a_remote_tracking_target(self) -> None:
+        """Git resolves a short name against refs/heads/ first, so the ref must be qualified.
+
+        A local branch literally named `upstream/main` sits on a different commit than the
+        remote-tracking ref of that name, and the merge base must come from the remote one.
+        """
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", "HEAD")
+        run(self.tmp, "checkout", "-b", "upstream/main")
+        (self.tmp / "moved.txt").write_text("local moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "local only")
+        run(self.tmp, "checkout", "task")
+        remote = run(self.tmp, "rev-parse", "refs/remotes/upstream/main").strip()
+        local = run(self.tmp, "rev-parse", "refs/heads/upstream/main").strip()
+        self.assertNotEqual(remote, local, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("upstream/main", self.tmp), remote)
 
     def test_a_target_resolving_nowhere_is_a_boundary(self) -> None:
         with self.assertRaises(local_review.CannotRun):

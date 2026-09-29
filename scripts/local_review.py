@@ -300,12 +300,17 @@ def target_ref(target: str, root: Path) -> str:
     A value that resolves only as written is used as written last, which is what lets a
     fork-based flow name another remote's branch even when it is not already a remote-tracking
     ref (for example a local-only branch checked out from that remote).
+
+    A remote-tracking result is returned fully qualified, as `refs/remotes/...`. Git resolves a
+    short name such as `upstream/main` against `refs/heads/` before `refs/remotes/`, so a local
+    branch literally named that would otherwise define the review scope in place of the
+    remote-tracking ref this function chose.
     """
     if ref_exists(f"refs/remotes/{target}", root):
-        return target
+        return f"refs/remotes/{target}"
     remote = f"origin/{target}"
-    if ref_exists(remote, root):
-        return remote
+    if ref_exists(f"refs/remotes/{remote}", root):
+        return f"refs/remotes/{remote}"
     if ref_exists(target, root):
         return target
     raise CannotRun(
