@@ -4883,7 +4883,10 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(48, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
-        self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+        out = self.out.getvalue()
+        self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("note: the review request returned success and recorded nothing", out)
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
 
     def test_a_drifted_login_in_the_answer_is_not_read_as_unrecorded(self) -> None:
         """A renamed reviewer is what the poll reports, so the request is not judged on its spelling."""

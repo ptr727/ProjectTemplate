@@ -3701,7 +3701,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"auto-request: {line}")
         # No re-read here: Copilot never resolves within the round trip that just issued the request.
         # The loop below picks up fresh state on its own first iteration instead of this spending a second call to learn nothing new.
-    if signal:
+    if recorded is False:
+        print(
+            "note: the review request returned success and recorded nothing on this pull "
+            "request, no pending reviewer and no review-request event, so this wait stops here "
+            "rather than polling --timeout out against a request that does not exist."
+        )
+    elif signal:
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
@@ -3712,12 +3718,6 @@ def main(argv: list[str] | None = None) -> int:
             "quota-limit refusal with nothing answering it since, so this wait stops here "
             "rather than polling --timeout out against the same account state. Pass "
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
-        )
-    elif recorded is False:
-        print(
-            "note: the review request returned success and recorded nothing on this pull "
-            "request, no pending reviewer and no review-request event, so this wait stops here "
-            "rather than polling --timeout out against a request that does not exist."
         )
     else:
         i = 0
