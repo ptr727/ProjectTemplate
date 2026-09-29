@@ -299,6 +299,16 @@ class ContentKeyCase(RepoCase):
         self.assertNotEqual(base, tip, "fixture does not distinguish the two")
         self.assertEqual(local_review.merge_base("feat", self.tmp), base)
 
+    def test_a_remote_tracking_ref_naming_a_non_commit_refuses_rather_than_falls_through(
+        self,
+    ) -> None:
+        """Falling through would reach the as-written step, where a same-named branch wins."""
+        tree = run(self.tmp, "write-tree").strip()
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", tree)
+        run(self.tmp, "branch", "upstream/main", "HEAD")
+        with self.assertRaises(local_review.CannotRun):
+            local_review.target_ref("upstream/main", self.tmp)
+
     def test_a_local_branch_named_like_a_qualified_remote_ref_is_not_remote_tracking(
         self,
     ) -> None:
