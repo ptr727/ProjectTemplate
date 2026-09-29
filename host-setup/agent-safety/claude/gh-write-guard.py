@@ -1968,17 +1968,9 @@ def _is_timeout_signal_zero(val):
     return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
 
 
-def _is_timeout_signal_passed_on(val):
-    """True if a `timeout` receiving this `-s` value, the default SIGTERM when empty, passes it on.
-
-    GNU `timeout` catches HUP, INT, QUIT, and TERM and sends each on to its child. Their numbers are
-    the same on Linux and macOS.
-    """
-    if not val:
-        return True
-    if re.fullmatch(r"[0-9]+", val):
-        return _timeout_signal_number(val) in (1, 2, 3, 15)
-    return bool(re.fullmatch(r"(?:sig)?(?:hup|int|quit|term)", val, re.IGNORECASE))
+def _is_timeout_signal_unknown(val):
+    """True if the `-s` value is expanded by the shell at run time, so the text names no signal."""
+    return "$" in val or "`" in val
 
 
 def _timeout_option(tok):
@@ -2088,15 +2080,17 @@ def _timeout_bounds_wrapper(toks, w):
     `echo` in a run of its own.
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
-    unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no process and
-    the `timeout` goes on waiting for a child that keeps running.
+    unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
+    process and the `timeout` goes on waiting for a child that keeps running.
 
-    Where a `timeout` runs another `timeout`, the outer one signals only the inner one, which runs its
-    child in a process group of its own and passes on only the signals `_is_timeout_signal_passed_on`
-    names. Any other signal, or a kill-after's SIGKILL, reaches no further than the inner `timeout`, and
-    where it ends or stops that one, its child runs on with nothing left to stop it. So an outer `timeout` sending such a signal, or carrying a
-    kill-after, leaves the run unbounded, one sending signal 0 with no kill-after is inert, and the run
-    is bounded when the innermost one is a bound or an outer one sends a signal the inner one passes on.
+    A `-s` value the shell expands at run time, such as `"$SIG"`, is read the same way, since the
+    text cannot say it is not signal 0.
+
+    Where a `timeout` runs another `timeout`, the run is bounded only when every outer one sends
+    signal 0 with no kill-after, which is inert, and the innermost one is a bound. Any other nesting
+    is read as no bound, since an outer signal can end the inner `timeout` before its deadline and
+    leave the loop under it running. That is a false deny wherever the outer signal would have
+    stopped the loop too.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2117,7 +2111,6 @@ def _timeout_bounds_wrapper(toks, w):
         return False
     i = start + 1
     signal = kill_after = ""
-    bounded = False
     while i < w:
         tok = toks[i]
         if tok.startswith("-"):
@@ -2138,10 +2131,11 @@ def _timeout_bounds_wrapper(toks, w):
         while i < w and _is_command_prefix(toks[i]):
             i += 1
         if i >= w or not _is_timeout_exe(toks[i]):
-            return bounded or kills or not _is_timeout_signal_zero(signal)
-        if kills or not (_is_timeout_signal_zero(signal) or _is_timeout_signal_passed_on(signal)):
+            return kills or not (
+                _is_timeout_signal_zero(signal) or _is_timeout_signal_unknown(signal)
+            )
+        if kills or not _is_timeout_signal_zero(signal):
             return False
-        bounded = bounded or not _is_timeout_signal_zero(signal)
         i += 1
         signal = kill_after = ""
     return False
@@ -4367,39 +4361,49 @@ _WAIT_CASES = [
         "while an inner timeout sending signal 0 too bounds nothing either",
     ),
     (
-        "timeout -s 0 -k 30 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
-        "deny",
-        "an outer kill-after kills only the inner timeout, never the child in its own process group",
+        "timeout -s 0 900 timeout -s 0 800 timeout 700 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "every outer timeout sending signal 0 leaves the innermost one as the bound",
     ),
     (
-        "timeout -s KILL 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "timeout -s 0 -k 30 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "and neither does an outer SIGKILL",
+        "an outer kill-after is not inert, so the nesting is read as no bound",
+    ),
+    (
+        "timeout 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and neither is an outer SIGTERM, a declared false deny",
+    ),
+    (
+        "timeout -k 30 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor one carrying a kill-after, however the inner one is spelled",
     ),
     (
         "timeout -s KILL 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "which, sent before the inner deadline, ends the inner timeout and leaves the loop with no bound",
+        "an outer signal can end the inner timeout before its deadline and leave the loop running",
     ),
     (
-        "timeout -s USR1 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "timeout 900 time timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "as any signal the inner timeout does not pass on does",
-    ),
-    (
-        "timeout 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
-        "allow",
-        "while an outer SIGTERM, which the inner timeout passes on, bounds the loop itself",
-    ),
-    (
-        "timeout -s 129 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
-        "allow",
-        "as a number masking to HUP does",
+        "a command prefix between the two changes nothing about the outer one",
     ),
     (
         "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "and a numbered signal only looks like zero when every digit is",
+    ),
+    (
+        "timeout -s \"$SIG\" 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a signal the shell expands at run time may be signal 0, so it is no bound",
+    ),
+    (
+        "timeout -s \"$SIG\" -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "unless a kill-after follows it with a SIGKILL",
     ),
     (
         "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",

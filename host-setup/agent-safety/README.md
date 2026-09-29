@@ -196,17 +196,15 @@ text says, because the harm it covers was never in the text.
    reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
-   where its value takes the form a duration takes here. Where a `timeout` runs another `timeout`,
-   the outer one signals only the inner one, which runs its child in a process group of its own and
-   passes on `HUP`, `INT`, `QUIT`, and `TERM`, the default. Any other signal, or a kill-after's
-   SIGKILL, reaches no further than the inner `timeout`, and where it ends or stops that one, the
-   loop runs on with nothing left to stop it. An outer one sending either is therefore no bound and
-   bounds nothing beneath it, while one sending signal 0 with no kill-after is inert. That makes
-   `timeout -s 0 900 timeout 800 bash -c '<the loop>'` and `timeout 900 timeout -s 0 800 bash -c
-   '<the loop>'` bounded, and `timeout -s KILL 10 timeout 800 bash -c '<the loop>'` not. It costs a
-   false deny where the inner one would have stopped the loop before the outer one's signal, and
-   where a `-f`/`--foreground` inner one keeps its child in the outer one's process group.
-   The second is an arithmetic guard in the loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
+   where its value takes the form a duration takes here. A `-s` value the shell expands at run
+   time, such as `"$SIG"`, is read the same way, since the text cannot say it is not signal 0.
+   Where a `timeout` runs another `timeout`, the run is bounded only when every outer one sends
+   signal 0 with no kill-after, which is inert, and the innermost one is a bound, so `timeout -s 0
+   900 timeout 800 bash -c '<the loop>'` is bounded. Every other nesting is read as no bound, since
+   an outer signal can end the inner `timeout` before its deadline and leave the loop running. That
+   is a false deny wherever the outer signal would have stopped the loop too, as it does in
+   `timeout 900 timeout -s 0 800 bash -c '<the loop>'`. The second is an arithmetic guard in the
+   loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
@@ -268,8 +266,9 @@ text says, because the harm it covers was never in the text.
    the same blind spot every requirement here has. A redirect from a named pipe is a file path in
    the command text, indistinguishable from a redirect from a file. And a `timeout` sending any
    other signal that ends nothing is still read as a bound. That covers a signal whose default
-   action ends nothing, such as `CONT`, `CHLD`, or a stop signal, and one the payload handles and
-   ignores, which is not decidable from the command text at all. A false deny on an ordinary loop
+   action ends nothing, such as `CONT`, `CHLD`, or a stop signal, `HUP` sent to a payload run under
+   `nohup`, which ignores it, and one the payload handles and ignores, which is not decidable from
+   the command text at all. A false deny on an ordinary loop
    costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
    states the prohibition for every agent whether or not a hook is installed.
 
