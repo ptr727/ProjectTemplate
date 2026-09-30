@@ -237,18 +237,19 @@ in the new tree.
   own, so run `uv tool install pre-commit` once per host if not already installed, then
   `pre-commit install` there. `pre-commit` is never a project dependency, so this is the same
   regardless of profile.
-- **Never install or switch a hook from a linked worktree where the hook or its setting is
-  shared.** A linked worktree is one where `git rev-parse --git-dir` and
-  `git rev-parse --git-common-dir` differ. Its git config is the base clone's, and so is its hooks
-  directory when no `core.hooksPath` is set, so an installer run there rewrites the hook or the
-  setting for every checkout of the repository, the maintainer's own included. Switching
+- **Never change a shared hook or its setting from a linked worktree.** A linked worktree is one
+  where `git rev-parse --git-dir` and `git rev-parse --git-common-dir`, both run from the worktree
+  root, print different paths. Its git config is the base clone's, and so is its hooks directory
+  when no `core.hooksPath` is set, so an installer that changes either there changes it for every
+  checkout of the repository, the maintainer's own included. Rewriting a setting to the value it
+  already holds, as the Husky.Net step above does, changes nothing and is not this case. Switching
   installers is the same act, since `prek install` over a pre-commit framework hook moves the
   original aside and chains to it, which has left every commit in every checkout failing on the
   chained script. A missing or wrong shared hook is reported to the maintainer, not repaired from
   the worktree.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they
-  differ from these standard cases, except that none of them is run from a linked worktree
-  against a shared hook or setting, per the bullet above. Do not infer a replacement command from
+  differ from these standard cases, except that none of them changes a shared hook or setting
+  from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
 
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
