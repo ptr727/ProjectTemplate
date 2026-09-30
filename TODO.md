@@ -458,7 +458,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Adopt the merge-bot caller stub, which is one file per repo replacing the copied job bodies.** The audit reports the missing `merge-bot` caller job on every copy until the repo adopts, which is the work list.
   - **Hub state** - Done on `develop`, where `.github/workflows/merge-bot-task.yml` is the task and the hub's own `merge-bot-pull-request.yml` is the stub. The stub a repo copies is in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot", and its pin is the first hub release carrying the task, so no repo can adopt before that release.
-  - **Outstanding** - Every repo still carrying the job bodies rather than the stub, which the audit's missing `merge-bot` job finding lists. PhotoCleaner adopted in ptr727/PhotoCleaner#53 and promoted it in ptr727/PhotoCleaner#54 on 2026-08-15, and HomeAutomation-Config adopted in ptr727/HomeAutomation-Config#58 on 2026-08-19, so the repos still carrying the bodies, homeassistant-purpleair for the `rules` input among them, are the adopters still to come. HomeAutomation-Config piloted the direct-to-`develop` path in that adoption while it was still an operational repo, and none of the repos still carrying the bodies is operational, so no pilot of that path is owed.
+  - **Outstanding** - Every repo still carrying the job bodies rather than the stub, which the audit's missing `merge-bot` job finding lists. PhotoCleaner adopted in ptr727/PhotoCleaner#53 and promoted it in ptr727/PhotoCleaner#54 on 2026-08-15, and HomeAutomation-Config adopted in ptr727/HomeAutomation-Config#58 on 2026-08-19, so the repos still carrying the bodies, homeassistant-purpleair for the `rules` input among them, are the adopters still to come. HomeAutomation-Config piloted the direct-to-`develop` path while it was still an operational repo, where [a merge-bot run][ha-config-pilot-run] merged the Dependabot pull request ptr727/HomeAutomation-Config#412 into `develop` on 2026-09-23, and none of the repos still carrying the bodies is operational, so no pilot of that path is owed.
   - **Issue** - [#521][issue-521], whose hub half is done and whose sweep half this is.
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
@@ -545,6 +545,10 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 <!-- Pull requests -->
 
 [pr-620]: https://github.com/ptr727/ProjectTemplate/pull/620
+
+<!-- Runs -->
+
+[ha-config-pilot-run]: https://github.com/ptr727/HomeAutomation-Config/actions/runs/35890754503
 
 <!-- Upstream -->
 
