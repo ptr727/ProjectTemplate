@@ -156,14 +156,23 @@ class TestTierTables(BaitCase):
     def test_a_lookalike_letter_is_still_reported(self) -> None:
         """Beside ASCII, another script's letter or a styled Latin form is usually a lookalike."""
         rules = {"charset", "charset-unknown"}
-        for ch in ("\u0430", "\u03bf", "\u02bc", "\u00aa", "\uff41"):
+        for ch in ("\u0430", "\u03bf", "\u02bc", "\u00aa", "\uff41", "\ufb01", "\u2090"):
             with self.subTest(codepoint=f"U+{ord(ch):04X}"):
                 self.assertEqual(["charset-unknown"], self.kinds(f"p{ch}ss here\n", rules))
 
-    def test_a_combining_mark_standing_alone_is_still_reported(self) -> None:
-        """A mark carried by no Latin letter spells no name, so it is reported rather than passed."""
+    def test_a_mark_that_spells_no_name_is_still_reported(self) -> None:
+        """A mark that is no diacritic, or that no Latin letter carries, is reported, not passed."""
         rules = {"charset", "charset-unknown"}
-        for text in ("a \u0301 here", "\u0301 here", "3\u0301 here", "\u0436\u0301 here"):
+        for text in (
+            "a \u0301 here",
+            "\u0301 here",
+            "3\u0301 here",
+            "\u0436\u0301 here",
+            "pass\ufe0f word",
+            "a\U000e0100 b",
+            "a\u034fb",
+            "a\u0941 here",
+        ):
             with self.subTest(text=text):
                 self.assertIn("charset-unknown", self.kinds(f"{text}\n", rules))
 

@@ -1028,6 +1028,10 @@ TIER3 = frozenset(
     }
 )
 
+COMBINING_DIACRITICS = frozenset(chr(c) for c in range(0x300, 0x370)) - {
+    unicodedata.lookup("COMBINING GRAPHEME JOINER")
+}
+
 # A digit, unit, or operator on either side makes a tier-2 character the range it describes.
 NUMERIC = re.compile(r"[0-9]")
 
@@ -1725,9 +1729,10 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
 
     An unrecognized character is reported rather than passed. A gate that allows whatever it does
     not recognize stops gating as the character set grows. A Latin letter, with any combining
-    mark it carries, is the one exception, since it may spell a recorded name. A letter of another
-    script is still reported, since beside ASCII it is most often a lookalike of a Latin one, and
-    so is a mark standing alone.
+    diacritic it carries, is the one exception, since it may spell a recorded name. A letter of
+    another script is still reported, since beside ASCII it is most often a lookalike of a Latin
+    one, and so is a compatibility form such as a ligature, any other mark, and a diacritic
+    standing alone.
     """
     out: list[tuple[int, str, str]] = []
     carrier = False
@@ -1737,10 +1742,14 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
             continue
         name = unicodedata.name(ch, f"U+{ord(ch):04X}")
         category = unicodedata.category(ch)
-        if category.startswith("L") and name.startswith("LATIN "):
+        if (
+            category.startswith("L")
+            and name.startswith("LATIN ")
+            and not unicodedata.decomposition(ch).startswith("<")
+        ):
             carrier = True
             continue
-        if category == "Mn" and carrier:
+        if carrier and ch in COMBINING_DIACRITICS:
             continue
         carrier = False
         if ch in TIER3:
