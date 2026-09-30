@@ -2569,7 +2569,9 @@ def _opens_command(toks, i):
 
 
 def _sleeps(toks, _depth=0):
-    """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` payload it carries."""
+    """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` or `eval` payload it
+    carries. The quoting of `toks` is unknown here, so an `eval` payload is read to its end.
+    """
     if _depth > 4:
         return False
     for k, tok in enumerate(toks):
@@ -2577,6 +2579,12 @@ def _sleeps(toks, _depth=0):
         # `env -i sleep 30` and `sudo -u ci sleep 30` both sleep.
         # `grep -i sleep f` does not, its run's first command being no launcher.
         if _is_sleep_exe(tok) and _runs_as_command(toks, k):
+            return True
+        if (
+            tok == "eval"
+            and _runs_as_command(toks, k)
+            and _sleeps(_shell_tokens(_eval_payload(toks, k)), _depth + 1)
+        ):
             return True
         if not _is_shell_wrapper_exe(tok):
             continue
@@ -2661,6 +2669,24 @@ def _forks_out_of_reach(toks):
     return False
 
 
+def _eval_payload(toks, i, quoted=None):
+    """The shell text the `eval` at index i of `toks` runs, as bash builds it: its arguments, one
+    leading `--` dropped, joined with spaces.
+
+    `quoted` is a `_quoted_mask` of `toks`, or None where the quoting is unknown. A quoted separator
+    among the arguments is one of them, and becomes a separator only once bash rereads the payload.
+    Where the quoting is unknown the payload runs to the end of `toks`, since any separator in it may
+    be a quoted one. Reading too far there costs a false deny, where stopping short hid a loop.
+    """
+    if quoted is None:
+        args = toks[i + 1 :]
+    else:
+        args, _ = _collect_arglist(toks, i + 1, quoted)
+    if args[:1] == ["--"]:
+        args = args[1:]
+    return " ".join(args)
+
+
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     """The first unbounded wait loop in `cmd`, as `<keyword> <condition>` text, or None when none.
 
@@ -2669,10 +2695,8 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     `timeout <duration>` runs. A `timeout` never bounds a loop at its own level, since `timeout`
     takes a command and a loop keyword is not one. A nested loop is judged on its own terms, so an
     unbounded inner wait is denied even inside a bounded outer one, which is what it is: unbounded.
-    An `eval`'s arguments are a payload the same way, since bash drops one leading `--`, joins the
-    rest with spaces, and runs them as shell text. A quoted separator among them is an argument
-    until that reread makes it one. They run in this same shell, so only a bound on this shell
-    reaches them, `timeout` being unable to run a builtin.
+    An `eval`'s arguments are a payload the same way, read by `_eval_payload`. They run in this same
+    shell, so only a bound on this shell reaches them, `timeout` being unable to run a builtin.
     A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
     """
     if _depth > 4:
@@ -2704,11 +2728,8 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 if inner is not None:
                     return inner
         elif tok == "eval" and _runs_as_command(toks, i):
-            args, _ = _collect_arglist(toks, i + 1, mask)
-            if args[:1] == ["--"]:
-                args = args[1:]
             bounded = inherited_timeout and not forks_away
-            inner = _unbounded_wait_loop(" ".join(args), bounded, _depth + 1)
+            inner = _unbounded_wait_loop(_eval_payload(toks, i, mask), bounded, _depth + 1)
             if inner is not None:
                 return inner
         elif _opens_loop(toks, i):
@@ -4770,6 +4791,16 @@ _WAIT_CASES = [
         "eval 'until [ \"$i\" -lt 5 ]; do sleep 1; done'",
         "allow",
         "an eval payload's own arithmetic guard bounds it",
+    ),
+    (
+        'eval until false ";" do sleep 1 ";" done\necho "$(echo "it\'s")"',
+        "deny",
+        "where the quoting is unknown an eval payload runs to the end rather than stopping at a quoted separator",
+    ),
+    (
+        "while true; do eval 'sleep 5'; done",
+        "deny",
+        "a sleep an eval runs is a sleep, the same as one a wrapper runs",
     ),
     (
         """eval until [ '"$i"' 2> ";" -lt 5 ]\\; do sleep 1\\; done""",
