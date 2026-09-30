@@ -2204,15 +2204,7 @@ def unrecognized_in(body: str) -> list[str]:
         return []
     plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    narrative = [
-        (start, end)
-        for start, end in details_spans(plain)[0]
-        if not unvetted(normal(heading_of(plain[start:end])), {NARRATIVE_SUMMARY})
-    ]
-    metadata = plain
-    for start, end in reversed(narrative):
-        metadata = metadata[:start] + metadata[end:]
-    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, metadata.splitlines()) if m]
+    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, metadata_text(plain)) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
         f"summary: {marker}"
@@ -2630,6 +2622,25 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
                 cursor = m.end()
     leftover.append((cursor, len(body)))
     return regions, leftover
+
+
+def metadata_text(text: str) -> list[str]:
+    """Every line a metadata label may sit on, which is every line outside a narrative block.
+
+    A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`, and only
+    its own lines are dropped, since a block nested inside it is read like any other.
+    """
+    regions, leftover = details_spans(text)
+    lines = [ln for start, end in leftover for ln in text[start:end].splitlines()]
+    return lines + [ln for start, end in regions for ln in region_metadata(text[start:end])]
+
+
+def region_metadata(region: str) -> list[str]:
+    """`metadata_text` for one `<details>` region's own content, its narrative test included."""
+    opener = SUMMARY.match(region.lstrip())
+    if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
+        return [ln for s, e in details_spans(region)[0] for ln in region_metadata(region[s:e])]
+    return metadata_text(region)
 
 
 # Every character a quotation covers replaced by a space, and every line boundary kept.

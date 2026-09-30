@@ -3046,6 +3046,40 @@ class TestSecondOverviewFormat(GqlCase):
         )
         self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
 
+    def test_a_block_whose_own_summary_is_unread_is_not_taken_for_a_nested_narrative(self) -> None:
+        """A region reads as narrative from its own opening summary, never a nested one."""
+        body = self.narrated() + (
+            "\n<details>\n<summary >Review details</summary>\n\n- **Confidence:** high\n\n"
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n</details>\n</details>\n"
+        )
+        self.assertIn("metadata label: Confidence", pr_review.unrecognized_in(body))
+
+    def test_a_bare_narrative_line_is_not_a_narrative_summary(self) -> None:
+        """A region opening on plain text naming the narrative carries no summary to skip it by."""
+        body = self.narrated() + (
+            "\n<details>\nWhat changed in this PR\n- **Confidence:** high\n</details>\n"
+        )
+        self.assertIn("metadata label: Confidence", pr_review.unrecognized_in(body))
+
+    def test_a_block_nested_in_the_narrative_is_still_vetted(self) -> None:
+        """Only the narrative's own lines are skipped, and a block inside it reads as any other."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n\n<details>\n<summary>Review details</summary>\n\n"
+            "- **Confidence:** high\n</details>\n</details>\n"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_narrative_nested_in_another_block_is_still_skipped(self) -> None:
+        """The narrative is found at any depth, so wrapping it does not bring the refusal back."""
+        body = self.narrated() + (
+            "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+            "<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n</details>\n</details>\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 
