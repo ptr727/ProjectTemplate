@@ -144,6 +144,30 @@ class TestTierTables(BaitCase):
             ["charset-unknown"], self.kinds(f"a {unknown} here\n", {"charset-unknown"})
         )
 
+    def test_a_letter_in_a_recorded_name_is_left_alone(self) -> None:
+        """Folding a name's letter to ASCII records a different name, so no tier rule reports it."""
+        line = "- b2 Zo\u00eb: married 1702 Ren\u00e9 M\u00fcller\n"
+        self.assertEqual([], self.kinds(line, {"charset", "charset-unknown"}))
+        for ch in ("\u00c5", "\u0142", "\u03b1", "\u0436", "\u4e2d"):
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertEqual([], self.kinds(f"a {ch} here\n", {"charset", "charset-unknown"}))
+
+    def test_a_combining_mark_is_still_reported(self) -> None:
+        """A mark is not a letter, so a decomposed letter is reported rather than passed."""
+        self.assertEqual(
+            ["charset-unknown"], self.kinds("Rene\u0301 here\n", {"charset", "charset-unknown"})
+        )
+        self.assertEqual(
+            ["charset-unknown"], self.kinds("a \u0301 here\n", {"charset", "charset-unknown"})
+        )
+
+    def test_tier_one_typography_beside_a_name_is_still_reported(self) -> None:
+        """Accepting a name's letters leaves the typography around it a finding."""
+        self.assertEqual(
+            ["charset"],
+            self.kinds("Ren\u00e9 M\u00fcller \u2014 married\n", {"charset", "charset-unknown"}),
+        )
+
     def test_keys_are_single_non_ascii_characters(self) -> None:
         """A key is a substitution target, so an ASCII key would flag text that is already fine."""
         for label, table in (

@@ -4,7 +4,7 @@
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
   charset        Non-ASCII judged against the three tiers the charset rule defines.
-  charset-unknown A non-ASCII character in no tier, so it is classified rather than assumed.
+  charset-unknown A non-ASCII non-letter in no tier, so it is classified rather than assumed.
   semicolon      No semicolon in prose, outside a list that already carries commas.
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
@@ -46,7 +46,7 @@ from typing import NamedTuple, TypedDict
 # One source of truth for the rule names, so the CLI choices cannot drift from check_file.
 RULES = {
     "charset": "a non-ASCII character its tier does not permit here",
-    "charset-unknown": "a non-ASCII character in no tier",
+    "charset-unknown": "a non-ASCII non-letter in no tier",
     "semicolon": "a semicolon in prose, outside a list that already carries commas",
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
@@ -1724,7 +1724,9 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """Every non-ASCII character on the line, judged against its tier.
 
     An unrecognized character is reported rather than passed. A gate that allows whatever it does
-    not recognize stops gating as the character set grows.
+    not recognize stops gating as the character set grows. A letter is the one exception, since
+    it may spell a recorded name. A combining mark is not a letter, so the mark in a decomposed
+    letter is still reported.
     """
     out: list[tuple[int, str, str]] = []
     for pos, ch in enumerate(line):
@@ -1742,6 +1744,8 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
                 out.append(
                     (lineno, "charset", f"{name} (U+{ord(ch):04X}) in prose -> use '{TIER2[ch]}'")
                 )
+        elif unicodedata.category(ch).startswith("L"):
+            continue
         else:
             out.append(
                 (
