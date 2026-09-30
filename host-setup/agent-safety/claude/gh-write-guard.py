@@ -861,27 +861,38 @@ def _is_gh_exe(tok):
     return base in ("gh", "gh.exe")
 
 
-def _collect_arglist(toks, start):
+def _collect_arglist(toks, start, quoted=None):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
     `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
 
+    `quoted`, a `_quoted_mask` of `toks` where known, marks a token spelled quoted, which is an
+    argument even where its text is a separator's or a redirection's.
+
     Returns (args, index_after_this_invocation).
     """
+
+    def literal(j):
+        return quoted is not None and quoted[j]
+
     n = len(toks)
     k = start
     args = []
     while k < n:
         t = toks[k]
+        if literal(k):
+            args.append(t)
+            k += 1
+            continue
         if _is_separator(t):
             break  # a command separator ends this invocation
-        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
+        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]) and not literal(k + 1):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
             k += 1  # skip the redirection operator and its target token; args continue after it
-            if k < n and not _is_shell_op(toks[k]):
+            if k < n and (literal(k) or not _is_shell_op(toks[k])):
                 k += 1
             continue
         args.append(t)
@@ -2658,6 +2669,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     `timeout <duration>` runs. A `timeout` never bounds a loop at its own level, since `timeout`
     takes a command and a loop keyword is not one. A nested loop is judged on its own terms, so an
     unbounded inner wait is denied even inside a bounded outer one, which is what it is: unbounded.
+    An `eval`'s arguments are a payload the same way, since bash drops one leading `--`, joins the
+    rest with spaces, and runs them as shell text. A quoted separator among them is an argument
+    until that reread makes it one. They run in this same shell, so only a bound on this shell
+    reaches them, `timeout` being unable to run a builtin.
     A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
     """
     if _depth > 4:
@@ -2688,6 +2703,14 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
                 if inner is not None:
                     return inner
+        elif tok == "eval" and _runs_as_command(toks, i):
+            args, _ = _collect_arglist(toks, i + 1, mask)
+            if args[:1] == ["--"]:
+                args = args[1:]
+            bounded = inherited_timeout and not forks_away
+            inner = _unbounded_wait_loop(" ".join(args), bounded, _depth + 1)
+            if inner is not None:
+                return inner
         elif _opens_loop(toks, i):
             parts = _loop_parts(toks, i)
             if parts is None:
@@ -4717,6 +4740,41 @@ _WAIT_CASES = [
         "timeout 600 bash -c \"bash -c 'until [ -f x ]; do sleep 5; done'\"",
         "allow",
         "a real bound is inherited through a nested wrapper",
+    ),
+    (
+        'eval "until true; do sleep 1; done"',
+        "deny",
+        "an eval argument is shell text bash runs, read the same as a wrapper payload",
+    ),
+    (
+        'eval until [ -f y ";" -lt 5 ]\\; do sleep 1\\; done',
+        "deny",
+        "a quoted separator becomes one when eval joins and rereads its arguments, so the comparison is no test's",
+    ),
+    (
+        "eval -- 'while true; do sleep 1; done'",
+        "deny",
+        "eval drops one leading double dash before running the rest",
+    ),
+    (
+        "echo eval 'until [ -f x ]; do sleep 5; done'",
+        "allow",
+        "an eval named as an argument runs nothing",
+    ),
+    (
+        "timeout 600 bash -c 'eval \"until [ -f x ]; do sleep 5; done\"'",
+        "allow",
+        "an eval runs in the bounded shell, so it inherits that shell's bound",
+    ),
+    (
+        "eval 'until [ \"$i\" -lt 5 ]; do sleep 1; done'",
+        "allow",
+        "an eval payload's own arithmetic guard bounds it",
+    ),
+    (
+        """eval until [ '"$i"' 2> ";" -lt 5 ]\\; do sleep 1\\; done""",
+        "allow",
+        "a quoted redirection target names a file rather than joining the payload as a separator",
     ),
     (
         "timeout 0 bash -c 'until [ -f x ]; do sleep 30; done'",
