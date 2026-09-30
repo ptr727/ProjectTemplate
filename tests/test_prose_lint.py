@@ -379,6 +379,38 @@ class TestDash(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"dash"}))
 
+    def test_a_blockquoted_list_marker_is_not_a_dash(self) -> None:
+        """A callout's bullet sits behind `>`, which is structure rather than a word the dash follows."""
+        for text in (
+            "- Refer to X.\n",
+            "  - Nested item.\n",
+            "> - Refer to X.\n",
+            ">- Refer to X.\n",
+            "> > - Refer to X.\n",
+            ">> - Refer to X.\n",
+            "  >   - Nested in a callout.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"dash"}))
+
+    def test_a_dash_in_a_blockquoted_line_still_counts(self) -> None:
+        """Only the prefix is structure, so the prose after it is judged as it is anywhere else."""
+        for text in (
+            "> - Refer to X - and to Y.\n",
+            "> > - Refer to X - and to Y.\n",
+            ">> - Refer to X - and to Y.\n",
+            "> A callout sentence - with a clause break.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_a_blockquoted_label_separator_is_exempt(self) -> None:
+        """The label construct reads the same inside a callout as outside one."""
+        self.assertEqual([], self.kinds("> - **Bug** - wrong behavior\n", {"dash"}))
+        self.assertEqual(
+            ["dash"], self.kinds("> - **Bug** - wrong behavior - and worse\n", {"dash"})
+        )
+
 
 class TestSemicolon2(BaitCase):
     def test_any_prose_semicolon_is_flagged(self) -> None:
