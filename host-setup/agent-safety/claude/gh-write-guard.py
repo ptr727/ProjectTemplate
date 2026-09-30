@@ -861,38 +861,27 @@ def _is_gh_exe(tok):
     return base in ("gh", "gh.exe")
 
 
-def _collect_arglist(toks, start, quoted=None):
+def _collect_arglist(toks, start):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
     `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
 
-    `quoted`, a `_quoted_mask` of `toks` where known, marks a token spelled quoted, which is an
-    argument even where its text is a separator's or a redirection's.
-
     Returns (args, index_after_this_invocation).
     """
-
-    def literal(j):
-        return quoted is not None and quoted[j]
-
     n = len(toks)
     k = start
     args = []
     while k < n:
         t = toks[k]
-        if literal(k):
-            args.append(t)
-            k += 1
-            continue
         if _is_separator(t):
             break  # a command separator ends this invocation
-        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]) and not literal(k + 1):
+        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
             k += 1  # skip the redirection operator and its target token; args continue after it
-            if k < n and (literal(k) or not _is_shell_op(toks[k])):
+            if k < n and not _is_shell_op(toks[k]):
                 k += 1
             continue
         args.append(t)
@@ -2568,9 +2557,9 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
-def _sleeps(toks, _depth=0):
+def _sleeps(toks, _depth=0, quoted=None):
     """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` or `eval` payload it
-    carries. The quoting of `toks` is unknown here, so an `eval` payload is read to its end.
+    carries. `quoted` is the quote mask of `toks` where known, which `_eval_payload` reads.
     """
     if _depth > 4:
         return False
@@ -2583,7 +2572,7 @@ def _sleeps(toks, _depth=0):
         if (
             tok == "eval"
             and _runs_as_command(toks, k)
-            and _sleeps(_shell_tokens(_eval_payload(toks, k)), _depth + 1)
+            and _sleeps(_shell_tokens(_eval_payload(toks, k, quoted)), _depth + 1)
         ):
             return True
         if not _is_shell_wrapper_exe(tok):
@@ -2677,14 +2666,33 @@ def _eval_payload(toks, i, quoted=None):
     among the arguments is one of them, and becomes a separator only once bash rereads the payload.
     Where the quoting is unknown the payload runs to the end of `toks`, since any separator in it may
     be a quoted one. Reading too far there costs a false deny, where stopping short hid a loop.
+
+    A redirection on the `eval` is its payload's, so it follows the payload with its target quoted,
+    and a loop reading its input from one is read with that input.
     """
+    n = len(toks)
     if quoted is None:
-        args = toks[i + 1 :]
+        words, redirs = toks[i + 1 :], []
     else:
-        args, _ = _collect_arglist(toks, i + 1, quoted)
-    if args[:1] == ["--"]:
-        args = args[1:]
-    return " ".join(args)
+        words, redirs = [], []
+        k = i + 1
+        while k < n:
+            t = toks[k]
+            if not quoted[k] and _is_separator(t):
+                break
+            if not quoted[k] and _is_redir_op(t):
+                if words and words[-1].isdigit() and not quoted[k - 1]:
+                    redirs.append(words.pop())
+                redirs.append(t)
+                if k + 1 < n and (quoted[k + 1] or not _is_shell_op(toks[k + 1])):
+                    redirs.append(shlex.quote(toks[k + 1]))
+                    k += 1
+            else:
+                words.append(t)
+            k += 1
+    if words[:1] == ["--"]:
+        words = words[1:]
+    return " ".join(words + redirs)
 
 
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
@@ -2739,7 +2747,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             cond, body, done_at = parts
             # `while sleep 30; do ...; done` is the standard poll-forever idiom.
             # Its condition sleeps as surely as a body does, and a sleep handed to `sh -c` is still one.
-            sleeps = _sleeps(body) or _sleeps(cond)
+            do_at = i + 1 + len(cond)
+            sleeps = _sleeps(body, quoted=mask[do_at + 1 : done_at] if mask else None) or _sleeps(
+                cond, quoted=mask[i + 1 : do_at] if mask else None
+            )
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
@@ -4801,6 +4812,16 @@ _WAIT_CASES = [
         "while true; do eval 'sleep 5'; done",
         "deny",
         "a sleep an eval runs is a sleep, the same as one a wrapper runs",
+    ),
+    (
+        "eval 'while read -r l; do sleep 1; done' < f",
+        "allow",
+        "a redirection on an eval is its payload's, so a loop reading that input is bounded by it",
+    ),
+    (
+        'while [ -f x ]; do eval "$step"; echo "a; sleep 1"; done',
+        "allow",
+        "an eval's payload ends at its own separator, so a sleep quoted in a later command stays text",
     ),
     (
         """eval until [ '"$i"' 2> ";" -lt 5 ]\\; do sleep 1\\; done""",
