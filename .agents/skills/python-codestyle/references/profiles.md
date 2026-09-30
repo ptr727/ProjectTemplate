@@ -10,8 +10,12 @@ in review). The axes that commonly vary per repo:
 
 - **Type checker in CI**: pyright strict, mypy with its strict flags (run in CI and the editor, with
   pyright kept editor-only through Pylance), or both. The clean-compile runs every checker CI runs.
-- **Dependency declaration**: `[dependency-groups]`, or PEP 621 `[project.optional-dependencies]`
-  (dev tools installed with `uv sync --extra <group>`).
+- **Dependency declaration**: the uv form declares the dev tools CI runs in the `dev` group of
+  `[dependency-groups]`, the one group a plain local `uv sync` or `uv run` installs, and which CI's
+  `uv sync --all-groups --frozen` installs too, since it takes every group and no extra. PEP 621
+  `[project.optional-dependencies]` (installed with `uv sync --extra <group>`) suits only a tool CI
+  does not run. The pip form declares its dependencies in `requirements*.txt` files, installed
+  together in one resolve, per `SKILL.md` "Local development loop".
 - **Versioning / publishing**: a published package (`_version.py` plus a version source,
   `uv build`, and a PyPI publish step), or a source-only repo with a static `version` and no
   publish step (see Versioning below).
@@ -24,21 +28,25 @@ in review). The axes that commonly vary per repo:
 ## Two profiles: full specification
 
 A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated
-against the `pyproject.toml` shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
+against the directory's structural shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
 describe the Project shape (the `build` profile), and its uv project, `uv.lock`, and `uv run` rules
-describe that shape's uv form. The two differ by whether the Python has third-party runtime
-dependencies, which shows up structurally in `pyproject.toml`, so the fleet's audit reads the shape
-there:
+describe that shape's uv form. The two differ by trait, whether the Python has third-party runtime
+dependencies or is the repo's deliverable. The fleet's audit reads the shape that trait leaves
+rather than inspecting imports. A `[project]` or `[build-system]` table in `pyproject.toml`, a
+committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile, and tool
+configuration alone marks the lint-only one:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
   repo's deliverable. It takes one of two forms. The uv form is a PEP 621 project: `[project]`
-  with `dependencies` (dev tools in `[project.optional-dependencies]` or `[dependency-groups]`), a
-  `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line Endings"
-  section). CI runs `uv sync --frozen` + `uv run <tool>`, so the lockfile pins tool versions. The
-  pip form is a `pyproject.toml` beside a `requirements*.txt`, installed with pip, whether or not
-  it carries a `[project]` table. A committed `uv.lock` makes a directory the uv form even where a
-  `requirements*.txt` sits beside it. In the pip form CI runs pytest from the installed
-  environment, as `.venv/bin/python -m pytest`, and runs ruff through `uvx`. In a directory
+  with `dependencies` (dev tools in `[dependency-groups]`, per the dependency-declaration axis
+  above), a `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line
+  Endings" section). CI runs `uv sync --all-groups --frozen` + `uv run <tool>`, so the lockfile pins
+  tool versions. That sync installs every `[dependency-groups]` group and no
+  `[project.optional-dependencies]` extra. The pip form is a `pyproject.toml` beside a
+  `requirements*.txt`, installed with pip, whether or not it carries a `[project]` table. A
+  committed `uv.lock` makes a directory the uv form even where a `requirements*.txt` sits beside it.
+  In the pip form CI builds the environment as `SKILL.md` "Local development loop" shows, runs
+  pytest from it as `.venv/bin/python -m pytest`, and runs ruff through `uvx`. In a directory
   declared in the hub validator's `python-directories` input it runs the type checker through
   `uvx` pointed at that environment, or runs mypy from the environment where it is installed
   there, while the undeclared default root runs a bare `uvx <checker>@latest` with nothing
