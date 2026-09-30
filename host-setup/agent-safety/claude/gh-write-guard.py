@@ -2867,12 +2867,12 @@ def _check_unbounded_wait(cmd):
     The command is judged with its heredoc bodies stripped every way `_heredoc_openers` reads them
     and every way `_line_heredoc_openers` does, and a reading holding an unbounded wait denies it, so
     a heredoc the scan misreads never hides a loop the line reading kept. A command naming no `sleep`
-    once its quotes, backslashes, and `$` signs are removed holds no such wait in any reading, since
-    every token is its text with some of those removed, so it is allowed unread. Past the reading
-    limit the command is denied unread only when that text also names a loop keyword, matched in
-    its case as bash reads one, since a wait needs both.
+    once its line continuations, quotes, backslashes, and `$` signs are removed holds no such wait
+    in any reading, since every token is its text with some of those removed, so it is allowed
+    unread. Past the reading limit the command is denied unread only when that text also names a
+    loop keyword, matched in its case as bash reads one, since a wait needs both.
     """
-    text = re.sub(r"[\"'\\$]", "", cmd)
+    text = re.sub(r"\\\r?\n|[\"'\\$]", "", cmd)
     if "sleep" not in text.lower():
         return "allow", ""
     readings = _heredoc_readings(cmd)
