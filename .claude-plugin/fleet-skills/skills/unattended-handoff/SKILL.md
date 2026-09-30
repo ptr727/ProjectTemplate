@@ -141,9 +141,10 @@ An issue needs no maintainer decision when every one of these holds. Where any i
 does not qualify, since skipping one costs nothing and a guess costs a revert and a review round.
 
 - **The right outcome is determined** by the issue together with the committed rules, and the issue
-  leaves no choice open between alternatives it names. A choice counts as closed once the
-  maintainer's answer to it, or the reason a later change overtook it, is recorded on the issue,
-  which is how an adopted lesson that still lists its options qualifies.
+  leaves no choice open between alternatives it names. A choice counts as closed once the issue's
+  `decision` label has come off with the answer or the reason recorded on it, per `GOVERNANCE.md`
+  "Communicating with the User", which is how an adopted lesson that still lists its options
+  qualifies.
 - **Nothing on it waits on the maintainer.** It carries none of `decision`, `blocked`, `handoff`, or
   `canonical-sweep`, the last being an issue a workflow owns rather than one a pull request closes,
   and no comment asks the maintainer something still unanswered.
@@ -197,13 +198,13 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session has a closed predecessor holding that comment, so read the predecessor's
-   comments too. Where the parking comment names the decision issue the lane waits on, read the
-   answer recorded there and follow it, since it is what unblocked the lane. A lesson issue the
-   comment also names, per step 6, is its own work rather than this lane's, so the worker neither
-   follows it nor parks on it. Where the decision the lane waits on has no answer recorded, its
-   worker was interrupted while parking, so finish parking per "Parking" step 4 and return
-   `PARKED`. Re-derive live state rather than trusting any of them, per
-   `session-handoff` "Resuming".
+   comments too. Where the parking comment is on the current link and the decision issue it
+   waits on still carries `decision`, the worker before was interrupted while parking, so finish
+   parking per "Parking" step 4 and return `PARKED`. Otherwise read the answer or the reason
+   recorded on that decision issue and follow it, since it is what unblocked the lane. A lesson
+   issue the comment also names, per step 6, is its own work rather than this lane's, so the
+   worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
+   them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
