@@ -592,8 +592,26 @@ class DanglingRemoteTrackingCase(RepoCase):
         with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
             local_review.target_ref("upstream/main", self.tmp)
 
+    def test_an_empty_loose_ref_file_refuses(self) -> None:
+        """An empty ref file, such as a crash can leave, is skipped by every ref-listing command."""
+        if self.ref_format == "reftable":
+            self.skipTest("a reftable store holds no loose ref files")
+        loose = (
+            self.tmp
+            / run(self.tmp, "rev-parse", "--git-path", "refs/remotes/upstream/main").strip()
+        )
+        loose.parent.mkdir(parents=True, exist_ok=True)
+        loose.write_bytes(b"")
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_name_git_rejects_is_not_looked_for_on_disk(self) -> None:
+        """`refs/remotes/../../HEAD` would otherwise reach the repository's own HEAD file."""
+        self.assertIsNone(local_review.remote_tracking_ref("../../HEAD", self.tmp))
+
     def test_a_ref_nested_under_the_name_is_not_the_name(self) -> None:
-        """`for-each-ref` matches a pattern by whole path components, so the match is exact."""
+        """`for-each-ref` also lists a ref nested under the name, so only an exact match counts."""
         run(self.tmp, "update-ref", "refs/remotes/upstream/main/nested", "HEAD")
         self.assertFalse(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
 

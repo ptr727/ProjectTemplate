@@ -285,14 +285,23 @@ def ref_exists(ref: str, root: Path) -> bool:
 def ref_name_exists(ref: str, root: Path) -> bool:
     """Whether the exact ref name `ref` exists, whether or not it resolves to an object.
 
-    `for-each-ref` lists a ref naming an absent object, and `symbolic-ref` reads a symbolic ref
-    whose target is gone, which `for-each-ref` skips. Neither needs the object to resolve, and
-    both read through git's ref backend, so a files or a reftable store answers alike.
-    `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, one that is absent or
-    not a valid ref name included.
+    `for-each-ref` lists a ref naming an absent object, on a files or a reftable store alike. It
+    also lists refs nested under the name, so only an exact match counts. It skips a symbolic ref
+    whose target is gone, which `symbolic-ref` reads instead, and it skips a loose ref file that
+    is empty or holds no valid content, which neither command reports, so that file is looked for
+    directly. A reftable store holds no loose ref files, so that last check finds nothing there.
+    `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, an absent one
+    included. A name `check-ref-format` rejects is never a ref git reads, so it is never looked
+    for on disk, where a `..` in it would reach outside the ref store.
     """
+    try:
+        git("check-ref-format", ref, root=root)
+    except CannotRun:
+        return False
     listed = git("for-each-ref", "--format=%(refname)", ref, root=root).splitlines()
     if ref in listed:
+        return True
+    if (root / git("rev-parse", "--git-path", ref, root=root).strip()).is_file():
         return True
     try:
         git("symbolic-ref", "-q", ref, root=root)
