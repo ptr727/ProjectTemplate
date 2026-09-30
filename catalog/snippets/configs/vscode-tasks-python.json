@@ -15,8 +15,10 @@
         // `uv run mypy src`.
         // A pyright-strict repo keeps `uv run pyright`.
         // Adapt the target paths to the repo's package layout.
-        // A lint-only Scripts-profile subtree, with no uv project and no `uv.lock`, runs every tool via
-        // `uvx <tool>` rather than `uv run <tool>`.
+        // A build-profile directory in its pip form, a `requirements*.txt` with no `uv.lock`, keeps every task here, "Python Test" included, and runs no `uv sync` and no project-scoped `uv run`, since either writes a `uv.lock`.
+        // It replaces "uv Sync" with a `dependsOrder: sequence` aggregator over `uv venv --clear`, one `uv pip install` taking every `requirements*.txt` as a `-r` argument, and `uv pip install -e .` where its pyproject.toml has a [project] table, and adapts or drops "uv Upgrade", which runs `uv sync` too.
+        // It runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
+        // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy src` for a mypy repo, `uvx pyright` otherwise.
         // It omits the pytest, coverage, and `uv sync` tasks, per CODESTYLE.md Python "Two profiles".
         {
@@ -177,7 +179,7 @@
             "label": "Lint: Prose",
             "type": "process",
             "command": "uv",
-            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "args": [ "run", "--no-project", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -188,7 +190,7 @@
             "label": "Lint: EOL",
             "type": "process",
             "command": "uv",
-            "args": [ "run", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "args": [ "run", "--no-project", "python", "${workspaceFolder}/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,

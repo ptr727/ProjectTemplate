@@ -204,7 +204,7 @@ text says, because the harm it covers was never in the text.
    rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
-   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
+   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a `while` loop whose condition is a
    `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
    which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
    rather than a leak. Four things have to hold, and a real command defeated each of them.
@@ -320,7 +320,7 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nread of an input redirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
+    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nwhile read of an input\nredirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
     iswait -- yes --> deny7["DENY - requirement 7"]
     iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
