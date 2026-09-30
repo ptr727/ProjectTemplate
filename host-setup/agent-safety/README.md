@@ -196,24 +196,25 @@ text says, because the harm it covers was never in the text.
    reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
-   where its value takes the form a duration takes here. A `-s` value the shell may rewrite at run
-   time, by a substitution such as `"$SIG"`, a brace expansion, a glob, or a tilde expansion, is
-   read the same way, since the text cannot say it is not signal 0. An option word the shell may
-   rewrite, such as `-${F}0`, is read as both a signal-0 `-s` and a `-k` of no duration form,
-   since it may become either. Where a `timeout`'s command is another `timeout`,
-   past any command prefix, the run is bounded only when every outer one sends signal 0 with no
-   `-k` of any value, which is inert, and the innermost one is a bound, so `timeout -s 0 900
-   timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read as no bound,
-   since an outer signal can end the inner `timeout` before its deadline and leave the loop
-   running. A word naming `timeout` anywhere between an outer duration and the wrapper is read as
-   that nesting. That is a false deny wherever the outer signal would have stopped the loop too,
-   as it does in `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, and wherever a prefix's
-   argument merely names `timeout`, as a path ending in `/timeout` does. Behind outer ones that each
-   send signal 0 with no `-k`, it is a false deny too wherever a prefix between two of them takes an
-   argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
-   argument changes nothing. The second is an arithmetic guard in the loop's own condition, either
-   the test-builtin form (`[ "$i" -lt 120 ]`)
-   or the arithmetic form
+   where its value takes the form a duration takes here. An option word or option value the shell
+   may rewrite at run time, by a substitution such as `"$SIG"`, a brace expansion, a glob, or a
+   tilde expansion, is read as both a signal-0 `-s` and a `-k` of no duration form, since the text
+   cannot say it is not signal 0 and the rewrite may split one word into both, so only a `-k`
+   following it bounds the run. Where a `timeout`'s command is another `timeout`, past any command
+   prefix, the run is bounded only when every outer one sends signal 0 with no `-k` of any value,
+   which is inert, and the innermost one is a bound, so `timeout -s 0 900 timeout 800 bash -c '<the
+   loop>'` is bounded. Every other such nesting is read as no bound, since an outer signal can end
+   the inner `timeout` before its deadline and leave the loop running. Past the command prefixes
+   and assignments directly after an outer duration, a word naming `timeout`, or one the shell may
+   rewrite into it, anywhere before the wrapper is read as that nesting. That is a false deny
+   wherever the outer signal would have stopped the loop too, as it does in `timeout 900 timeout -s
+   0 800 bash -c '<the loop>'`, wherever a prefix's argument merely names `timeout`, as a path
+   ending in `/timeout` does, and wherever a word the shell rewrites becomes something else, as
+   `$N` in `nice -n $N` does. Behind outer ones that each send signal 0 with no `-k`, it is a false
+   deny too wherever a prefix between two of them takes an argument, as `nice -n 5` does. Behind
+   any other outer one the nesting is denied anyway, so the argument changes nothing. The second
+   is an arithmetic guard in the loop's own condition, either the test-builtin form (`[ "$i" -lt
+   120 ]`) or the arithmetic form
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
