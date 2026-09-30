@@ -72,7 +72,7 @@ Commit first, then read the digest, then dispatch the subagent, then hand that s
 engine="<hub-checkout>/scripts/local_review.py"   # in the hub itself, scripts/local_review.py
 python3 "$engine" status --target '<target>'      # JSON, take contentDigest
 # run the pass above, then:
-python3 "$engine" record --reviewer agent-skill --target '<target>' --expect-digest '<digest>' [--findings N]
+python3 "$engine" record --reviewer agent-skill --target '<target>' --expect-digest '<digest>' --findings '<count>'
 ```
 
 Every subcommand here, `run --backend <name>` included, runs with the repository under review as the working directory, whichever repository that is. The engine takes no `--repo` and reads whichever repository it is run in, so the path names where the script lives and the working directory names what it measures.
@@ -81,7 +81,7 @@ Every subcommand here, `run --backend <name>` included, runs with the repository
 
 `--expect-digest` is required rather than optional, and binding it to the earlier read is the whole point. A format-on-save or a hook autofix between the review and the record would otherwise be stamped as reviewed by a pass that never saw it. A refusal there is the content having moved, so the answer is another pass over the current content rather than another read of the digest.
 
-Record the pass whatever it found, including nothing. The key covers the net content the branch introduces against its target rather than the commit series, so a rebase that leaves the tree alone keeps the receipt valid while the fork point holds, and changing one byte invalidates it. The key holds that fork point too, so rebasing onto a target that has moved retires the receipt although no file changed.
+Record the pass whatever it found, including nothing. `--findings` is optional and records how many findings the pass raised. The key covers the net content the branch introduces against its target rather than the commit series, so a rebase that leaves the tree alone keeps the receipt valid while the fork point holds, and changing one byte invalidates it. The key holds that fork point too, so rebasing onto a target that has moved retires the receipt although no file changed.
 
 **Why the commit comes first**, rather than being an ordering that could equally run the other way. A push delivers the commit, and the hook's tree check refuses a push whose tracked content differs from HEAD, so the record has to describe what HEAD holds. A commit that leaves the tree alone usually does not move the receipt's key, so diligence done before it still describes the same content, and a commit putting a path back to its base state drops it from the change set and does move it. Two reasons make the order matter anyway: staging a modified tracked file moves the key even though its content did not change, and a commit made after the record can carry content the pass never read. Reviewing earlier than this is still worth doing as ordinary diligence, and it does not substitute for the recorded pass: the digest read and the record bracket a window in which the tree holds still, and a commit inside that window ends it.
 
