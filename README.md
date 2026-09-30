@@ -234,7 +234,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 - Sign every commit (SSH or GPG).
 - Branch feature -> develop (squash) -> main (merge commit), and develop is forward-only.
 - Drive every PR through the Copilot review loop and merge only with maintainer approval.
-- Write US English and ASCII only (no em-dash, straight quotes).
+- Write US English and ASCII only (no em-dash, straight quotes), apart from the letters of a recorded name.
 - Write docs and comments in the present tense, describing only the current state, never as a change from a prior one.
 - Keep comments concise and only for the non-obvious, and never grow them on edit.
 - Follow `.editorconfig` line endings (LF default, CRLF for `.bat`/`.cmd`) and preserve a file's endings on edit.

@@ -28,7 +28,7 @@ the snapshot's verdict alone, since the live channel following its checkout is t
 Usage: python3 scripts/skills_install.py            (installs)
        python3 scripts/skills_install.py --snapshot-only   (refreshes the Codex/opencode copy alone)
        python3 scripts/skills_install.py --report   (read-only: what does each channel hold?)
-       python3 scripts/skills_install.py --report --intended <rev>   (judge the snapshot against <rev>)
+       python3 scripts/skills_install.py --report --intended '<rev>'   (judge the snapshot against <rev>)
        AGENTS_HOME=/x python3 scripts/skills_install.py   (override the global skills target, for testing)
 """
 
