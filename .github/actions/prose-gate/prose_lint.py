@@ -1730,9 +1730,9 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     An unrecognized character is reported rather than passed. A gate that allows whatever it does
     not recognize stops gating as the character set grows. A Latin letter, with any combining
     diacritic it carries, is the one exception, since it may spell a recorded name. A letter of
-    another script is still reported, since beside ASCII it is most often a lookalike of a Latin
-    one, and so is a compatibility form such as a ligature, any other mark, and a diacritic
-    standing alone.
+    another script, a compatibility form such as a ligature, any other mark, and a diacritic
+    standing alone are still reported, so the gate covers the Latin part of that rule and nothing
+    wider.
     """
     out: list[tuple[int, str, str]] = []
     carrier = False
