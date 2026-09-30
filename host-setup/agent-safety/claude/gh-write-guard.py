@@ -82,8 +82,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
      shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
-     opening nothing and once per `<<` whose tag it accepts and whose body a later line closes, and
-     any reading holding an unbounded wait denies. A command with more readings than the rule builds
+     opening nothing and once per `<<` whose tag it accepts and whose non-empty body a later line
+     closes, and any reading holding an unbounded wait denies. A command with more readings than the rule builds
      is denied unread when it names both `sleep` and a loop keyword.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
@@ -2867,12 +2867,13 @@ def _check_unbounded_wait(cmd):
     The command is judged with its heredoc bodies stripped every way `_heredoc_openers` reads them
     and every way `_line_heredoc_openers` does, and a reading holding an unbounded wait denies it, so
     a heredoc the scan misreads never hides a loop the line reading kept. A command naming no `sleep`
-    once its quotes and backslashes are removed holds no such wait in any reading, since every token
-    is its text with some of those removed, so it is allowed unread. Past the reading limit the
-    command is denied unread only when that text also names a loop keyword, since a wait needs both.
+    once its quotes, backslashes, and `$` signs are removed holds no such wait in any reading, since
+    every token is its text with some of those removed, so it is allowed unread. Past the reading
+    limit the command is denied unread only when that text also names a loop keyword, matched in
+    its case as bash reads one, since a wait needs both.
     """
-    text = re.sub(r"[\"'\\]", "", cmd).lower()
-    if "sleep" not in text:
+    text = re.sub(r"[\"'\\$]", "", cmd)
+    if "sleep" not in text.lower():
         return "allow", ""
     readings = _heredoc_readings(cmd)
     line_readings = _heredoc_readings(cmd, _line_heredoc_openers)
@@ -4870,6 +4871,18 @@ _WAIT_CASES = [
         "\n".join(['cat > "part$((N+1)).md" <<EOF', "text", "EOF"] * 5 + ["sleep 2"]),
         "allow",
         "so five numbered heredoc writes followed by a pause stay allowed past the limit",
+    ),
+    (
+        "\n".join(
+            ['cat > "part$((N+1)).md" <<EOF', "While it loads, wait.", "EOF"] * 5 + ["sleep 2"]
+        ),
+        "allow",
+        "even where their bodies hold a capitalized loop word, since bash reads a keyword in its case",
+    ),
+    (
+        "while [ ! -f /x ]; do sl$'e'ep 1; done # it's",
+        "deny",
+        "and a `sleep` spelled through a `$'...'` span is still read as one",
     ),
     (
         "\n".join(

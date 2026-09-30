@@ -199,7 +199,7 @@ text says, because the harm it covers was never in the text.
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
    document quoting the forbidden shape is written rather than denied. A line holding `((` beside
    a `<<` is read once as opening nothing and once per `<<` whose tag the rule accepts and whose
-   body a later line closes, since an arithmetic shift tokenizes as a redirection does, and any
+   non-empty body a later line closes, since an arithmetic shift tokenizes as a redirection does, and any
    reading holding an unbounded wait denies the command. A command with more readings than the
    rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
