@@ -228,13 +228,19 @@ class ContentKeyCase(RepoCase):
         remote = run(self.tmp, "rev-parse", "origin/release/v1").strip()
         local = run(self.tmp, "rev-parse", "release/v1").strip()
         self.assertNotEqual(remote, local, "fixture does not distinguish the two")
-        self.assertEqual(local_review.target_ref("release/v1", self.tmp), "origin/release/v1")
+        self.assertEqual(
+            local_review.target_ref("release/v1", self.tmp), "refs/remotes/origin/release/v1"
+        )
         self.assertEqual(local_review.merge_base("release/v1", self.tmp), remote)
 
-    def test_a_target_that_only_exists_on_another_remote_is_used_as_written(self) -> None:
+    def test_a_target_that_only_exists_on_another_remote_is_qualified_from_that_remote(
+        self,
+    ) -> None:
         """This is what lets a fork-based flow name an upstream branch directly."""
         run(self.tmp, "update-ref", "refs/remotes/upstream/main", "HEAD")
-        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+        self.assertEqual(
+            local_review.target_ref("upstream/main", self.tmp), "refs/remotes/upstream/main"
+        )
 
     def test_an_explicit_remote_tracking_target_wins_over_a_same_named_origin_branch(self) -> None:
         """An explicitly named remote-tracking ref must not lose to the origin/ preference.
@@ -256,7 +262,81 @@ class ContentKeyCase(RepoCase):
             run(self.tmp, "rev-parse", "upstream/main").strip(),
             "fixture does not distinguish the two",
         )
-        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+        self.assertEqual(
+            local_review.target_ref("upstream/main", self.tmp), "refs/remotes/upstream/main"
+        )
+
+    def test_a_same_named_local_branch_cannot_shadow_a_remote_tracking_target(self) -> None:
+        """Git resolves a short name against refs/heads/ first, so the ref must be qualified.
+
+        The remote-tracking `upstream/main` sits at the base commit, and a local branch of the
+        same name sits at the task tip. Resolving the short name picks the local branch and
+        yields the task tip as the merge base, while the qualified ref yields the base commit.
+        """
+        base = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", base)
+        (self.tmp / "moved.txt").write_text("task moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "task work")
+        run(self.tmp, "branch", "upstream/main", "HEAD")
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("upstream/main", self.tmp), base)
+
+    def test_a_local_branch_named_origin_target_cannot_shadow_the_origin_ref(self) -> None:
+        """The `origin/<target>` step is qualified too, since the fleet default takes it.
+
+        `refs/remotes/origin/feat` sits at the base commit, and a local branch literally named
+        `origin/feat` sits at the task tip, which the short name would resolve to first.
+        """
+        base = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/origin/feat", base)
+        (self.tmp / "moved.txt").write_text("task moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "task work")
+        run(self.tmp, "branch", "origin/feat", "HEAD")
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("feat", self.tmp), base)
+
+    def test_a_qualified_target_is_not_also_tried_under_origin(self) -> None:
+        """An origin branch literally named `refs/remotes/origin/main` must not replace the ref.
+
+        The requested `refs/remotes/origin/main` sits at the base commit, and the nested
+        `refs/remotes/origin/refs/remotes/origin/main` sits at the task tip.
+        """
+        base = run(self.tmp, "rev-parse", "HEAD").strip()
+        run(self.tmp, "update-ref", "refs/remotes/origin/main", base)
+        (self.tmp / "moved.txt").write_text("task moved on\n", encoding="utf-8")
+        run(self.tmp, "add", "moved.txt")
+        run(self.tmp, "commit", "-m", "task work")
+        run(self.tmp, "update-ref", "refs/remotes/origin/refs/remotes/origin/main", "HEAD")
+        tip = run(self.tmp, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(base, tip, "fixture does not distinguish the two")
+        self.assertEqual(local_review.merge_base("refs/remotes/origin/main", self.tmp), base)
+
+    def test_a_remote_tracking_ref_naming_a_non_commit_refuses_rather_than_falls_through(
+        self,
+    ) -> None:
+        """Falling through would reach the as-written step, where a same-named branch wins."""
+        tree = run(self.tmp, "write-tree").strip()
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", tree)
+        run(self.tmp, "branch", "upstream/main", "HEAD")
+        with self.assertRaises(local_review.CannotRun):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_local_branch_named_like_a_qualified_remote_ref_is_not_remote_tracking(
+        self,
+    ) -> None:
+        """`rev-parse` also resolves a full name through `refs/heads/`, so the match is exact.
+
+        A local branch literally named `refs/remotes/upstream/main`, with no remote-tracking ref
+        of that name, must leave the target unresolved rather than be taken as remote-tracking.
+        """
+        run(self.tmp, "branch", "refs/remotes/upstream/main", "HEAD")
+        self.assertIsNone(local_review.remote_tracking_ref("upstream/main", self.tmp))
+        with self.assertRaises(local_review.CannotRun):
+            local_review.target_ref("upstream/main", self.tmp)
 
     def test_a_target_resolving_nowhere_is_a_boundary(self) -> None:
         with self.assertRaises(local_review.CannotRun):
@@ -1128,7 +1208,8 @@ class BackendCase(RepoCase):
         argv = argv_log.read_text(encoding="utf-8").split("\n")
         self.assertIn("--agent", argv)
         self.assertIn(base, argv, f"the backend was not given the merge base: {argv}")
-        self.assertNotIn("origin/develop", argv, "the backend was given the target tip")
+        for tip in ("origin/develop", "refs/remotes/origin/develop"):
+            self.assertNotIn(tip, argv, "the backend was given the target tip")
         # The flag name matters as much as the value.
         # The CLI documents --base as taking a branch and --base-commit as taking a commit hash.
         # A sha handed to --base is the wrong call even though the sha itself is right.

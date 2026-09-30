@@ -200,8 +200,8 @@ text says, because the harm it covers was never in the text.
    document quoting the forbidden shape is written rather than denied. A line holding `((` beside
    a `<<` is read once as opening nothing and once per `<<` whose tag the rule accepts and whose
    body a later line closes, since an arithmetic shift tokenizes as a redirection does, and any
-   reading holding an unbounded wait denies the command. A command with more readings than the rule builds is denied whenever it
-   names `sleep` at all.
+   reading holding an unbounded wait denies the command. A command with more readings than the
+   rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a

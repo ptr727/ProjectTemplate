@@ -45,7 +45,13 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    only where the pull request changes the same set of files at both commits, since a statement
    about a diff this head no longer has says nothing about this one. A head round's own
    statement always wins, and `pr_review.py` refuses the carry where it cannot read that set at
-   both commits. The coverage this item
+   both commits. Where no statement reaches the head either way, a round covering it whose own
+   file table names exactly the changed files covers it, `coverage=table` in the digest, which is
+   the reading a Copilot round at Balanced review effort gives, and a statement that reaches the
+   head, stated on it or carried to it, wins over that table. The table stands in only where no
+   Copilot round on the pull request, on any commit, states or appears to state partial
+   coverage, so a pull request that ever had a partial round goes to the maintainer. The
+   coverage this item
    requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
    `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is
    a required reviewer: an advisory reviewer's absence blocks nothing, while its findings owe
