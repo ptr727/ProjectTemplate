@@ -311,8 +311,8 @@ silent pass, a letter of a recorded name excepted per the bullet below.
   authored text and not a license for the agent to add its own.
 - **A letter in a recorded name keeps its actual spelling.** A person's or a place's name that a
   document records as data is written with its own letters and the marks they carry, since
-  folding one to ASCII records a different name. Anywhere else a letter in no tier takes its
-  ASCII form, like any other character in no tier.
+  folding one to ASCII records a different name. Anywhere else a letter the agent writes that no
+  tier covers takes its ASCII form.
 - **An unrecognized non-ASCII character is reported, not allowed.** Classify it into a tier above
   before using it. A letter of a recorded name is the one exception, per the bullet above.
 - **No semicolon in agent-authored prose.** Recast a mid-sentence semicolon as a comma or as two

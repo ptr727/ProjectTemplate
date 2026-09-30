@@ -4,7 +4,7 @@
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
   charset        Non-ASCII judged against the three tiers the charset rule defines.
-  charset-unknown A non-ASCII character no tier covers, a Latin letter excepted.
+  charset-unknown A non-ASCII character no tier covers, a Latin letter and its diacritics excepted.
   semicolon      No semicolon in prose, outside a list that already carries commas.
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
@@ -46,7 +46,7 @@ from typing import NamedTuple, TypedDict
 # One source of truth for the rule names, so the CLI choices cannot drift from check_file.
 RULES = {
     "charset": "a non-ASCII character its tier does not permit here",
-    "charset-unknown": "a non-ASCII character in no tier, a Latin letter excepted",
+    "charset-unknown": "a non-ASCII character in no tier, a Latin letter and its diacritics excepted",
     "semicolon": "a semicolon in prose, outside a list that already carries commas",
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
