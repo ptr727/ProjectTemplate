@@ -126,7 +126,20 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         self.assertNotIn("tool.py", result.stdout + result.stderr)
 
     def test_a_commit_that_is_not_a_merge_still_diffs_against_head(self) -> None:
+        """A comment the branch already committed is out of scope, and a new one is refused.
+
+        The held comment is on the branch alone, so any base other than HEAD, develop or the fork
+        point among them, reads it as added. The new file's comment is added against every base.
+        """
         self.git("merge", "--abort")
+        self.write("held.py", COMMENT + "value = 2\n")
+        self.git("add", "held.py")
+        self.git("commit", "-q", "--no-verify", "-m", "held comment")
+        self.write("held.py", COMMENT + "value = 3\n")
+        self.git("add", "held.py")
+        result = self.run_git("commit", "-m", "edit beside the held comment")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
         self.write("feature.py", COMMENT + "value = 2\n")
         self.git("add", "feature.py")
         result = self.run_git("commit", "-m", "feature comment")

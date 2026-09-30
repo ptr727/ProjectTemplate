@@ -36,7 +36,8 @@ else
     exit 1
 fi
 
-# The prose gate is scoped to what changed against HEAD, which is the policy for prose.
+# The prose gate is scoped to what changed, which is the policy for prose.
+# The base is HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
 # A rule is applied as a file is next edited rather than swept across the tree.
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.13.
 # The scope is the working tree rather than the index.
