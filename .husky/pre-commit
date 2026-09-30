@@ -42,7 +42,11 @@ fi
 # The scope is the working tree rather than the index.
 # A partially staged file is therefore judged on all of its edits, not only the staged ones.
 # The pull request gate reads every line the branch changes against its base.
-run_py scripts/prose_lint.py . --diff HEAD
+base=HEAD
+if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    base=MERGE_HEAD
+fi
+run_py scripts/prose_lint.py . --diff "$base"
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
