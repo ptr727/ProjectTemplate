@@ -200,8 +200,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    comments too. Where the parking comment names the decision issue the lane waits on, read the
    answer recorded there and follow it, since it is what unblocked the lane. A lesson issue the
    comment also names, per step 6, is its own work rather than this lane's, so the worker neither
-   follows it nor parks on it. Re-derive live state rather than trusting any of them, per `session-handoff`
-   "Resuming".
+   follows it nor parks on it. Re-derive live state rather than trusting any of them, per
+   `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
