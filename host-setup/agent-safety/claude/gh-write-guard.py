@@ -81,7 +81,10 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      against a condition that could never become true, until they were killed by PID by hand. A shell
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
-     shell, which is the script that shell runs.
+     shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
+     opening nothing and once per `<<` whose tag it accepts and whose non-empty body a later line
+     closes, and any reading holding an unbounded wait denies. A command with more readings than the rule builds
+     is denied unread when it names both `sleep` and a loop keyword.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
@@ -2717,41 +2720,9 @@ def _ends_pipeline(tok):
     return _is_separator(tok) and tok != "|"
 
 
-def _heredoc_opener(line):
-    """(tag, is_dash_form, feeds_a_shell) for a heredoc `line` opens, or None.
-
-    Read from tokens rather than from the raw text, so a `<<` inside a quoted argument is the
-    text it is: a commit message explaining the `<< EOF` form opened one, and the strip then
-    deleted every command after it. A `<<<` herestring is a token of its own and not this, and a
-    line carrying arithmetic is skipped outright, since `$(( 1 << n ))` tokenizes to a bare `<<`
-    that no token test can tell from a redirection. Skipping there costs a false deny on a line
-    holding both, which is vanishingly rare, where reading it wrong drops real commands.
-
-    The line is read twice, with its comments dropped and with a `#` read as text, and opens a
-    heredoc only where both readings find one, taking the first reading's. The first keeps a `<<`
-    inside a comment from opening one. A reading that does not parse is replaced by the line as
-    `_operator_tokens` reads it.
-    """
-    readings = []
-    for comments in (False, True):
-        try:
-            readings.append(_context_lex(line, comments))
-        except (ValueError, RecursionError):
-            readings.append(_operator_tokens(line))
-    if _heredoc_opener_in(readings[0]) is None:
-        return None
-    return _heredoc_opener_in(readings[1])
-
-
-def _line_heredoc_opener(line):
-    """`_heredoc_opener` as it read a line before `_context_lex`, through `_operator_tokens` alone."""
-    return _heredoc_opener_in(_operator_tokens(line))
-
-
-def _heredoc_opener_in(toks):
-    """(tag, is_dash_form, feeds_a_shell) for the heredoc a line's `toks` open, or None."""
-    if any("((" in t for t in toks):
-        return None
+def _heredoc_openers_in(toks):
+    """Every heredoc a line's `toks` can open, in order, each (tag, is_dash_form, feeds_a_shell)."""
+    openers = []
     for k, tok in enumerate(toks):
         if tok != "<<" or k + 1 >= len(toks):
             continue
@@ -2776,55 +2747,146 @@ def _heredoc_opener_in(toks):
         end = k
         while end < len(toks) and not _ends_pipeline(toks[end]):
             end += 1
-        return tag, dash, any(_is_shell_wrapper_exe(t) for t in toks[start:end])
-    return None
+        openers.append((tag, dash, any(_is_shell_wrapper_exe(t) for t in toks[start:end])))
+    return openers
 
 
-def _strip_heredoc_bodies(cmd, opener=_heredoc_opener):
-    """`cmd` with every heredoc body removed, except one fed to a shell, which really is a script.
-    `opener` decides which lines open a heredoc.
+def _heredoc_forks(toks):
+    """The ways a line's `toks` can open a heredoc whose body is data, each a (tag, is_dash_form) or None.
+
+    None is the reading where the line strips no body, either because it opens none or because
+    the one it opens is fed to a shell. A line holding no `((` has one reading. A line holding one
+    has a reading per `<<` beside None, since `$(( 1 << n ))` tokenizes to a bare `<<` that no token
+    test can tell from a redirection. Skipping such a line outright kept a real heredoc's body as
+    commands, and a comparison in that body then vouched for a wait loop whose condition carried no
+    bound.
+    """
+    openers = [None if fed else (tag, dash) for tag, dash, fed in _heredoc_openers_in(toks)]
+    if any("((" in t for t in toks):
+        return list(dict.fromkeys([None, *openers]))
+    return openers[:1] or [None]
+
+
+def _heredoc_openers(line):
+    """`_heredoc_forks` for `line`, read from tokens rather than from the raw text.
+
+    Tokens keep a `<<` inside a quoted argument the text it is: a commit message explaining the
+    `<< EOF` form opened one, and the strip then deleted every command after it. A `<<<` herestring
+    is a token of its own and not this.
+
+    The line is read twice, with a `#` read as text and with its comments dropped, and opens a
+    heredoc only where both readings find one, taking the second reading's forks. The second keeps
+    a `<<` inside a comment from opening one. A reading that does not parse is replaced by the line
+    as `_operator_tokens` reads it.
+    """
+    readings = []
+    for comments in (False, True):
+        try:
+            readings.append(_context_lex(line, comments))
+        except (ValueError, RecursionError):
+            readings.append(_operator_tokens(line))
+    if not _heredoc_openers_in(readings[0]):
+        return [None]
+    return _heredoc_forks(readings[1])
+
+
+def _line_heredoc_openers(line):
+    """`_heredoc_openers` as it read a line before `_context_lex`, through `_operator_tokens` alone."""
+    return _heredoc_forks(_operator_tokens(line))
+
+
+_HEREDOC_READING_LIMIT = 16
+
+
+def _heredoc_body_end(lines, start, opener):
+    """(the index after the line closing the body `opener` opens at `start`, [that line]).
+
+    Where no line closes the body, this is (the line count, []).
+
+    A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs. Accepting
+    any indentation instead ended the body early on a doc line that merely read as the tag, and the
+    rest was scanned as commands.
+    """
+    tag, dash = opener
+    for j in range(start, len(lines)):
+        if (lines[j].lstrip("\t") if dash else lines[j]) == tag:
+            return j + 1, [lines[j]]  # the terminator line itself is ordinary text again
+    return len(lines), []
+
+
+def _heredoc_readings(cmd, openers=_heredoc_openers):
+    """Every text `cmd` can be with its heredoc bodies removed, or None past the reading limit.
+    `openers` decides the ways each line opens a heredoc.
 
     A heredoc body is data rather than a command line, so `cat > notes.md <<EOF` writing this rule's
     own forbidden shape into a document is not that shape being run. A body fed to `sh`/`bash` is
     kept, since there it is the script the shell executes. This is precision over recall in the same
     direction the kit takes elsewhere: a wait inside a script file is likewise unseen.
+
+    A line `openers` reads more than one way forks the text, one reading per `<<` whose tag closes a
+    body on a later line, beside the reading that strips nothing there. A caller denying on any
+    reading then needs no guess at which `<<` is the shift. A `<<` with no closing line forks
+    nothing, since stripping to the end dropped the rest of a quoted payload holding a shift. Nor
+    does one whose closing line is the next line, since that reading is the same text as the one
+    stripping nothing. Past `_HEREDOC_READING_LIMIT` readings this returns None rather than building
+    them all.
     """
     if "<<" not in cmd:
-        return cmd
+        return [cmd]
     lines = cmd.split("\n")
-    kept = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        kept.append(line)
-        opened = opener(line)
-        if opened and not opened[2]:
-            tag, dash, _fed = opened
-            # A plain `<<` ends only on the tag at column zero, and `<<-` also accepts leading tabs.
-            # Accepting any indentation instead ended the body early on a doc line that merely read as the tag, and the rest was scanned as commands.
+    readings = []
+    pending = [(0, [])]
+    count = 1
+    while pending:
+        i, kept = pending.pop()
+        while i < len(lines):
+            kept.append(lines[i])
             i += 1
-            while i < len(lines):
-                if (lines[i].lstrip("\t") if dash else lines[i]) == tag:
-                    break
-                i += 1
-            if i < len(lines):
-                kept.append(lines[i])  # the terminator line itself is ordinary text again
-        i += 1
-    return "\n".join(kept)
+            first, *others = openers(lines[i - 1])
+            for opener in others:
+                j, term = _heredoc_body_end(lines, i, opener)
+                if not term or j == i + 1:
+                    continue
+                count += 1
+                if count > _HEREDOC_READING_LIMIT:
+                    return None
+                pending.append((j, kept + term))
+            if first is not None:
+                i, term = _heredoc_body_end(lines, i, first)
+                kept.extend(term)
+        readings.append("\n".join(kept))
+    return readings
+
+
+_NAMES_A_LOOP = re.compile(r"\b(?:while|until)\b|\bfor\s*\(\(")
 
 
 def _check_unbounded_wait(cmd):
-    """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text. The
-    command is judged with its heredoc bodies stripped twice, once by `_heredoc_opener` and once
-    by `_line_heredoc_opener`, and a loop either leaves standing is denied, so a heredoc the scan
-    misreads never hides a loop the line reading kept.
+    """Rule 7: deny a `while`/`until` + `sleep` wait carrying no bound in the command text.
+
+    The command is judged with its heredoc bodies stripped every way `_heredoc_openers` reads them
+    and every way `_line_heredoc_openers` does, and a reading holding an unbounded wait denies it, so
+    a heredoc the scan misreads never hides a loop the line reading kept. A command naming no `sleep`
+    once its line continuations, quotes, backslashes, and `$` signs are removed holds no such wait
+    in any reading, since every token is its text with some of those removed, so it is allowed
+    unread. Past the reading limit the command is denied unread only when that text also names a
+    loop keyword, matched in its case as bash reads one, since a wait needs both.
     """
-    stripped = _strip_heredoc_bodies(cmd)
-    loop = _unbounded_wait_loop(stripped)
-    if loop is None:
-        line_stripped = _strip_heredoc_bodies(cmd, _line_heredoc_opener)
-        if line_stripped != stripped:
-            loop = _unbounded_wait_loop(line_stripped)
+    text = re.sub(r"\\\r?\n|[\"'\\$]", "", cmd)
+    if "sleep" not in text.lower():
+        return "allow", ""
+    readings = _heredoc_readings(cmd)
+    line_readings = _heredoc_readings(cmd, _line_heredoc_openers)
+    if readings is None or line_readings is None:
+        if not _NAMES_A_LOOP.search(text):
+            return "allow", ""
+        return "deny", (
+            "This command names `sleep` and a loop keyword and holds more lines where `<<` could "
+            "open a heredoc or shift inside `(( ))` than the unbounded-wait rule reads every way a "
+            'shell might. Split it into shorter commands. See AGENTS.md "Delegation".'
+        )
+    candidates = dict.fromkeys(readings + line_readings)
+    loop = next((found for found in map(_unbounded_wait_loop, candidates) if found), None)
     if loop is None:
         return "allow", ""
     return "deny", (
@@ -4750,6 +4812,85 @@ _WAIT_CASES = [
         "echo $(( 1 << shift ))\nuntil [ -f y ]; do sleep 30; done",
         "deny",
         "nor a spaced one, which a raw-text read took for an opener and dropped the command after",
+    ),
+    (
+        "while [ -e /x ] <<EOF ; : $((0))\n[ x -lt 5 ]\nEOF\ndo sleep 1; done",
+        "deny",
+        "a real heredoc on a line holding (( keeps no body to vouch for the loop's bound",
+    ),
+    (
+        "while [ -e /x ] ; : $(( 1 << n )) <<EOF\n[ x -lt 5 ]\nEOF\ndo sleep 1; done",
+        "deny",
+        "nor does one after a shift on its line, since every << there is read as the opener in turn",
+    ),
+    (
+        "while [ -e /x ] <<EOF ; echo '(('\n[ x -lt 5 ]\nEOF\ndo sleep 1; done",
+        "deny",
+        "nor does one beside a quoted ((, which tokenizes as the arithmetic does",
+    ),
+    (
+        "while [ -e /x ] <<A ; : $((0))\n[ x -lt 5 ]\nA\n: $((0)) <<B\n[ y -lt 5 ]\nB\ndo sleep 1; done",
+        "deny",
+        "nor do two such lines, each read both ways together with the other",
+    ),
+    (
+        'i=0; while [ "$i" -lt 5 ]; do cat <<EOF ; sleep 1; i=$((i+1))\nbody\nEOF\ndone',
+        "allow",
+        "and a bounded loop holding a heredoc and (( on one body line stays allowed",
+    ),
+    (
+        "timeout 600 bash -c '\nwhile ! [ -f /x ]; do sleep 1; done\necho $(( 1 << n ))\necho fin\n'",
+        "allow",
+        "a shift inside a quoted payload opens nothing when no later line closes it",
+    ),
+    (
+        "\n".join(["echo $(( a << b ))", "x", "b"] * 7 + ["while [ ! -f /x ]; do sleep 1; done"]),
+        "deny",
+        "a waiting command past the reading limit is denied rather than read one way",
+    ),
+    (
+        "\n".join(
+            ["echo $(( a << b ))", "x", "b"] * 7
+            + ["cat > a.md <<EOF", "don't", "EOF", "while [ ! -f /x ]; do sleep 1; done"]
+            + ["cat > b.md <<EOF", "it's", "EOF"]
+        ),
+        "deny",
+        "nor does a quote pairing across two bodies hide the sleep from that limit",
+    ),
+    (
+        "\n".join(["echo $(( a << b ))", "x", "b"] * 7),
+        "allow",
+        "and one that never sleeps is allowed, since it holds no wait to judge",
+    ),
+    (
+        "\n".join(["echo $(( a << b ))", "x", "b"] * 7 + ["sleep 1"]),
+        "allow",
+        "nor one that sleeps and names no loop keyword, since a wait needs both",
+    ),
+    (
+        "\n".join(['cat > "part$((N+1)).md" <<EOF', "text", "EOF"] * 5 + ["sleep 2"]),
+        "allow",
+        "so five numbered heredoc writes followed by a pause stay allowed past the limit",
+    ),
+    (
+        "\n".join(
+            ['cat > "part$((N+1)).md" <<EOF', "While it loads, wait.", "EOF"] * 5 + ["sleep 2"]
+        ),
+        "allow",
+        "even where their bodies hold a capitalized loop word, since bash reads a keyword in its case",
+    ),
+    (
+        "while [ ! -f /x ]; do sl$'e'ep 1; done # it's",
+        "deny",
+        "and a `sleep` spelled through a `$'...'` span is still read as one",
+    ),
+    (
+        "\n".join(
+            ["echo $(( a << b ))", "b"] * 7
+            + ["timeout 5 bash -c 'while [ ! -f /x ]; do sleep 1; done'"]
+        ),
+        "allow",
+        "and a `<<` whose body is empty forks nothing, so a bounded wait after seven is still read",
     ),
     (
         "git commit -m 'Explain the << EOF form'\nuntil [ -f y ]; do sleep 30; done",
