@@ -282,17 +282,45 @@ def ref_exists(ref: str, root: Path) -> bool:
     return True
 
 
+def ref_name_exists(ref: str, root: Path) -> bool:
+    """Whether the exact ref name `ref` exists, whether or not it resolves to an object.
+
+    `for-each-ref` lists a ref naming an absent object, and `symbolic-ref` reads a symbolic ref
+    whose target is gone, which `for-each-ref` skips. Neither needs the object to resolve, and
+    both read through git's ref backend, so a files or a reftable store answers alike.
+    `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, one that is absent or
+    not a valid ref name included.
+    """
+    listed = git("for-each-ref", "--format=%(refname)", ref, root=root).splitlines()
+    if ref in listed:
+        return True
+    try:
+        git("symbolic-ref", "-q", ref, root=root)
+    except CannotRun:
+        return False
+    return True
+
+
 def remote_tracking_ref(name: str, root: Path) -> str | None:
-    """The exact `refs/remotes/<name>` ref, or None where `show-ref --verify` rejects that name.
+    """The exact `refs/remotes/<name>` ref, or None where no ref of that exact name exists.
 
     `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
     matches a local branch literally named that. `show-ref --verify` matches the name exactly.
-    Raises CannotRun where the ref it accepts does not resolve to a commit.
+    Raises CannotRun where the ref exists but does not resolve to a commit.
+
+    `show-ref --verify` also rejects a ref whose object is missing, or a symbolic ref whose target
+    is gone. Returning None for those would fall through to the as-written step in `target_ref`,
+    where a local branch sharing the short name then defines the review scope.
     """
     ref = f"refs/remotes/{name}"
     try:
         git("show-ref", "--verify", "--quiet", ref, root=root)
     except CannotRun:
+        if ref_name_exists(ref, root):
+            raise CannotRun(
+                f"{ref} exists but does not resolve to an object, so the review scope cannot be"
+                " determined"
+            ) from None
         return None
     if not ref_exists(ref, root):
         raise CannotRun(

@@ -51,6 +51,7 @@ class RepoCase(unittest.TestCase):
     """
 
     target = "develop"
+    ref_format: str | None = None
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
@@ -59,7 +60,10 @@ class RepoCase(unittest.TestCase):
         # The file then outlives the run, and two concurrent runs collide on one name.
         self.outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.isolate_git_config()
-        run(self.tmp, "init", "--initial-branch=develop", ".")
+        init = ["init", "--initial-branch=develop"]
+        if self.ref_format is not None:
+            init.append(f"--ref-format={self.ref_format}")
+        run(self.tmp, *init, ".")
         run(self.tmp, "config", "user.email", "test@example.invalid")
         run(self.tmp, "config", "user.name", "Test")
         run(self.tmp, "config", "commit.gpgsign", "false")
@@ -559,6 +563,61 @@ class ContentKeyCase(RepoCase):
         os.chdir(self.tmp / "sub")
         self.assertEqual(local_review.repo_root(), self.tmp)
         self.assertEqual(self.digest(), from_root, "the key changed with the working directory")
+
+
+class DanglingRemoteTrackingCase(RepoCase):
+    """A remote-tracking ref that exists but resolves to no object refuses rather than falls through.
+
+    `show-ref --verify` rejects both shapes below, and reading that as "no such ref" reached the
+    as-written step, where a local branch sharing the short name defined the review scope.
+    """
+
+    def shadow_with_a_local_branch(self) -> None:
+        run(self.tmp, "branch", "upstream/main", "HEAD")
+
+    def test_a_symbolic_ref_whose_target_is_gone_refuses(self) -> None:
+        run(self.tmp, "symbolic-ref", "refs/remotes/upstream/main", "refs/remotes/upstream/gone")
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_ref_naming_an_absent_object_refuses(self) -> None:
+        content = self.outside / "gone.txt"
+        content.write_text("about to go missing\n", encoding="utf-8")
+        blob = run(self.tmp, "hash-object", "-w", str(content)).strip()
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", blob)
+        loose = local_review.objects_dir(self.tmp) / blob[:2] / blob[2:]
+        loose.unlink()
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_ref_nested_under_the_name_is_not_the_name(self) -> None:
+        """`for-each-ref` matches a pattern by whole path components, so the match is exact."""
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main/nested", "HEAD")
+        self.assertFalse(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
+
+    def test_an_absent_ref_still_falls_through_to_the_as_written_step(self) -> None:
+        """Only a ref that exists refuses, so a target with no remote-tracking ref still resolves."""
+        self.shadow_with_a_local_branch()
+        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+
+
+class ReftableDanglingRemoteTrackingCase(DanglingRemoteTrackingCase):
+    """The same shapes on the reftable backend, which stores refs in no loose file at all."""
+
+    ref_format = "reftable"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as probe:
+            proc = subprocess.run(
+                ["git", "init", "--ref-format=reftable", probe],
+                capture_output=True,
+                check=False,
+            )
+        if proc.returncode != 0:
+            raise unittest.SkipTest("this git cannot create a reftable repository")
 
 
 class HeadContentCase(RepoCase):
