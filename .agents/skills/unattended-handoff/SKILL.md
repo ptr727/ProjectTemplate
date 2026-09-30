@@ -164,8 +164,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    in its body or in a comment on it, that it blocks the open develop -> main pull request, as
    "Parking" step 2 has it state, return `STOP` before picking anything, since every worker
    this run dispatched would meet that same decision after merging its own work to develop. Read
-   them with `gh issue list --repo "<owner>/<repo>" --label decision --state open --limit 100`
-   under step 2's full-page check, then each one's comments with `gh issue view --comments`.
+   them with `gh issue list --repo "<owner>/<repo>" --label decision --state open --limit 100
+   --json number,body,comments` under step 2's full-page check.
 2. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
    --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py
    tracks` prints neither. Where it returns as many rows as the limit, the list may be truncated, so
@@ -197,13 +197,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session has a closed predecessor holding that comment, so read the predecessor's
-   comments too. Where the newest parking comment names a decision issue the lane waits on, and
-   that comment is on the current link while the issue still carries `decision`, the worker
-   before was interrupted while parking, so finish parking per "Parking" step 4 and return
-   `PARKED`. Where it names one and neither holds, read the answer or the reason recorded on that
-   issue and follow it, since it is what unblocked the lane. A lesson issue the comment also
-   names, per step 6, is its own work rather than this lane's, so the worker neither follows it
-   nor parks on it. Re-derive live state rather than trusting any of them, per `session-handoff`
+   comments too. Where the parking comment names the decision issue the lane waits on, read the
+   answer recorded there and follow it, since it is what unblocked the lane. A lesson issue the
+   comment also names, per step 6, is its own work rather than this lane's, so the worker neither
+   follows it nor parks on it. Re-derive live state rather than trusting any of them, per `session-handoff`
    "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
