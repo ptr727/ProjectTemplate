@@ -10,6 +10,7 @@ name: Deploy site task
 # A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
 # A composite action's own steps are not guaranteed to read the caller's vars context directly, so each invocation also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars, the same mechanism the upload and flip steps below use.
 # The verify invocation also carries an optional SITE_AUTH_TOKEN_ID/SITE_AUTH_TOKEN secret pair the same way, for a hook whose live check needs its own token-gated auth.
+# It also carries SITE_EXTRA_BASE_URL and an optional SITE_EXTRA_AUTH_TOKEN_ID/SITE_EXTRA_AUTH_TOKEN pair, for a second site the bundle serves on its own hostname behind its own gate.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
 #
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
@@ -37,6 +38,12 @@ on:
       SITE_AUTH_TOKEN_ID:
         required: false
       SITE_AUTH_TOKEN:
+        required: false
+      # The second site's own pair, since a gate's token opens only the one resource it was issued for.
+      # Checked as a pair and against SITE_EXTRA_BASE_URL by the assert step below, then forwarded only on the verify invocation.
+      SITE_EXTRA_AUTH_TOKEN_ID:
+        required: false
+      SITE_EXTRA_AUTH_TOKEN:
         required: false
     outputs:
       # The caller records what shipped, without this a rollback has to read the host to find out.
@@ -110,6 +117,9 @@ jobs:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
           SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
+          SITE_EXTRA_BASE_URL: ${{ vars.SITE_EXTRA_BASE_URL }}
+          SITE_EXTRA_AUTH_TOKEN_ID: ${{ secrets.SITE_EXTRA_AUTH_TOKEN_ID }}
+          SITE_EXTRA_AUTH_TOKEN: ${{ secrets.SITE_EXTRA_AUTH_TOKEN }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -126,6 +136,15 @@ jobs:
           # A caller that maps one without the other fails here instead of reaching the verify hook with a partial credential.
           if { [ -n "$SITE_AUTH_TOKEN_ID" ] && [ -z "$SITE_AUTH_TOKEN" ]; } || { [ -z "$SITE_AUTH_TOKEN_ID" ] && [ -n "$SITE_AUTH_TOKEN" ]; }; then
             echo "::error::SITE_AUTH_TOKEN_ID and SITE_AUTH_TOKEN must both be mapped or neither; got only one."
+            exit 1
+          fi
+          # The second site's pair follows the same rule, and a pair with no SITE_EXTRA_BASE_URL names no site to check.
+          if { [ -n "$SITE_EXTRA_AUTH_TOKEN_ID" ] && [ -z "$SITE_EXTRA_AUTH_TOKEN" ]; } || { [ -z "$SITE_EXTRA_AUTH_TOKEN_ID" ] && [ -n "$SITE_EXTRA_AUTH_TOKEN" ]; }; then
+            echo "::error::SITE_EXTRA_AUTH_TOKEN_ID and SITE_EXTRA_AUTH_TOKEN must both be mapped or neither; got only one."
+            exit 1
+          fi
+          if [ -n "$SITE_EXTRA_AUTH_TOKEN_ID" ] && [ -z "$SITE_EXTRA_BASE_URL" ]; then
+            echo "::error::SITE_EXTRA_AUTH_TOKEN_ID and SITE_EXTRA_AUTH_TOKEN are mapped, but SITE_EXTRA_BASE_URL is missing or empty on '${{ inputs.environment }}'."
             exit 1
           fi
 
@@ -242,6 +261,9 @@ jobs:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
           SITE_AUTH_TOKEN_ID: ${{ secrets.SITE_AUTH_TOKEN_ID }}
           SITE_AUTH_TOKEN: ${{ secrets.SITE_AUTH_TOKEN }}
+          SITE_EXTRA_BASE_URL: ${{ vars.SITE_EXTRA_BASE_URL }}
+          SITE_EXTRA_AUTH_TOKEN_ID: ${{ secrets.SITE_EXTRA_AUTH_TOKEN_ID }}
+          SITE_EXTRA_AUTH_TOKEN: ${{ secrets.SITE_EXTRA_AUTH_TOKEN }}
         with:
           mode: verify
           environment: ${{ inputs.environment }}
