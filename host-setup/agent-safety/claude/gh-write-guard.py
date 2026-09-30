@@ -24,7 +24,7 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
      whose rules require a pull request, a force-push where history is protected, a delete where deletion
      is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`, or a
-     per-invocation `core.hooksPath` override on a commit or push). The
+     `-c`/`--config-env` override of `core.hooksPath` on a commit or push). The
      branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
      allowed with no hardcoded repo list.
   5. a hand-rolled reply/resolve for a review thread: a `resolveReviewThread` mutation via `gh api
