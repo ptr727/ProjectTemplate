@@ -141,10 +141,7 @@ An issue needs no maintainer decision when every one of these holds. Where any i
 does not qualify, since skipping one costs nothing and a guess costs a revert and a review round.
 
 - **The right outcome is determined** by the issue together with the committed rules, and the issue
-  leaves no choice open between alternatives it names. A choice counts as closed once the issue's
-  `decision` label has come off with the answer or the reason recorded on it, per `GOVERNANCE.md`
-  "Communicating with the User", which is how an adopted lesson that still lists its options
-  qualifies.
+  leaves no choice open between alternatives it names.
 - **Nothing on it waits on the maintainer.** It carries none of `decision`, `blocked`, `handoff`, or
   `canonical-sweep`, the last being an issue a workflow owns rather than one a pull request closes,
   and no comment asks the maintainer something still unanswered.
@@ -166,7 +163,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 1. **Check the promotion first** under `main` or `release`. Where an open `decision` issue states,
    in its body or in a comment on it, that it blocks the open develop -> main pull request, as
    "Parking" step 2 has it state, return `STOP` before picking anything, since every worker
-   this run dispatched would meet that same decision after merging its own work to develop.
+   this run dispatched would meet that same decision after merging its own work to develop. Read
+   them with `gh issue list --repo "<owner>/<repo>" --label decision --state open --limit 100`
+   under step 2's full-page check, then each one's comments with `gh issue view --comments`.
 2. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
    --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py
    tracks` prints neither. Where it returns as many rows as the limit, the list may be truncated, so
@@ -198,13 +197,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session has a closed predecessor holding that comment, so read the predecessor's
-   comments too. Where the parking comment is on the current link and the decision issue it
-   waits on still carries `decision`, the worker before was interrupted while parking, so finish
-   parking per "Parking" step 4 and return `PARKED`. Otherwise read the answer or the reason
-   recorded on that decision issue and follow it, since it is what unblocked the lane. A lesson
-   issue the comment also names, per step 6, is its own work rather than this lane's, so the
-   worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
-   them, per `session-handoff` "Resuming".
+   comments too. Where the newest parking comment names a decision issue the lane waits on, and
+   that comment is on the current link while the issue still carries `decision`, the worker
+   before was interrupted while parking, so finish parking per "Parking" step 4 and return
+   `PARKED`. Where it names one and neither holds, read the answer or the reason recorded on that
+   issue and follow it, since it is what unblocked the lane. A lesson issue the comment also
+   names, per step 6, is its own work rather than this lane's, so the worker neither follows it
+   nor parks on it. Re-derive live state rather than trusting any of them, per `session-handoff`
+   "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
@@ -254,8 +254,8 @@ interruption part way leaves the work findable rather than lost.
 3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
    can name it: what is done, the branch and pull request, whether the worktree was left standing,
    what remains, and the decision issue it now waits on, named as that apart from any lesson issue
-   the comment also names. This comment is what the next session on
-   the lane resumes from, so it is complete enough to continue with no other context.
+   the comment also names. This comment is what the next session on the lane resumes from, so it
+   is complete enough to continue with no other context.
 4. **Label the handoff `blocked`**, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
    The picker skips it from then on, and the attended session takes it first.
 
