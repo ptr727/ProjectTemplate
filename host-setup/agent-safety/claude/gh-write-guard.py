@@ -2329,6 +2329,30 @@ def _names_a_stream(target):
     return posixpath.normpath(re.sub(r"^/+", "/", target)).startswith(("/dev/", "/proc/"))
 
 
+_NON_CLOSING_RESERVED_WORDS = frozenset(
+    {
+        "!",
+        "case",
+        "coproc",
+        "do",
+        "elif",
+        "else",
+        "for",
+        "function",
+        "if",
+        "in",
+        "select",
+        "then",
+        "time",
+        "until",
+        "while",
+        "{",
+        "[[",
+        "]]",
+    }
+)
+
+
 def _redirects_stdin(after_done):
     """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
@@ -2341,6 +2365,11 @@ def _redirects_stdin(after_done):
 
     The last binding is what counts, not the first to qualify. A shell applies redirections in
     order and each replaces the last, so `< in.txt < /dev/zero` reads the stream.
+
+    The loop's command ends at a reserved word as it does at a separator, so the `< f` in
+    `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
+    A closing word, one of `}`, `fi`, `done`, and `esac`, is passed over rather than ending it,
+    since a redirect after one binds a compound enclosing the loop, which the loop reads from.
     """
     bound = False
     i = 0
@@ -2349,6 +2378,8 @@ def _redirects_stdin(after_done):
         # Only this loop's own invocation, since a redirect on a later command binds nothing it reads.
         # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
         if _is_separator(tok):
+            return bound
+        if tok in _NON_CLOSING_RESERVED_WORDS:
             return bound
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
@@ -5331,6 +5362,26 @@ _WAIT_CASES = [
         "yes | while read l; do sleep 30; done; cat < f",
         "deny",
         "a redirect on a later command binds nothing this loop reads",
+    ),
+    (
+        "if while read l; do sleep 30; done then echo x < f; fi",
+        "deny",
+        "nor does one after a reserved word, which ends the loop's command as a separator does",
+    ),
+    (
+        "if true; then while read l; do sleep 30; done else echo x < f; fi",
+        "deny",
+        "and an `else` ends it the same way a `then` does",
+    ),
+    (
+        "if true; then if true; then while read l; do sleep 30; done fi else echo x < f; fi",
+        "deny",
+        "even behind a closing word, which the scan passes over",
+    ),
+    (
+        "{ while read l; do sleep 30; done } < f",
+        "allow",
+        "while a redirect after a closing word binds the enclosing compound, which the loop reads",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",
