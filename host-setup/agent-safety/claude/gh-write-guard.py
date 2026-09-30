@@ -2329,14 +2329,17 @@ def _names_a_stream(target):
     return posixpath.normpath(re.sub(r"^/+", "/", target)).startswith(("/dev/", "/proc/"))
 
 
-_NON_CLOSING_RESERVED_WORDS = frozenset(
+_RESERVED_WORDS = frozenset(
     {
         "!",
         "case",
         "coproc",
         "do",
+        "done",
         "elif",
         "else",
+        "esac",
+        "fi",
         "for",
         "function",
         "if",
@@ -2347,6 +2350,7 @@ _NON_CLOSING_RESERVED_WORDS = frozenset(
         "until",
         "while",
         "{",
+        "}",
         "[[",
         "]]",
     }
@@ -2368,8 +2372,8 @@ def _redirects_stdin(after_done):
 
     The loop's command ends at a reserved word as it does at a separator, so the `< f` in
     `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
-    A closing word, one of `}`, `fi`, `done`, and `esac`, is passed over rather than ending it,
-    since a redirect after one binds a compound enclosing the loop, which the loop reads from.
+    That includes a closing word such as `}`, since a pipe inside the compound it closes can feed
+    the loop, so `{ yes | while read l; do sleep 30; done } < f` reads the pipe.
     """
     bound = False
     i = 0
@@ -2379,7 +2383,7 @@ def _redirects_stdin(after_done):
         # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
         if _is_separator(tok):
             return bound
-        if tok in _NON_CLOSING_RESERVED_WORDS:
+        if tok in _RESERVED_WORDS:
             return bound
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
@@ -5376,12 +5380,12 @@ _WAIT_CASES = [
     (
         "if true; then if true; then while read l; do sleep 30; done fi else echo x < f; fi",
         "deny",
-        "even behind a closing word, which the scan passes over",
+        "even behind a closing word, which ends it too",
     ),
     (
-        "{ while read l; do sleep 30; done } < f",
-        "allow",
-        "while a redirect after a closing word binds the enclosing compound, which the loop reads",
+        "{ yes | while read l; do sleep 30; done } < f",
+        "deny",
+        "since a redirect after a closing word binds a compound whose pipe can still feed the loop",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",
