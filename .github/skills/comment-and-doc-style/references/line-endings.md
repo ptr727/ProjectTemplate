@@ -9,7 +9,7 @@ summary, preserve the existing ending and verify with a byte scan, covers that c
 
 - **`.editorconfig` sets the line ending.** `[*] end_of_line = lf` is the default, every file
   type is LF unless pinned otherwise, with CRLF pinned for the one exception Windows requires:
-  `*.bat` and `*.cmd` (cmd.exe's line handling is unreliable on LF). Only the CRLF exception is
+  `*.bat` and `*.cmd` (cmd.exe's line handling is unreliable on LF). Only the CRLF exceptions are
   declared, the redundant per-type LF rules are intentionally omitted, since the default already
   gives shell scripts, Dockerfiles, workflow YAML, `uv.lock`, and every shebang-executed `.py`
   the ending they need without a path-specific pin.
