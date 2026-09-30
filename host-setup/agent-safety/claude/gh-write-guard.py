@@ -2443,10 +2443,11 @@ def _is_timeout_signal_zero(val):
 
 
 def _is_timeout_signal_unknown(val):
-    """True if the shell may rewrite the `-s` value at run time, so the text names no signal.
+    """True if the shell may rewrite the word at run time, so the text cannot say what it names.
 
     A substitution, a brace expansion, a glob, and a tilde expansion each can, as `$SIG`, `{0..0}`,
-    `[0]`, and `~` do.
+    `[0]`, and `~` do. That holds for a `-s` value and for an option word alike, since `-${F}0`
+    becomes `-s0` where `F` is `s`.
     """
     return any(ch in val for ch in "$`{[*?~")
 
@@ -2562,7 +2563,9 @@ def _timeout_bounds_wrapper(toks, w):
     process and the `timeout` goes on waiting for a child that keeps running.
 
     A `-s` value the shell may rewrite at run time, such as `"$SIG"` or `{0..0}`, is read the same
-    way, since the text cannot say it is not signal 0.
+    way, since the text cannot say it is not signal 0. An option word the shell may rewrite, such as
+    `-${F}0`, is read as both a signal-0 `-s` and a `-k` of no duration form, since it may become
+    either.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
     only when every outer one sends signal 0 with no `-k` of any value, which is inert, and the
@@ -2596,6 +2599,10 @@ def _timeout_bounds_wrapper(toks, w):
     signal = kill_after = ""
     while i < w:
         tok = toks[i]
+        if tok.startswith("-") and _is_timeout_signal_unknown(tok):
+            signal = kill_after = tok
+            i += 1
+            continue
         if tok.startswith("-"):
             opt, val = _timeout_option(tok)
             if val is None:
@@ -5228,6 +5235,26 @@ _WAIT_CASES = [
         "timeout -s ~ 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "as is a tilde, which the shell rewrites to HOME",
+    ),
+    (
+        "timeout -${F}0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and an option word the shell may rewrite into -s0 names no signal either",
+    ),
+    (
+        "timeout -${F}0 -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "unless a kill-after follows it with a SIGKILL",
+    ),
+    (
+        "timeout -s 0 -$X 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and behind an outer timeout it may be a kill-after, so the nesting is read as no bound",
+    ),
+    (
+        "timeout -$X -s 0 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "even where a later -s 0 replaces the signal it may have named",
     ),
     (
         "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",

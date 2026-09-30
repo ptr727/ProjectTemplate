@@ -198,8 +198,9 @@ text says, because the harm it covers was never in the text.
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
    where its value takes the form a duration takes here. A `-s` value the shell may rewrite at run
    time, by a substitution such as `"$SIG"`, a brace expansion, a glob, or a tilde expansion, is
-   read the same way, since the text cannot say it is not signal 0. Where a `timeout`'s command is
-   another `timeout`,
+   read the same way, since the text cannot say it is not signal 0. An option word the shell may
+   rewrite, such as `-${F}0`, is read as both a signal-0 `-s` and a `-k` of no duration form,
+   since it may become either. Where a `timeout`'s command is another `timeout`,
    past any command prefix, the run is bounded only when every outer one sends signal 0 with no
    `-k` of any value, which is inert, and the innermost one is a bound, so `timeout -s 0 900
    timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read as no bound,
