@@ -62,8 +62,8 @@ default baseline on first-party code (a repo may instead run mypy with its stric
 and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
 `strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
 standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
-editor and the CLI/CI (`uv run pyright` in the uv form, `uvx pyright@latest` pointed at the
-environment in the pip form) run the same engine and never disagree.
+editor and the CLI/CI (`uv run pyright` in the uv form, `uvx pyright@latest` in the pip form,
+pointed at the environment in a declared directory) run the same engine and never disagree.
 The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
@@ -112,7 +112,7 @@ carries a `[project]` table it then installs the directory itself as editable, w
 `src`-layout package is not importable and pytest fails locally where CI passes:
 
 ```sh
-uv venv                                   # creates .venv
+uv venv --clear                           # creates .venv, replacing an existing one
 uv pip install -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
 uv pip install -e .                       # only where pyproject.toml has a [project] table
 uvx ruff@latest format                    # auto-format
@@ -138,7 +138,9 @@ adaptations. Every command-executing task in it is `type: process`, and every ag
 
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
 `python-directories` input declares. The undeclared root, the default for a repo declaring none, is
-gated more loosely. In its pip form CI installs nothing for the type check and runs a bare
+gated more loosely. CI reads its type-checker configuration only from the `[tool.mypy]` or
+`[tool.pyright]` section of its `pyproject.toml`, and skips the type check where neither is there,
+whatever the form. In its pip form CI installs nothing for that check and runs a bare
 `uvx <checker>@latest`, so the local check against the environment is the stricter one. And CI runs
 its tests only where a pytest suite in `tests/` sits beside a `uv.lock` or `requirements*.txt`.
 
