@@ -170,7 +170,7 @@ No comment, no docstring, and no instruction document names an issue, a pull req
 
 ### Character Set
 
-The full ASCII tier system (never legitimate, legitimate next to a number, always legitimate, developer-typed Unicode) and the semicolon and spaced-hyphen rules are in the `comment-and-doc-style` Skill referenced above.
+The full ASCII tier system (never legitimate, legitimate next to a number, always legitimate, developer-typed Unicode), the letters of a recorded name keeping their actual spelling, and the semicolon and spaced-hyphen rules are in the `comment-and-doc-style` Skill referenced above.
 
 ### Line Endings
 
