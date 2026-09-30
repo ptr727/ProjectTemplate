@@ -581,6 +581,21 @@ class DanglingRemoteTrackingCase(RepoCase):
         with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
             local_review.target_ref("upstream/main", self.tmp)
 
+    def test_a_dangling_symbolic_ref_is_found_without_its_loose_file(self) -> None:
+        """A files store also holds it as a loose file, which would hide a gap on a reftable store."""
+        run(self.tmp, "symbolic-ref", "refs/remotes/upstream/main", "refs/remotes/upstream/gone")
+        with unittest.mock.patch.object(local_review.Path, "is_file", return_value=False):
+            self.assertTrue(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
+
+    def test_a_loose_ref_file_that_cannot_be_checked_is_a_boundary(self) -> None:
+        """A name `check-ref-format` accepts can still be one the filesystem rejects, as too long."""
+        too_long = OSError(36, "File name too long")
+        with (
+            unittest.mock.patch.object(local_review.Path, "is_file", side_effect=too_long),
+            self.assertRaises(local_review.CannotRun),
+        ):
+            local_review.remote_tracking_ref("upstream/main", self.tmp)
+
     def test_a_ref_naming_an_absent_object_refuses(self) -> None:
         content = self.outside / "gone.txt"
         content.write_text("about to go missing\n", encoding="utf-8")

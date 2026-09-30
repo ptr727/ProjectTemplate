@@ -292,7 +292,8 @@ def ref_name_exists(ref: str, root: Path) -> bool:
     directly. A reftable store holds no loose ref files, so that last check finds nothing there.
     `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, an absent one
     included. A name `check-ref-format` rejects is never a ref git reads, so it is never looked
-    for on disk, where a `..` in it would reach outside the ref store.
+    for on disk, where a `..` in it would reach outside the ref store. A file that cannot be
+    checked, such as one whose name the filesystem rejects as too long, raises CannotRun.
     """
     try:
         git("check-ref-format", ref, root=root)
@@ -301,8 +302,12 @@ def ref_name_exists(ref: str, root: Path) -> bool:
     listed = git("for-each-ref", "--format=%(refname)", ref, root=root).splitlines()
     if ref in listed:
         return True
-    if (root / git("rev-parse", "--git-path", ref, root=root).strip()).is_file():
-        return True
+    loose = root / git("rev-parse", "--git-path", ref, root=root).strip()
+    try:
+        if loose.is_file():
+            return True
+    except OSError as e:
+        raise CannotRun(f"could not check for a loose ref file at {loose} ({e})") from e
     try:
         git("symbolic-ref", "-q", ref, root=root)
     except CannotRun:
