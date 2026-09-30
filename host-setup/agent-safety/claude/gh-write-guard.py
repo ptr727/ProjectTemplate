@@ -81,9 +81,10 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      against a condition that could never become true, until they were killed by PID by hand. A shell
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
-     shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
-     opening nothing and once per `<<` whose tag it accepts and whose non-empty body a later line
-     closes, and any reading holding an unbounded wait denies. A command with more readings than the rule builds
+     shell, which is the script that shell runs. A line opening several heredocs skips each body in
+     order. A line holding `((` beside a `<<` is read once as opening nothing and once per ordered
+     subset of its `<<`s whose tags it accepts and whose bodies later lines close, removing at least
+     one line, and any reading holding an unbounded wait denies. A command with more readings than the rule builds
      is denied unread when it names both `sleep` and a loop keyword.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
@@ -2752,19 +2753,18 @@ def _heredoc_openers_in(toks):
 
 
 def _heredoc_forks(toks):
-    """The ways a line's `toks` can open a heredoc whose body is data, each a (tag, is_dash_form) or None.
+    """(the heredocs a line's `toks` can open in order, whether the line is ambiguous).
 
-    None is the reading where the line strips no body, either because it opens none or because
-    the one it opens is fed to a shell. A line holding no `((` has one reading. A line holding one
-    has a reading per `<<` beside None, since `$(( 1 << n ))` tokenizes to a bare `<<` that no token
-    test can tell from a redirection. Skipping such a line outright kept a real heredoc's body as
-    commands, and a comparison in that body then vouched for a wait loop whose condition carried no
-    bound.
+    Each heredoc is a (tag, is_dash_form), or None for one whose body is fed to a shell. Bash reads
+    every body a line opens in turn, each through its own delimiter, before the next command, so an
+    unambiguous line strips them in order up to the first fed to a shell. A line holding `((` is
+    ambiguous, since `$(( 1 << n ))` tokenizes to a bare `<<` that no token test can tell from a
+    redirection, so it is read as opening nothing and as opening each ordered subset of its `<<`s.
+    Skipping such a line outright kept a real heredoc's body as commands, and a comparison in that
+    body then vouched for a wait loop whose condition carried no bound.
     """
     openers = [None if fed else (tag, dash) for tag, dash, fed in _heredoc_openers_in(toks)]
-    if any("((" in t for t in toks):
-        return list(dict.fromkeys([None, *openers]))
-    return openers[:1] or [None]
+    return openers, any("((" in t for t in toks)
 
 
 def _heredoc_openers(line):
@@ -2786,7 +2786,7 @@ def _heredoc_openers(line):
         except (ValueError, RecursionError):
             readings.append(_operator_tokens(line))
     if not _heredoc_openers_in(readings[0]):
-        return [None]
+        return [], False
     return _heredoc_forks(readings[1])
 
 
@@ -2814,22 +2814,67 @@ def _heredoc_body_end(lines, start, opener):
     return len(lines), []
 
 
+def _heredoc_bodies_end(lines, start, openers):
+    """(the index after the last body `openers` open at `start`, [their closing lines]).
+
+    The bodies are read in order up to the first fed to a shell, whose lines stay commands. A body
+    no line closes runs to the end, as bash reads it.
+    """
+    terms = []
+    for opener in openers:
+        if opener is None:
+            break
+        start, term = _heredoc_body_end(lines, start, opener)
+        terms.extend(term)
+    return start, terms
+
+
+def _heredoc_subset_ends(lines, start, openers):
+    """Every (end, [closing lines]) an ordered subset of `openers` leaves at `start`, or None past the
+    reading limit.
+
+    A subset counts only where every body it opens closes and it removes at least one line, since
+    stripping to the end dropped the rest of a quoted payload holding a shift, and removing none is
+    the reading that strips nothing. A body fed to a shell ends a subset, which then strips what
+    the openers before it did. A closed body is charged against the limit whether or not its
+    subset counts, which bounds the search, since only a closed body extends one.
+    """
+    found = {}
+    stack = [(0, start, [])]
+    charged = 0
+    while stack:
+        first, i, terms = stack.pop()
+        for k in range(first, len(openers)):
+            if openers[k] is None:
+                continue
+            j, term = _heredoc_body_end(lines, i, openers[k])
+            if not term:
+                continue
+            charged += 1
+            if charged > _HEREDOC_READING_LIMIT:
+                return None
+            ends = terms + term
+            if j - start > len(ends):
+                found.setdefault((j, tuple(ends)), None)
+            stack.append((k + 1, j, ends))
+    return [(j, list(ends)) for j, ends in found]
+
+
 def _heredoc_readings(cmd, openers=_heredoc_openers):
     """Every text `cmd` can be with its heredoc bodies removed, or None past the reading limit.
-    `openers` decides the ways each line opens a heredoc.
+    `openers` decides the heredocs each line opens and whether it is ambiguous.
 
     A heredoc body is data rather than a command line, so `cat > notes.md <<EOF` writing this rule's
     own forbidden shape into a document is not that shape being run. A body fed to `sh`/`bash` is
     kept, since there it is the script the shell executes. This is precision over recall in the same
-    direction the kit takes elsewhere: a wait inside a script file is likewise unseen.
+    direction the kit takes elsewhere: a wait inside a script file is likewise unseen. A line
+    opening several heredocs strips every body in order, since reading only the first left the
+    others' lines as commands, and a heredoc opener among them swallowed the real commands after.
 
-    A line `openers` reads more than one way forks the text, one reading per `<<` whose tag closes a
-    body on a later line, beside the reading that strips nothing there. A caller denying on any
-    reading then needs no guess at which `<<` is the shift. A `<<` with no closing line forks
-    nothing, since stripping to the end dropped the rest of a quoted payload holding a shift. Nor
-    does one whose closing line is the next line, since that reading is the same text as the one
-    stripping nothing. Past `_HEREDOC_READING_LIMIT` readings this returns None rather than building
-    them all.
+    An ambiguous line forks the text, one reading per ordered subset of its `<<`s whose tags each
+    close a body, beside the reading that strips nothing there. A caller denying on any reading
+    then needs no guess at which `<<` is the shift. Past `_HEREDOC_READING_LIMIT` readings this
+    returns None rather than building them all.
     """
     if "<<" not in cmd:
         return [cmd]
@@ -2842,18 +2887,19 @@ def _heredoc_readings(cmd, openers=_heredoc_openers):
         while i < len(lines):
             kept.append(lines[i])
             i += 1
-            first, *others = openers(lines[i - 1])
-            for opener in others:
-                j, term = _heredoc_body_end(lines, i, opener)
-                if not term or j == i + 1:
-                    continue
+            opened, ambiguous = openers(lines[i - 1])
+            if not ambiguous:
+                i, term = _heredoc_bodies_end(lines, i, opened)
+                kept.extend(term)
+                continue
+            forks = _heredoc_subset_ends(lines, i, opened)
+            if forks is None:
+                return None
+            for j, term in forks:
                 count += 1
                 if count > _HEREDOC_READING_LIMIT:
                     return None
                 pending.append((j, kept + term))
-            if first is not None:
-                i, term = _heredoc_body_end(lines, i, first)
-                kept.extend(term)
         readings.append("\n".join(kept))
     return readings
 
@@ -4832,6 +4878,31 @@ _WAIT_CASES = [
         "while [ -e /x ] <<A ; : $((0))\n[ x -lt 5 ]\nA\n: $((0)) <<B\n[ y -lt 5 ]\nB\ndo sleep 1; done",
         "deny",
         "nor do two such lines, each read both ways together with the other",
+    ),
+    (
+        "cat <<A <<B\na\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "a line opening two heredocs strips both bodies, so a second body's opener hides no loop",
+    ),
+    (
+        ": $((0)) <<EOF <<EOF\na\nEOF\ncat <<X\nEOF\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "nor does one holding (( whose two bodies share a tag",
+    ),
+    (
+        ": $((0)) <<A <<B\nB\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "nor one holding (( whose first body holds the second tag's line",
+    ),
+    (
+        "cat <<A; bash <<B\na\nA\nwhile [ ! -f /x ]; do sleep 1; done\nB",
+        "deny",
+        "a second body fed to a shell is still read as the script it is",
+    ),
+    (
+        "cat <<A <<B > notes.md\nwhile [ ! -f /x ]; do sleep 1; done\nA\nuntil [ -f /x ]; do sleep 1; done\nB",
+        "allow",
+        "and a line writing two bodies to a document runs neither loop it quotes",
     ),
     (
         'i=0; while [ "$i" -lt 5 ]; do cat <<EOF ; sleep 1; i=$((i+1))\nbody\nEOF\ndone',
