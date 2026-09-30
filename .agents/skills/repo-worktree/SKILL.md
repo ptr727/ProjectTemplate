@@ -227,7 +227,8 @@ in the new tree.
   `dotnet tool restore`, then `dotnet husky install` from the worktree root. That generates the
   runtime in this tree and writes `core.hooksPath` back to the value it already holds. Where the
   setting reads anything else, the install would change it for every checkout, so the
-  linked-worktree bullet below applies.
+  linked-worktree bullet below applies. In a standalone clone, whose config and hooks are its
+  own, run the same two commands there whatever the setting reads.
 - **Python pre-commit:** When `.pre-commit-config.yaml` exists, check for the hook the new tree
   will run before installing anything, from the worktree root, with
   `test -x "$(git rev-parse --git-path hooks)/pre-commit"`. In a linked worktree with no
