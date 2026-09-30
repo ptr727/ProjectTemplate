@@ -2445,9 +2445,10 @@ def _is_timeout_signal_zero(val):
 def _is_timeout_signal_unknown(val):
     """True if the shell may rewrite the `-s` value at run time, so the text names no signal.
 
-    A substitution, a brace expansion, and a glob each can, as `$SIG`, `{0..0}`, and `[0]` do.
+    A substitution, a brace expansion, a glob, and a tilde expansion each can, as `$SIG`, `{0..0}`,
+    `[0]`, and `~` do.
     """
-    return any(ch in val for ch in "$`{[*?")
+    return any(ch in val for ch in "$`{[*?~")
 
 
 def _timeout_option(tok):
@@ -2568,9 +2569,11 @@ def _timeout_bounds_wrapper(toks, w):
     innermost one is a bound. Any other such nesting is read as no bound, since an outer signal can
     end the inner `timeout` before its deadline and leave the loop under it running. A word naming
     `timeout` anywhere between an outer duration and the wrapper is read as that nesting. That is a
-    false deny wherever the outer signal would have stopped the loop too, wherever a prefix between
-    the two takes an argument, as `nice -n 5` does, and wherever such an argument merely names
-    `timeout`, as a path ending in `/timeout` does.
+    false deny wherever the outer signal would have stopped the loop too, and wherever a prefix's
+    argument merely names `timeout`, as a path ending in `/timeout` does. Behind outer ones that each
+    send signal 0 with no `-k`, it is a false deny too wherever a prefix between two of them takes an
+    argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
+    argument changes nothing.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -5147,6 +5150,11 @@ _WAIT_CASES = [
         "while an inner timeout sending signal 0 too bounds nothing either",
     ),
     (
+        "timeout -s 0 900 nice timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a prefix taking no argument between the two leaves the inner one as the bound",
+    ),
+    (
         "timeout -s 0 900 timeout -s 0 800 timeout 700 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "every outer timeout sending signal 0 leaves the innermost one as the bound",
@@ -5187,6 +5195,11 @@ _WAIT_CASES = [
         "which is read as no bound even behind a signal-0 outer one, a declared false deny",
     ),
     (
+        "timeout -s 0 900 foo -s 0 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a word naming timeout after any other command is read as nesting too",
+    ),
+    (
         "timeout -s 0 -k .5 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "an outer kill-after counts in any spelling, since GNU timeout reads more than the duration form",
@@ -5210,6 +5223,11 @@ _WAIT_CASES = [
         "timeout -s {0..0} 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "and a brace expansion the shell rewrites to 0 is read the same way",
+    ),
+    (
+        "timeout -s ~ 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as is a tilde, which the shell rewrites to HOME",
     ),
     (
         "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
