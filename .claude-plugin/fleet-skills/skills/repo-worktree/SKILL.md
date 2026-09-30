@@ -225,14 +225,28 @@ in the new tree.
 - **Husky.Net:** When `.husky/pre-commit` sources `.husky/_/husky.sh` and the local .NET tool
   manifest declares Husky.Net, run `dotnet tool restore`, then `dotnet husky install` from the
   worktree root.
-- **Python pre-commit:** When `.pre-commit-config.yaml` exists, run `uv tool install pre-commit`
-  once per host if not already installed, then `pre-commit install` from the worktree root.
-  `pre-commit` is never a project dependency, so this is the same regardless of profile.
+- **Python pre-commit:** When `.pre-commit-config.yaml` exists, check the hook the new tree
+  will actually run before installing anything, with
+  `test -x "$(git rev-parse --path-format=absolute --git-path hooks)/pre-commit"`. With no
+  `core.hooksPath` set, that path is the base clone's shared hooks directory, so a hook already
+  there is the one every checkout runs, and the step is done. Where none is present, install from
+  the primary checkout rather than from the linked worktree, which is the maintainer's to do per
+  the next bullet. `pre-commit` is never a project dependency, so this is the same regardless of
+  profile.
+- **Never install or switch a shared hook from a linked worktree.** Where the hooks path resolves
+  outside the worktree, into the base clone's git directory, running an installer there rewrites
+  the hook for every checkout of the repository, which is the base-clone mutation this skill
+  forbids. Switching installers is the same act, since `prek install` over a pre-commit framework
+  hook moves the original aside and chains to it, which has left every commit in every checkout
+  failing on the chained script. A missing or wrong shared hook is reported to the maintainer, not
+  repaired from the worktree.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they
   differ from these standard cases. Do not infer a replacement command from the language alone.
 
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
 fails, report that boundary and fix the setup. Never bypass the hook to make the commit succeed.
+A commit-time `core.hooksPath` override, `git -c core.hooksPath=<dir> commit`, is a bypass too,
+since git then runs whatever that directory holds, and nothing where it holds nothing.
 
 ## Listing and Cleanup
 

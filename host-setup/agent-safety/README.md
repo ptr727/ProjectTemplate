@@ -55,7 +55,7 @@ text says, because the harm it covers was never in the text.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
-   `--no-verify` on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
+   `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -374,9 +374,10 @@ opt-in per clone, visible to anyone reading the repo, and bypassable on purpose,
 rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
-The two layers meet at requirement 4, which denies `--no-verify` unconditionally, so a Claude Code
-session meets a committed hook it cannot wave through with that flag while a human keeps the escape
-hatch. They do not compose into a seal, and saying so would be the more comfortable claim rather
+The two layers meet at requirement 4, which denies `--no-verify` and a per-invocation
+`core.hooksPath` override unconditionally, so a Claude Code session meets a committed hook it
+cannot wave through with either while a human keeps the escape hatch. They do not compose into a
+seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
 invocation, and `--no-verify` is the documented route rather than the only one. This requirement
 list also reaches Claude Code alone today, per the Per-Agent Status table below, so a Codex or

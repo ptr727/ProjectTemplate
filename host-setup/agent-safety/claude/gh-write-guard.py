@@ -23,7 +23,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
      whose rules require a pull request, a force-push where history is protected, a delete where deletion
-     is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
+     is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`, or a
+     per-invocation `core.hooksPath` override on a commit or push). The
      branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
      allowed with no hardcoded repo list.
   5. a hand-rolled reply/resolve for a review thread: a `resolveReviewThread` mutation via `gh api
@@ -897,6 +898,11 @@ def _git_subcommand_arglists(cmd, sub):
     such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen,
     whether the two are joined by `&&` or written on their own lines.
     """
+    return [args for _, args in _git_subcommand_invocations(cmd, sub)]
+
+
+def _git_subcommand_invocations(cmd, sub):
+    """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
     n = len(toks)
     out = []
@@ -913,11 +919,25 @@ def _git_subcommand_arglists(cmd, sub):
                 j += 1
         if j < n and toks[j] == sub:
             args, k = _collect_arglist(toks, j + 1)
-            out.append(args)
+            out.append((toks[i + 1 : j], args))
             i = k
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+def _overrides_hooks_path(global_opts):
+    """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
+    for i, t in enumerate(global_opts):
+        if t in ("-c", "--config-env"):
+            value = global_opts[i + 1] if i + 1 < len(global_opts) else ""
+        elif t.startswith("--config-env="):
+            value = t[len("--config-env=") :]
+        else:
+            continue
+        if value.split("=", 1)[0].lower() == "core.hookspath":
+            return True
+    return False
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1943,6 +1963,16 @@ def _check_bypass_flags(cmd):
         return "deny", (
             "This uses --no-verify, which skips the git hooks (signing, lint, and pre-push gates). "
             "Skipping verification is a bypass; run the command without it." + _handoff(cmd)
+        )
+    if any(
+        _overrides_hooks_path(opts)
+        for sub in ("commit", "push")
+        for opts, _ in _git_subcommand_invocations(cmd, sub)
+    ):
+        return "deny", (
+            "This overrides core.hooksPath for a commit or push, which runs whatever hooks that directory "
+            "holds instead of the repository's, and none where it holds none. That is a hook bypass; run "
+            "the command without the override." + _handoff(cmd)
         )
     return "allow", ""
 
@@ -3683,6 +3713,55 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "push --no-verify is a bypass even on a feature branch",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null commit -m x",
+        None,
+        {},
+        "deny",
+        "a per-invocation core.hooksPath on commit is a hook bypass",
+    ),
+    (
+        "git -C /repo -c core.hookspath=.none push origin feature/x",
+        None,
+        {"feature/x": set()},
+        "deny",
+        "a per-invocation core.hooksPath on push is a hook bypass, key matched case-insensitively",
+    ),
+    (
+        "git --config-env=core.hooksPath=HOOKS commit -m x",
+        None,
+        {},
+        "deny",
+        "--config-env naming core.hooksPath is the same override",
+    ),
+    (
+        "git --config-env core.hooksPath=HOOKS commit -m x",
+        None,
+        {},
+        "deny",
+        "--config-env with a separate value is the same override",
+    ),
+    (
+        "git -c core.editor=true commit -m x",
+        None,
+        {},
+        "allow",
+        "a -c override of another key is not a hook bypass",
+    ),
+    (
+        "git -c core.hooksPath=.githooks config --list",
+        None,
+        {},
+        "allow",
+        "a core.hooksPath override on a command that runs no commit or push hook is not denied here",
+    ),
+    (
+        "git commit -m 'git -c core.hooksPath=x commit'",
+        None,
+        {},
+        "allow",
+        "a hooksPath override inside a quoted message is not an option",
     ),
     (
         "git push -n origin develop",
