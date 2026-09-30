@@ -4,7 +4,7 @@
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
   charset        Non-ASCII judged against the three tiers the charset rule defines.
-  charset-unknown A non-ASCII non-letter in no tier, so it is classified rather than assumed.
+  charset-unknown A non-ASCII character no tier covers, a Latin letter excepted.
   semicolon      No semicolon in prose, outside a list that already carries commas.
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
@@ -46,7 +46,7 @@ from typing import NamedTuple, TypedDict
 # One source of truth for the rule names, so the CLI choices cannot drift from check_file.
 RULES = {
     "charset": "a non-ASCII character its tier does not permit here",
-    "charset-unknown": "a non-ASCII non-letter in no tier",
+    "charset-unknown": "a non-ASCII character in no tier, a Latin letter excepted",
     "semicolon": "a semicolon in prose, outside a list that already carries commas",
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
@@ -1724,15 +1724,25 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """Every non-ASCII character on the line, judged against its tier.
 
     An unrecognized character is reported rather than passed. A gate that allows whatever it does
-    not recognize stops gating as the character set grows. A letter is the one exception, since
-    it may spell a recorded name. A combining mark is not a letter, so the mark in a decomposed
-    letter is still reported.
+    not recognize stops gating as the character set grows. A Latin letter, with any combining
+    mark it carries, is the one exception, since it may spell a recorded name. A letter of another
+    script is still reported, since beside ASCII it is most often a lookalike of a Latin one, and
+    so is a mark standing alone.
     """
     out: list[tuple[int, str, str]] = []
+    carrier = False
     for pos, ch in enumerate(line):
         if ch.isascii():
+            carrier = ch.isalpha()
             continue
         name = unicodedata.name(ch, f"U+{ord(ch):04X}")
+        category = unicodedata.category(ch)
+        if category.startswith("L") and name.startswith("LATIN "):
+            carrier = True
+            continue
+        if category == "Mn" and carrier:
+            continue
+        carrier = False
         if ch in TIER3:
             continue
         if ch in TIER1:
@@ -1744,8 +1754,6 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
                 out.append(
                     (lineno, "charset", f"{name} (U+{ord(ch):04X}) in prose -> use '{TIER2[ch]}'")
                 )
-        elif unicodedata.category(ch).startswith("L"):
-            continue
         else:
             out.append(
                 (

@@ -144,22 +144,28 @@ class TestTierTables(BaitCase):
             ["charset-unknown"], self.kinds(f"a {unknown} here\n", {"charset-unknown"})
         )
 
-    def test_a_letter_in_a_recorded_name_is_left_alone(self) -> None:
+    def test_a_latin_letter_in_a_recorded_name_is_left_alone(self) -> None:
         """Folding a name's letter to ASCII records a different name, so no tier rule reports it."""
+        rules = {"charset", "charset-unknown"}
         line = "- b2 Zo\u00eb: married 1702 Ren\u00e9 M\u00fcller\n"
-        self.assertEqual([], self.kinds(line, {"charset", "charset-unknown"}))
-        for ch in ("\u00c5", "\u0142", "\u03b1", "\u0436", "\u4e2d"):
-            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
-                self.assertEqual([], self.kinds(f"a {ch} here\n", {"charset", "charset-unknown"}))
+        self.assertEqual([], self.kinds(line, rules))
+        for text in ("\u00c5se", "\u0141\u00f3d\u017a", "Rene\u0301", "o\u0323\u0301 here"):
+            with self.subTest(text=text):
+                self.assertEqual([], self.kinds(f"{text}\n", rules))
 
-    def test_a_combining_mark_is_still_reported(self) -> None:
-        """A mark is not a letter, so a decomposed letter is reported rather than passed."""
-        self.assertEqual(
-            ["charset-unknown"], self.kinds("Rene\u0301 here\n", {"charset", "charset-unknown"})
-        )
-        self.assertEqual(
-            ["charset-unknown"], self.kinds("a \u0301 here\n", {"charset", "charset-unknown"})
-        )
+    def test_a_lookalike_letter_is_still_reported(self) -> None:
+        """Beside ASCII, another script's letter or a styled Latin form is usually a lookalike."""
+        rules = {"charset", "charset-unknown"}
+        for ch in ("\u0430", "\u03bf", "\u02bc", "\u00aa", "\uff41"):
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertEqual(["charset-unknown"], self.kinds(f"p{ch}ss here\n", rules))
+
+    def test_a_combining_mark_standing_alone_is_still_reported(self) -> None:
+        """A mark carried by no Latin letter spells no name, so it is reported rather than passed."""
+        rules = {"charset", "charset-unknown"}
+        for text in ("a \u0301 here", "\u0301 here", "3\u0301 here", "\u0436\u0301 here"):
+            with self.subTest(text=text):
+                self.assertIn("charset-unknown", self.kinds(f"{text}\n", rules))
 
     def test_tier_one_typography_beside_a_name_is_still_reported(self) -> None:
         """Accepting a name's letters leaves the typography around it a finding."""
