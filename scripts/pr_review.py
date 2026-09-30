@@ -2204,7 +2204,8 @@ def unrecognized_in(body: str) -> list[str]:
         return []
     plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, metadata_text(plain)) if m]
+    lines = mask_narrative(plain).splitlines()
+    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
         f"summary: {marker}"
@@ -2592,7 +2593,7 @@ def heading_of(block: str) -> str:
 
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
-DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
+DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details\s*>", re.IGNORECASE)
 
 
 def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
@@ -2624,23 +2625,35 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
     return regions, leftover
 
 
-def metadata_text(text: str) -> list[str]:
-    """Every line a metadata label may sit on, which is every line outside a narrative block.
+def mask_narrative(text: str) -> str:
+    """The text with each narrative block's own content blanked, offsets and lines left alone.
 
-    A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`, and only
-    its own lines are dropped, since a block nested inside it is read like any other.
+    A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`. A block
+    nested inside it keeps its content, and an unclosed block is never blanked, so a label it
+    holds is still read wherever it sits.
     """
-    regions, leftover = details_spans(text)
-    lines = [ln for start, end in leftover for ln in text[start:end].splitlines()]
-    return lines + [ln for start, end in regions for ln in region_metadata(text[start:end])]
-
-
-def region_metadata(region: str) -> list[str]:
-    """`metadata_text` for one `<details>` region's own content, its narrative test included."""
-    opener = SUMMARY.match(region.lstrip())
-    if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
-        return [ln for s, e in details_spans(region)[0] for ln in region_metadata(region[s:e])]
-    return metadata_text(region)
+    stack: list[tuple[int, int, list[tuple[int, int]]]] = []
+    blank: list[tuple[int, int]] = []
+    for m in DETAILS_TAG.finditer(text):
+        if not m.group().startswith("</"):
+            stack.append((m.start(), m.end(), []))
+            continue
+        if not stack:
+            continue
+        tag_start, start, children = stack.pop()
+        opener = SUMMARY.match(text[start : m.start()].lstrip())
+        if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
+            cursor = start
+            for child_start, child_end in children:
+                blank.append((cursor, child_start))
+                cursor = child_end
+            blank.append((cursor, m.start()))
+        if stack:
+            stack[-1][2].append((tag_start, m.end()))
+    masked = text
+    for start, end in blank:
+        masked = masked[:start] + QUOTED_CHAR.sub(" ", masked[start:end]) + masked[end:]
+    return masked
 
 
 # Every character a quotation covers replaced by a space, and every line boundary kept.

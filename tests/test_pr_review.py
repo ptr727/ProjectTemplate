@@ -3080,6 +3080,31 @@ class TestSecondOverviewFormat(GqlCase):
         )
         self.assertEqual([], pr_review.unrecognized_in(body))
 
+    def test_a_deeply_nested_body_is_read_without_exhausting_the_stack(self) -> None:
+        """Nesting depth is bounded only by the body size, so the walk holds no call per level."""
+        body = (
+            self.narrated() + "\n" + "<details>\n" * 600 + "- **Deep:** x\n" + "</details>\n" * 600
+        )
+        self.assertEqual(["metadata label: Deep"], pr_review.unrecognized_in(body))
+
+    def test_unvetted_labels_are_listed_in_body_order(self) -> None:
+        """The narrative is blanked in place, so a label inside a block keeps its position."""
+        body = self.narrated() + (
+            "\n<details>\n<summary>Review details</summary>\n\n- **Aaa:** x\n</details>\n\n"
+            "- **Bbb:** x\n"
+        )
+        self.assertEqual(
+            ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
+        )
+
+    def test_a_close_tag_with_trailing_space_ends_the_narrative(self) -> None:
+        """HTML accepts `</details >`, and missing it ran the narrative over the label after it."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n</details >\n\n- **Hidden:** x\n</details>\n"
+        )
+        self.assertEqual(["metadata label: Hidden"], pr_review.unrecognized_in(body))
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 
