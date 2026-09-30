@@ -2371,8 +2371,9 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         # Both prose rules are Markdown-only until a comment can be told from code.
         # A shell script carries 78 statement separators that are not prose at all.
         if path.suffix == ".md":
+            unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
             if "semicolon" in rules:
-                for span in list_spans(prose):
+                for span in list_spans(unquoted):
                     # The sentence is the unit, since the list an exemption protects lives in one.
                     # Judged over a whole bullet, one colon exempted every semicolon after it.
                     for sentence in sentences(span):
@@ -2388,7 +2389,6 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
                                 (i, "semicolon", "semicolon in prose -> a comma or two sentences")
                             )
             if "dash" in rules:
-                unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
                 skip = LABEL_DASH.match(unquoted)
                 for m in DASH.finditer(unquoted):
                     if skip and m.start() < skip.end():

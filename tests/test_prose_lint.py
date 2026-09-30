@@ -519,6 +519,36 @@ class TestSemicolon2(BaitCase):
             ),
         )
 
+    def test_a_blockquoted_bullet_label_colon_does_not_announce_a_list(self) -> None:
+        """A callout's `>` is structure, so its bullet is judged as the same bullet unquoted."""
+        for text in (
+            "- **Label**: one, two; three\n",
+            "> - **Label**: one, two; three\n",
+            ">- **Label**: one, two; three\n",
+            "> > - **Label**: one, two; three\n",
+            "> 1. **Label:** one, two; three\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_blockquoted_line_keeps_the_exemptions_it_has_unquoted(self) -> None:
+        """Only the prefix is blanked, so a list in a callout keeps its semicolons."""
+        self.assertEqual(
+            [], self.kinds("> Inputs: a, b, and c; outputs: d and e.\n", {"semicolon"})
+        )
+
+    def test_a_blockquoted_table_row_judges_each_cell_alone(self) -> None:
+        """A row inside a callout is still a record of fields rather than one sentence.
+
+        Read whole, the first cell's colon and the last cell's comma made the row a list.
+        """
+        for text in (
+            "| S1: x | it runs; it gates | D1, D2 |\n",
+            "> | S1: x | it runs; it gates | D1, D2 |\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
     def test_an_abbreviation_does_not_end_a_sentence(self) -> None:
         """Splitting at `e.g.` cuts a list in half and flags the separator the exemption protects."""
         self.assertEqual(
