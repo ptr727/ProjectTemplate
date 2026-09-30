@@ -3017,6 +3017,35 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertIn("**Changes:**", overview_v2())
         self.assertEqual([], pr_review.unrecognized_in(overview_v2()))
 
+    def narrated(self) -> str:
+        """The format with its changes narrative led by bold phrases, as live bodies carry it."""
+        led = (
+            "**Changes:**\n- **Gadget sync (#4321):** Bumps the gadget pins.\n"
+            "- **Verification:** Every pin lands on the same version.\n"
+        )
+        body = overview_v2().replace("**Changes:**\n- Narrow the reader.\n", led)
+        self.assertIn("Gadget sync", body, "the narrative this case rewrites has moved")
+        return body
+
+    def test_a_bold_lead_in_the_changes_narrative_is_not_a_metadata_label(self) -> None:
+        """Each narrative bullet naming its change in bold read as an unknown label and blocked."""
+        self.assertEqual([], pr_review.unrecognized_in(self.narrated()))
+
+    def test_a_bold_lead_outside_the_changes_narrative_is_still_vetted(self) -> None:
+        """The narrative is skipped as a block, so the same bullet beside it still reports."""
+        body = self.narrated().replace(
+            "\n\n<details open>", "\n- **Sprocket tuning:** x\n\n<details open>", 1
+        )
+        self.assertIn("Sprocket tuning", body, "the anchor this case inserts at has moved")
+        self.assertEqual(["metadata label: Sprocket tuning"], pr_review.unrecognized_in(body))
+
+    def test_a_bullet_in_the_review_details_block_is_still_vetted(self) -> None:
+        """Only the narrative is skipped, and the first format states its metadata inside a block."""
+        body = closer_look().replace(
+            "- **Files reviewed:**", "- **Confidence:** high\n- **Files reviewed:**"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 

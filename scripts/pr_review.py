@@ -517,11 +517,12 @@ VETTED_HEADINGS = {
     "### Human review recommended",
     "### Suppressed comments (N)",
 }
+NARRATIVE_SUMMARY = "What changed in this PR"
 VETTED_SUMMARIES = {
     "Pull request overview",
     "Open (N)",
     "Resolved since last review (N)",
-    "What changed in this PR",
+    NARRATIVE_SUMMARY,
     "Show a summary per file",
     "File summaries",
     "Review details",
@@ -2203,7 +2204,15 @@ def unrecognized_in(body: str) -> list[str]:
         return []
     plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
+    narrative = [
+        (start, end)
+        for start, end in details_spans(plain)[0]
+        if not unvetted(normal(heading_of(plain[start:end])), {NARRATIVE_SUMMARY})
+    ]
+    metadata = plain
+    for start, end in reversed(narrative):
+        metadata = metadata[:start] + metadata[end:]
+    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, metadata.splitlines()) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
         f"summary: {marker}"
