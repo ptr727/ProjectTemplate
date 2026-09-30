@@ -584,14 +584,20 @@ class DanglingRemoteTrackingCase(RepoCase):
     def test_a_dangling_symbolic_ref_is_found_without_its_loose_file(self) -> None:
         """A files store also holds it as a loose file, which would hide a gap on a reftable store."""
         run(self.tmp, "symbolic-ref", "refs/remotes/upstream/main", "refs/remotes/upstream/gone")
-        with unittest.mock.patch.object(local_review.Path, "is_file", return_value=False):
+        hidden = FileNotFoundError(2, "No such file or directory")
+        with unittest.mock.patch.object(local_review.Path, "stat", side_effect=hidden):
             self.assertTrue(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
 
     def test_a_loose_ref_file_that_cannot_be_checked_is_a_boundary(self) -> None:
-        """A name `check-ref-format` accepts can still be one the filesystem rejects, as too long."""
+        """A name `check-ref-format` accepts can still be one the filesystem rejects, as too long.
+
+        `Path.is_file` answers False for that on Python 3.14, which would fall through again, so
+        it is made to answer that way on every version.
+        """
         too_long = OSError(36, "File name too long")
         with (
-            unittest.mock.patch.object(local_review.Path, "is_file", side_effect=too_long),
+            unittest.mock.patch.object(local_review.Path, "stat", side_effect=too_long),
+            unittest.mock.patch.object(local_review.Path, "is_file", return_value=False),
             self.assertRaises(local_review.CannotRun),
         ):
             local_review.remote_tracking_ref("upstream/main", self.tmp)
@@ -624,6 +630,11 @@ class DanglingRemoteTrackingCase(RepoCase):
     def test_a_name_git_rejects_is_not_looked_for_on_disk(self) -> None:
         """`refs/remotes/../../HEAD` would otherwise reach the repository's own HEAD file."""
         self.assertIsNone(local_review.remote_tracking_ref("../../HEAD", self.tmp))
+
+    def test_a_ref_whose_parent_is_a_ref_file_is_absent(self) -> None:
+        """A files store holds `refs/remotes/upstream` as a file, so the lookup meets ENOTDIR."""
+        run(self.tmp, "update-ref", "refs/remotes/upstream", "HEAD")
+        self.assertIsNone(local_review.remote_tracking_ref("upstream/main", self.tmp))
 
     def test_a_ref_nested_under_the_name_is_not_the_name(self) -> None:
         """`for-each-ref` also lists a ref nested under the name, so only an exact match counts."""

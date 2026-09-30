@@ -110,6 +110,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -292,8 +293,10 @@ def ref_name_exists(ref: str, root: Path) -> bool:
     directly. A reftable store holds no loose ref files, so that last check finds nothing there.
     `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, an absent one
     included. A name `check-ref-format` rejects is never a ref git reads, so it is never looked
-    for on disk, where a `..` in it would reach outside the ref store. A file that cannot be
-    checked, such as one whose name the filesystem rejects as too long, raises CannotRun.
+    for on disk, where a `..` in it would reach outside the ref store. The file is read with
+    `stat` rather than `Path.is_file`, which answers False for a name too long on Python 3.14,
+    so only a path that is not there counts as absent. Any other failure, such as a name the
+    filesystem rejects as too long, raises CannotRun.
     """
     try:
         git("check-ref-format", ref, root=root)
@@ -304,8 +307,10 @@ def ref_name_exists(ref: str, root: Path) -> bool:
         return True
     loose = root / git("rev-parse", "--git-path", ref, root=root).strip()
     try:
-        if loose.is_file():
+        if stat.S_ISREG(loose.stat().st_mode):
             return True
+    except (FileNotFoundError, NotADirectoryError):
+        pass
     except OSError as e:
         raise CannotRun(f"could not check for a loose ref file at {loose} ({e})") from e
     try:
