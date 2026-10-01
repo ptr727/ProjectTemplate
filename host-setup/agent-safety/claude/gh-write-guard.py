@@ -2411,10 +2411,20 @@ def _redirects_stdin(after_done, quoted=None):
     It ends at a comment too, since bash reads nothing after one, so `done # < f` reads the pipe.
     A word opens a comment when it starts with an unquoted `#`, which `quoted` says per token.
     Where that is unknown, every such word reads as one.
+    A comment keeps an earlier binding only where it is surely one, since ending early at a `#`
+    that is not skips the later binding that applies.
+    It is not sure where the quoting is unknown or after an expansion that can hold a space,
+    as in `< ${g:- #x} < /dev/zero`, where a `$(` arrives as a token ending in `$`.
+    A redirect whose target opens a comment has none, so it bounds nothing.
     """
 
     def comment(j):
         return after_done[j].startswith("#") and not (quoted is not None and quoted[j])
+
+    def sure(j):
+        return quoted is not None and not any(
+            t.endswith("$") or any(c in t for c in ("${", "$[", "`")) for t in after_done[:j]
+        )
 
     bound = False
     i = 0
@@ -2424,8 +2434,10 @@ def _redirects_stdin(after_done, quoted=None):
         # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
         if _is_separator(tok):
             return bound
-        if tok in _RESERVED_WORDS or comment(i):
+        if tok in _RESERVED_WORDS:
             return bound
+        if comment(i):
+            return bound and sure(i)
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
         # Reading the token before the `<` as a descriptor read the previous redirect's target as one.
@@ -2441,7 +2453,7 @@ def _redirects_stdin(after_done, quoted=None):
             i += 1
             continue
         if i + 1 < len(after_done) and comment(i + 1):
-            return bound
+            return False
         target = after_done[i + 1] if i + 1 < len(after_done) else ""
         if _is_shell_op(target):
             target = ""
@@ -5622,6 +5634,16 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < '#f'",
         "allow",
         "and a quoted `#` names a file rather than opening a comment",
+    ),
+    (
+        "while read l; do sleep 30; done < ${g:- #x} < /dev/zero",
+        "deny",
+        "a `#` inside an expansion opens no comment, so the stream after it still binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f < '#x' < /dev/zero\n# don't",
+        "deny",
+        "nor does one whose quoting is unknown end the scan before the stream that binds",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",
