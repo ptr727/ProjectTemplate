@@ -2629,23 +2629,24 @@ def _timeout_bounds_wrapper(toks, w):
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
     process and the `timeout` goes on waiting for a child that keeps running.
 
-    An option word or option value the shell may rewrite at run time, such as `-${F}0`, `"$SIG"`,
-    or `{0..0}`, is read as both a signal-0 `-s` and a `-k` of no duration form, since it may become
-    either or split into both. A later `-s` still replaces the signal and a later `-k` the
-    kill-after, as getopt keeps the last of each.
+    A word between the `timeout` and the wrapper that the shell may rewrite at run time, such as
+    `-${F}0`, `"$SIG"`, `{0..0}`, or `X=$T` after `env`, makes the run no bound, whatever follows
+    it. The rewrite may name signal 0, a kill-after, or another `timeout`, or split into words that
+    end option parsing early. That is a false deny wherever the rewrite yields a bound, as it does
+    in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'`.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
     only when every outer one sends signal 0 with no `-k` of any value, which is inert, and the
     innermost one is a bound. Any other such nesting is read as no bound, since an outer signal can
     end the inner `timeout` before its deadline and leave the loop under it running. Past the
-    command prefixes and assignments directly after an outer duration, a word naming `timeout`, or
-    one the shell may rewrite into it, anywhere before the wrapper is read as that nesting. That is a
-    false deny wherever the outer signal would have stopped the loop too, wherever a prefix's
-    argument merely names `timeout`, as a path ending in `/timeout` does, and wherever a word the
-    shell rewrites becomes something else, as `$N` in `nice -n $N` does. Behind outer ones that each
-    send signal 0 with no `-k`, it is a false deny too wherever a prefix between two of them takes an
-    argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
-    argument changes nothing.
+    command prefixes and assignments directly after an outer duration, a word naming `timeout`
+    anywhere before the wrapper is read as that nesting. That is a false deny wherever the outer
+    signal would have stopped the loop too, and wherever a prefix's argument merely names `timeout`,
+    as a path ending in `/timeout` does. A launcher building the inner `timeout` from its own
+    arguments, as `env -S 'timeout 800'` does, names no `timeout` in a word and is not reached.
+    Behind outer ones that each send signal 0 with no `-k`, it is a false deny too wherever a prefix
+    between two of them takes an argument, as `nice -n 5` does. Behind any other outer one the
+    nesting is denied anyway, so the argument changes nothing.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
@@ -2664,22 +2665,18 @@ def _timeout_bounds_wrapper(toks, w):
     # One written inside the payload is caught where that payload is read, on its own terms.
     if _forks_out_of_reach(toks[start:w]):
         return False
+    if any(_is_shell_rewritable(t) for t in toks[start + 1 : w]):
+        return False
     i = start + 1
     signal = kill_after = ""
     while i < w:
         tok = toks[i]
-        if tok.startswith("-") and _is_shell_rewritable(tok):
-            signal = kill_after = tok
-            i += 1
-            continue
         if tok.startswith("-"):
             opt, val = _timeout_option(tok)
             if val is None:
                 i += 1  # the option's value is the next token, never the duration
                 val = toks[i] if i < w else ""
-            if _is_shell_rewritable(val):
-                signal = kill_after = val
-            elif opt == "s":
+            if opt == "s":
                 signal = val  # getopt keeps the last one given
             elif opt == "k":
                 kill_after = val
@@ -2691,8 +2688,8 @@ def _timeout_bounds_wrapper(toks, w):
         i += 1
         while i < w and _is_command_prefix(toks[i]):
             i += 1
-        if not any(_is_timeout_exe(t) or _is_shell_rewritable(t) for t in toks[i:w]):
-            return kills or not (_is_timeout_signal_zero(signal) or _is_shell_rewritable(signal))
+        if not any(_is_timeout_exe(t) for t in toks[i:w]):
+            return kills or not _is_timeout_signal_zero(signal)
         if kill_after or not _is_timeout_signal_zero(signal) or not _is_timeout_exe(toks[i]):
             return False
         i += 1
@@ -5341,8 +5338,8 @@ _WAIT_CASES = [
     ),
     (
         "timeout -s \"$SIG\" -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
-        "allow",
-        "unless a kill-after follows it with a SIGKILL",
+        "deny",
+        "and no later kill-after rescues it, since the rewrite may split into more words",
     ),
     (
         "timeout -s {0..0} 900 bash -c 'until [ -f x ]; do sleep 60; done'",
@@ -5361,8 +5358,8 @@ _WAIT_CASES = [
     ),
     (
         "timeout -${F}0 -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
-        "allow",
-        "unless a kill-after follows it with a SIGKILL",
+        "deny",
+        "nor here, where a rewrite into a duration and a command ends option parsing",
     ),
     (
         "timeout -s 0 -$X 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
@@ -5372,7 +5369,7 @@ _WAIT_CASES = [
     (
         "timeout -$X -s 0 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "even where a later -s 0 replaces the signal it may have named",
+        "even where a later literal -s 0 follows it",
     ),
     (
         "timeout -k $K 900 bash -c 'until [ -f x ]; do sleep 60; done'",
@@ -5392,7 +5389,22 @@ _WAIT_CASES = [
     (
         "timeout -s KILL 10 $T 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "a word the shell may rewrite into timeout is read as nesting",
+        "a rewritable word past the duration is no bound, as one that may become timeout",
+    ),
+    (
+        "timeout -s KILL 10 env X=$T 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is an assignment argument the shell splits after env",
+    ),
+    (
+        "timeout -$X -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a rewritable option word is no bound whatever literal options follow it",
+    ),
+    (
+        "timeout 900 env PATH=$HOME/bin bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a declared false deny, since the rewrite here yields a bound",
     ),
     (
         "timeout -s KILL 10 /usr/bin/time?ut 800 bash -c 'until [ -f x ]; do sleep 60; done'",
