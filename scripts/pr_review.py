@@ -517,11 +517,12 @@ VETTED_HEADINGS = {
     "### Human review recommended",
     "### Suppressed comments (N)",
 }
+NARRATIVE_SUMMARY = "What changed in this PR"
 VETTED_SUMMARIES = {
     "Pull request overview",
     "Open (N)",
     "Resolved since last review (N)",
-    "What changed in this PR",
+    NARRATIVE_SUMMARY,
     "Show a summary per file",
     "File summaries",
     "Review details",
@@ -2203,7 +2204,8 @@ def unrecognized_in(body: str) -> list[str]:
         return []
     plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, plain.splitlines()) if m]
+    lines = mask_narrative(plain).splitlines()
+    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
         f"summary: {marker}"
@@ -2621,6 +2623,37 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
                 cursor = m.end()
     leftover.append((cursor, len(body)))
     return regions, leftover
+
+
+def mask_narrative(text: str) -> str:
+    """The text with each narrative block's own content blanked, offsets and lines left alone.
+
+    A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`. A block
+    nested inside it keeps its content, and an unclosed block is never blanked, so a label it
+    holds is still read wherever it sits.
+    """
+    stack: list[tuple[int, int, list[tuple[int, int]]]] = []
+    blank: list[tuple[int, int]] = []
+    for m in DETAILS_TAG.finditer(text):
+        if not m.group().startswith("</"):
+            stack.append((m.start(), m.end(), []))
+            continue
+        if not stack:
+            continue
+        tag_start, start, children = stack.pop()
+        opener = SUMMARY.match(text[start : m.start()].lstrip())
+        if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
+            cursor = start
+            for child_start, child_end in children:
+                blank.append((cursor, child_start))
+                cursor = child_end
+            blank.append((cursor, m.start()))
+        if stack:
+            stack[-1][2].append((tag_start, m.end()))
+    masked = text
+    for start, end in blank:
+        masked = masked[:start] + QUOTED_CHAR.sub(" ", masked[start:end]) + masked[end:]
+    return masked
 
 
 # Every character a quotation covers replaced by a space, and every line boundary kept.
