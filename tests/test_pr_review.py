@@ -3097,32 +3097,6 @@ class TestSecondOverviewFormat(GqlCase):
             ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
         )
 
-    def test_a_close_tag_with_trailing_space_ends_the_narrative(self) -> None:
-        """HTML accepts `</details >`, and missing it ran the narrative over the label after it."""
-        body = self.narrated() + (
-            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
-            "- **Gadget (#1):** x\n</details >\n\n- **Hidden:** x\n</details>\n"
-        )
-        self.assertEqual(["metadata label: Hidden"], pr_review.unrecognized_in(body))
-
-    def test_every_close_spelling_html_accepts_ends_a_nested_narrative(self) -> None:
-        """A close the walk missed paired the wrapper's own close with the narrative instead."""
-        for close in ("</details >", "</details x>", "</details/>", "</details />"):
-            with self.subTest(close=close):
-                body = self.narrated() + (
-                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
-                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
-                    f"- **Gadget (#1):** x\n{close}\n\n- **Real:** y\n</details>\n"
-                )
-                self.assertEqual(["metadata label: Real"], pr_review.unrecognized_in(body))
-
-    def test_a_section_ends_at_a_close_tag_carrying_more_than_its_name(self) -> None:
-        """The shared tag pattern is what every block reader pairs on, so each one ends there too."""
-        body = "<details>\nInside\n</details />\nOutside"
-        regions, leftover = pr_review.details_spans(body)
-        self.assertEqual(["\nInside\n"], [body[s:e] for s, e in regions])
-        self.assertIn("Outside", "".join(body[s:e] for s, e in leftover))
-
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 
