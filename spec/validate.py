@@ -227,6 +227,19 @@ def reduces_to_repo_root(value):
     return pathlib.PurePosixPath(value) == pathlib.PurePosixPath(".")
 
 
+def symlinked_component(root, value):
+    """The first component of `root / value`, as a path relative to `root`, that is a symlink, or None.
+
+    `scripts/carry.py` refuses a tree path with any symlinked component, while `is_dir()` follows one, so without this the validator accepts a source the carrier refuses on every host.
+    """
+    current = root
+    for part in pathlib.PurePosixPath(value).parts:
+        current /= part
+        if current.is_symlink():
+            return current.relative_to(root).as_posix()
+    return None
+
+
 def canonical_file_in_root(rel_path):
     """Whether `ROOT / rel_path` resolves, symlinks followed, to an existing file under ROOT.
 
@@ -1188,10 +1201,15 @@ def main():
             errors.append(f"files.json: tree declaration has an invalid target: {tree!r}")
             continue
         for field, value in (("source", source), ("target", target)):
-            parts = pathlib.PurePosixPath(value).parts
-            if reduces_to_repo_root(value) or value.startswith("/") or ".." in parts:
+            if reduces_to_repo_root(value) or escapes_repo_root(value):
                 errors.append(
                     f"files.json: tree {source} {field} '{value}' must be a path below the repository root"
+                )
+                continue
+            link = symlinked_component(ROOT, value)
+            if link is not None:
+                errors.append(
+                    f"files.json: tree {source} {field} '{value}' has a symlinked component {link}, which scripts/carry.py refuses"
                 )
         if tree.get("fidelity") != "verbatim-tree":
             errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")
