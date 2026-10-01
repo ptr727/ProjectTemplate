@@ -7,8 +7,10 @@ not about GitHub. The one thing a stub cannot prove is that `gh` accepts these a
 each write case asserts the argv it produced rather than only its effect.
 
 Two refusals earn cases of their own because the chain exists to fix them. An ambiguous track is
-never resolved by picking, and a repository missing the label refuses rather than reporting an
-empty chain, which is the silent failure the `decision` label already demonstrated fleet-wide.
+never resolved by picking, and a fleet repository missing the label refuses rather than reporting
+an empty chain, which is the silent failure the `decision` label already demonstrated fleet-wide.
+A repository outside the fleet warns instead, and its cases prove the warning path never writes
+anything but the one label `new --create-label` asks for.
 
 Run as `python3 tests/test_handoff.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -70,15 +72,21 @@ class FakeGh:
     It honors `--json`, `--state`, `--label`, and `--limit`, because a stub looser than the tool
     it stands in for is a stub that green-lights a crash.
 
-    It also refuses any call carrying no `--repo`, which real `gh` would answer by resolving the
-    repository from the working directory's remote. That is the failure this whole script is built
+    It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
+    repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
+    would answer a call missing its repository by resolving it from the working directory's
+    remote. That is the failure this whole script is built
     against, and without this the argument could be dropped from any of nine call sites with every
     case still green.
     """
 
-    def __init__(self, issues: dict[int, dict] | None = None, *, label: bool = True) -> None:
+    def __init__(
+        self, issues: dict[int, dict] | None = None, *, label: bool = True, issues_on: bool = True
+    ) -> None:
         self.issues = issues or {}
         self.label = label
+        self.issues_on = issues_on
+        self.refuse_label = False
         self.calls: list[list[str]] = []
         self.next_number = 1001
         # A close that reports success and leaves the issue open.
@@ -87,6 +95,10 @@ class FakeGh:
 
     def __call__(self, argv: list[str]) -> str:
         self.calls.append(list(argv))
+        if argv[:2] == ["repo", "view"]:
+            if "/" not in argv[2]:
+                raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
+            return json.dumps({"hasIssuesEnabled": self.issues_on})
         if "--repo" not in argv:
             raise AssertionError(
                 f"{' '.join(argv)} carries no --repo, so real gh would resolve the repository "
@@ -95,6 +107,10 @@ class FakeGh:
         head = (argv[0], argv[1])
         if head == ("label", "list"):
             return json.dumps([{"name": handoff.LABEL}] if self.label else [{"name": "bug"}])
+        if head == ("label", "create"):
+            if not self.refuse_label:
+                self.label = argv[2] == handoff.LABEL
+            return ""
         if head == ("issue", "list"):
             return json.dumps([projected(row, argv) for row in self._list(argv)])
         if head == ("issue", "view"):
@@ -258,14 +274,43 @@ class MarkerCase(unittest.TestCase):
         self.assertEqual(read_marker(row["body"], 20)["track"], "default")
 
 
+def fleet(case: unittest.TestCase, member: bool = True) -> None:
+    """Pin whether `o/r` reads as a fleet repository, for the rest of the case."""
+    patcher = unittest.mock.patch.object(handoff, "in_fleet", lambda repo: member)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+
+
 class LabelCase(unittest.TestCase):
-    """A repository missing the label refuses rather than reporting an empty chain."""
+    """A fleet repository missing the label refuses rather than reporting an empty chain."""
+
+    def setUp(self) -> None:
+        fleet(self)
 
     def test_a_missing_label_refuses_and_names_the_fix(self) -> None:
         code, _, err = run(FakeGh(label=False), "current", "--repo", "o/r")
         self.assertEqual(code, 1)
         self.assertIn("configure.sh apply", err)
         self.assertIn(handoff.LABEL, err)
+
+    def test_create_label_is_refused_on_a_fleet_repository(self) -> None:
+        """There the fleet label set is the fix, and one label alone would hide the drift."""
+        fake = FakeGh(label=False)
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+            "--create-label",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("outside the fleet", err)
+        self.assertIn("configure.sh apply", err)
+        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
 
     def test_a_full_label_window_refuses_rather_than_reporting_the_label_absent(self) -> None:
         """Otherwise the caller is sent to re-apply a set that may already be applied."""
@@ -301,6 +346,127 @@ class LabelCase(unittest.TestCase):
                 argv = [cmd, *extra.get(cmd, [])]
                 self.assertEqual(run(fake, *argv, "--repo", "o/r")[0], 1)
                 self.assertEqual(fake.calls[0][:2], ["label", "list"])
+
+
+class OutsideFleetLabelCase(unittest.TestCase):
+    """A repository outside the fleet with no label warns, and writes only the label it is asked to."""
+
+    def setUp(self) -> None:
+        fleet(self, member=False)
+
+    def new(self, fake: FakeGh, *extra: str) -> tuple[int, str, str]:
+        return run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+            *extra,
+        )
+
+    def test_a_read_warns_and_answers_as_an_empty_chain(self) -> None:
+        for cmd in ("current", "resume", "chain"):
+            with self.subTest(cmd=cmd):
+                fake = FakeGh(label=False)
+                code, _, err = run(fake, cmd, "--repo", "o/r")
+                self.assertEqual(code, 1)
+                self.assertIn("warning:", err)
+                self.assertIn(f"gh label create {handoff.LABEL} --repo o/r", err)
+                self.assertIn("no handoff on track", err)
+                self.assertNotIn("configure.sh", err)
+                self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+
+    def test_tracks_warns_and_lists_nothing(self) -> None:
+        code, out, err = run(FakeGh(label=False), "tracks", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("(no open", out)
+        self.assertIn("warning:", err)
+
+    def test_new_without_the_flag_refuses_and_names_it(self) -> None:
+        fake = FakeGh(label=False)
+        code, _, err = self.new(fake)
+        self.assertEqual(code, 1)
+        self.assertIn("--create-label", err)
+        self.assertNotIn("configure.sh", err)
+        self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
+        self.assertFalse(any(c[:2] == ["issue", "create"] for c in fake.calls))
+
+    def test_new_with_the_flag_creates_the_label_then_the_first_link(self) -> None:
+        """The label is confirmed before the issue that needs it, and no chain read is made."""
+        fake = FakeGh(label=False)
+        code, out, _ = self.new(fake, "--create-label")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(
+            [c[:2] for c in fake.calls],
+            [
+                ["label", "list"],
+                ["repo", "view"],
+                ["label", "create"],
+                ["label", "list"],
+                ["issue", "create"],
+            ],
+        )
+        self.assertEqual(fake.calls[2][2], handoff.LABEL)
+        filed = fake.issues[1001]
+        self.assertEqual([label["name"] for label in filed["labels"]], [handoff.LABEL])
+        marker = read_marker(filed["body"], 1001)
+        self.assertEqual((marker["round"], marker["previous"]), ("1", "none"))
+
+    def test_a_dry_run_with_the_flag_writes_nothing(self) -> None:
+        fake = FakeGh(label=False)
+        code, out, _ = self.new(fake, "--create-label", "--dry-run")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"would run: gh label create {handoff.LABEL}", out)
+        self.assertIn("would run: gh issue create", out)
+        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+        self.assertFalse(fake.label)
+
+    def test_an_unconfirmed_label_create_fails_before_filing(self) -> None:
+        fake = FakeGh(label=False)
+        fake.refuse_label = True
+        code, _, err = self.new(fake, "--create-label")
+        self.assertEqual(code, 2)
+        self.assertIn("not confirmed", err)
+        self.assertFalse(any(c[:2] == ["issue", "create"] for c in fake.calls))
+
+    def test_issues_turned_off_are_named_and_stop_the_label_create(self) -> None:
+        code, _, err = run(FakeGh(label=False, issues_on=False), "current", "--repo", "o/r")
+        self.assertEqual(code, 1)
+        self.assertIn("gh repo edit o/r --enable-issues", err)
+        fake = FakeGh(label=False, issues_on=False)
+        code, _, err = self.new(fake, "--create-label")
+        self.assertEqual(code, 1)
+        self.assertIn("--enable-issues", err)
+        self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
+
+    def test_link_refuses_without_the_label(self) -> None:
+        fake = FakeGh(label=False)
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
+        self.assertEqual(code, 1)
+        self.assertIn("--create-label", err)
+        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+
+
+class FleetRegistryCase(unittest.TestCase):
+    """Membership is read from the hub's registry, and an unreadable one is not an empty one."""
+
+    def test_the_hub_itself_is_in_the_fleet_and_a_stranger_is_not(self) -> None:
+        self.assertTrue(handoff.in_fleet("ptr727/ProjectTemplate"))
+        self.assertTrue(handoff.in_fleet("PTR727/projecttemplate"))
+        self.assertFalse(handoff.in_fleet("ptr727/not-a-registered-repo"))
+        self.assertFalse(handoff.in_fleet("someone-else/ProjectTemplate"))
+
+    def test_an_unreadable_registry_fails_rather_than_reading_as_empty(self) -> None:
+        missing = Path(tempfile.mkdtemp()) / "repos.json"
+        self.addCleanup(shutil.rmtree, missing.parent)
+        with (
+            unittest.mock.patch.object(handoff, "REGISTRY", missing),
+            self.assertRaises(handoff.Execution),
+        ):
+            handoff.in_fleet("ptr727/ProjectTemplate")
 
 
 class CurrentCase(unittest.TestCase):
@@ -1154,7 +1320,7 @@ class GhBoundaryCase(unittest.TestCase):
                     ),
                     self.assertRaises(handoff.Execution) as caught,
                 ):
-                    handoff.require_label("o/r")
+                    handoff.label_present("o/r")
                 self.assertIn("carrying no name", str(caught.exception))
 
     def test_a_label_list_that_is_not_an_array_is_an_execution_failure(self) -> None:
@@ -1163,7 +1329,7 @@ class GhBoundaryCase(unittest.TestCase):
             unittest.mock.patch.object(handoff, "run_gh", lambda argv: '{"not": "an array"}'),
             self.assertRaises(handoff.Execution) as caught,
         ):
-            handoff.require_label("o/r")
+            handoff.label_present("o/r")
         self.assertIn("did not read as an array", str(caught.exception))
 
     def test_an_unreadable_body_file_refuses_rather_than_filing_an_empty_handoff(self) -> None:
