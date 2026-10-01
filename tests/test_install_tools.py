@@ -12,6 +12,7 @@ Run as `python3 tests/test_install_tools.py`, or under `python3 -m unittest disc
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -105,6 +106,25 @@ PATH=$host_path
         )
         self.assertEqual(len(report["notes"]), 1)
         self.assertIn("curl is not installed", report["notes"][0])
+
+    def test_json_string_drops_bytes_that_are_not_utf8(self) -> None:
+        for locale in ("C", "C.UTF-8"):
+            with self.subTest(locale=locale):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        f'source "{self.functions}"\njson_string "$1"',
+                        "bash",
+                        b"a\xffb\xc3\xa9",
+                    ],
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                    env={"PATH": os.environ["PATH"], "LC_ALL": locale},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout.decode("utf-8")), "ab\u00e9")
 
     def test_docker_inside_wsl_names_docker_desktop_as_its_mechanism(self) -> None:
         for is_wsl, expected in (("true", "docker-desktop"), ("false", "apt")):
@@ -208,6 +228,7 @@ class TestWindowsJsonReport(unittest.TestCase):
     def test_report_writes_each_row_and_files_each_note(self) -> None:
         result = self.run_harness()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.isascii(), result.stdout)
         report = json.loads(result.stdout)
         self.assertEqual(report["schema"], 1)
         self.assertEqual(report["platform"], "windows")

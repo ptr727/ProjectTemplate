@@ -1064,7 +1064,7 @@ function Show-Report {
             platform = 'windows'
             tools    = $rows
             notes    = (Get-NoteText -First $last -Last $script:NOTE_TEXTS.Count)
-        } | ConvertTo-Json -Depth 4
+        } | ConvertTo-Json -Depth 4 -EscapeHandling EscapeNonAscii
         return
     }
 

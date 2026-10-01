@@ -73,7 +73,14 @@ note() {
 }
 
 json_string() {
-    local LC_ALL=C s="$1" out="" ch i
+    local s="$1" out="" ch i
+    if command -v iconv >/dev/null; then
+        s=$(
+            printf '%s' "$s" | iconv -c -f UTF-8 -t UTF-8
+            printf '.'
+        )
+        s=${s%.}
+    fi
     s=${s//\\/\\\\}
     s=${s//\"/\\\"}
     s=${s//$'\n'/\\n}
