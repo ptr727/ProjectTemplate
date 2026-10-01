@@ -45,6 +45,8 @@ def relative_root(root: pathlib.Path, value: str) -> pathlib.Path:
         raise CarryError(
             f"path must be repository-relative and below the repository root without '..': {value}"
         )
+    if any(re.match(r"^[A-Za-z]:", part) for part in declared.parts):
+        raise CarryError(f"path must not carry a drive letter in any component: {value}")
     resolved_root = root.resolve()
     candidate = resolved_root / value
     resolved_candidate = candidate.resolve(strict=False)

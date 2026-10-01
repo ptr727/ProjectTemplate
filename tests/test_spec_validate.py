@@ -394,7 +394,12 @@ class TreePathGateCase(unittest.TestCase):
                 )
 
     def test_a_drive_letter_spelling_is_refused(self) -> None:
-        for field, value in (("source", "C:real"), ("target", "c:/docs")):
+        for field, value in (
+            ("source", "C:real"),
+            ("target", "c:/docs"),
+            ("source", "real/C:x"),
+            ("target", "docs/c:x"),
+        ):
             with self.subTest(field=field, value=value):
                 tree = self.tree("real", "t") | {field: value}
                 self.assertIn(

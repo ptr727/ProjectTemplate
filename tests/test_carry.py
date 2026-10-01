@@ -283,6 +283,15 @@ class CarryManifestTests(unittest.TestCase):
         ):
             carry.relative_root(pathlib.Path(temp), ".")
 
+    def test_rejects_drive_letter_in_any_component(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            for value in ("C:x", "real/C:x", "real/sub/d:"):
+                with (
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(carry.CarryError, "drive letter"),
+                ):
+                    carry.relative_root(pathlib.Path(temp), value)
+
     def test_rejects_symlinked_declared_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
