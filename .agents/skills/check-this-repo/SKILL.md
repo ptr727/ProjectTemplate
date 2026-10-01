@@ -35,14 +35,17 @@ repo.
    content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that. For a
    Claude Code session, read `live` as well, since that channel loads the registered directory in
    place rather than the copy. A registered directory that is missing is an answer there whatever
-   the exit code says. Where `live.vcs` is `git`, a checkout that is detached or on an old branch
-   is one too, and moving that checkout is the fix rather than re-installing. Where it is
-   `archive`, the channel serves the tree the hub's
-   `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps, which has no git, so `branch: null` there
-   is not a detached checkout. `live.commit` is the commit that tree holds, a tree behind the
-   hub's `main` is the answer, and re-running `bootstrap.sh --skills` or `bootstrap.ps1 -Skills`
-   is the fix, since re-running the installer from a `main` checkout leaves an existing
-   registration where it is.
+   the exit code says.
+   - Where `live` carries `vcs: archive`, the channel serves the tree the hub's
+     `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps, which has no git, so `branch: null` there
+     is not a detached checkout. A `live.commit` behind the hub's `main` is the answer, and so is
+     a null one, which means the bootstrap could not resolve the commit it fetched. Re-running
+     `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` is the fix, given `--dir` or `-Dir` naming
+     the parent of `live.checkout` where an earlier run kept the tree somewhere other than the
+     default, since re-running the installer from any other directory leaves an existing
+     registration where it is.
+   - Otherwise `live` names a git checkout, and one that is detached or on an old branch is an
+     answer too, and moving that checkout is the fix rather than re-installing.
 2. **Does this repo's own carried content still match the hub.** Compare `AGENTS.md`'s
    "Where the Rules Live" pointer text, and any other verbatim `AGENTS.md`/`GOVERNANCE.md` section
    this repo carries, against the same hub checkout's current wording, by reading the text rather

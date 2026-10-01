@@ -132,9 +132,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    directory in place, the one `--report` names under `live`, and serves whatever it holds at
    read time, so where that is the primary checkout on `develop`, Claude Code sessions on this
    machine load `develop`. Where `live.vcs` reads `archive`, that directory is the tree the hub's
-   `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps rather than a checkout, and it holds the
-   commit `live.commit` names until `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again,
-   which this step does not do. Then remove the worktree with
+   `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps rather than a checkout, and it holds what
+   that bootstrap fetched, the commit `live.commit` names where it is not null, until
+   `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again, which this step does not do.
+   Then remove the worktree with
    `git worktree remove <worktree>`, whatever the report said, and report a snapshot that does not
    read current. `--report` exits on the snapshot alone. This step runs whether step 5
    or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
