@@ -2685,21 +2685,30 @@ def _sleeps(toks, _depth=0):
     return False
 
 
-def _loop_parts(toks, i):
+def _loop_parts(toks, i, quoted=None):
     """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
 
     None means the loop is not closed in this command string, a shape this rule leaves alone rather
     than denies, matching the precision-over-recall stance rules 1-3 take.
+    `quoted` is the per-token quote mask, where known.
+    A quoted word is no reserved word, and a word after a quoted `;` is an argument.
+    So `while true; do echo ";" done; sleep 1; done` closes at its last `done` rather than its first.
     """
     n = len(toks)
-    do_at = next((j for j in range(i + 1, n) if toks[j] == "do" and _opens_command(toks, j)), None)
+
+    def keyword(j, word):
+        if toks[j] != word or not _opens_command(toks, j):
+            return False
+        return quoted is None or not (quoted[j] or (j > 0 and quoted[j - 1]))
+
+    do_at = next((j for j in range(i + 1, n) if keyword(j, "do")), None)
     if do_at is None:
         return None
     depth = 0
     for j in range(do_at + 1, n):
-        if toks[j] == "do" and _opens_command(toks, j):
+        if keyword(j, "do"):
             depth += 1
-        elif toks[j] == "done" and _opens_command(toks, j):
+        elif keyword(j, "done"):
             if depth == 0:
                 return toks[i + 1 : do_at], toks[do_at + 1 : j], j
             depth -= 1
@@ -2783,7 +2792,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 if inner is not None:
                     return inner
         elif _opens_loop(toks, i):
-            parts = _loop_parts(toks, i)
+            parts = _loop_parts(toks, i, mask)
             if parts is None:
                 continue
             cond, body, done_at = parts
@@ -5459,6 +5468,16 @@ _WAIT_CASES = [
         'while ! test -f "`"; grep "`" -le x log; do sleep 30; done',
         "deny",
         "two quoted backticks pair into no substitution to hide the separator between them",
+    ),
+    (
+        'while true; do echo ";" done; sleep 1; done',
+        "deny",
+        "a `done` after a quoted `;` is an argument rather than the loop's close",
+    ),
+    (
+        'while true; do echo x; "done"; sleep 1; done',
+        "deny",
+        "a quoted `done` is a command name rather than the loop's close",
     ),
     (
         'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
