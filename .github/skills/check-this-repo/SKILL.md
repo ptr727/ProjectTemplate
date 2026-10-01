@@ -44,8 +44,11 @@ repo.
      the parent of `live.checkout` where an earlier run kept the tree somewhere other than the
      default, since re-running the installer from any other directory leaves an existing
      registration where it is.
-   - Otherwise `live` names a git checkout, and one that is detached or on an old branch is an
-     answer too, and moving that checkout is the fix rather than re-installing.
+   - Where `live` carries no `vcs` and a non-null `commit`, it names a git checkout, and one that
+     is detached, `branch: null`, or on an old branch is an answer too, and moving that checkout
+     is the fix rather than re-installing.
+   - Any other shape names no registration, or one this report could not read, and the `reason`
+     it carries, where it carries one, says which.
 2. **Does this repo's own carried content still match the hub.** Compare `AGENTS.md`'s
    "Where the Rules Live" pointer text, and any other verbatim `AGENTS.md`/`GOVERNANCE.md` section
    this repo carries, against the same hub checkout's current wording, by reading the text rather
