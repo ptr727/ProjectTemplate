@@ -3777,6 +3777,66 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("coverage=unstated ", self.out.getvalue())
 
+    def test_a_wildcard_row_covers_the_sibling_files_it_groups(self) -> None:
+        """The table can collapse sibling files into one glob row rather than naming each."""
+        body = self.balanced(["src/app.py", ".github/workflows/*.yml"])
+        files = ["src/app.py", *(f".github/workflows/{n}.yml" for n in "abc")]
+        self.answer(payload([review(body=body)], files=files))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_shortened_row_covers_the_one_long_path_it_shortens(self) -> None:
+        """The table can replace the middle of a long name with a gap.
+
+        The nested path carries the zero-width space the format writes after a slash.
+        """
+        long = "docs/notes/2020-01-01 - Sample Topic - A Rather Long Descriptive Name.md"
+        body = self.balanced(
+            ["a.md", "docs/\u200bnotes/\u200b2020-01-01 - ... Descriptive Name.md"]
+        )
+        self.answer(payload([review(body=body)], files=["a.md", long]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_row_carrying_a_glob_character_the_diff_carries_reads_literally(self) -> None:
+        body = self.balanced(["app/[id].tsx"])
+        self.answer(payload([review(body=body)], files=["app/[id].tsx"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+
+    def test_a_pattern_or_gap_row_matching_nothing_or_too_much_keeps_the_table_out(self) -> None:
+        """A pattern matching nothing, or a gap matching anything but one path, is a mismatch."""
+        for rows, files, reason in (
+            (
+                ["a.md", "lib/*.py"],
+                ["a.md"],
+                "names lib/*.py, which the diff does not carry",
+            ),
+            (
+                ["dir/*.yml"],
+                ["dir/sub/b.yml"],
+                "leaves out dir/sub/b.yml, and names dir/*.yml, which",
+            ),
+            (
+                ["a.md", "docs/x - ... z.md"],
+                ["a.md"],
+                "names docs/x - ... z.md, which the diff does not carry",
+            ),
+            (
+                ["docs/x - ... z.md"],
+                ["docs/x - one z.md", "docs/x - two z.md"],
+                "shortens docs/x - ... z.md, which matches more than one changed file",
+            ),
+            (
+                ["docs/x - ... z.md"],
+                ["docs/x -z.md"],
+                "names docs/x - ... z.md, which the diff does not carry",
+            ),
+        ):
+            with self.subTest(rows=rows, files=files):
+                pr = payload([review(body=self.balanced(rows))], files=files)
+                self.assertIn(reason, pr_review.table_shortfall(pr))
+                self.assertFalse(pr_review.table_covers(pr))
+
     def test_a_quoted_table_does_not_stand_in_for_coverage(self) -> None:
         """An indented block and a fence left unclosed quote a table rather than write one."""
         table = "| File | Description |\n| ---- | ---- |\n| a.md | Prose. |"
@@ -4215,6 +4275,19 @@ class TestTheRoundsOwnFileTable(GqlCase):
         )
         self.assertIn("b.mb", out)
         self.assertIn("names no unread file", out)
+        self.assertNotIn("omits exactly", out)
+
+    def test_a_shortened_path_matching_several_files_disqualifies_the_naming(self) -> None:
+        """Which file a gap shortened is unknown, so both read as omitted.
+
+        The counts leave two unread, so only the gap keeps this from reading as a lead.
+        """
+        pr = payload(
+            [review(body=summarized(["a.py", "d - ... z.md"], covers=""))],
+            files=["a.py", "d - one z.md", "d - two z.md"],
+        )
+        out = pr_review.table_against_diff(pr, (1, 3))
+        self.assertIn("shortening d - ... z.md to fit several", out)
         self.assertNotIn("omits exactly", out)
 
     def test_a_table_short_by_more_than_the_counts_tracks_neither(self) -> None:
