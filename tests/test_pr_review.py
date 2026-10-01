@@ -1394,34 +1394,6 @@ class TestQodoOpenFindings(GqlCase):
         self.assertNotIn("Description", out)
         self.assertNotIn("Relevance", out)
 
-    def test_a_finding_with_a_thread_is_left_to_unresolved_whatever_its_state(self) -> None:
-        """Resolving a finding's thread adds no badge to the comment, so the thread decides it."""
-        for resolved, unresolved in ((True, 0), (False, 1)):
-            opener = '<img alt="Action required">\n\n<s>1\\. Bad naming</s> <code>Bug</code>'
-            self.answer(
-                payload(
-                    [review()],
-                    [thread("T1", resolved=resolved, login=pr_review.QODO_LOGIN, body=opener)],
-                    comments=[comment(login=pr_review.QODO_LOGIN, body=qodo_review_body())],
-                )
-            )
-            out, count = pr_review.digest("o", "r", 7)
-            self.assertEqual(unresolved, count)
-            self.assertIn("qodo_open=0", out)
-            self.assertNotIn("QODO OPEN FINDING", out)
-
-    def test_a_thread_for_another_finding_leaves_this_one_open(self) -> None:
-        for opener in ("2\\. Bad naming", "11\\. Bad naming", "1\\. Unrelated"):
-            self.answer(
-                payload(
-                    [review()],
-                    [thread("T1", resolved=True, login=pr_review.QODO_LOGIN, body=opener)],
-                    comments=[comment(login=pr_review.QODO_LOGIN, body=qodo_review_body())],
-                )
-            )
-            out, _ = pr_review.digest("o", "r", 7)
-            self.assertIn("qodo_open=1", out, opener)
-
     def test_a_resolved_finding_does_not_count_as_open(self) -> None:
         self.answer(
             payload(

@@ -93,8 +93,7 @@ Subcommands
            silence means no finding was raised or CodeRabbit was never trialed at all.
            `qodo_open=N` counts Qodo's own
            numbered findings that carry neither its `Resolved` nor `Dismissed` self-tracked
-           badge nor a review thread of their own, a finding with a thread being counted in
-           `unresolved=` instead: Qodo's formal review carries an empty body on every round observed, so its
+           badge: Qodo's formal review carries an empty body on every round observed, so its
            findings are read from its "Code Review by Qodo" PR-level comment instead, not
            head-scoped since a comment carries no commit. Printed as `0` once Qodo has posted
            that comment at all, since a `0` is itself a reading, `unknown` where its findings
@@ -2828,45 +2827,21 @@ def qodo_review_comment(pr: dict) -> dict | None:
     return max(comments, key=lambda c: c.get("createdAt") or "", default=None)
 
 
-def qodo_heading(text: str) -> str:
-    """A Qodo finding's numbered title, `1. title`, with markup, escapes and case removed.
-
-    The findings comment and the review thread Qodo opens for the same finding render one
-    heading differently, `  1.  title` in a `<summary>` against `<s>1\\. title</s>` once its
-    thread is resolved, so both are reduced to this form before they are compared.
-    """
-    return " ".join(re.sub(r"<[^>]*>", " ", text).replace("\\", "").split()).lower()
-
-
-def qodo_open_findings(body: str, threads: list[dict] | None = None) -> list[str]:
+def qodo_open_findings(body: str) -> list[str]:
     """Each numbered finding in a `Code Review by Qodo` comment that carries neither Qodo's own
-    `Resolved` nor `Dismissed` self-tracked badge nor a review thread of its own, so it is still
-    open and has no thread to resolve.
+    `Resolved` nor `Dismissed` self-tracked badge, so it is still open.
 
     Qodo nests each finding's own Description/Code/Relevance/Evidence/Agent-prompt sections
     under `<summary>` tags of their own, so every `<summary>` in the comment is read rather than
     only the outermost ones, and only the numbered heading itself, matched by `QODO_FINDING`,
     counts as a finding.
-
-    A finding Qodo also opened a thread for is left to `unresolved=`, whose resolved state is
-    the only one its open-source app keeps: resolving that thread adds no badge to this comment,
-    so reading the comment alone would report a resolved finding as open forever. A thread is
-    matched on the finding's numbered title, the text before its first `<code>` label, at the
-    start of its opening comment, `threads` being every thread the reviewer opened, resolved or
-    not.
     """
     if not body:
         return []
-    openers = [
-        qodo_heading(((t.get("comments") or {}).get("nodes") or [{}])[0].get("body") or "")
-        for t in threads or []
-    ]
     return [
         s.strip()
         for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(body)))
-        if QODO_FINDING.match(s)
-        and not QODO_BADGE.search(s)
-        and not any(o.startswith(qodo_heading(s.split("<code", 1)[0])) for o in openers)
+        if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
     ]
 
 
@@ -3055,14 +3030,7 @@ def digest(
     # Qodo's own comment-only findings: its formal review carries no body at all on any round checked, so its numbered findings are read from its `Code Review by Qodo` PR comment instead.
     # Comments carry no commit, so this is read by recency, not head-scoped the way `cr_blocks` above is.
     qodo_comment = qodo_review_comment(pr)
-    qodo_open = (
-        qodo_open_findings(
-            qodo_comment.get("body") or "",
-            [t for t in threads if thread_author(t) == QODO_LOGIN],
-        )
-        if qodo_comment
-        else []
-    )
+    qodo_open = qodo_open_findings(qodo_comment.get("body") or "") if qodo_comment else []
     lines = [
         # The repository leads the line, since a number alone reads as correct anywhere.
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
