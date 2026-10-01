@@ -209,13 +209,15 @@ def escapes_repo_root(value):
     """Whether `ROOT / value` could resolve outside ROOT on some host.
 
     `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename) and a Windows drive letter such as `C:`.
+    A drive is refused in any component rather than only the first, since joining one Windows reads as a drive, such as `C:x` or `1:x`, onto a Windows path discards everything joined before it.
     """
+    parts = pathlib.PurePosixPath(value).parts
     return (
         not value
         or value.startswith("/")
         or "\\" in value
-        or re.match(r"^[A-Za-z]:", value) is not None
-        or ".." in pathlib.PurePosixPath(value).parts
+        or any(pathlib.PureWindowsPath(part).drive for part in parts)
+        or ".." in parts
     )
 
 
