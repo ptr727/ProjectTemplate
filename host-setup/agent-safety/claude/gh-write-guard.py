@@ -2513,10 +2513,12 @@ def _is_shell_rewritable(val):
     """True if the shell may rewrite the word at run time, so the text cannot say what it names.
 
     A substitution, a brace expansion, a glob, and a tilde expansion each can, as `$SIG`, `{0..0}`,
-    `[0]`, and `~` do. The rewrite can also split one word into several, so `-k $K` becomes
-    `-k 0 -s 0` where `K` holds `0 -s 0`.
+    `[0]`, and `~` do, and so can zsh's expansion of a leading `=`, as `=timeout` names a path. The
+    rewrite can also split one word into several, so `-k $K` becomes `-k 0 -s 0` where `K` holds
+    `0 -s 0`. The test reads the characters rather than the quoting, so a quoted word holding one,
+    as `'a*b'` does, is read as rewritable too.
     """
-    return any(ch in val for ch in "$`{[*?~")
+    return val.startswith("=") or any(ch in val for ch in "$`{[*?~")
 
 
 def _timeout_option(tok):
@@ -2633,7 +2635,8 @@ def _timeout_bounds_wrapper(toks, w):
     `-${F}0`, `"$SIG"`, `{0..0}`, or `X=$T` after `env`, makes the run no bound, whatever follows
     it. The rewrite may name signal 0, a kill-after, or another `timeout`, or split into words that
     end option parsing early. That is a false deny wherever the rewrite yields a bound, as it does
-    in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'`.
+    in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'`, and wherever quoting keeps the word
+    literal, as it does in `timeout 900 env MSG='a*b' bash -c '<loop>'`.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
     only when every outer one sends signal 0 with no `-k` of any value, which is inert, and the
@@ -5405,6 +5408,16 @@ _WAIT_CASES = [
         "timeout 900 env PATH=$HOME/bin bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "a declared false deny, since the rewrite here yields a bound",
+    ),
+    (
+        "timeout 900 env MSG='a*b' bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is a quoted word holding a rewrite character, which the shell leaves literal",
+    ),
+    (
+        "timeout -s KILL 10 =timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a leading = is rewritten into a command path by zsh, so it may name timeout",
     ),
     (
         "timeout -s KILL 10 /usr/bin/time?ut 800 bash -c 'until [ -f x ]; do sleep 60; done'",

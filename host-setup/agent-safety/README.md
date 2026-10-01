@@ -198,10 +198,12 @@ text says, because the harm it covers was never in the text.
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
    where its value takes the form a duration takes here. A word between the `timeout` and the
    wrapper that the shell may rewrite at run time, by a substitution such as `"$SIG"`, a brace
-   expansion, a glob, or a tilde expansion, makes the run no bound, whatever follows it, since the
-   text cannot say what the word becomes and the rewrite may split it into words that end option
-   parsing early. That is a false deny wherever the rewrite yields a bound, as it does in `timeout
-   900 env PATH=$HOME/bin bash -c '<the loop>'`. Where a `timeout`'s command is another `timeout`,
+   expansion, a glob, a tilde expansion, or zsh's expansion of a leading `=`, makes the run no
+   bound, whatever follows it, since the text cannot say what the word becomes and the rewrite may
+   split it into words that end option parsing early. That is a false deny wherever the rewrite
+   yields a bound, as it does in `timeout 900 env PATH=$HOME/bin bash -c '<the loop>'`, and wherever
+   quoting keeps a word holding one of those characters literal, as it does for `'a*b'`, since the
+   characters are read rather than the quoting. Where a `timeout`'s command is another `timeout`,
    past any command prefix, the run is bounded only when every outer one sends signal 0 with no `-k`
    of any value, which is inert, and the innermost one is a bound, so `timeout -s 0 900 timeout 800
    bash -c '<the loop>'` is bounded. Every other such nesting is read as no bound, since an outer
@@ -285,8 +287,7 @@ text says, because the harm it covers was never in the text.
    trap is read, and a trap set inside a script the payload runs is not in the command text at
    all. A launcher that builds an inner `timeout` from its own arguments, as `env -S 'timeout 800'`
    and `xargs -I% % 800` do, names no `timeout` in a word, so the nesting it makes is not read. A
-   false deny on an ordinary loop
-   costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
+   false deny on an ordinary loop costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
    states the prohibition for every agent whether or not a hook is installed.
 
 8. **A process outliving the session is reported, never killed.** Requirement 7 stops a leak from
