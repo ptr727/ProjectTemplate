@@ -1029,8 +1029,9 @@ TIER3 = frozenset(
 )
 
 CHARSET_CLASSIFY = (
-    'classify it in the comment-and-doc-style skill\'s "Character set" section'
-    " and in prose_lint.py's TIER1, TIER2, or TIER3 table"
+    "classify it in ptr727/ProjectTemplate:"
+    ' the comment-and-doc-style skill\'s "Character set" section'
+    " and prose_lint.py's TIER1, TIER2, or TIER3 table"
 )
 
 COMBINING_DIACRITICS = frozenset(chr(c) for c in range(0x300, 0x370)) - {

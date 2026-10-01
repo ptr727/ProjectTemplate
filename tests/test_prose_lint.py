@@ -152,6 +152,7 @@ class TestTierTables(BaitCase):
         self.assertEqual("charset-unknown", kind)
         self.assertIn('the comment-and-doc-style skill\'s "Character set" section', message)
         self.assertIn("prose_lint.py's TIER1, TIER2, or TIER3 table", message)
+        self.assertIn("classify it in ptr727/ProjectTemplate:", message)
         self.assertNotIn("GOVERNANCE.md", message)
 
     def test_a_latin_letter_in_a_recorded_name_is_left_alone(self) -> None:
