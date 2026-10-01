@@ -72,30 +72,58 @@ note() {
     NOTE_TEXTS+=("$2")
 }
 
-json_string() {
-    local s="$1" out="" ch i
-    if command -v iconv >/dev/null; then
-        s=$(
-            printf '%s' "$s" | iconv -c -f UTF-8 -t UTF-8
-            printf '.'
-        )
-        s=${s%.}
+json_string() (
+    export LC_ALL=C
+    local s="$1" out="" i n b c cp need min j hi lo
+    if [[ $s != *[!\ -~]* && $s != *[\"\\]* ]]; then
+        printf '"%s"' "$s"
+        return 0
     fi
-    s=${s//\\/\\\\}
-    s=${s//\"/\\\"}
-    s=${s//$'\n'/\\n}
-    s=${s//$'\r'/\\r}
-    s=${s//$'\t'/\\t}
-    if [[ $s == *[$'\x01'-$'\x1f']* ]]; then
-        for ((i = 0; i < ${#s}; i++)); do
-            ch=${s:i:1}
-            [[ $ch == [$'\x01'-$'\x1f'] ]] && printf -v ch '\\u%04x' "'$ch"
-            out+=$ch
-        done
-        s=$out
-    fi
-    printf '"%s"' "$s"
-}
+    n=${#s}
+    for ((i = 0; i < n; i++)); do
+        printf -v b '%d' "'${s:i:1}"
+        b=$((b & 0xff))
+        if ((b == 34 || b == 92)); then
+            out+="\\${s:i:1}"
+        elif ((b < 32)); then
+            printf -v c '\\u%04x' "$b"
+            out+=$c
+        elif ((b < 128)); then
+            out+=${s:i:1}
+        else
+            if ((b >= 0xc2 && b <= 0xdf)); then
+                need=1 cp=$((b & 0x1f)) min=0x80
+            elif ((b >= 0xe0 && b <= 0xef)); then
+                need=2 cp=$((b & 0x0f)) min=0x800
+            elif ((b >= 0xf0 && b <= 0xf4)); then
+                need=3 cp=$((b & 0x07)) min=0x10000
+            else
+                continue
+            fi
+            for ((j = 1; j <= need; j++)); do
+                ((i + j < n)) || break
+                printf -v c '%d' "'${s:i+j:1}"
+                c=$((c & 0xff))
+                ((c >= 0x80 && c <= 0xbf)) || break
+                cp=$(((cp << 6) | (c & 0x3f)))
+            done
+            if ((j <= need || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))); then
+                continue
+            fi
+            i=$((i + need))
+            if ((cp < 0x10000)); then
+                printf -v c '\\u%04x' "$cp"
+            else
+                cp=$((cp - 0x10000))
+                hi=$((0xd800 + (cp >> 10)))
+                lo=$((0xdc00 + (cp & 0x3ff)))
+                printf -v c '\\u%04x\\u%04x' "$hi" "$lo"
+            fi
+            out+=$c
+        fi
+    done
+    printf '"%s"' "$out"
+)
 
 json_value() {
     if [[ -n $1 ]]; then
@@ -145,10 +173,11 @@ binary, so a column compares like with like. A report reads the apt cache as it 
 not refresh it, so an available version is as current as the last apt update.
 
 --json writes one object carrying the same rows: "schema" (1), "platform" ("linux"), "tools", one
-entry per tool with "tool", "installed", "available", "source", "mechanism" ("apt", which any
-apt upgrade moves, "binary", which only this script moves, or "docker-desktop" for docker inside a
-WSL distribution, which Docker Desktop moves), "status" and that tool's own "notes", and a
-top-level "notes" for what belongs to no tool. A version that was not read is null.
+entry per tool with "tool", "installed", "available", "source", "mechanism", "status" and that
+tool's own "notes", and a top-level "notes" for what belongs to no tool. A version that was not
+read is null. Like "source", "mechanism" names how this script manages the tool rather than where
+the installed copy came from: "apt", which any apt upgrade moves, "binary", which only this script
+moves, or "docker-desktop" for docker inside a WSL distribution, which Docker Desktop moves.
 
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
 every terminal that user has open rather than only the one it ran in. It touches no tool.

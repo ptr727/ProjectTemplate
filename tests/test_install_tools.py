@@ -108,6 +108,22 @@ PATH=$host_path
         self.assertIn("curl is not installed", report["notes"][0])
 
     def test_json_string_drops_bytes_that_are_not_utf8(self) -> None:
+        never_valid = b"\xff"
+        above_the_last_code_point = b"\xf4\x90\x80\x80"
+        overlong = b"\xe0\x80\x80"
+        surrogate = b"\xed\xa0\x80"
+        truncated = b"\xe2\x82"
+        lead_before_ascii = b"\xc3"
+        malformed = (
+            b"a"
+            + never_valid
+            + above_the_last_code_point
+            + overlong
+            + surrogate
+            + lead_before_ascii
+            + "b\u00e9\U0001f600".encode()
+            + truncated
+        )
         for locale in ("C", "C.UTF-8"):
             with self.subTest(locale=locale):
                 result = subprocess.run(
@@ -116,7 +132,7 @@ PATH=$host_path
                         "-c",
                         f'source "{self.functions}"\njson_string "$1"',
                         "bash",
-                        b"a\xffb\xc3\xa9",
+                        malformed,
                     ],
                     capture_output=True,
                     check=False,
@@ -124,7 +140,9 @@ PATH=$host_path
                     env={"PATH": os.environ["PATH"], "LC_ALL": locale},
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(json.loads(result.stdout.decode("utf-8")), "ab\u00e9")
+                self.assertEqual(result.stderr, b"")
+                self.assertTrue(result.stdout.isascii(), result.stdout)
+                self.assertEqual(json.loads(result.stdout), "ab\u00e9\U0001f600")
 
     def test_docker_inside_wsl_names_docker_desktop_as_its_mechanism(self) -> None:
         for is_wsl, expected in (("true", "docker-desktop"), ("false", "apt")):
