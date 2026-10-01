@@ -654,6 +654,17 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "new")
 
+    def test_a_leftover_old_tree_that_will_not_go_stops_the_swap_naming_its_path(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        self.locked_entry(self.owned_tree("skills-tree.old", "old"))
+        result = self.run_loader("swap_in")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"Could not remove the previous tree at {self.dir / 'skills-tree.old'}", result.stderr
+        )
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "live")
+
     def test_a_failed_swap_never_moves_a_foreign_old_tree_into_place(self) -> None:
         self.owned_tree("skills-tree.new", "new")
         foreign = self.dir / "skills-tree.old"
