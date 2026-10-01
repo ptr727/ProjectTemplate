@@ -9,7 +9,7 @@
         // VS Code task shell on many setups.
         // Sequencing is expressed with `dependsOrder: sequence` and `dependsOn`, never shell operators.
         //
-        // The first tasks are the Python clean-compile set, per CODESTYLE.md "Local Development Loop":
+        // The first tasks are the Python clean-compile set, per the python-codestyle Skill "Local development loop":
         // `ruff format`, then `ruff check`, then the type checker.
         // A repo whose CI type checker is mypy, with pyright editor-only, swaps "Python Types" to
         // `uv run mypy src`.
@@ -20,7 +20,7 @@
         // It runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy src` for a mypy repo, `uvx pyright` otherwise.
-        // It omits the pytest, coverage, and `uv sync` tasks, per CODESTYLE.md Python "Two profiles".
+        // It omits "uv Sync" and "uv Upgrade", and "Python Test" runs the unittest command the repository's OPERATIONS.md gives rather than pytest, per the python-codestyle Skill "Two profiles".
         {
             "label": "Ruff Format",
             "type": "process",

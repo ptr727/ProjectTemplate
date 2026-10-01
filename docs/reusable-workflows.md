@@ -127,22 +127,22 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [x] HomeAutomation-Config (operational model at adoption, the direct-to-develop path, and release model since its 2026-09-24 reclassification): adopted on `develop` in ptr727/HomeAutomation-Config#58 at `d920805`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin, and `python3 spec/audit.py HomeAutomation-Config` reports no `interface` finding on the file.
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
-- [ ] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
+- [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [ ] KiCadLibrary (drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
-- [ ] LanguageTags (`delete-branch: true`)
-- [ ] aiopurpleair (`delete-branch: true`)
-- [ ] MediaTools (`delete-branch: true`)
-- [ ] VSCode-Server-DotNetCore (`delete-branch: true`)
-- [ ] Blog
-- [ ] ESPHome-Config
-- [ ] HomeAssistant-Config
-- [ ] PlexCleaner
-- [ ] Utilities
-- [ ] Vantage-Config
+- [x] LanguageTags (`delete-branch: true`): adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] aiopurpleair (`delete-branch: true`): adopted on `develop` in ptr727/aiopurpleair#103 at `3b69dc3`, merged 2026-09-09 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] MediaTools (`delete-branch: true`): adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] VSCode-Server-DotNetCore (`delete-branch: true`): adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 at `ca46db7`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] Blog: adopted on `develop` in ptr727/Blog#97 at `71bcb64`, merged 2026-08-23 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] ESPHome-Config: adopted on `develop` in ptr727/ESPHome-Config#100 at `a21dfd7`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] HomeAssistant-Config: adopted on `develop` in ptr727/HomeAssistant-Config#33 at `f980637`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] PlexCleaner: adopted on `develop` in ptr727/PlexCleaner#940 at `0e9b0b9`, merged 2026-08-30 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] Utilities: adopted on `develop` in ptr727/Utilities#451 at `78c081b`, merged 2026-08-30 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
+- [x] Vantage-Config: adopted on `develop` in ptr727/Vantage-Config#19 at `e4fd8e2`, merged 2026-09-27 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [ ] AudioCleaner (carries no merge-bot today, takes the stub on its next standup or resync, since the manifest applies it to every repo)
 - [ ] DevKitCIoT (same)
 - [ ] EspDinIoT (same)
-- [ ] Financial-Modeling (same)
+- [x] Financial-Modeling (same): adopted on `develop` in ptr727/Financial-Modeling#116 at `66a550a`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [ ] HolidayLights (same)
 - [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` showing callers equal to copies.
 
@@ -156,7 +156,28 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 - [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path observed on PhotoCleaner's adoption pull request, [pilot smoke run][pilot-smoke-run], where the hub's `validate-default` ran because that repo carries no `validate` hook. The follow-up self-reference pilot also runs the bundled prose and repository gates through `$/.github/actions/` without checking out the hub.
 - [x] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), both on 2026-08-16. `test-pull-request.yml` calls the hub validate task and no repo hook was needed.
 - [x] HomeAutomation-Config (second pilot, operational trigger shape at adoption, and release model since its 2026-09-24 reclassification): ptr727/HomeAutomation-Config#58 on `develop` (`d920805`), merged 2026-08-19 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin, and the same audit reports no `interface` finding on that file.
-- [ ] The remaining repos, one checkbox each still to add now that the pilots have closed, since the sweep list is every cataloged repo. A Python adopter owes one precondition before its bump: the `unit-test` job fails when a Python directory's run wrote no `coverage.xml`, and that job's Python leg runs in each directory the caller names in `python-directories`, or at the root where it names none, so a `pytest` adopter puts `pytest-cov` among its test dependencies and a `--cov=<package>` selector in its own `pyproject.toml` before it bumps, per D1.6. aiopurpleair and Financial-Modeling carry both. homeassistant-purpleair owes the same precondition, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`, and its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14. The `python-versions` input settles the interpreter half, a caller naming `["3.14"]` moving the leg there, and leaves the dependency-version axis open, which is a dimension the hub task does not express. PlexCleaner's Python is a stdlib-only tooling subtree with no tests yet, which it owes before it names that subtree in `python-directories`. The hub cannot smoke-test this itself, having no `tests/` of its own.
+
+The remaining repos are one checkbox each below, the sweep list being every cataloged repo other than the hub, which is its own consumer, and the two pilots above. A Python adopter owes one precondition before its bump: the `unit-test` job fails when a Python directory's run wrote no `coverage.xml`, and that job's Python leg runs in each directory the caller names in `python-directories`, or at the root where it names none, so a `pytest` adopter puts `pytest-cov` among its test dependencies and a `--cov=<package>` selector in its own `pyproject.toml` before it bumps, per D1.6. aiopurpleair and Financial-Modeling carry both. The hub cannot smoke-test this itself, having no `tests/` of its own.
+
+- [x] Utilities: adopted on `develop` in ptr727/Utilities#451 at `78c081b`, merged 2026-08-30 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [x] LanguageTags: adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [x] aiopurpleair: adopted on `develop` in ptr727/aiopurpleair#109 at `c9d889e`, merged 2026-09-10 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] homeassistant-purpleair: Its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14. The `python-versions` input settles the interpreter half, a caller naming `["3.14"]` moving the leg there, and leaves the dependency-version axis open, which is a dimension the hub task does not express. It owes the Python precondition above, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`.
+- [x] Financial-Modeling: adopted on `develop` in ptr727/Financial-Modeling#115 at `f6882cf`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] PlexCleaner: Its `test-pull-request.yml` still calls its own `validate-task.yml` rather than the hub's. Its Python is a stdlib-only tooling subtree with no tests yet, which it owes before it names that subtree in `python-directories`.
+- [ ] ESPHome-NonRoot: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
+- [x] VSCode-Server-DotNetCore: adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 at `ca46db7`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [x] NxWitness: adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] KiCadLibrary: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [ ] EspDinIoT: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [x] ESPHome-Config: adopted on `develop` in ptr727/ESPHome-Config#100 at `a21dfd7`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [x] HomeAssistant-Config: adopted on `develop` in ptr727/HomeAssistant-Config#33 at `f980637`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] DevKitCIoT: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [x] MediaTools: adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] AudioCleaner: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
+- [x] Vantage-Config: adopted on `develop` in ptr727/Vantage-Config#19 at `e4fd8e2`, merged 2026-09-27 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
+- [ ] HolidayLights: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [x] Blog: adopted on `develop` in ptr727/Blog#99 at `fa4b364`, merged 2026-08-23 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
 
 ### Stage 3: The Pure Functions

@@ -82,9 +82,13 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      against a condition that could never become true, until they were killed by PID by hand. A shell
      started by a tool call runs in its own session, so it survives the agent that started it and nothing
      reaps it. A heredoc body is data rather than a command line and is skipped, except one fed to a
-     shell, which is the script that shell runs. A line holding `((` beside a `<<` is read once as
-     opening nothing and once per `<<` whose tag it accepts and whose non-empty body a later line
-     closes, and any reading holding an unbounded wait denies. A command with more readings than the rule builds
+     shell, which is the script that shell runs. A line opening several heredocs is read as opening
+     its first alone and, where every body closes, as opening each in order through the last one
+     that is data, keeping whole a body fed to a shell before it. A line holding `((` or `$[` beside
+     a `<<` is read as opening nothing, and as opening each `<<` whose tag it accepts alone and
+     together with every later one whose body closes, wherever that reading closes its first body,
+     ends on a body that is data, and removes at least one line. Any reading holding an unbounded
+     wait denies. A command with more readings than the rule builds
      is denied unread when it names both `sleep` and a loop keyword.
 
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
@@ -2387,7 +2391,7 @@ _RESERVED_WORDS = frozenset(
 )
 
 
-def _redirects_stdin(after_done):
+def _redirects_stdin(after_done, quoted=None):
     """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
     Three things have to hold, and reading only the first accepted loops that never end.
@@ -2404,7 +2408,26 @@ def _redirects_stdin(after_done):
     `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
     That includes a closing word such as `}`, since a pipe inside the compound it closes can feed
     the loop, so `{ yes | while read l; do sleep 30; done } < f` reads the pipe.
+    It ends at a comment too, since bash reads nothing after one, so `done # < f` reads the pipe.
+    A word opens a comment when it starts with an unquoted `#`, which `quoted` says per token.
+    Where that is unknown, every such word reads as one.
+    A comment keeps an earlier binding only where it is surely one, since ending early at a `#`
+    that is not skips the later binding that applies.
+    It is not sure where the quoting is unknown or after an expansion that can hold a space,
+    as in `< ${g:- #x} < /dev/zero`, where a `$(` arrives as a token ending in `$`.
+    The caller passes no mask where the command holds a carriage return, which the lex splits
+    words at and bash does not, so `log\r#x` is one word rather than a comment.
+    A redirect whose target opens a comment has none, so it bounds nothing.
     """
+
+    def comment(j):
+        return after_done[j].startswith("#") and not (quoted is not None and quoted[j])
+
+    def sure(j):
+        return quoted is not None and not any(
+            t.endswith("$") or any(c in t for c in ("${", "$[", "`")) for t in after_done[:j]
+        )
+
     bound = False
     i = 0
     while i < len(after_done):
@@ -2415,6 +2438,8 @@ def _redirects_stdin(after_done):
             return bound
         if tok in _RESERVED_WORDS:
             return bound
+        if comment(i):
+            return bound and sure(i)
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
         # Reading the token before the `<` as a descriptor read the previous redirect's target as one.
@@ -2429,6 +2454,8 @@ def _redirects_stdin(after_done):
         if not _is_redir_op(tok):
             i += 1
             continue
+        if i + 1 < len(after_done) and comment(i + 1):
+            return False
         target = after_done[i + 1] if i + 1 < len(after_done) else ""
         if _is_shell_op(target):
             target = ""
@@ -2448,7 +2475,7 @@ def _redirects_stdin(after_done):
     return bound
 
 
-def _reads_its_input(keyword, cond, after_done):
+def _reads_its_input(keyword, cond, after_done, quoted=None):
     """True if a `while` loop's condition is a `read`, which ends it when the input is exhausted.
 
     `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
@@ -2470,7 +2497,7 @@ def _reads_its_input(keyword, cond, after_done):
     # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
     if any(t.startswith(("<(", ">(")) for t in after_done):
         return False
-    if not _redirects_stdin(after_done):
+    if not _redirects_stdin(after_done, quoted):
         return False
     words = [t for t in cond if not _ENV_ASSIGN_RE.match(t)]
     if not words or words[0].rsplit("/", 1)[-1] != "read":
@@ -2658,21 +2685,30 @@ def _sleeps(toks, _depth=0):
     return False
 
 
-def _loop_parts(toks, i):
+def _loop_parts(toks, i, quoted=None):
     """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
 
     None means the loop is not closed in this command string, a shape this rule leaves alone rather
     than denies, matching the precision-over-recall stance rules 1-3 take.
+    `quoted` is the per-token quote mask, where known.
+    A quoted word is no reserved word, and a word after a quoted `;` is an argument.
+    So `while true; do echo ";" done; sleep 1; done` closes at its last `done` rather than its first.
     """
     n = len(toks)
-    do_at = next((j for j in range(i + 1, n) if toks[j] == "do" and _opens_command(toks, j)), None)
+
+    def keyword(j, word):
+        if toks[j] != word or not _opens_command(toks, j):
+            return False
+        return quoted is None or not (quoted[j] or (j > 0 and quoted[j - 1]))
+
+    do_at = next((j for j in range(i + 1, n) if keyword(j, "do")), None)
     if do_at is None:
         return None
     depth = 0
     for j in range(do_at + 1, n):
-        if toks[j] == "do" and _opens_command(toks, j):
+        if keyword(j, "do"):
             depth += 1
-        elif toks[j] == "done" and _opens_command(toks, j):
+        elif keyword(j, "done"):
             if depth == 0:
                 return toks[i + 1 : do_at], toks[do_at + 1 : j], j
             depth -= 1
@@ -2756,7 +2792,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 if inner is not None:
                     return inner
         elif _opens_loop(toks, i):
-            parts = _loop_parts(toks, i)
+            parts = _loop_parts(toks, i, mask)
             if parts is None:
                 continue
             cond, body, done_at = parts
@@ -2768,7 +2804,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # Measured: the same leak as having written no bound at all.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
-                tok, cond, toks[done_at + 1 :]
+                tok,
+                cond,
+                toks[done_at + 1 :],
+                mask[done_at + 1 :] if mask and "\r" not in cmd else None,
             )
             quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
             if sleeps and not bounded and not _bound_in_condition(cond, quoted):
@@ -2818,20 +2857,18 @@ def _heredoc_openers_in(toks):
     return openers
 
 
-def _heredoc_forks(toks):
-    """The ways a line's `toks` can open a heredoc whose body is data, each a (tag, is_dash_form) or None.
+_ARITH_OPENERS = ("((", "$[")
 
-    None is the reading where the line strips no body, either because it opens none or because
-    the one it opens is fed to a shell. A line holding no `((` has one reading. A line holding one
-    has a reading per `<<` beside None, since `$(( 1 << n ))` tokenizes to a bare `<<` that no token
-    test can tell from a redirection. Skipping such a line outright kept a real heredoc's body as
-    commands, and a comparison in that body then vouched for a wait loop whose condition carried no
-    bound.
+
+def _heredoc_forks(toks):
+    """(the heredocs a line's `toks` can open in order, whether a `<<` there can be a shift).
+
+    Each heredoc is a (tag, is_dash_form, feeds_a_shell). A line holding `((` or `$[` can hold a
+    shift, since `$(( 1 << n ))` tokenizes to a bare `<<` that no token test can tell from a
+    redirection. Skipping such a line outright kept a real heredoc's body as commands, and a
+    comparison in that body then vouched for a wait loop whose condition carried no bound.
     """
-    openers = [None if fed else (tag, dash) for tag, dash, fed in _heredoc_openers_in(toks)]
-    if any("((" in t for t in toks):
-        return list(dict.fromkeys([None, *openers]))
-    return openers[:1] or [None]
+    return _heredoc_openers_in(toks), any(m in t for t in toks for m in _ARITH_OPENERS)
 
 
 def _heredoc_openers(line):
@@ -2853,7 +2890,7 @@ def _heredoc_openers(line):
         except (ValueError, RecursionError):
             readings.append(_operator_tokens(line))
     if not _heredoc_openers_in(readings[0]):
-        return [None]
+        return [], False
     return _heredoc_forks(readings[1])
 
 
@@ -2881,22 +2918,69 @@ def _heredoc_body_end(lines, start, opener):
     return len(lines), []
 
 
+def _heredoc_bodies_end(lines, start, openers):
+    """(the index after the bodies `openers` open at `start`, [the lines kept], whether all closed).
+
+    The bodies are read in order through the last one that is data. A body fed to a shell before
+    it is kept whole, since it is the script that shell runs, and one after it is left to be read
+    line by line as before. A body no line closes runs to the end, as bash reads it.
+    """
+    last = max((k for k, (_, _, fed) in enumerate(openers) if not fed), default=-1)
+    kept, closed = [], True
+    for tag, dash, fed in openers[: last + 1]:
+        end, term = _heredoc_body_end(lines, start, (tag, dash))
+        kept.extend(lines[start:end] if fed else term)
+        closed = closed and bool(term)
+        start = end
+    return start, kept, closed
+
+
+def _heredoc_shift_ends(lines, start, openers):
+    """Every (end, [lines kept]) a line holding a shift can leave at `start`, reading each of its
+    `<<`s alone and each together with every later one whose body closes, in order.
+
+    A reading counts only where its first body closes, it ends on a body that is data, and it removes
+    at least one line, since stripping to the end dropped the rest of a quoted payload holding a
+    shift, and removing none is the reading that strips nothing. A body fed to a shell within it is
+    kept whole. Every subset instead grew the readings as a power of the `<<` count, so a line
+    writing five documents passed the reading limit alone.
+    """
+    found = {}
+    for k in range(len(openers)):
+        for run in (openers[k : k + 1], openers[k:]):
+            i, kept, last = start, [], None
+            for n, (tag, dash, fed) in enumerate(run):
+                j, term = _heredoc_body_end(lines, i, (tag, dash))
+                if not term:
+                    if n == 0:
+                        break
+                    continue
+                kept = kept + (lines[i:j] if fed else term)
+                i = j
+                if not fed:
+                    last = (i, kept)
+            if last is not None and last[0] - start > len(last[1]):
+                found.setdefault((last[0], tuple(last[1])), None)
+    return [(j, list(ends)) for j, ends in found]
+
+
 def _heredoc_readings(cmd, openers=_heredoc_openers):
     """Every text `cmd` can be with its heredoc bodies removed, or None past the reading limit.
-    `openers` decides the ways each line opens a heredoc.
+    `openers` decides the heredocs each line opens and whether a `<<` there can be a shift.
 
     A heredoc body is data rather than a command line, so `cat > notes.md <<EOF` writing this rule's
     own forbidden shape into a document is not that shape being run. A body fed to `sh`/`bash` is
     kept, since there it is the script the shell executes. This is precision over recall in the same
     direction the kit takes elsewhere: a wait inside a script file is likewise unseen.
 
-    A line `openers` reads more than one way forks the text, one reading per `<<` whose tag closes a
-    body on a later line, beside the reading that strips nothing there. A caller denying on any
-    reading then needs no guess at which `<<` is the shift. A `<<` with no closing line forks
-    nothing, since stripping to the end dropped the rest of a quoted payload holding a shift. Nor
-    does one whose closing line is the next line, since that reading is the same text as the one
-    stripping nothing. Past `_HEREDOC_READING_LIMIT` readings this returns None rather than building
-    them all.
+    Bash reads every body a line opens in turn, each through its own delimiter, before the next
+    command. A line opening several is read as opening its first alone and, where every body closes,
+    as opening each in order through the last that is data. Reading only the first left the others'
+    lines as commands, and a heredoc opener among them swallowed the real commands after. Reading
+    only every one in order let a quoted `<<` word, or one inside a substitution, strip real commands.
+    A line holding a shift is read as opening nothing and every way `_heredoc_shift_ends` reads it.
+    A caller denying on any reading then needs no guess at which `<<` is the shift or which body is
+    real. Past `_HEREDOC_READING_LIMIT` readings this returns None rather than building them all.
     """
     if "<<" not in cmd:
         return [cmd]
@@ -2909,18 +2993,21 @@ def _heredoc_readings(cmd, openers=_heredoc_openers):
         while i < len(lines):
             kept.append(lines[i])
             i += 1
-            first, *others = openers(lines[i - 1])
-            for opener in others:
-                j, term = _heredoc_body_end(lines, i, opener)
-                if not term or j == i + 1:
-                    continue
+            opened, shift = openers(lines[i - 1])
+            base = list(kept)
+            if shift:
+                forks = _heredoc_shift_ends(lines, i, opened)
+            else:
+                j, term, closed = _heredoc_bodies_end(lines, i, opened)
+                end, first, _ = _heredoc_bodies_end(lines, i, opened[:1])
+                forks = [(j, term)] if closed and (j, term) != (end, first) else []
+                i = end
+                kept.extend(first)
+            for j, term in forks:
                 count += 1
                 if count > _HEREDOC_READING_LIMIT:
                     return None
-                pending.append((j, kept + term))
-            if first is not None:
-                i, term = _heredoc_body_end(lines, i, first)
-                kept.extend(term)
+                pending.append((j, base + term))
         readings.append("\n".join(kept))
     return readings
 
@@ -4950,6 +5037,70 @@ _WAIT_CASES = [
         "nor do two such lines, each read both ways together with the other",
     ),
     (
+        "cat <<A <<B\na\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "a line opening two heredocs strips both bodies, so a second body's opener hides no loop",
+    ),
+    (
+        ": $((0)) <<EOF <<EOF\na\nEOF\ncat <<X\nEOF\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "nor does one holding (( whose two bodies share a tag",
+    ),
+    (
+        ": $((0)) <<A <<B\nB\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "nor one holding (( whose first body holds the second tag's line",
+    ),
+    (
+        "cat <<A; bash <<B\na\nA\nwhile [ ! -f /x ]; do sleep 1; done\nB",
+        "deny",
+        "a second body fed to a shell is still read as the script it is",
+    ),
+    (
+        "bash <<A; cat <<B\necho hi\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "and a first one fed to a shell is kept whole while the data body after it is stripped",
+    ),
+    (
+        ": $((0)); bash <<A; cat <<B\necho hi\nB\nA\ncat <<X\nB\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "on a line holding (( too",
+    ),
+    (
+        "cat <<A >/dev/null; x=$(cat <<B\nb\nB\n)\na\nA\nwhile [ ! -f /x ]; do sleep 1; done",
+        "deny",
+        "a heredoc inside a substitution is read before it closes, not queued after the line's own",
+    ),
+    (
+        "cat <<A >/dev/null; x=`cat <<B\nb\nB\n`\na\nA\nwhile [ ! -f /x ]; do sleep 1; done",
+        "deny",
+        "and so is one inside a backquote",
+    ),
+    (
+        "cat <<A >/dev/null; echo $[ 1 << X ]\na\nA\nwhile [ ! -f /x ]; do sleep 1; done\nX",
+        "deny",
+        "a shift inside $[ ] is read as one inside (( )) is",
+    ),
+    (
+        'cat > "$(pwd)/notes.md" <<EOF\nwhile [ ! -f /x ]; do sleep 1; done\nEOF',
+        "allow",
+        "and a document written to a path holding a substitution still strips its body",
+    ),
+    (
+        "cat <<A >/dev/null; grep -c '<<' B\na\nA\nwhile [ ! -f /x ]; do sleep 1; done\nB",
+        "deny",
+        "a quoted << after a real heredoc is also read as the text it is, so it strips no command",
+    ),
+    (
+        "n=$((1)); "
+        + "; ".join(f"cat <<T{k} >f{k}.md" for k in range(5))
+        + "\n"
+        + "\n".join(f"T{k}" for k in range(5))
+        + "\necho 'use while with sleep and a bound'",
+        "allow",
+        "and five empty bodies on a line holding (( build one reading rather than passing the limit",
+    ),
+    (
         'i=0; while [ "$i" -lt 5 ]; do cat <<EOF ; sleep 1; i=$((i+1))\nbody\nEOF\ndone',
         "allow",
         "and a bounded loop holding a heredoc and (( on one body line stays allowed",
@@ -5319,6 +5470,16 @@ _WAIT_CASES = [
         "two quoted backticks pair into no substitution to hide the separator between them",
     ),
     (
+        'while true; do echo ";" done; sleep 1; done',
+        "deny",
+        "a `done` after a quoted `;` is an argument rather than the loop's close",
+    ),
+    (
+        'while true; do echo x; "done"; sleep 1; done',
+        "deny",
+        "a quoted `done` is a command name rather than the loop's close",
+    ),
+    (
         'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
         "deny",
         "a bracket after a quoted `;` is an argument rather than a command",
@@ -5467,6 +5628,51 @@ _WAIT_CASES = [
         "{ yes | while read l; do sleep 30; done } < f",
         "deny",
         "since a redirect after a closing word binds a compound whose pipe can still feed the loop",
+    ),
+    (
+        "yes | while read l; do sleep 30; done # < f",
+        "deny",
+        "nor does one inside a trailing comment, which bash reads none of",
+    ),
+    (
+        "yes | while read l; do sleep 30; done #< f",
+        "deny",
+        "and a comment glued to the redirect hides it the same way",
+    ),
+    (
+        "yes | while read l; do sleep 30; done < #f",
+        "deny",
+        "a target opening a comment leaves the redirect with none",
+    ),
+    (
+        "bash -c 'yes | while read l; do sleep 30; done # < f'",
+        "deny",
+        "and a payload's trailing comment hides its redirect as well",
+    ),
+    (
+        "while read l; do sleep 30; done < f # x",
+        "allow",
+        "while a comment after the redirect leaves the file it binds in place",
+    ),
+    (
+        "while read l; do sleep 30; done < '#f'",
+        "allow",
+        "and a quoted `#` names a file rather than opening a comment",
+    ),
+    (
+        "while read l; do sleep 30; done < ${g:- #x} < /dev/zero",
+        "deny",
+        "a `#` inside an expansion opens no comment, so the stream after it still binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f < '#x' < /dev/zero\n# don't",
+        "deny",
+        "nor does one whose quoting is unknown end the scan before the stream that binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f > log\r#x < /dev/zero",
+        "deny",
+        "and a `#` after a carriage return sits inside a word bash reads whole",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",

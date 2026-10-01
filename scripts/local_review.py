@@ -110,6 +110,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -282,17 +283,63 @@ def ref_exists(ref: str, root: Path) -> bool:
     return True
 
 
+def ref_name_exists(ref: str, root: Path) -> bool:
+    """Whether the exact ref name `ref` exists, whether or not it resolves to an object.
+
+    `for-each-ref` lists a ref naming an absent object, on a files or a reftable store alike. It
+    also lists refs nested under the name, so only an exact match counts. It skips a symbolic ref
+    whose target is gone, which `symbolic-ref` reads instead, and it skips a loose ref file that
+    is empty or holds no valid content, which neither command reports, so that file is looked for
+    directly. A reftable store holds no loose ref files, so that last check finds nothing there.
+    `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, an absent one
+    included. A name `check-ref-format` rejects is never a ref git reads, so it is never looked
+    for on disk, where a `..` in it would reach outside the ref store. The file is read with
+    `stat` rather than `Path.is_file`, which answers False for a name too long on Python 3.14,
+    so only a path that is not there counts as absent. Any other failure, such as a name the
+    filesystem rejects as too long, raises CannotRun.
+    """
+    try:
+        git("check-ref-format", ref, root=root)
+    except CannotRun:
+        return False
+    listed = git("for-each-ref", "--format=%(refname)", ref, root=root).splitlines()
+    if ref in listed:
+        return True
+    loose = root / git("rev-parse", "--git-path", ref, root=root).strip()
+    try:
+        if stat.S_ISREG(loose.stat().st_mode):
+            return True
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except OSError as e:
+        raise CannotRun(f"could not check for a loose ref file at {loose} ({e})") from e
+    try:
+        git("symbolic-ref", "-q", ref, root=root)
+    except CannotRun:
+        return False
+    return True
+
+
 def remote_tracking_ref(name: str, root: Path) -> str | None:
-    """The exact `refs/remotes/<name>` ref, or None where `show-ref --verify` rejects that name.
+    """The exact `refs/remotes/<name>` ref, or None where no ref of that exact name exists.
 
     `rev-parse` runs its whole resolution list on a full name too, so `refs/remotes/<name>` also
     matches a local branch literally named that. `show-ref --verify` matches the name exactly.
-    Raises CannotRun where the ref it accepts does not resolve to a commit.
+    Raises CannotRun where the ref exists but does not resolve to a commit.
+
+    `show-ref --verify` also rejects a ref whose object is missing, or a symbolic ref whose target
+    is gone. Returning None for those would fall through to the as-written step in `target_ref`,
+    where a local branch sharing the short name then defines the review scope.
     """
     ref = f"refs/remotes/{name}"
     try:
         git("show-ref", "--verify", "--quiet", ref, root=root)
     except CannotRun:
+        if ref_name_exists(ref, root):
+            raise CannotRun(
+                f"{ref} exists but does not resolve to an object, so the review scope cannot be"
+                " determined"
+            ) from None
         return None
     if not ref_exists(ref, root):
         raise CannotRun(
