@@ -1867,12 +1867,12 @@ def gap_fits(path: str, parts: list[str]) -> bool:
 def segment_fits(segment: str, pattern: str) -> bool:
     """Whether one path segment matches one row segment, a `[` in either being a literal.
 
-    A segment holding a wildcard must also hold a literal character, so a row of bare wildcards
-    such as `*/*` names nothing rather than every path at that depth.
+    A segment holding a wildcard must also hold a letter or a digit, so a row of bare wildcards
+    such as `*/*` or `*.*` names nothing rather than every path at that depth.
     """
     if not TABLE_GLOB & set(pattern):
         return segment == pattern
-    if not set(pattern) - TABLE_GLOB:
+    if not any(c.isalnum() for c in pattern):
         return False
     return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
 

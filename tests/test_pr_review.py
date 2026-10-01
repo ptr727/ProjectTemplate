@@ -3808,8 +3808,8 @@ class TestCoverageExitCodes(GqlCase):
         files = ["app/[slug]/page.tsx", "app/[slug]/layout.tsx"]
         pr = payload([review(body=self.balanced(["app/[slug]/*.tsx"]))], files=files)
         self.assertEqual("", pr_review.table_shortfall(pr))
-        pr = payload([review(body=self.balanced(["app/[id]/page.tsx"]))], files=["app/i/page.tsx"])
-        self.assertIn("names app/[id]/page.tsx, which the diff", pr_review.table_shortfall(pr))
+        pr = payload([review(body=self.balanced(["app/[id]/*.tsx"]))], files=["app/i/page.tsx"])
+        self.assertIn("names app/[id]/*.tsx, which the diff", pr_review.table_shortfall(pr))
 
     def test_a_shortened_row_reads_a_wildcard_in_its_text_literally(self) -> None:
         """A long title can carry a `?`, and the gap is what shortened it."""
@@ -3819,7 +3819,13 @@ class TestCoverageExitCodes(GqlCase):
 
     def test_a_row_of_bare_wildcards_names_nothing(self) -> None:
         """A row like `*/*` carries no evidence that any file was read, so it covers none."""
-        for row, path in (("*", "a"), ("*/*", "dir/a"), ("dir/*", "dir/a"), ("dir/?", "dir/a")):
+        for row, path in (
+            ("*", "a"),
+            ("*/*", "dir/a"),
+            ("dir/*", "dir/a"),
+            ("dir/?", "dir/a"),
+            ("*.*", "a.md"),
+        ):
             with self.subTest(row=row):
                 pr = payload([review(body=self.balanced([row]))], files=[path])
                 self.assertIn(f"names {row}, which the diff", pr_review.table_shortfall(pr))
@@ -3831,7 +3837,7 @@ class TestCoverageExitCodes(GqlCase):
         self.assertFalse(pr_review.gap_fits("a-bc", ["a", "b", "c"]))
         self.assertFalse(pr_review.gap_fits("ab", ["ab", "b"]))
         started = time.monotonic()
-        self.assertFalse(pr_review.gap_fits("a" * 60 + "c", ["a"] * 12 + ["b"]))
+        self.assertFalse(pr_review.gap_fits("a" * 60 + "c", ["a"] * 12 + ["b", "c"]))
         self.assertLess(time.monotonic() - started, 1.0)
 
     def test_a_pattern_or_gap_row_matching_nothing_or_too_much_keeps_the_table_out(self) -> None:
