@@ -313,12 +313,14 @@ refusal rather than a degraded empty answer, and it names the command that appli
 set except where the label read filled its window, which is the one case where the label's absence
 is unproven rather than established.
 
-A repository outside the fleet, such as a fork kept for an upstream contribution per
-`upstream-contribution-workflow`, can host a chain to keep a session's state without taking on any
-fleet configuration. Missing the label there, a read prints a warning and answers as an empty chain
-does, and `new` refuses until it is given `--create-label`, which creates the one `handoff` label,
-confirms it, and then files the first link. Issues turned off stop it before any write, naming the
-command that turns them on. Never apply the fleet label set to such a repository.
+A fork under the registry's owner that the registry does not list, such as one kept for an
+upstream contribution per `upstream-contribution-workflow`, can host a chain to keep a session's
+state without taking on any fleet configuration. Missing the label there, a read prints a warning
+and answers as an empty chain does, and `new` refuses until it is given `--create-label`, which
+creates the one `handoff` label, confirms it, and then files the first link. Issues turned off stop
+it before any write, naming the command that turns them on. Never apply the fleet label set to such
+a fork. A repository under another owner, or an unregistered one of the owner's that is not a fork,
+refuses before any write.
 
 Creating an issue, commenting on one, closing one, and editing a body are each outward-facing
 writes. `new` creates, comments, and closes, the label riding inside the one create call rather than

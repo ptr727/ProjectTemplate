@@ -77,11 +77,11 @@ skip the squash step because the dirty branch "looks clean enough."
 ## The iteration PR is never merged
 
 Merging the iteration PR into the mirror branch looks like the natural finish once it is green, and
-it breaks the fork two ways. The mirror branch then carries a commit upstream does not, so it can
-no longer be fast-forwarded from upstream, and every later sync conflicts with the maintainer's own
-change. And the iteration PR is the place where upstream drift is absorbed and its fallout fixed
-before the upstream PR has to absorb the same drift, so merging it removes that place. Closing it
-loses the review record the same way.
+it breaks the fork two ways. The mirror branch then carries a commit upstream does not, so it stops
+being a mirror: it can no longer be fast-forwarded from upstream, every later sync has to merge
+upstream into the maintainer's own change, and any sync touching the same lines conflicts. And the
+iteration PR is the place where upstream drift is absorbed and its fallout fixed before the
+upstream PR has to absorb the same drift, so merging or closing it removes that place.
 
 When the upstream base moves, sync the mirror branch from upstream, merge the mirror branch into
 the dirty branch, and fix whatever breaks in the iteration PR. That is a merge rather than a rebase,
@@ -91,7 +91,7 @@ tip whenever the clean branch needs to follow, per step 5.
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror
 branch to `B`, merges `B` into `work/x`, and fixes the breakage in the iteration PR. Had `work/x`
-been merged into the mirror branch at `A`, the mirror branch could not have followed `B` cleanly.
+been merged into the mirror branch at `A`, the mirror branch could not have fast-forwarded to `B`.
 
 The contribution ends when upstream merges or declines the upstream PR. Only then close the
 iteration PR, unmerged, and delete the dirty and clean branches. A merged change then reaches the
@@ -121,5 +121,5 @@ The fork is not a fleet repository. It carries none of the fleet's instruction f
 repository settings, and a resync or the fleet label set is never applied to it. A session working
 the contribution can still keep its state in the `session-handoff` chain on the fork. That needs
 issues turned on and the one `handoff` label, which the hub's `scripts/handoff.py new
---create-label` creates on a repository outside the fleet, and nothing else of the fleet's
+--create-label` creates on a fork under the fleet's owner, and nothing else of the fleet's
 configuration.

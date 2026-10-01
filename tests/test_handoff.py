@@ -81,11 +81,17 @@ class FakeGh:
     """
 
     def __init__(
-        self, issues: dict[int, dict] | None = None, *, label: bool = True, issues_on: bool = True
+        self,
+        issues: dict[int, dict] | None = None,
+        *,
+        label: bool = True,
+        issues_on: bool = True,
+        fork: bool = True,
     ) -> None:
         self.issues = issues or {}
         self.label = label
         self.issues_on = issues_on
+        self.fork = fork
         self.refuse_label = False
         self.calls: list[list[str]] = []
         self.next_number = 1001
@@ -98,7 +104,8 @@ class FakeGh:
         if argv[:2] == ["repo", "view"]:
             if "/" not in argv[2]:
                 raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
-            return json.dumps({"hasIssuesEnabled": self.issues_on})
+            flags = {"hasIssuesEnabled": self.issues_on, "isFork": self.fork}
+            return json.dumps(projected(flags, argv))
         if "--repo" not in argv:
             raise AssertionError(
                 f"{' '.join(argv)} carries no --repo, so real gh would resolve the repository "
@@ -275,8 +282,9 @@ class MarkerCase(unittest.TestCase):
 
 
 def fleet(case: unittest.TestCase, member: bool = True) -> None:
-    """Pin whether `o/r` reads as a fleet repository, for the rest of the case."""
-    patcher = unittest.mock.patch.object(handoff, "in_fleet", lambda repo: member)
+    """Pin a registry owned by `o` that lists `o/r` or not, for the rest of the case."""
+    names = {"r"} if member else set()
+    patcher = unittest.mock.patch.object(handoff, "registry", lambda: ("o", names))
     patcher.start()
     case.addCleanup(patcher.stop)
 
@@ -308,7 +316,7 @@ class LabelCase(unittest.TestCase):
             "--create-label",
         )
         self.assertEqual(code, 1)
-        self.assertIn("outside the fleet", err)
+        self.assertIn("unregistered fork", err)
         self.assertIn("configure.sh apply", err)
         self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
 
@@ -349,7 +357,7 @@ class LabelCase(unittest.TestCase):
 
 
 class OutsideFleetLabelCase(unittest.TestCase):
-    """A repository outside the fleet with no label warns, and writes only the label it is asked to."""
+    """An unregistered fork with no label warns, and writes only the label it is asked to."""
 
     def setUp(self) -> None:
         fleet(self, member=False)
@@ -442,6 +450,51 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertIn("--enable-issues", err)
         self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
 
+    def test_a_repository_under_another_owner_refuses_before_any_other_call(self) -> None:
+        """A mistyped owner would otherwise put a label and an issue on a stranger's repository."""
+        for argv in (("current",), ("tracks",)):
+            with self.subTest(argv=argv):
+                fake = FakeGh(label=False)
+                code, _, err = run(fake, *argv, "--repo", "stranger/r")
+                self.assertEqual(code, 1)
+                self.assertIn("not under o", err)
+                self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
+        fake = FakeGh(label=False)
+        code, _, _ = run(
+            fake,
+            "new",
+            "--repo",
+            "stranger/r",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+            "--create-label",
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
+
+    def test_an_unregistered_repository_that_is_not_a_fork_is_drift(self) -> None:
+        """It belongs in the registry, so it refuses as drift rather than taking a lone label."""
+        fake = FakeGh(label=False, fork=False)
+        code, _, err = run(fake, "tracks", "--repo", "o/r")
+        self.assertEqual(code, 1)
+        self.assertIn("registry drift", err)
+        self.assertIn("configure.sh apply", err)
+        fake = FakeGh(label=False, fork=False)
+        code, _, _ = self.new(fake, "--create-label")
+        self.assertEqual(code, 1)
+        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+
+    def test_the_label_created_is_the_fleet_set_s_own_definition(self) -> None:
+        rows = json.loads(handoff.LABELS.read_text(encoding="utf-8"))
+        want = next(row for row in rows if row["name"] == handoff.LABEL)
+        fake = FakeGh(label=False)
+        self.assertEqual(self.new(fake, "--create-label")[0], 0)
+        argv = next(c for c in fake.calls if c[:2] == ["label", "create"])
+        self.assertEqual(argv[argv.index("--color") + 1], want["color"])
+        self.assertEqual(argv[argv.index("--description") + 1], want["description"])
+
     def test_link_refuses_without_the_label(self) -> None:
         fake = FakeGh(label=False)
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
@@ -467,6 +520,19 @@ class FleetRegistryCase(unittest.TestCase):
             self.assertRaises(handoff.Execution),
         ):
             handoff.in_fleet("ptr727/ProjectTemplate")
+
+    def test_a_malformed_registry_fails_rather_than_reading_as_empty(self) -> None:
+        bad = Path(tempfile.mkdtemp()) / "repos.json"
+        self.addCleanup(shutil.rmtree, bad.parent)
+        for data in ({"owner": "o", "repos": [{"name": 7}]}, {"owner": 7, "repos": []}):
+            with self.subTest(data=data):
+                bad.write_text(json.dumps(data), encoding="utf-8")
+                with (
+                    unittest.mock.patch.object(handoff, "REGISTRY", bad),
+                    self.assertRaises(handoff.Execution) as caught,
+                ):
+                    handoff.in_fleet("o/r")
+                self.assertIn("could not read the fleet registry", str(caught.exception))
 
 
 class CurrentCase(unittest.TestCase):
