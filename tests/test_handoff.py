@@ -32,6 +32,19 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import handoff
 
+REAL_REGISTRY = handoff.registry
+
+
+def setUpModule() -> None:
+    """Read `o/r` as a fleet repository unless a case says otherwise.
+
+    The write scope reads the registry before every write, and the real one lists no `o`, so
+    without this every write case would test the scope refusal instead of what it names.
+    """
+    patcher = unittest.mock.patch.object(handoff, "registry", lambda: ("o", {"r"}))
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
 
 def marked(body: str, track: str, round_: int, previous: int | None) -> str:
     return handoff.with_marker(body, track, round_, previous)
@@ -410,8 +423,8 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertEqual(
             [c[:2] for c in fake.calls],
             [
-                ["label", "list"],
                 ["repo", "view"],
+                ["label", "list"],
                 ["label", "create"],
                 ["label", "list"],
                 ["issue", "create"],
@@ -429,7 +442,7 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn(f"would run: gh label create {handoff.LABEL}", out)
         self.assertIn("would run: gh issue create", out)
-        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"], ["label", "list"]])
         self.assertFalse(fake.label)
 
     def test_a_body_new_would_refuse_creates_no_label(self) -> None:
@@ -518,7 +531,7 @@ class OutsideFleetLabelCase(unittest.TestCase):
             "--create-label",
         )
         self.assertEqual(code, 1)
-        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
+        self.assertEqual([c[:2] for c in fake.calls], [])
 
     def test_an_unregistered_repository_that_is_not_a_fork_is_drift(self) -> None:
         """It belongs in the registry, so it refuses as drift rather than taking a lone label."""
@@ -530,7 +543,7 @@ class OutsideFleetLabelCase(unittest.TestCase):
         fake = FakeGh(label=False, fork=False)
         code, _, _ = self.new(fake, "--create-label")
         self.assertEqual(code, 1)
-        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
 
     def test_the_label_created_is_the_fleet_set_s_own_definition(self) -> None:
         rows = json.loads(handoff.LABELS.read_text(encoding="utf-8"))
@@ -546,14 +559,65 @@ class OutsideFleetLabelCase(unittest.TestCase):
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
         self.assertEqual(code, 1)
         self.assertIn("--create-label", err)
-        self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"], ["label", "list"]])
+
+
+class WriteScopeCase(unittest.TestCase):
+    """The writes are bounded whatever the label state, since a label opens no write by itself."""
+
+    def setUp(self) -> None:
+        fleet(self, member=False)
+
+    def new(self, fake: FakeGh, repo: str) -> tuple[int, str, str]:
+        return run(fake, "new", "--repo", repo, "--title", "T", "--body-file", body_file(self, "w"))
+
+    def test_a_labeled_repository_under_another_owner_takes_no_call_and_no_write(self) -> None:
+        fake = FakeGh()
+        code, _, err = self.new(fake, "stranger/r")
+        self.assertEqual(code, 1)
+        self.assertIn("writes nothing there", err)
+        self.assertEqual(fake.calls, [])
+        fake = FakeGh()
+        code, _, _ = run(fake, "link", "--repo", "stranger/r", "--new", "2", "--previous", "1")
+        self.assertEqual(code, 1)
+        self.assertEqual(fake.calls, [])
+
+    def test_a_labeled_unregistered_repository_that_is_not_a_fork_takes_no_write(self) -> None:
+        fake = FakeGh(fork=False)
+        code, _, err = self.new(fake, "o/r")
+        self.assertEqual(code, 1)
+        self.assertIn("registry drift", err)
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
+        fake = FakeGh(fork=False)
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
+        self.assertEqual(code, 1)
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
+
+    def test_a_labeled_unregistered_fork_files_and_asks_once_whether_it_is_one(self) -> None:
+        fake = FakeGh()
+        code, out, err = self.new(fake, "o/r")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(sum(c[:2] == ["repo", "view"] for c in fake.calls), 1)
+        self.assertTrue(any(c[:2] == ["issue", "create"] for c in fake.calls))
+
+    def test_a_read_of_a_labeled_repository_under_another_owner_stays_open(self) -> None:
+        fake = FakeGh()
+        code, out, _ = run(fake, "tracks", "--repo", "stranger/r")
+        self.assertEqual(code, 0)
+        self.assertIn("(no open", out)
+
+    def test_a_registered_repository_costs_no_extra_request(self) -> None:
+        fleet(self)
+        fake = FakeGh()
+        self.assertEqual(self.new(fake, "o/r")[0], 0)
+        self.assertFalse(any(c[:2] == ["repo", "view"] for c in fake.calls))
 
 
 class FleetRegistryCase(unittest.TestCase):
     """Membership is read from the hub's registry, and an unreadable one is not an empty one."""
 
     def test_the_registry_reads_lowercased_with_the_hub_in_it(self) -> None:
-        owner, names = handoff.registry()
+        owner, names = REAL_REGISTRY()
         self.assertEqual(owner, "ptr727")
         self.assertIn("projecttemplate", names)
 
@@ -575,7 +639,7 @@ class FleetRegistryCase(unittest.TestCase):
             unittest.mock.patch.object(handoff, "REGISTRY", missing),
             self.assertRaises(handoff.Execution),
         ):
-            handoff.registry()
+            REAL_REGISTRY()
 
     def test_a_malformed_registry_fails_rather_than_reading_as_empty(self) -> None:
         bad = Path(tempfile.mkdtemp()) / "repos.json"
@@ -587,7 +651,7 @@ class FleetRegistryCase(unittest.TestCase):
                     unittest.mock.patch.object(handoff, "REGISTRY", bad),
                     self.assertRaises(handoff.Execution) as caught,
                 ):
-                    handoff.registry()
+                    REAL_REGISTRY()
                 self.assertIn("could not read the fleet registry", str(caught.exception))
 
 
