@@ -18,6 +18,7 @@ param(
     [Alias('u')][switch]$Upgrade,
     [switch]$Reinstall,
     [Alias('l')][switch]$List,
+    [Alias('j')][switch]$Json,
     [Alias('n')][switch]$DryRun,
     [Alias('y')][switch]$Yes,
     [Alias('o')][switch]$Optional,
@@ -51,6 +52,7 @@ $WANT_TOOLS = @($Name | Where-Object { $_ })
 
 $MODE = 'report'
 $DRY_RUN = [bool]$DryRun
+$JSON_OUTPUT = [bool]$Json
 $ASSUME_YES = [bool]$Yes
 $WITH_OPTIONAL = [bool]$Optional
 $WANT_SCOPE = $Scope
@@ -58,6 +60,7 @@ $REPO = $Repo
 $ELEVATED = $false
 $SELECTED = @()
 $NOTES = @()
+$NOTE_TEXTS = @()
 $FAILED = @()
 $CHANGED = @()
 $EXPLICIT = $null
@@ -70,7 +73,17 @@ function step { param([string]$Message) Write-Host "`n==> $Message" }
 function warn { param([string]$Message) [Console]::Error.WriteLine("WARNING: $Message") }
 function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Message"); exit 1 }
 
-function note { param([string]$Tool, [string]$Message) $script:NOTES += "${Tool}: $Message" }
+function note {
+    param([string]$Tool, [string]$Message)
+    $script:NOTES += "${Tool}: $Message"
+    $script:NOTE_TEXTS += $Message
+}
+
+function Get-NoteText {
+    param([int]$First, [int]$Last)
+    if ($Last -le $First) { return , @() }
+    return , @($script:NOTE_TEXTS[$First..($Last - 1)])
+}
 
 # A path with the home directory replaced by the variable that names it.
 # A report is written to be pasted into an issue or a pull request, so a path it prints carries the account name into wherever it is pasted, and the comments here already avoid writing one for the same reason.
@@ -101,11 +114,17 @@ Actions, name one, default -Report:
   -h, -Help         Show this help
 
 Options:
+  -j, -Json         Write the report as JSON rather than a table, for a program to read
   -n, -DryRun       Print the commands instead of running them
   -y, -Yes          Do not prompt before changing the host
   -o, -Optional     Include the optional package set, where a tool has one
       -Scope        Name a scope, either user or machine, for the copy to act on
       -Repo PATH    Include winget packages declared by PATH\host-tools.json
+
+-Json writes one object carrying the same rows: "schema" (1), "platform" ("windows"), "tools",
+one entry per tool with "tool", "installed", "available", "source" (the winget package id),
+"mechanism" ("winget"), "status", "scope" and that tool's own "notes", and a top-level "notes" for
+what belongs to no tool. A version that was not read is null.
 
 Run this without elevation. No scope is passed unless -Scope names one, so winget acts on the copy
 it finds and an installer that needs administrator asks for it itself. Naming a scope that
@@ -120,6 +139,7 @@ prompt, which this refuses to start unattended where nothing could answer it, ra
 
 Examples:
   install-tools.ps1                       Report on every tool
+  install-tools.ps1 -Json                 Report on every tool, as JSON
   install-tools.ps1 -Install              Install what is missing
   install-tools.ps1 -Upgrade -Yes         Bring every tool current, no prompt
   install-tools.ps1 -Upgrade uv jq        Bring two tools current
@@ -1006,21 +1026,46 @@ function Show-List {
 
 function Show-Report {
     $format = '{0,-10} {1,-16} {2,-16} {3,-24} {4,-13} {5}'
-    log ($format -f 'TOOL', 'INSTALLED', 'AVAILABLE', 'SOURCE', 'SCOPE', 'STATUS')
+    if (-not $script:JSON_OUTPUT) { log ($format -f 'TOOL', 'INSTALLED', 'AVAILABLE', 'SOURCE', 'SCOPE', 'STATUS') }
+    $rows = @()
 
     foreach ($tool in $script:SELECTED) {
         $record = Get-Tool $tool
         $state = Get-ToolState -Tool $record
         # Every row is printed only where they did not resolve to one version, since a dotnet line carrying three side by side builds resolves cleanly and listing all three would overflow the column for nothing.
-        $installed = if ($state.Status -eq 'multiple') { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { '-' }
-        $available = if ($state.Available) { $state.Available } else { '-' }
-        $scope = if ($state.Scope.Count -gt 0) { $state.Scope -join '+' } else { '-' }
-        log ($format -f $record.Name, $installed, $available, $state.Package, $scope, $state.Status)
+        $installed = if ($state.Status -eq 'multiple') { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { $null }
+        $first = $script:NOTE_TEXTS.Count
+        if (-not $script:JSON_OUTPUT) {
+            $available = if ($state.Available) { $state.Available } else { '-' }
+            $scope = if ($state.Scope.Count -gt 0) { $state.Scope -join '+' } else { '-' }
+            log ($format -f $record.Name, $(if ($installed) { $installed } else { '-' }), $available, $state.Package, $scope, $state.Status)
+        }
         Add-ToolNote -Tool $record -State $state
+        $rows += [ordered]@{
+            tool      = $record.Name
+            installed = $installed
+            available = $(if ($state.Available) { $state.Available } else { $null })
+            source    = $state.Package
+            mechanism = 'winget'
+            status    = $state.Status
+            scope     = @($state.Scope)
+            notes     = (Get-NoteText -First $first -Last $script:NOTE_TEXTS.Count)
+        }
     }
 
+    $last = $script:NOTE_TEXTS.Count
     if ($script:ELEVATED) {
         note 'report' 'this pwsh is elevated, and some installers fail when launched from an elevated process, so an unelevated run is the one to prefer'
+    }
+
+    if ($script:JSON_OUTPUT) {
+        [ordered]@{
+            schema   = 1
+            platform = 'windows'
+            tools    = $rows
+            notes    = (Get-NoteText -First $last -Last $script:NOTE_TEXTS.Count)
+        } | ConvertTo-Json -Depth 4
+        return
     }
 
     if ($script:NOTES.Count -eq 0) { return }
@@ -1203,8 +1248,11 @@ function Invoke-Apply {
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
-    if ($given.Count -eq 0) { return 'report' }
-    return $given[0]
+    $mode = if ($given.Count -eq 0) { 'report' } else { $given[0] }
+    if ($script:JSON_OUTPUT -and $mode -ne 'report') {
+        die "-Json changes how a report is written, so it applies only to -Report, and the $mode action was given"
+    }
+    return $mode
 }
 
 function Resolve-Selection {

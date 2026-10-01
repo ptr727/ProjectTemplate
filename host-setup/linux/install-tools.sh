@@ -32,6 +32,7 @@ readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-s
 
 MODE="report"
 DRY_RUN=false
+JSON_OUTPUT=false
 ASSUME_YES=false
 WITH_OPTIONAL=false
 APT_REFRESHED=false
@@ -48,6 +49,7 @@ REPO=""
 declare -A REPO_PACKAGES=()
 declare -A REPO_KEYS=()
 NOTES=()
+NOTE_TEXTS=()
 FAILED=()
 CHANGED=()
 
@@ -65,7 +67,47 @@ die() {
     exit 1
 }
 
-note() { NOTES+=("$1: $2"); }
+note() {
+    NOTES+=("$1: $2")
+    NOTE_TEXTS+=("$2")
+}
+
+json_string() {
+    local LC_ALL=C s="$1" out="" ch i
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    if [[ $s == *[$'\x01'-$'\x1f']* ]]; then
+        for ((i = 0; i < ${#s}; i++)); do
+            ch=${s:i:1}
+            [[ $ch == [$'\x01'-$'\x1f'] ]] && printf -v ch '\\u%04x' "'$ch"
+            out+=$ch
+        done
+        s=$out
+    fi
+    printf '"%s"' "$s"
+}
+
+json_value() {
+    if [[ -n $1 ]]; then
+        json_string "$1"
+    else
+        printf 'null'
+    fi
+}
+
+json_notes() {
+    local i sep=""
+    printf '['
+    for ((i = $1; i < $2; i++)); do
+        printf '%s' "$sep"
+        json_string "${NOTE_TEXTS[i]}"
+        sep=", "
+    done
+    printf ']'
+}
 
 usage() {
     cat <<'EOF'
@@ -85,6 +127,7 @@ Actions, name one, default --report:
   -h, --help        Show this help
 
 Options:
+  -j, --json        Write the report as JSON rather than a table, for a program to read
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt before changing the host
   -o, --optional    Include the optional tool and the optional package sets, where a tool has one
@@ -94,6 +137,11 @@ Versions read as apt versions for an apt-managed tool and as upstream versions f
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
 not refresh it, so an available version is as current as the last apt update.
 
+--json writes one object carrying the same rows: "schema" (1), "platform" ("linux"), "tools", one
+entry per tool with "tool", "installed", "available", "source", "mechanism" ("apt", which any
+apt upgrade moves, or "binary", which only this script moves), "status" and that tool's own
+"notes", and a top-level "notes" for what belongs to no tool. A version that was not read is null.
+
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
 every terminal that user has open rather than only the one it ran in. It touches no tool.
 Removing the file it names undoes it, and "update-alternatives --auto sudo" undoes the
@@ -101,6 +149,7 @@ implementation switch it asks for on a host whose sudo parses no timestamp_type.
 
 Examples:
   install-tools.sh                       Report on every tool
+  install-tools.sh --json                Report on every tool, as JSON
   install-tools.sh --install             Install what is missing
   install-tools.sh --upgrade --yes       Bring every tool current, no prompt
   install-tools.sh --upgrade node jq     Bring two tools current
@@ -1006,32 +1055,66 @@ tool_note() {
     return 0
 }
 
+tool_mechanism() {
+    case "$1" in
+    jq | uv | git-restore-mtime) printf 'binary' ;;
+    *) printf 'apt' ;;
+    esac
+}
+
 report() {
     # Wide enough for an Ubuntu backport version, which is the longest of these in practice.
     local format="%-18s %-26s %-26s %-22s %s\n"
-    # shellcheck disable=SC2059  # Format string is a constant defined above.
-    printf "$format" "TOOL" "INSTALLED" "AVAILABLE" "SOURCE" "STATUS"
+    local -a rows=()
+    if [[ $JSON_OUTPUT == false ]]; then
+        # shellcheck disable=SC2059  # Format string is a constant defined above.
+        printf "$format" "TOOL" "INSTALLED" "AVAILABLE" "SOURCE" "STATUS"
+    fi
 
     if ! command -v curl >/dev/null; then
         note "report" "curl is not installed, so an upstream that is not an apt repository cannot be read yet"
     fi
+    local report_notes=${#NOTES[@]}
 
-    local tool installed target
+    local tool installed target source mechanism status first
     for tool in "${SELECTED[@]}"; do
+        first=${#NOTES[@]}
         if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
             installed=$(apt_installed_version "${REPO_PACKAGES[$tool]}")
             target=$(apt_candidate_version "${REPO_PACKAGES[$tool]}")
-            # shellcheck disable=SC2059  # Format string is a constant defined above.
-            printf "$format" "$tool" "${installed:--}" "${target:--}" "apt:${REPO_PACKAGES[$tool]}" "$(tool_status "$installed" "$target")"
-            continue
+            source="apt:${REPO_PACKAGES[$tool]}"
+            mechanism="apt"
+            status=$(tool_status "$installed" "$target")
+        else
+            installed=$("$(tool_function "$tool" version)" 2>/dev/null || true)
+            target=$("$(tool_function "$tool" target)" 2>/dev/null || true)
+            source=$("$(tool_function "$tool" source)")
+            mechanism=$(tool_mechanism "$tool")
+            status=$(tool_effective_status "$tool" "$installed" "$target")
         fi
-        installed=$("$(tool_function "$tool" version)" 2>/dev/null || true)
-        target=$("$(tool_function "$tool" target)" 2>/dev/null || true)
-        # shellcheck disable=SC2059  # Format string is a constant defined above.
-        printf "$format" "$tool" "${installed:--}" "${target:--}" \
-            "$("$(tool_function "$tool" source)")" "$(tool_effective_status "$tool" "$installed" "$target")"
-        tool_note "$tool"
+        if [[ $JSON_OUTPUT == false ]]; then
+            # shellcheck disable=SC2059  # Format string is a constant defined above.
+            printf "$format" "$tool" "${installed:--}" "${target:--}" "$source" "$status"
+        fi
+        [[ -n ${REPO_PACKAGES[$tool]:-} ]] || tool_note "$tool"
+        if [[ $JSON_OUTPUT == true ]]; then
+            rows+=("$(printf '{"tool": %s, "installed": %s, "available": %s, "source": %s, "mechanism": %s, "status": %s, "notes": %s}' \
+                "$(json_string "$tool")" "$(json_value "$installed")" "$(json_value "$target")" "$(json_string "$source")" \
+                "$(json_string "$mechanism")" "$(json_string "$status")" "$(json_notes "$first" "${#NOTES[@]}")")")
+        fi
     done
+
+    if [[ $JSON_OUTPUT == true ]]; then
+        local i sep=""
+        printf '{\n  "schema": 1,\n  "platform": "linux",\n  "tools": ['
+        for ((i = 0; i < ${#rows[@]}; i++)); do
+            printf '%s\n    %s' "$sep" "${rows[i]}"
+            sep=","
+        done
+        [[ ${#rows[@]} -eq 0 ]] || printf '\n  '
+        printf '],\n  "notes": %s\n}\n' "$(json_notes 0 "$report_notes")"
+        return 0
+    fi
 
     [[ ${#NOTES[@]} -eq 0 ]] && return 0
     log ""
@@ -1562,6 +1645,7 @@ parse_args() {
         -u | --upgrade) actions+=(upgrade) ;;
         -l | --list) actions+=(list) ;;
         --sudo-timestamp) actions+=(sudo-timestamp) ;;
+        -j | --json) JSON_OUTPUT=true ;;
         -n | --dry-run) DRY_RUN=true ;;
         -y | --yes) ASSUME_YES=true ;;
         -o | --optional) WITH_OPTIONAL=true ;;
@@ -1587,6 +1671,10 @@ parse_args() {
         die "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+
+    if [[ $JSON_OUTPUT == true && $MODE != "report" ]]; then
+        die "--json changes how a report is written, so it applies only to --report, and the $MODE action was given"
+    fi
 
     # The sudo-timestamp refusal needs the whole set of tool names a run asked for, so it is checked after the loop rather than inside it.
     if [[ $MODE == "sudo-timestamp" && ${#REQUESTED[@]} -gt 0 ]]; then

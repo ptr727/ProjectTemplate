@@ -110,6 +110,7 @@ This moved a boundary the tool used to hold: WSL used to be read-only here, and 
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |
 | `install-tools.sh --sudo-timestamp` shares one sudo credential cache across a user's terminals | no peer | Nothing here elevates on Windows, so there is no cached credential to share |
 | `unmanaged` means the upstream repository is unconfigured | `unmanaged` means the tool is on `PATH` and winget knows no package for it | The same question, by a different mechanism |
+| `--json` reports `mechanism` as `apt` or `binary` | `-Json` reports `mechanism` as `winget`, and adds each tool's `scope` list | Every source is `winget`, and scope is the one column Linux has no peer for. The report's shape is otherwise the one the [Linux README][linux-readme] describes |
 | `python-is-python3` supplies the `python` name, under `--optional` | `install-tools.ps1` supplies the `python3` name itself, always | Debian packages the alias and Windows does not, so the one platform installs a package and the other writes the file. This is the only action here that deletes something winget did not install, so it is narrow by construction: it removes an app execution alias only where the reparse tag and the target package both say it is the Microsoft Store placeholder, and reports rather than removes anything else |
 | `credential.helper cache --timeout=3600` | `credential.helper manager`, and only where unset | Git Credential Manager ships with Git for Windows |
 | `ssh-agent` is a socket, started per shell | `ssh-agent` is a Windows service, reported and not started | Starting it needs administrator, and nothing here elevates |
@@ -157,6 +158,7 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
 [install-tools]: ./install-tools.ps1
+[linux-readme]: ../linux/README.md
 [menu]: ../menu.sh
 [menu-ps1]: ../menu.ps1
 [setup-github]: ./setup-github.ps1
