@@ -79,7 +79,7 @@ def git_in(root, *args):
             check=False,
             timeout=SUBPROCESS_TIMEOUT,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
 
@@ -301,7 +301,7 @@ def register_claude_marketplace():
         if not same_directory(location, ROOT):
             print(
                 f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
-                f"which no longer exists. Registering it from {ROOT}.",
+                f"which is no longer a directory. Registering it from {ROOT}.",
                 file=sys.stderr,
             )
 
@@ -404,7 +404,7 @@ def live_channel():
         return {
             "registered": True,
             "checkout": str(root),
-            "reason": "the registered checkout does not exist, so this channel serves nothing",
+            "reason": "the registered checkout is not a directory, so this channel serves nothing",
         }
     # A tree the bootstrap keeps is a tarball rather than a checkout, so git has nothing to say about it.
     # Asking anyway would answer for whatever repository encloses it, a home directory kept in git being the ordinary case.

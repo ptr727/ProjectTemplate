@@ -504,8 +504,30 @@ class LiveChannelCase(unittest.TestCase):
             )
         )
         live = skills_install.live_channel()
-        self.assertIn("does not exist", live["reason"])
+        self.assertIn("is not a directory", live["reason"])
         self.assertNotIn("commit", live)
+
+    def test_a_file_at_the_registered_checkout_says_it_serves_nothing(self) -> None:
+        stray = Path(self.enterContext(tempfile.TemporaryDirectory())) / "stray"
+        stray.write_text("", encoding="utf-8")
+        live = self.registered_live(stray)
+        self.assertIn("is not a directory", str(live["reason"]))
+        self.assertNotIn("commit", live)
+
+    def test_a_registered_path_carrying_a_nul_byte_is_reported_rather_than_crashing(
+        self,
+    ) -> None:
+        """Nothing mocks subprocess here, since it is subprocess itself that refuses the path."""
+        entry = {
+            "name": skills_install.MARKETPLACE_NAME,
+            "source": "directory",
+            "path": "/tmp/a\0b",
+        }
+        mock.patch("skills_install.marketplace_entry", return_value=entry).start()
+        live = skills_install.live_channel()
+        self.assertTrue(live["registered"])
+        self.assertIsNone(live["commit"])
+        self.assertIsNone(live["dirty"])
 
     def registered_live(self, location: Path) -> dict[str, object]:
         self.listing(
@@ -767,7 +789,7 @@ class RegisterCase(unittest.TestCase):
         self.assertTrue(self.run_register())
         self.assertTrue(self.added())
         self.assertIn(str(self.elsewhere / "removed"), self.stderr)
-        self.assertIn("no longer exists", self.stderr)
+        self.assertIn("no longer a directory", self.stderr)
 
     @unittest.skipIf(
         sys.platform == "win32" or os.geteuid() == 0,
@@ -803,6 +825,7 @@ class RegisterCase(unittest.TestCase):
         self.registered_at(stray)
         self.assertTrue(self.run_register())
         self.assertTrue(self.added())
+        self.assertIn("no longer a directory", self.stderr)
 
     def test_a_github_registration_is_left_in_place_whether_or_not_its_cache_exists(
         self,
