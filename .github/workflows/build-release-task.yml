@@ -427,7 +427,7 @@ jobs:
           BRANCH: ${{ inputs.branch }}
         run: |
           set -Eeuo pipefail
-          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --paginate \
+          if ! ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
             --jq '.artifacts[] | select(.name | startswith("release-asset-" + env.BRANCH + "-")) | .id'); then
             echo "::warning::Could not list run artifacts; retention-days backstop will reap them."
             ids=""

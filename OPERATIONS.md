@@ -53,7 +53,7 @@ Two gaps in that list are noted here so a local run's coverage is not read as co
 
 Run `python3 scripts/docker_lint.py --linter editorconfig-checker` before pushing a new or programmatically rewritten file. This repository defaults to LF, which most tooling already writes. An editor that writes CRLF regardless of file type still fails this check. A text-mode script can cause the same failure by converting every line ending.
 
-Both prose invocations exit non-zero locally whenever findings exist. The second reports a character that no tier covers. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
+Both prose invocations exit non-zero locally whenever findings exist. The second reports a character that no tier covers, a Latin letter and a U+0300-U+036F diacritic it carries excepted. It is warn-only in CI because the workflow step sets `continue-on-error: true`, not because the command is lenient, so a non-zero exit locally is the expected result rather than a problem.
 
 Scope a run to what changed, which matches the correct-as-next-edited rule:
 

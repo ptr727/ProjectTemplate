@@ -1,4 +1,4 @@
-# Normalize every detected text file to LF in the index and on checkout.
+# Normalize every detected text file to LF in the index, and to LF on checkout except where a CRLF pin below applies.
 # `text=auto` leaves binary files byte-preserved.
 * text=auto eol=lf
 

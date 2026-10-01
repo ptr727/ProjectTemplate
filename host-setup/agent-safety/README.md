@@ -55,7 +55,7 @@ text says, because the harm it covers was never in the text.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
-   `--no-verify` on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
+   `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -197,14 +197,19 @@ text says, because the harm it covers was never in the text.
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
-   document quoting the forbidden shape is written rather than denied. A line holding `((` beside
-   a `<<` is read once as opening nothing and once per `<<` whose tag the rule accepts and whose
-   non-empty body a later line closes, since an arithmetic shift tokenizes as a redirection does, and any
-   reading holding an unbounded wait denies the command. A command with more readings than the
+   document quoting the forbidden shape is written rather than denied. A line opening several
+   heredocs is read as opening its first alone and, where every body closes, as opening each in
+   order through the last one that is data, as bash reads them, keeping whole a body fed to a shell
+   before it. The first reading covers a quoted `<<` word or one inside a substitution, which the
+   rule tokenizes as an opener although bash queues no body for it. A line holding `((` or `$[`
+   beside a `<<` is read as opening nothing, and as opening each `<<` whose tag the rule accepts
+   alone and together with every later one whose body closes, wherever that reading closes its
+   first body, ends on a body that is data, and removes at least one line, since an arithmetic
+   shift tokenizes as a redirection does. Any reading holding an unbounded wait denies the command. A command with more readings than the
    rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
-   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
+   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a `while` loop whose condition is a
    `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
    which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
    rather than a leak. Four things have to hold, and a real command defeated each of them.
@@ -320,7 +325,7 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nread of an input redirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
+    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nwhile read of an input\nredirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
     iswait -- yes --> deny7["DENY - requirement 7"]
     iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
@@ -374,9 +379,10 @@ opt-in per clone, visible to anyone reading the repo, and bypassable on purpose,
 rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
-The two layers meet at requirement 4, which denies `--no-verify` unconditionally, so a Claude Code
-session meets a committed hook it cannot wave through with that flag while a human keeps the escape
-hatch. They do not compose into a seal, and saying so would be the more comfortable claim rather
+The two layers meet at requirement 4, which denies `--no-verify` and a `-c core.hooksPath=`
+override unconditionally, so a Claude Code session meets a committed hook it
+cannot wave through with either while a human keeps the escape hatch. They do not compose into a
+seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
 invocation, and `--no-verify` is the documented route rather than the only one. This requirement
 list also reaches Claude Code alone today, per the Per-Agent Status table below, so a Codex or
