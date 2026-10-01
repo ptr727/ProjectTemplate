@@ -451,7 +451,7 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
 
     def test_a_repository_under_another_owner_refuses_before_any_other_call(self) -> None:
-        """A mistyped owner would otherwise put a label and an issue on a stranger's repository."""
+        """A mistyped owner would otherwise put a label on a stranger's repository, then an issue."""
         for argv in (("current",), ("tracks",)):
             with self.subTest(argv=argv):
                 fake = FakeGh(label=False)
@@ -506,11 +506,21 @@ class OutsideFleetLabelCase(unittest.TestCase):
 class FleetRegistryCase(unittest.TestCase):
     """Membership is read from the hub's registry, and an unreadable one is not an empty one."""
 
-    def test_the_hub_itself_is_in_the_fleet_and_a_stranger_is_not(self) -> None:
-        self.assertTrue(handoff.in_fleet("ptr727/ProjectTemplate"))
-        self.assertTrue(handoff.in_fleet("PTR727/projecttemplate"))
-        self.assertFalse(handoff.in_fleet("ptr727/not-a-registered-repo"))
-        self.assertFalse(handoff.in_fleet("someone-else/ProjectTemplate"))
+    def test_the_registry_reads_lowercased_with_the_hub_in_it(self) -> None:
+        owner, names = handoff.registry()
+        self.assertEqual(owner, "ptr727")
+        self.assertIn("projecttemplate", names)
+
+    def test_membership_is_compared_case_insensitively_on_the_live_path(self) -> None:
+        """A mixed-case registered repository is drift on the fleet path, never a fork's warning."""
+        fleet(self)
+        for repo in ("O/R", "o/R"):
+            with self.subTest(repo=repo):
+                fake = FakeGh(label=False)
+                code, _, err = run(fake, "tracks", "--repo", repo)
+                self.assertEqual(code, 1)
+                self.assertIn("configure.sh apply", err)
+                self.assertEqual([c[:2] for c in fake.calls], [["label", "list"]])
 
     def test_an_unreadable_registry_fails_rather_than_reading_as_empty(self) -> None:
         missing = Path(tempfile.mkdtemp()) / "repos.json"
@@ -519,7 +529,7 @@ class FleetRegistryCase(unittest.TestCase):
             unittest.mock.patch.object(handoff, "REGISTRY", missing),
             self.assertRaises(handoff.Execution),
         ):
-            handoff.in_fleet("ptr727/ProjectTemplate")
+            handoff.registry()
 
     def test_a_malformed_registry_fails_rather_than_reading_as_empty(self) -> None:
         bad = Path(tempfile.mkdtemp()) / "repos.json"
@@ -531,7 +541,7 @@ class FleetRegistryCase(unittest.TestCase):
                     unittest.mock.patch.object(handoff, "REGISTRY", bad),
                     self.assertRaises(handoff.Execution) as caught,
                 ):
-                    handoff.in_fleet("o/r")
+                    handoff.registry()
                 self.assertIn("could not read the fleet registry", str(caught.exception))
 
 

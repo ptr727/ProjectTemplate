@@ -39,11 +39,10 @@ Subcommands
 
 Exit codes
   0  the command did what it says.
-  1  a refusal the caller can act on: the label is missing from a repository that is not an
-     unregistered fork under the fleet's owner, or from one that is where `new` was not given
-     `--create-label` or its issues are turned off, no handoff is open on the track, a track is
-     ambiguous, a handoff carries no metadata block, a body is over the hard cap, or the command
-     line itself was wrong. A usage error is a refusal, so
+  1  a refusal the caller can act on: the label is missing, other than where `tracks` answers
+     an unregistered fork under the fleet's owner or `new --create-label` creates the label there,
+     no handoff is open on the track, a track is ambiguous, a handoff carries no metadata block, a
+     body is over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
      `Parser` below moves it here off argparse's own 2.
   2  the command did not run to an answer: `gh` failed, a write did not confirm, or an exception
      nobody modeled reached the top. A refusal and a failure to reach one never share a code,
@@ -269,13 +268,6 @@ def registry() -> tuple[str, set[str]]:
     return owner.lower(), names
 
 
-def in_fleet(repo: str) -> bool:
-    """Whether the hub's registry lists the repository."""
-    owner, names = registry()
-    repo_owner, _, name = repo.partition("/")
-    return repo_owner.lower() == owner and name.lower() in names
-
-
 def repo_flags(repo: str) -> dict[str, bool]:
     """Whether the repository has issues turned on and whether it is a fork, read live."""
     data = gh_json(["repo", "view", repo, "--json", "hasIssuesEnabled,isFork"])
@@ -338,8 +330,8 @@ def without_label(a: argparse.Namespace) -> int | None:
     exist, so an empty chain is the true answer there rather than a degraded one, and only
     `new --create-label` writes anything.
 
-    Everything else refuses before any write. A repository under another owner is outside what this
-    may write to at all, and these calls run as subprocesses a write guard on the caller never sees.
+    Everything else refuses before any write. A repository under another owner never gets a label
+    created here, since these calls run as subprocesses a write guard on the caller never sees.
     An unregistered repository of the owner's that is not a fork is registry drift rather than a
     fork, and a lone label there would hide it.
     """

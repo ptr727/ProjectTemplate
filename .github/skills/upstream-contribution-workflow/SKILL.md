@@ -117,8 +117,8 @@ GitHub id) also still apply in full. A fork the maintainer owns is within scope 
 the upstream repository itself is written to only through the PR the maintainer explicitly asked
 for.
 
-The fork is not a fleet repository. It carries none of the fleet's instruction files, labels, or
-repository settings, and a resync or the fleet label set is never applied to it. A session working
+The fork is not a fleet repository. It carries none of the fleet's instruction files or repository
+settings, and a resync or the fleet label set is never applied to it. A session working
 the contribution can still keep its state in the `session-handoff` chain on the fork. That needs
 issues turned on and the one `handoff` label, which the hub's `scripts/handoff.py new
 --create-label` creates on a fork under the fleet's owner, and nothing else of the fleet's
