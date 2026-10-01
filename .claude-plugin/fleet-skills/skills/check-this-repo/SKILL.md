@@ -47,8 +47,7 @@ repo.
 - **Re-run the installer**, `python3 scripts/skills_install.py --snapshot-only`, from that same
   `main` checkout, when `--report` exits non-zero. `--snapshot-only` refreshes the copy and leaves
   the Claude Code registration alone, since a fetched checkout is not one that registration should
-  load from. A channel `--report` reads as unregistered or serving nothing is not this skill's to
-  fix, since only a full install registers it, and it goes to the maintainer.
+  load from.
   This is a per-machine, local-only change, nothing in it touches this repo's git history or
   needs a review.
 
@@ -58,10 +57,8 @@ per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from 
 
 ## Refresh cadence
 
-Re-run the installer with `--snapshot-only` from a hub checkout on a freshly fetched `main` when
-`--report` exits non-zero, and after any promotion to `main` that touches `.agents/skills/`. A
-machine with no install yet, or whose Claude Code channel is unregistered or serves nothing, takes
-the full install instead, from a checkout that stays. A copy taken from
+Re-run the installer from a hub checkout on a freshly fetched `main` when `--report` exits
+non-zero, and after any promotion to `main` that touches `.agents/skills/`. A copy taken from
 `develop` reads not current by design, since the snapshot is judged against the promoted
 revision. Session entry runs no automatic check, by design: the trigger is suspicion,
 and the restated-rule symptom below is the loudest form of it. `docs/host-setup.md`
