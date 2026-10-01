@@ -68,6 +68,11 @@ label set does not belong on it. There the reads warn and answer as an empty cha
 `new --create-label` creates the one `handoff` label and nothing else. Every other repository
 missing the label refuses, a repository under another owner and an unregistered repository of the
 owner's that is not a fork among them.
+
+The two writing subcommands, `new` and `link`, are bounded whatever the label state, as
+`pr_review.py` bounds its own writes. They refuse a repository under another owner before any
+call, and an unregistered repository of the owner's unless it is a fork, since these writes run as
+subprocesses a write guard on the caller never sees. The reads stay open everywhere.
 """
 
 from __future__ import annotations
@@ -268,13 +273,47 @@ def registry() -> tuple[str, set[str]]:
     return owner.lower(), names
 
 
-def repo_flags(repo: str) -> dict[str, bool]:
-    """Whether the repository has issues turned on and whether it is a fork, read live."""
-    data = gh_json(["repo", "view", repo, "--json", "hasIssuesEnabled,isFork"])
+def repo_flags(a: argparse.Namespace) -> dict[str, bool]:
+    """Whether the repository has issues turned on and whether it is a fork, read live once a run.
+
+    The write scope and the missing-label path both ask, so the answer rides on the parsed
+    arguments rather than costing a second request.
+    """
+    cached = getattr(a, "repo_flags", None)
+    if cached is not None:
+        return cached
+    data = gh_json(["repo", "view", a.repo, "--json", "hasIssuesEnabled,isFork"])
     fields = ("hasIssuesEnabled", "isFork")
     if not isinstance(data, dict) or not all(isinstance(data.get(f), bool) for f in fields):
-        raise Execution(f"repo view for {repo} returned no {' and '.join(fields)}: {data!r}")
-    return {field: data[field] for field in fields}
+        raise Execution(f"repo view for {a.repo} returned no {' and '.join(fields)}: {data!r}")
+    a.repo_flags = {field: data[field] for field in fields}
+    return a.repo_flags
+
+
+def require_write_scope(a: argparse.Namespace) -> None:
+    """Refuse a write outside the registry's owner, or to an unregistered repository not a fork.
+
+    It runs before the label is read, so a label a stranger's repository happens to carry opens no
+    write there. A registered repository costs no request, and the reads are never bounded here.
+    """
+    if a.cmd in READS:
+        return
+    owner, names = registry()
+    repo_owner, _, name = a.repo.partition("/")
+    if repo_owner.lower() != owner:
+        raise Refusal(
+            f"{a.repo} is not under {owner}, so this script writes nothing there. A different "
+            "owner goes through the runbook's own `gh` path, where the write guard reads the "
+            "maintainer's grant."
+        )
+    if name.lower() in names:
+        return
+    if not repo_flags(a)["isFork"]:
+        raise Refusal(
+            f"{a.repo} is neither in registry/repos.json nor a fork, so it is registry drift "
+            "rather than a fork keeping state, and this script writes nothing there. Register it, "
+            f"then apply the fleet label set: {APPLY}"
+        )
 
 
 def label_definition() -> tuple[str, str]:
@@ -332,9 +371,8 @@ def without_label(a: argparse.Namespace) -> int | None:
 
     The body is read once, before the label is created, and that read is the one `new` files, so a
     body `new` would refuse leaves no label behind. Everything else refuses before any write. A
-    repository under another owner never gets a label created here, since these calls run as
-    subprocesses a write guard on the caller never sees. An unregistered repository of the owner's
-    that is not a fork is registry drift rather than a fork, and a lone label there would hide it.
+    repository under another owner, or an unregistered one of the owner's that is not a fork,
+    refuses here for a read and in `require_write_scope` for a write, which runs first.
     """
     repo = a.repo
     create = getattr(a, "create_label", False)
@@ -349,7 +387,7 @@ def without_label(a: argparse.Namespace) -> int | None:
     if name.lower() in names:
         flag = " `--create-label` is for an unregistered fork." if create else ""
         raise Refusal(f"{missing}{flag} Apply the fleet label set from a hub checkout: {APPLY}")
-    flags = repo_flags(repo)
+    flags = repo_flags(a)
     if not flags["isFork"]:
         raise Refusal(
             f"{missing} It is neither in registry/repos.json nor a fork, so it is registry drift "
@@ -1243,6 +1281,7 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
             ap.error(f"--{flag} takes an issue number, so it cannot be below 1")
     try:
+        require_write_scope(a)
         if not label_present(a.repo):
             answered = without_label(a)
             if answered is not None:

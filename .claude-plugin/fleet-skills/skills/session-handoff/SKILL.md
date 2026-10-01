@@ -320,7 +320,8 @@ and answers as an empty chain does, and `new` refuses until it is given `--creat
 creates the one `handoff` label, confirms it, and then files the first link. Issues turned off stop
 it before any write, naming the command that turns them on. Never apply the fleet label set to such
 a fork. A repository under another owner, or an unregistered one of the owner's that is not a fork,
-refuses before any write.
+refuses before any write. `new` and `link` refuse both whatever the label state, since a label on
+such a repository opens no write there, while the reads stay open everywhere.
 
 Creating an issue, commenting on one, closing one, and editing a body are each outward-facing
 writes. `new` creates, comments, and closes, the label riding inside the one create call rather than
