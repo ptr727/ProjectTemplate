@@ -263,11 +263,32 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
-# Test with `labels_payload_ok`, which is true only when labels.json parses to a non-empty array whose every label meets the API's field contract.
-# That is a non-empty name, a six-digit hex color, and a description of at most 100 characters, each a string holding no tab or line break.
-# The type test keeps a missing description from rendering as the literal string null, the contract tests keep a label from failing at the API partway through the loop, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
+# Test with `labels_payload_ok`, which succeeds only when labels.json parses to a non-empty array of uniquely named labels that each meet the API's field contract.
+# That is a non-empty name, a six-digit lowercase hex color, which is how GitHub stores it, and a description of at most 100 characters, each a string holding no tab or line break.
+# Each step runs its own jq and prints its own reason on a failure, so a payload that is malformed, empty, out of contract, or repeats a name is told apart from a jq that failed.
 labels_payload_ok() {
-    jq -e 'type=="array" and length > 0 and all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-fA-F]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
+    local err status step
+    local -a steps=(
+        'type=="array"@@is not an array'
+        'length > 0@@is empty'
+        'all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
+        '(map(.name) | unique | length) == length@@names a label more than once'
+    )
+    if ! err="$(jq -e . "$labels_file" 2>&1 >/dev/null)"; then
+        echo "did not parse (${err//$'\n'/ })"
+        return 1
+    fi
+    for step in "${steps[@]}"; do
+        status=0
+        err="$(jq -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
+        if [ "$status" -eq 1 ]; then
+            echo "${step#*@@}"
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+            return 1
+        fi
+    done
 }
 
 apply_labels() { # create-or-update every label labels.json declares, by name
@@ -315,7 +336,7 @@ apply_project() { # project-node-id
 }
 
 cmd_apply() {
-    local f private disc payload project_id
+    local f private disc payload project_id why
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -324,8 +345,8 @@ cmd_apply() {
         fi
     done
     # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
-    if ! labels_payload_ok; then
-        echo "Label payload $labels_file did not parse, is empty, or holds a label outside the field contract (non-empty name, six-digit hex color, description of at most 100 characters, no tab or line break). Aborting before any write." >&2
+    if ! why="$(labels_payload_ok)"; then
+        echo "Label payload $labels_file $why. Aborting before any write." >&2
         exit 1
     fi
     # The project payload is validated here for the same reason, since apply_project runs last of all and an abort inside it would leave every write before it applied.
@@ -553,7 +574,7 @@ check_security() {
 }
 
 check_labels() {
-    local live rows lname color desc got extra
+    local live rows lname color desc got extra why
     if [ ! -e "$labels_file" ]; then
         fail "label payload $labels_file missing"
         return
@@ -563,8 +584,8 @@ check_labels() {
         fail "could not read repository labels"
         return
     fi
-    if ! labels_payload_ok; then
-        fail "label payload $labels_file did not parse, is empty, or holds a label outside the field contract"
+    if ! why="$(labels_payload_ok)"; then
+        fail "label payload $labels_file $why"
         return
     fi
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"
