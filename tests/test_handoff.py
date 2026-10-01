@@ -452,6 +452,32 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertIn("could not read the body file", err)
         self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
 
+    def test_the_body_is_read_once_and_that_read_is_filed(self) -> None:
+        """A second read could see a changed file after the label exists, and warns twice."""
+        fake = FakeGh(label=False)
+        path = body_file(self, "x" * (handoff.WARN_BYTES + 1))
+        reads: list[Path] = []
+        real = handoff.body_from
+
+        def counted(p: Path) -> str:
+            reads.append(p)
+            return real(p)
+
+        with unittest.mock.patch.object(handoff, "body_from", counted):
+            code, out, err = run(
+                fake,
+                "new",
+                "--repo",
+                "o/r",
+                "--title",
+                "T",
+                "--body-file",
+                path,
+                "--create-label",
+            )
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(reads), 1)
+
     def test_an_unconfirmed_label_create_fails_before_filing(self) -> None:
         fake = FakeGh(label=False)
         fake.refuse_label = True

@@ -330,11 +330,11 @@ def without_label(a: argparse.Namespace) -> int | None:
     exist, so an empty chain is the true answer there rather than a degraded one, and only
     `new --create-label` writes anything.
 
-    The body is read before the label is created, so a body `new` would refuse leaves no label
-    behind. Everything else refuses before any write. A repository under another owner never gets a label
-    created here, since these calls run as subprocesses a write guard on the caller never sees.
-    An unregistered repository of the owner's that is not a fork is registry drift rather than a
-    fork, and a lone label there would hide it.
+    The body is read once, before the label is created, and that read is the one `new` files, so a
+    body `new` would refuse leaves no label behind. Everything else refuses before any write. A
+    repository under another owner never gets a label created here, since these calls run as
+    subprocesses a write guard on the caller never sees. An unregistered repository of the owner's
+    that is not a fork is registry drift rather than a fork, and a lone label there would hide it.
     """
     repo = a.repo
     create = getattr(a, "create_label", False)
@@ -377,7 +377,7 @@ def without_label(a: argparse.Namespace) -> int | None:
             "handoff on a track, so `new` is what follows, not a retry of this."
         )
     if a.cmd == "new" and create:
-        body_from(Path(a.body_file))
+        a.body = body_from(Path(a.body_file))
         print(f"0. create the `{LABEL}` label on {repo}, a fork outside the fleet")
         create_label(repo, a.dry_run)
         a.fresh_label = True
@@ -918,7 +918,9 @@ def cmd_new(a: argparse.Namespace) -> int:
     sits on no issue yet, so no chain read is made, which also keeps a dry run from querying a label
     it never created.
     """
-    body = body_from(Path(a.body_file))
+    body = getattr(a, "body", None)
+    if body is None:
+        body = body_from(Path(a.body_file))
     if getattr(a, "fresh_label", False):
         rows, previous = [], None
     else:
