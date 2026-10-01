@@ -399,6 +399,7 @@ class TreePathGateCase(unittest.TestCase):
             ("target", "c:/docs"),
             ("source", "real/C:x"),
             ("target", "docs/c:x"),
+            ("source", "real/1:x"),
         ):
             with self.subTest(field=field, value=value):
                 tree = self.tree("real", "t") | {field: value}

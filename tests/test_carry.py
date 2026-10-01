@@ -283,12 +283,12 @@ class CarryManifestTests(unittest.TestCase):
         ):
             carry.relative_root(pathlib.Path(temp), ".")
 
-    def test_rejects_drive_letter_in_any_component(self) -> None:
+    def test_rejects_windows_drive_or_root_in_any_component(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            for value in ("C:x", "real/C:x", "real/sub/d:"):
+            for value in ("C:x", "real/C:x", "real/sub/d:", "real/1:x", "real/\\x"):
                 with (
                     self.subTest(value=value),
-                    self.assertRaisesRegex(carry.CarryError, "drive letter"),
+                    self.assertRaisesRegex(carry.CarryError, "Windows drive or root"),
                 ):
                     carry.relative_root(pathlib.Path(temp), value)
 
