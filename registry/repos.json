@@ -306,17 +306,18 @@
             "name": "Blog",
             "url": "https://github.com/ptr727/Blog",
             "status": "cataloged",
-            "types": ["hugo", "source-only"],
+            "types": ["hugo", "source-only", "python"],
             "groundTruthBranch": "main",
             "workflowModel": "release",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }, { "target": "self-hosted", "mechanism": "static-secret" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "environments": [{ "name": "production", "branchPolicy": "none" }, { "name": "staging", "branchPolicy": "none" }],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which spec/secrets.json has no vocabulary for, so requiredSecrets stays empty and the names are declared in this repo's own secrets.json environments block; listing them here would make the audit demand them in the repository actions store.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving."]
+            "pythonDirectories": ["checks", "scripts"],
+            "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which spec/secrets.json has no vocabulary for, so requiredSecrets leaves them out and the names are declared in this repo's own secrets.json environments block; listing them here would make the audit demand them in the repository actions store.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving.", "capture/ is one-shot WordPress migration tooling that has already run, so the maintainer kept it out of pythonDirectories (Blog #356, 2026-10-01), forgoing the lint, format, type-check, test, and coverage obligations every Python directory owes. The audit's python-directories drift naming capture/ files is therefore expected."]
         },
         {
             "name": "DiskSpeedTest",
