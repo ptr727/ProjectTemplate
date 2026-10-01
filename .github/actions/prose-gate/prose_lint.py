@@ -1028,6 +1028,11 @@ TIER3 = frozenset(
     }
 )
 
+CHARSET_CLASSIFY = (
+    'classify it in the comment-and-doc-style skill\'s "Character set" section'
+    " and in prose_lint.py's TIER1, TIER2, or TIER3 table"
+)
+
 COMBINING_DIACRITICS = frozenset(chr(c) for c in range(0x300, 0x370)) - {
     unicodedata.lookup("COMBINING GRAPHEME JOINER")
 }
@@ -1768,7 +1773,7 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
                 (
                     lineno,
                     "charset-unknown",
-                    f"{name} (U+{ord(ch):04X}) is in no tier - classify it in GOVERNANCE.md",
+                    f"{name} (U+{ord(ch):04X}) is in no tier - {CHARSET_CLASSIFY}",
                 )
             )
     return out
