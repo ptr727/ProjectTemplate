@@ -2628,9 +2628,10 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
-def _sleeps(toks, _depth=0, quoted=None):
+def _sleeps(toks, _depth=0, quoted=None, _reading=()):
     """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` or `eval` payload it
     carries. `quoted` is the quote mask of `toks` where known, which `_eval_payload` reads.
+    `_reading` holds the `eval` payloads being read around this call, which `_rereads` checks.
     """
     if _depth > 4:
         return False
@@ -2640,12 +2641,12 @@ def _sleeps(toks, _depth=0, quoted=None):
         # `grep -i sleep f` does not, its run's first command being no launcher.
         if _is_sleep_exe(tok) and _runs_as_command(toks, k):
             return True
-        if (
-            tok == "eval"
-            and _runs_as_command(toks, k)
-            and _sleeps(_shell_tokens(_eval_payload(toks, k, quoted)), _depth + 1)
-        ):
-            return True
+        if tok == "eval" and _runs_as_command(toks, k):
+            payload = _eval_payload(toks, k, quoted)
+            if not _rereads(payload, _reading) and _sleeps(
+                _shell_tokens(payload), _depth + 1, _reading=(*_reading, payload)
+            ):
+                return True
         if not _is_shell_wrapper_exe(tok):
             continue
         # The payload is read from its own token, since re-joining the token list dropped its quoting.
@@ -2729,21 +2730,36 @@ def _forks_out_of_reach(toks):
     return False
 
 
+def _rereads(payload, reading):
+    """True if `payload` ends one of the `eval` payloads in `reading`, at a word boundary.
+
+    The enclosing read already lexes that text as its own tail, so reading it again finds nothing new.
+    Each `eval` in a run of chained ones carries the rest of the run as its payload, and reading every
+    one of them at every depth made a run of sixty take over a minute to classify.
+    """
+    for r in reading:
+        if r.endswith(payload) and (len(r) == len(payload) or r[-len(payload) - 1].isspace()):
+            return True
+    return False
+
+
 def _eval_payload(toks, i, quoted=None):
     """The shell text the `eval` at index i of `toks` runs, as bash builds it: its arguments, one
     leading `--` dropped, joined with spaces.
 
     `quoted` is a `_quoted_mask` of `toks`, or None where the quoting is unknown. A quoted separator
     among the arguments is one of them, and becomes a separator only once bash rereads the payload.
-    Where the quoting is unknown the payload runs to the end of `toks`, since any separator in it may
-    be a quoted one. Reading too far there costs a false deny, where stopping short hid a loop.
+    Where the quoting is unknown the payload runs to the end of the eval's line, since any separator
+    on it may be a quoted one. A newline token is a real line break, since a quoted newline stays
+    inside its word, so no later line is read as the payload.
 
-    A redirection on the `eval` is its payload's, so it follows the payload with its target quoted,
-    and a loop reading its input from one is read with that input.
+    A redirection on the `eval` applies to the whole payload, so the payload is read as a group the
+    redirection follows, with its target quoted, and binds no single command inside it.
     """
     n = len(toks)
     if quoted is None:
-        words, redirs = toks[i + 1 :], []
+        end = next((k for k in range(i + 1, n) if toks[k] == "\n"), n)
+        words, redirs = toks[i + 1 : end], []
     else:
         words, redirs = [], []
         k = i + 1
@@ -2763,10 +2779,12 @@ def _eval_payload(toks, i, quoted=None):
             k += 1
     if words[:1] == ["--"]:
         words = words[1:]
-    return " ".join(words + redirs)
+    if not redirs:
+        return " ".join(words)
+    return "{ " + " ".join(words) + "\n} " + " ".join(redirs)
 
 
-def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
+def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _reading=()):
     """The first unbounded wait loop in `cmd`, as `<keyword> <condition>` text, or None when none.
 
     A wait loop is a `while`/`until` compound whose body calls `sleep`. It passes when its own
@@ -2777,6 +2795,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     An `eval`'s arguments are a payload the same way, read by `_eval_payload`. They run in this same
     shell, so only a bound on this shell reaches them, `timeout` being unable to run a builtin.
     A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
+    `_reading` holds the `eval` payloads being read around this call, which `_rereads` checks.
     """
     if _depth > 4:
         return None
@@ -2803,12 +2822,15 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
                 backgrounded = forks_away
                 bounded = (inherited_timeout and not backgrounded) or local
-                inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
+                inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1, _reading)
                 if inner is not None:
                     return inner
         elif tok == "eval" and _runs_as_command(toks, i):
+            payload = _eval_payload(toks, i, mask)
+            if _rereads(payload, _reading):
+                continue
             bounded = inherited_timeout and not forks_away
-            inner = _unbounded_wait_loop(_eval_payload(toks, i, mask), bounded, _depth + 1)
+            inner = _unbounded_wait_loop(payload, bounded, _depth + 1, (*_reading, payload))
             if inner is not None:
                 return inner
         elif _opens_loop(toks, i):
@@ -4977,14 +4999,19 @@ _WAIT_CASES = [
         "where the quoting is unknown an eval payload runs to the end rather than stopping at a quoted separator",
     ),
     (
+        'eval "$(ssh-agent -s)"\ntimeout 60 bash -c \'cd /w; until [ -f x ]; do sleep 5; done\'\necho "$(echo "it\'s")"',
+        "allow",
+        "where the quoting is unknown an eval payload still ends at its own line, so a later line keeps its quoting",
+    ),
+    (
         "while true; do eval 'sleep 5'; done",
         "deny",
         "a sleep an eval runs is a sleep, the same as one a wrapper runs",
     ),
     (
-        "eval 'while read -r l; do sleep 1; done' < f",
-        "allow",
-        "a redirection on an eval is its payload's, so a loop reading that input is bounded by it",
+        "eval 'yes | while read -r l; do sleep 1; done' < f",
+        "deny",
+        "a redirection on an eval binds the whole payload, as it binds a group, so the pipe still feeds the loop",
     ),
     (
         'while [ -f x ]; do eval "$step"; echo "a; sleep 1"; done',
@@ -6225,6 +6252,17 @@ def _selftest():
         if elapsed >= 5:
             ok = False
         print(f"  {mark} [lex  ] {label} is scanned in linear time ({elapsed:.2f}s)")
+    for label, read in (
+        ("a wait-loop scan", lambda: _unbounded_wait_loop("eval " * 60 + "echo sleep")),
+        ("a sleep scan", lambda: _sleeps(_shell_tokens("eval " * 60 + "echo x"))),
+    ):
+        start = time.monotonic()
+        read()
+        elapsed = time.monotonic() - start
+        mark = "ok  " if elapsed < 5 else "FAIL"
+        if elapsed >= 5:
+            ok = False
+        print(f"  {mark} [wait ] {label} of sixty chained evals is fast ({elapsed:.2f}s)")
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
