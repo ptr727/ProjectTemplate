@@ -63,9 +63,10 @@ Subcommands
            regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
            because only `wait` is the command a caller might otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
-           CodeRabbit (`coderabbitai`) and qodo (`qodo-code-review`) are tracked at the identity
-           and thread-resolution level, since an open thread blocks a ruleset-gated merge
-           whoever opened it and `unresolved=0` once hid one of theirs that still did.
+           CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
+           tracked at the identity and thread-resolution level, since an open thread blocks a
+           ruleset-gated merge whoever opened it and `unresolved=0` once hid one of theirs that
+           still did.
            Both `threads=` and `unresolved=` are read from a single 100-thread page with no
            further pagination, so a pull request carrying more than that undercounts silently
            past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
@@ -254,9 +255,8 @@ REVIEWER = "copilot-pull-request-reviewer"
 # Each format read here is its own reader, and doing that well is a separate task per bot.
 # What generalizes without reading any of their prose is thread resolution.
 # An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one.
-# Login spellings are read off this repository's own history (`gh pr view --json reviews,comments`) rather than guessed.
 CODERABBIT_LOGIN = "coderabbitai"
-QODO_LOGIN = "qodo-code-review"
+QODO_LOGIN = "qodo-free-for-open-source-projects"
 # Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing.
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)

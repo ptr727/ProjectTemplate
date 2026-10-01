@@ -750,7 +750,7 @@ class TestOtherReviewers(GqlCase):
                 [review()],
                 [
                     thread("T1", login="coderabbitai"),
-                    thread("T2", login="qodo-code-review"),
+                    thread("T2", login=pr_review.QODO_LOGIN),
                     thread("T3", resolved=True, login="coderabbitai"),
                 ],
             )
@@ -787,13 +787,13 @@ class TestOtherReviewers(GqlCase):
                 [
                     review(),
                     self.other_review("coderabbitai"),
-                    self.other_review("qodo-code-review", oid=OLD),
+                    self.other_review(pr_review.QODO_LOGIN, oid=OLD),
                 ]
             )
         )
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("other_reviewed=coderabbitai", out)
-        self.assertNotIn("qodo-code-review", out)
+        self.assertNotIn(pr_review.QODO_LOGIN, out)
 
     def test_other_reviewed_is_absent_where_neither_has_posted(self) -> None:
         """The common case, a repository not trialing either, stays silent rather than `none`."""
@@ -805,7 +805,7 @@ class TestOtherReviewers(GqlCase):
         pr = payload([review(), self.other_review("coderabbitai")])
         self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews")))
         self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews", "coderabbitai")))
-        self.assertEqual(0, len(pr_review.reviewer_nodes(pr, "reviews", "qodo-code-review")))
+        self.assertEqual(0, len(pr_review.reviewer_nodes(pr, "reviews", pr_review.QODO_LOGIN)))
 
     def test_other_rate_limited_reads_the_structural_marker_on_a_plain_comment(self) -> None:
         """The one observed shape: a rate-limit notice riding a PR comment, not a formal review."""
@@ -839,7 +839,7 @@ class TestOtherReviewers(GqlCase):
             [review()], comments=[comment(login="coderabbitai", body=RATE_LIMITED_COMMENT)]
         )
         self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
-        self.assertIsNone(pr_review.rate_limited_by(pr, "qodo-code-review"))
+        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
 
     def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
         """The marker rides a plain comment on the one observed instance, but the reader
@@ -849,7 +849,7 @@ class TestOtherReviewers(GqlCase):
             comments=[],
         )
         self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
-        self.assertIsNone(pr_review.rate_limited_by(pr, "qodo-code-review"))
+        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
 
     def test_thread_author_defaults_a_deleted_account_rather_than_crashing(self) -> None:
         orphan = thread("T1")
@@ -1384,7 +1384,7 @@ class TestQodoOpenFindings(GqlCase):
     def test_an_open_finding_counts_and_prints_without_its_nested_subsections(self) -> None:
         self.answer(
             payload(
-                [review()], comments=[comment(login="qodo-code-review", body=qodo_review_body())]
+                [review()], comments=[comment(login=pr_review.QODO_LOGIN, body=qodo_review_body())]
             )
         )
         out, _ = pr_review.digest("o", "r", 7)
@@ -1398,7 +1398,9 @@ class TestQodoOpenFindings(GqlCase):
         self.answer(
             payload(
                 [review()],
-                comments=[comment(login="qodo-code-review", body=qodo_review_body(resolved=True))],
+                comments=[
+                    comment(login=pr_review.QODO_LOGIN, body=qodo_review_body(resolved=True))
+                ],
             )
         )
         out, _ = pr_review.digest("o", "r", 7)
@@ -1410,7 +1412,9 @@ class TestQodoOpenFindings(GqlCase):
         self.answer(
             payload(
                 [review()],
-                comments=[comment(login="qodo-code-review", body=qodo_review_body(resolved=True))],
+                comments=[
+                    comment(login=pr_review.QODO_LOGIN, body=qodo_review_body(resolved=True))
+                ],
             )
         )
         out, _ = pr_review.digest("o", "r", 7)
@@ -1424,7 +1428,9 @@ class TestQodoOpenFindings(GqlCase):
     def test_the_pr_summary_comment_is_not_read_as_the_findings_comment(self) -> None:
         """Qodo posts two comments per round, and only `Code Review by Qodo` carries findings."""
         summary = "<h3>PR Summary by Qodo</h3>\n\nAdds a thing.\n"
-        self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=summary)]))
+        self.answer(
+            payload([review()], comments=[comment(login=pr_review.QODO_LOGIN, body=summary)])
+        )
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("qodo_open", out)
 
@@ -1433,9 +1439,9 @@ class TestQodoOpenFindings(GqlCase):
             payload(
                 [review()],
                 comments=[
-                    comment(login="qodo-code-review", at=EARLY, body=qodo_review_body()),
+                    comment(login=pr_review.QODO_LOGIN, at=EARLY, body=qodo_review_body()),
                     comment(
-                        login="qodo-code-review", at=LATE, body=qodo_review_body(resolved=True)
+                        login=pr_review.QODO_LOGIN, at=LATE, body=qodo_review_body(resolved=True)
                     ),
                 ],
             )
@@ -1449,7 +1455,7 @@ class TestQodoOpenFindings(GqlCase):
         finding.
         """
         body = qodo_review_body(heading="isResolved handling is inconsistent")
-        self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
+        self.answer(payload([review()], comments=[comment(login=pr_review.QODO_LOGIN, body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("qodo_open=1", out)
         self.assertIn("isResolved handling is inconsistent", out)
@@ -1478,7 +1484,7 @@ class TestQodoOpenFindings(GqlCase):
         """
         summary = "<h3>PR Summary by Qodo</h3>\n\nAdds a thing.\n"
         full = [comment(login="ptr727") for _ in range(pr_review.WINDOW - 1)] + [
-            comment(login="qodo-code-review", body=summary)
+            comment(login=pr_review.QODO_LOGIN, body=summary)
         ]
         self.answer(payload([review()], comments=full, older=True))
         out, _ = pr_review.digest("o", "r", 7)
@@ -1495,7 +1501,7 @@ class TestQodoOpenFindings(GqlCase):
         """
         summary = "<h3>PR Summary by Qodo</h3>\n\nA Code Review by Qodo will follow shortly.\n"
         full = [comment(login="ptr727") for _ in range(pr_review.WINDOW - 1)] + [
-            comment(login="qodo-code-review", body=summary)
+            comment(login=pr_review.QODO_LOGIN, body=summary)
         ]
         self.answer(payload([review()], comments=full, older=True))
         out, _ = pr_review.digest("o", "r", 7)
@@ -1510,7 +1516,7 @@ class TestQodoOpenFindings(GqlCase):
         badge, only something adjacent enough to be mistaken for it on the word alone.
         """
         body = qodo_review_body(heading="<code>Resolved</code> flag ignored on retry")
-        self.answer(payload([review()], comments=[comment(login="qodo-code-review", body=body)]))
+        self.answer(payload([review()], comments=[comment(login=pr_review.QODO_LOGIN, body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("qodo_open=1", out)
 
