@@ -12,14 +12,13 @@
         // The first tasks are the Python clean-compile set, per CODESTYLE.md "Local Development Loop":
         // `ruff format`, then `ruff check`, then the type checker.
         // A repo whose CI type checker is mypy, with pyright editor-only, swaps "Python Types" to
-        // `uv run mypy src`.
+        // `uv run mypy`.
         // A pyright-strict repo keeps `uv run pyright`.
-        // Adapt the target paths to the repo's package layout.
         // A build-profile directory in its pip form, a `requirements*.txt` with no `uv.lock`, keeps every task here, "Python Test" included, and runs no `uv sync` and no project-scoped `uv run`, since either writes a `uv.lock`.
         // It replaces "uv Sync" with a `dependsOrder: sequence` aggregator over `uv venv --clear`, one `uv pip install` taking every `requirements*.txt` as a `-r` argument, and `uv pip install -e .` where its pyproject.toml has a [project] table, and adapts or drops "uv Upgrade", which runs `uv sync` too.
         // It runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
-        // The type-checker swap composes with it: `uvx mypy src` for a mypy repo, `uvx pyright` otherwise.
+        // The type-checker swap composes with it: `uvx mypy` for a mypy repo, `uvx pyright` otherwise.
         // It omits the pytest, coverage, and `uv sync` tasks, per CODESTYLE.md Python "Two profiles".
         {
             "label": "Ruff Format",
