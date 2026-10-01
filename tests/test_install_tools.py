@@ -106,6 +106,13 @@ PATH=$host_path
         self.assertEqual(len(report["notes"]), 1)
         self.assertIn("curl is not installed", report["notes"][0])
 
+    def test_docker_inside_wsl_names_docker_desktop_as_its_mechanism(self) -> None:
+        for is_wsl, expected in (("true", "docker-desktop"), ("false", "apt")):
+            with self.subTest(is_wsl=is_wsl):
+                result = self.run_bash(f"IS_WSL={is_wsl}\ntool_mechanism docker")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
     def test_report_with_no_rows_is_still_an_object(self) -> None:
         result = self.run_bash("JSON_OUTPUT=true\nSELECTED=()\nreport")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -146,6 +153,9 @@ function Get-ToolState {
     if ($Tool.Name -eq 'jq') {
         return @{ Package = 'jqlang.jq'; Installed = $null; Rows = @(); Available = '1.8.2'; Scope = @(); Status = 'missing' }
     }
+    if ($Tool.Name -eq 'dotnet') {
+        return @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $null; Rows = @('8.0.1', '10.0.1'); Available = '10.0.1'; Scope = @('machine'); Status = 'multiple' }
+    }
     return @{ Package = 'astral-sh.uv'; Installed = '0.12.4'; Rows = @('0.12.4'); Available = '0.12.4'; Scope = @('user', 'machine'); Status = 'current' }
 }
 function Add-ToolNote { param([hashtable]$Tool, [hashtable]$State) if ($Tool.Name -eq 'jq') { note 'jq' $Awkward } }
@@ -153,7 +163,7 @@ $NOTES = @()
 $NOTE_TEXTS = @()
 $JSON_OUTPUT = $true
 $ELEVATED = $true
-$SELECTED = @('jq', 'uv')
+$SELECTED = @('jq', 'uv', 'dotnet')
 if ($Mode) {
     $ACTIONS = [ordered]@{ report = $false; install = $false; list = $false }
     $ACTIONS[$Mode] = $true
@@ -222,6 +232,16 @@ class TestWindowsJsonReport(unittest.TestCase):
                     "mechanism": "winget",
                     "status": "current",
                     "scope": ["user", "machine"],
+                    "notes": [],
+                },
+                {
+                    "tool": "dotnet",
+                    "installed": None,
+                    "available": "10.0.1",
+                    "source": "Microsoft.DotNet.SDK.10",
+                    "mechanism": "winget",
+                    "status": "multiple",
+                    "scope": ["machine"],
                     "notes": [],
                 },
             ],

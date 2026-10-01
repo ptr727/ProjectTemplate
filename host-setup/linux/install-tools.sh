@@ -139,8 +139,9 @@ not refresh it, so an available version is as current as the last apt update.
 
 --json writes one object carrying the same rows: "schema" (1), "platform" ("linux"), "tools", one
 entry per tool with "tool", "installed", "available", "source", "mechanism" ("apt", which any
-apt upgrade moves, or "binary", which only this script moves), "status" and that tool's own
-"notes", and a top-level "notes" for what belongs to no tool. A version that was not read is null.
+apt upgrade moves, "binary", which only this script moves, or "docker-desktop" for docker inside a
+WSL distribution, which Docker Desktop moves), "status" and that tool's own "notes", and a
+top-level "notes" for what belongs to no tool. A version that was not read is null.
 
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
 every terminal that user has open rather than only the one it ran in. It touches no tool.
@@ -1058,6 +1059,13 @@ tool_note() {
 tool_mechanism() {
     case "$1" in
     jq | uv | git-restore-mtime) printf 'binary' ;;
+    docker)
+        if [[ $IS_WSL == true ]]; then
+            printf 'docker-desktop'
+        else
+            printf 'apt'
+        fi
+        ;;
     *) printf 'apt' ;;
     esac
 }
