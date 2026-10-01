@@ -432,6 +432,26 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
         self.assertFalse(fake.label)
 
+    def test_a_body_new_would_refuse_creates_no_label(self) -> None:
+        """Otherwise the refusal comes after a write, which leaves the fork half-changed."""
+        fake = FakeGh(label=False)
+        missing = str(Path(tempfile.mkdtemp()) / "absent.md")
+        self.addCleanup(shutil.rmtree, Path(missing).parent)
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--title",
+            "T",
+            "--body-file",
+            missing,
+            "--create-label",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("could not read the body file", err)
+        self.assertFalse(any(c[:2] == ["label", "create"] for c in fake.calls))
+
     def test_an_unconfirmed_label_create_fails_before_filing(self) -> None:
         fake = FakeGh(label=False)
         fake.refuse_label = True

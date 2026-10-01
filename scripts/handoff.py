@@ -330,7 +330,8 @@ def without_label(a: argparse.Namespace) -> int | None:
     exist, so an empty chain is the true answer there rather than a degraded one, and only
     `new --create-label` writes anything.
 
-    Everything else refuses before any write. A repository under another owner never gets a label
+    The body is read before the label is created, so a body `new` would refuse leaves no label
+    behind. Everything else refuses before any write. A repository under another owner never gets a label
     created here, since these calls run as subprocesses a write guard on the caller never sees.
     An unregistered repository of the owner's that is not a fork is registry drift rather than a
     fork, and a lone label there would hide it.
@@ -376,6 +377,7 @@ def without_label(a: argparse.Namespace) -> int | None:
             "handoff on a track, so `new` is what follows, not a retry of this."
         )
     if a.cmd == "new" and create:
+        body_from(Path(a.body_file))
         print(f"0. create the `{LABEL}` label on {repo}, a fork outside the fleet")
         create_label(repo, a.dry_run)
         a.fresh_label = True
