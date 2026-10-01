@@ -750,7 +750,7 @@ class TestOtherReviewers(GqlCase):
                 [review()],
                 [
                     thread("T1", login="coderabbitai"),
-                    thread("T2", login=pr_review.QODO_LOGIN),
+                    thread("T2", login="qodo-free-for-open-source-projects"),
                     thread("T3", resolved=True, login="coderabbitai"),
                 ],
             )
