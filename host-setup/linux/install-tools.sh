@@ -177,7 +177,7 @@ entry per tool with "tool", "installed", "available", "source", "mechanism", "st
 tool's own "notes", and a top-level "notes" for what belongs to no tool. A version that was not
 read is null. Like "source", "mechanism" names how this script manages the tool rather than where
 the installed copy came from: "apt", which any apt upgrade moves, "binary", which only this script
-moves, or "docker-desktop" for docker inside a WSL distribution, which Docker Desktop moves.
+moves, or "docker-desktop" for docker inside a WSL distribution, which it leaves to Docker Desktop.
 
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
 every terminal that user has open rather than only the one it ran in. It touches no tool.
