@@ -2391,7 +2391,7 @@ _RESERVED_WORDS = frozenset(
 )
 
 
-def _redirects_stdin(after_done):
+def _redirects_stdin(after_done, quoted=None):
     """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
     Three things have to hold, and reading only the first accepted loops that never end.
@@ -2408,7 +2408,26 @@ def _redirects_stdin(after_done):
     `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
     That includes a closing word such as `}`, since a pipe inside the compound it closes can feed
     the loop, so `{ yes | while read l; do sleep 30; done } < f` reads the pipe.
+    It ends at a comment too, since bash reads nothing after one, so `done # < f` reads the pipe.
+    A word opens a comment when it starts with an unquoted `#`, which `quoted` says per token.
+    Where that is unknown, every such word reads as one.
+    A comment keeps an earlier binding only where it is surely one, since ending early at a `#`
+    that is not skips the later binding that applies.
+    It is not sure where the quoting is unknown or after an expansion that can hold a space,
+    as in `< ${g:- #x} < /dev/zero`, where a `$(` arrives as a token ending in `$`.
+    The caller passes no mask where the command holds a carriage return, which the lex splits
+    words at and bash does not, so `log\r#x` is one word rather than a comment.
+    A redirect whose target opens a comment has none, so it bounds nothing.
     """
+
+    def comment(j):
+        return after_done[j].startswith("#") and not (quoted is not None and quoted[j])
+
+    def sure(j):
+        return quoted is not None and not any(
+            t.endswith("$") or any(c in t for c in ("${", "$[", "`")) for t in after_done[:j]
+        )
+
     bound = False
     i = 0
     while i < len(after_done):
@@ -2419,6 +2438,8 @@ def _redirects_stdin(after_done):
             return bound
         if tok in _RESERVED_WORDS:
             return bound
+        if comment(i):
+            return bound and sure(i)
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
         # Reading the token before the `<` as a descriptor read the previous redirect's target as one.
@@ -2433,6 +2454,8 @@ def _redirects_stdin(after_done):
         if not _is_redir_op(tok):
             i += 1
             continue
+        if i + 1 < len(after_done) and comment(i + 1):
+            return False
         target = after_done[i + 1] if i + 1 < len(after_done) else ""
         if _is_shell_op(target):
             target = ""
@@ -2452,7 +2475,7 @@ def _redirects_stdin(after_done):
     return bound
 
 
-def _reads_its_input(keyword, cond, after_done):
+def _reads_its_input(keyword, cond, after_done, quoted=None):
     """True if a `while` loop's condition is a `read`, which ends it when the input is exhausted.
 
     `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
@@ -2474,7 +2497,7 @@ def _reads_its_input(keyword, cond, after_done):
     # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
     if any(t.startswith(("<(", ">(")) for t in after_done):
         return False
-    if not _redirects_stdin(after_done):
+    if not _redirects_stdin(after_done, quoted):
         return False
     words = [t for t in cond if not _ENV_ASSIGN_RE.match(t)]
     if not words or words[0].rsplit("/", 1)[-1] != "read":
@@ -2772,7 +2795,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # Measured: the same leak as having written no bound at all.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
-                tok, cond, toks[done_at + 1 :]
+                tok,
+                cond,
+                toks[done_at + 1 :],
+                mask[done_at + 1 :] if mask and "\r" not in cmd else None,
             )
             quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
             if sleeps and not bounded and not _bound_in_condition(cond, quoted):
@@ -5583,6 +5609,51 @@ _WAIT_CASES = [
         "{ yes | while read l; do sleep 30; done } < f",
         "deny",
         "since a redirect after a closing word binds a compound whose pipe can still feed the loop",
+    ),
+    (
+        "yes | while read l; do sleep 30; done # < f",
+        "deny",
+        "nor does one inside a trailing comment, which bash reads none of",
+    ),
+    (
+        "yes | while read l; do sleep 30; done #< f",
+        "deny",
+        "and a comment glued to the redirect hides it the same way",
+    ),
+    (
+        "yes | while read l; do sleep 30; done < #f",
+        "deny",
+        "a target opening a comment leaves the redirect with none",
+    ),
+    (
+        "bash -c 'yes | while read l; do sleep 30; done # < f'",
+        "deny",
+        "and a payload's trailing comment hides its redirect as well",
+    ),
+    (
+        "while read l; do sleep 30; done < f # x",
+        "allow",
+        "while a comment after the redirect leaves the file it binds in place",
+    ),
+    (
+        "while read l; do sleep 30; done < '#f'",
+        "allow",
+        "and a quoted `#` names a file rather than opening a comment",
+    ),
+    (
+        "while read l; do sleep 30; done < ${g:- #x} < /dev/zero",
+        "deny",
+        "a `#` inside an expansion opens no comment, so the stream after it still binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f < '#x' < /dev/zero\n# don't",
+        "deny",
+        "nor does one whose quoting is unknown end the scan before the stream that binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f > log\r#x < /dev/zero",
+        "deny",
+        "and a `#` after a carriage return sits inside a word bash reads whole",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",
