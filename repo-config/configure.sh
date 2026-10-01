@@ -263,24 +263,30 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
-# Test with `labels_payload_ok`, which succeeds only when labels.json parses to a non-empty array of uniquely named labels that each meet the API's field contract.
+# Test with `labels_payload_ok`, which succeeds only when labels.json parses to a non-empty array of labels, unique by name ignoring case, that each meet the API's field contract.
 # That is a non-empty name, a six-digit lowercase hex color, which is how GitHub stores it, and a description of at most 100 characters, each a string holding no tab or line break.
 # Each step runs its own jq and prints its own reason on a failure, so a payload that is malformed, empty, out of contract, or repeats a name is told apart from a jq that failed.
 labels_payload_ok() {
     local err status step
     local -a steps=(
-        'type=="array"@@is not an array'
-        'length > 0@@is empty'
-        'all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
-        '(map(.name) | unique | length) == length@@names a label more than once'
+        'length == 1@@does not hold exactly one JSON document'
+        '.[0] | type=="array"@@is not an array'
+        '.[0] | length > 0@@is empty'
+        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
+        '.[0] | (map(.name | ascii_downcase) | unique | length) == length@@names a label more than once, ignoring case'
     )
-    if ! err="$(jq -e . "$labels_file" 2>&1 >/dev/null)"; then
+    status=0
+    err="$(jq empty "$labels_file" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
         echo "did not parse (${err//$'\n'/ })"
+        return 1
+    elif [ "$status" -ne 0 ]; then
+        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
         return 1
     fi
     for step in "${steps[@]}"; do
         status=0
-        err="$(jq -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
+        err="$(jq -s -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
         if [ "$status" -eq 1 ]; then
             echo "${step#*@@}"
             return 1

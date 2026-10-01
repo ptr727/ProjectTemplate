@@ -167,6 +167,15 @@ class LabelsPayloadCase(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("more than once", out)
 
+    def test_a_name_repeated_in_another_case_is_refused(self) -> None:
+        document = (
+            '[{"name": "bug", "color": "a2eeef", "description": "x"},'
+            ' {"name": "Bug", "color": "ffffff", "description": "y"}]'
+        )
+        ok, out = self.verdict(document)
+        self.assertFalse(ok)
+        self.assertIn("more than once", out)
+
     def test_an_uppercase_color_is_refused(self) -> None:
         ok, out = self.verdict('[{"name": "a", "color": "A2EEEF", "description": "x"}]')
         self.assertFalse(ok)
@@ -176,6 +185,9 @@ class LabelsPayloadCase(unittest.TestCase):
         entry = '{"name": "a", "color": "a2eeef", "description": "x"}'
         for label, document, expected in (
             ("not JSON", "[", "did not parse"),
+            ("null", "null", "not an array"),
+            ("empty file", "", "exactly one JSON document"),
+            ("two documents", "[] []", "exactly one JSON document"),
             ("not an array", entry, "not an array"),
             ("empty array", "[]", "is empty"),
             ("entry that is not an object", "[1]", "field contract"),
@@ -187,14 +199,8 @@ class LabelsPayloadCase(unittest.TestCase):
                 self.assertIn(expected, out)
 
     def test_a_jq_that_fails_is_not_blamed_on_the_payload(self) -> None:
-        """A jq lacking test/1 fails to compile the filter, which must not read as a bad label."""
-        prelude = (
-            "jq() {\n"
-            '  if [ "$2" = . ]; then command jq "$@"; return; fi\n'
-            '  echo "jq: error: test/1 is not defined" >&2\n'
-            "  return 3\n"
-            "}\n"
-        )
+        """A jq that fails, whether at parsing or at compiling test/1, must not read as a bad label."""
+        prelude = 'jq() {\n  echo "jq: error: test/1 is not defined" >&2\n  return 3\n}\n'
         ok, out = self.verdict('[{"name": "a", "color": "a2eeef", "description": "x"}]', prelude)
         self.assertFalse(ok)
         self.assertIn("jq failed (exit 3", out)
