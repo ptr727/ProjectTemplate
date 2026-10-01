@@ -340,6 +340,7 @@ QODO_FINDING = re.compile(r"\s*\d+\.\s")
 # A finding's own title can quote `Resolved`/`Dismissed` without carrying the badge, so the glyph is required rather than just the word.
 # Escaped (U+2713, U+2717) rather than typed literally, per the repository's ASCII charset rule.
 QODO_BADGE = re.compile(r"<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</code>")
+QODO_LABELS = re.compile(r"(?:\s*<code>[^<]*</code>)+\s*$")
 # A round states how much of the diff it read on a line of its own.
 # A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
 # Five such rounds landed across three merged pull requests here.
@@ -2829,13 +2830,22 @@ def qodo_review_comment(pr: dict) -> dict | None:
 
 
 def qodo_heading(text: str) -> str:
-    """A Qodo finding's numbered title, `1. title`, with markup, escapes and case removed.
+    """A Qodo finding's numbered title, `1. title`, or `""` where `text` carries none.
 
     The findings comment and the review thread Qodo opens for the same finding render one
-    heading differently, `  1.  title` in a `<summary>` against `<s>1\\. title</s>` once its
-    thread is resolved, so both are reduced to this form before they are compared.
+    heading differently: `  1.  title <code>Bug</code>` in a `<summary>`, against
+    `<s>1\\. title</s> <code>Bug</code>` on the first numbered line of the thread's opening
+    comment, which can sit below a severity line. Both are reduced to this form, from the first
+    line carrying a number and a period, with backtick spans blanked, the trailing `<code>`
+    labels dropped, markup and escapes removed, and case folded, so the two compare by equality.
     """
-    return " ".join(re.sub(r"<[^>]*>", " ", text).replace("\\", "").split()).lower()
+    for line in CODE_SPAN.sub(" ", text).splitlines():
+        plain = " ".join(re.sub(r"<[^>]*>", " ", line).replace("\\", "").split())
+        if QODO_FINDING.match(plain):
+            return " ".join(
+                re.sub(r"<[^>]*>", " ", QODO_LABELS.sub("", line)).replace("\\", "").split()
+            ).lower()
+    return ""
 
 
 def qodo_open_findings(body: str, threads: list[dict] | None = None) -> list[str]:
@@ -2850,23 +2860,20 @@ def qodo_open_findings(body: str, threads: list[dict] | None = None) -> list[str
 
     A finding Qodo also opened a thread for is left to `unresolved=`, whose resolved state is
     the only one its open-source app keeps: resolving that thread adds no badge to this comment,
-    so reading the comment alone would report a resolved finding as open forever. A thread is
-    matched on the finding's numbered title, the text before its first `<code>` label, at the
-    start of its opening comment, `threads` being every thread the reviewer opened, resolved or
-    not.
+    so reading the comment alone would report a resolved finding as open forever. A thread
+    matches where its `qodo_heading` equals the finding's own, `threads` being every thread the
+    reviewer opened, resolved or not.
     """
     if not body:
         return []
-    openers = [
+    openers = {
         qodo_heading(((t.get("comments") or {}).get("nodes") or [{}])[0].get("body") or "")
         for t in threads or []
-    ]
+    } - {""}
     return [
         s.strip()
         for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(body)))
-        if QODO_FINDING.match(s)
-        and not QODO_BADGE.search(s)
-        and not any(o.startswith(qodo_heading(s.split("<code", 1)[0])) for o in openers)
+        if QODO_FINDING.match(s) and not QODO_BADGE.search(s) and qodo_heading(s) not in openers
     ]
 
 

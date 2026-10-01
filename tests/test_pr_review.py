@@ -1411,16 +1411,50 @@ class TestQodoOpenFindings(GqlCase):
             self.assertNotIn("QODO OPEN FINDING", out)
 
     def test_a_thread_for_another_finding_leaves_this_one_open(self) -> None:
-        for opener in ("2\\. Bad naming", "11\\. Bad naming", "1\\. Unrelated"):
+        cases = (
+            ("Bad naming", "2\\. Bad naming"),
+            ("Bad naming", "11\\. Bad naming"),
+            ("Bad naming", "1\\. Unrelated"),
+            ("Bad naming", "<s>1\\. Bad naming helper</s> <code>Bug</code>"),
+            ("Bad", "<s>1\\. Bad naming</s> <code>Bug</code>"),
+            ("<code>Resolved</code> flag ignored", "<s>1\\. Unrelated finding</s>"),
+            ("<code>Resolved</code> flag ignored", "<s>1\\. <code>Path</code> skipped</s>"),
+        )
+        for heading, opener in cases:
             self.answer(
                 payload(
                     [review()],
                     [thread("T1", resolved=True, login=pr_review.QODO_LOGIN, body=opener)],
-                    comments=[comment(login=pr_review.QODO_LOGIN, body=qodo_review_body())],
+                    comments=[
+                        comment(login=pr_review.QODO_LOGIN, body=qodo_review_body(heading=heading))
+                    ],
                 )
             )
             out, _ = pr_review.digest("o", "r", 7)
             self.assertIn("qodo_open=1", out, opener)
+
+    def test_a_thread_matches_its_finding_across_rendering_variants(self) -> None:
+        """A severity line above the title, a backtick span, and a code-led title all match."""
+        cases = (
+            ("Bad naming", "\U0001f534 **High**\n\n1\\. Bad naming <code>Bug</code>"),
+            ("Use `x` here", "<s>1\\. Use `x` here</s> <code>Bug</code>"),
+            (
+                "<code>Resolved</code> flag ignored",
+                "<s>1\\. <code>Resolved</code> flag ignored</s> <code>Bug</code>",
+            ),
+        )
+        for heading, opener in cases:
+            self.answer(
+                payload(
+                    [review()],
+                    [thread("T1", resolved=True, login=pr_review.QODO_LOGIN, body=opener)],
+                    comments=[
+                        comment(login=pr_review.QODO_LOGIN, body=qodo_review_body(heading=heading))
+                    ],
+                )
+            )
+            out, _ = pr_review.digest("o", "r", 7)
+            self.assertIn("qodo_open=0", out, opener)
 
     def test_a_resolved_finding_does_not_count_as_open(self) -> None:
         self.answer(
