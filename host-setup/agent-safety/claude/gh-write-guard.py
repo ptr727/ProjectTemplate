@@ -23,7 +23,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
      whose rules require a pull request, a force-push where history is protected, a delete where deletion
-     is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`). The
+     is blocked, or an explicit-bypass flag (`gh pr merge --admin`, `git commit/push --no-verify`, or a
+     `-c`/`--config-env` override of `core.hooksPath` on a commit or push). The
      branch's live rules are the judge, so a code-style develop is denied and a config-style develop is
      allowed with no hardcoded repo list.
   5. a hand-rolled reply/resolve for a review thread: a `resolveReviewThread` mutation via `gh api
@@ -901,6 +902,11 @@ def _git_subcommand_arglists(cmd, sub):
     such sequence, and a compound `<sub> A && <sub> B` yields two independent arg lists so both are seen,
     whether the two are joined by `&&` or written on their own lines.
     """
+    return [args for _, args in _git_subcommand_invocations(cmd, sub)]
+
+
+def _git_subcommand_invocations(cmd, sub):
+    """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
     n = len(toks)
     out = []
@@ -917,11 +923,25 @@ def _git_subcommand_arglists(cmd, sub):
                 j += 1
         if j < n and toks[j] == sub:
             args, k = _collect_arglist(toks, j + 1)
-            out.append(args)
+            out.append((toks[i + 1 : j], args))
             i = k
         else:
             i += 1  # this `git` was a different subcommand; keep scanning
     return out
+
+
+def _overrides_hooks_path(global_opts):
+    """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
+    for i, t in enumerate(global_opts):
+        if t in ("-c", "--config-env"):
+            value = global_opts[i + 1] if i + 1 < len(global_opts) else ""
+        elif t.startswith("--config-env="):
+            value = t[len("--config-env=") :]
+        else:
+            continue
+        if value.split("=", 1)[0].lower() == "core.hookspath":
+            return True
+    return False
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1948,6 +1968,16 @@ def _check_bypass_flags(cmd):
             "This uses --no-verify, which skips the git hooks (signing, lint, and pre-push gates). "
             "Skipping verification is a bypass; run the command without it." + _handoff(cmd)
         )
+    if any(
+        _overrides_hooks_path(opts)
+        for sub in ("commit", "push")
+        for opts, _ in _git_subcommand_invocations(cmd, sub)
+    ):
+        return "deny", (
+            "This overrides core.hooksPath for a commit or push, which runs whatever hooks that directory "
+            "holds instead of the repository's, and none where it holds none. That is a hook bypass; run "
+            "the command without the override." + _handoff(cmd)
+        )
     return "allow", ""
 
 
@@ -2333,6 +2363,34 @@ def _names_a_stream(target):
     return posixpath.normpath(re.sub(r"^/+", "/", target)).startswith(("/dev/", "/proc/"))
 
 
+_RESERVED_WORDS = frozenset(
+    {
+        "!",
+        "case",
+        "coproc",
+        "do",
+        "done",
+        "elif",
+        "else",
+        "esac",
+        "fi",
+        "for",
+        "function",
+        "if",
+        "in",
+        "select",
+        "then",
+        "time",
+        "until",
+        "while",
+        "{",
+        "}",
+        "[[",
+        "]]",
+    }
+)
+
+
 def _redirects_stdin(after_done):
     """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
@@ -2345,6 +2403,11 @@ def _redirects_stdin(after_done):
 
     The last binding is what counts, not the first to qualify. A shell applies redirections in
     order and each replaces the last, so `< in.txt < /dev/zero` reads the stream.
+
+    The loop's command ends at a reserved word as it does at a separator, so the `< f` in
+    `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
+    That includes a closing word such as `}`, since a pipe inside the compound it closes can feed
+    the loop, so `{ yes | while read l; do sleep 30; done } < f` reads the pipe.
     """
     bound = False
     i = 0
@@ -2353,6 +2416,8 @@ def _redirects_stdin(after_done):
         # Only this loop's own invocation, since a redirect on a later command binds nothing it reads.
         # `yes | while read l; do sleep 30; done; cat < f` is fed by the pipe.
         if _is_separator(tok):
+            return bound
+        if tok in _RESERVED_WORDS:
             return bound
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
@@ -2387,8 +2452,8 @@ def _redirects_stdin(after_done):
     return bound
 
 
-def _reads_its_input(cond, after_done):
-    """True if the loop's condition is a `read`, which ends the loop when the input is exhausted.
+def _reads_its_input(keyword, cond, after_done):
+    """True if a `while` loop's condition is a `read`, which ends it when the input is exhausted.
 
     `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
     clock, and throttling between iterations is the ordinary reason such a loop sleeps at all.
@@ -2403,6 +2468,8 @@ def _reads_its_input(cond, after_done):
     `find | while read`, which is the safe direction, and the bound such a loop needs is the
     ordinary one.
     """
+    if keyword != "while":
+        return False
     # A process substitution wears a redirect's clothes and is the same unknown producer a pipe is:
     # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
     if any(t.startswith(("<(", ">(")) for t in after_done):
@@ -2705,7 +2772,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # Measured: the same leak as having written no bound at all.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
-                cond, toks[done_at + 1 :]
+                tok, cond, toks[done_at + 1 :]
             )
             quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
             if sleeps and not bounded and not _bound_in_condition(cond, quoted):
@@ -3698,6 +3765,55 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "push --no-verify is a bypass even on a feature branch",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null commit -m x",
+        None,
+        {},
+        "deny",
+        "a per-invocation core.hooksPath on commit is a hook bypass",
+    ),
+    (
+        "git -C /repo -c core.hookspath=.none push origin feature/x",
+        None,
+        {"feature/x": set()},
+        "deny",
+        "a per-invocation core.hooksPath on push is a hook bypass, key matched case-insensitively",
+    ),
+    (
+        "git --config-env=core.hooksPath=HOOKS commit -m x",
+        None,
+        {},
+        "deny",
+        "--config-env naming core.hooksPath is the same override",
+    ),
+    (
+        "git --config-env core.hooksPath=HOOKS commit -m x",
+        None,
+        {},
+        "deny",
+        "--config-env with a separate value is the same override",
+    ),
+    (
+        "git -c core.editor=true commit -m x",
+        None,
+        {},
+        "allow",
+        "a -c override of another key is not a hook bypass",
+    ),
+    (
+        "git -c core.hooksPath=.githooks config --list",
+        None,
+        {},
+        "allow",
+        "a core.hooksPath override on a command that runs no commit or push hook is not denied here",
+    ),
+    (
+        "git commit -m 'git -c core.hooksPath=x commit'",
+        None,
+        {},
+        "allow",
+        "a hooksPath override inside a quoted message is not an option",
     ),
     (
         "git push -n origin develop",
@@ -5449,6 +5565,26 @@ _WAIT_CASES = [
         "a redirect on a later command binds nothing this loop reads",
     ),
     (
+        "if while read l; do sleep 30; done then echo x < f; fi",
+        "deny",
+        "nor does one after a reserved word, which ends the loop's command as a separator does",
+    ),
+    (
+        "if true; then while read l; do sleep 30; done else echo x < f; fi",
+        "deny",
+        "and an `else` ends it the same way a `then` does",
+    ),
+    (
+        "if true; then if true; then while read l; do sleep 30; done fi else echo x < f; fi",
+        "deny",
+        "even behind a closing word, which ends it too",
+    ),
+    (
+        "{ yes | while read l; do sleep 30; done } < f",
+        "deny",
+        "since a redirect after a closing word binds a compound whose pipe can still feed the loop",
+    ),
+    (
         "yes | while read l; do sleep 30; done {fd}< f",
         "deny",
         "nor does a descriptor named by a variable, which is never descriptor 0",
@@ -5482,6 +5618,11 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < f",
         "allow",
         "while a redirect from a file names a source that ends",
+    ),
+    (
+        "until read l; do sleep 30; done < f",
+        "deny",
+        "but an until loop over that same source never ends once the input is exhausted",
     ),
     (
         "timeout 600 bash -c '(while true; do sleep 30; done) &'",

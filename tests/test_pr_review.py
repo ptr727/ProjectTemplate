@@ -3017,6 +3017,86 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertIn("**Changes:**", overview_v2())
         self.assertEqual([], pr_review.unrecognized_in(overview_v2()))
 
+    def narrated(self) -> str:
+        """The format with its changes narrative led by bold phrases, as live bodies carry it."""
+        led = (
+            "**Changes:**\n- **Gadget sync (#4321):** Bumps the gadget pins.\n"
+            "- **Verification:** Every pin lands on the same version.\n"
+        )
+        body = overview_v2().replace("**Changes:**\n- Narrow the reader.\n", led)
+        self.assertIn("Gadget sync", body, "the narrative this case rewrites has moved")
+        return body
+
+    def test_a_bold_lead_in_the_changes_narrative_is_not_a_metadata_label(self) -> None:
+        """Each narrative bullet naming its change in bold read as an unknown label and blocked."""
+        self.assertEqual([], pr_review.unrecognized_in(self.narrated()))
+
+    def test_a_bold_lead_outside_the_changes_narrative_is_still_vetted(self) -> None:
+        """The narrative is skipped as a block, so the same bullet beside it still reports."""
+        body = self.narrated().replace(
+            "\n\n<details open>", "\n- **Sprocket tuning:** x\n\n<details open>", 1
+        )
+        self.assertIn("Sprocket tuning", body, "the anchor this case inserts at has moved")
+        self.assertEqual(["metadata label: Sprocket tuning"], pr_review.unrecognized_in(body))
+
+    def test_a_bullet_in_the_review_details_block_is_still_vetted(self) -> None:
+        """Only the narrative is skipped, and the first format states its metadata inside a block."""
+        body = closer_look().replace(
+            "- **Files reviewed:**", "- **Confidence:** high\n- **Files reviewed:**"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_block_whose_own_summary_is_unread_is_not_taken_for_a_nested_narrative(self) -> None:
+        """A region reads as narrative from its own opening summary, never a nested one."""
+        body = self.narrated() + (
+            "\n<details>\n<summary >Review details</summary>\n\n- **Confidence:** high\n\n"
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n</details>\n</details>\n"
+        )
+        self.assertIn("metadata label: Confidence", pr_review.unrecognized_in(body))
+
+    def test_a_bare_narrative_line_is_not_a_narrative_summary(self) -> None:
+        """A region opening on plain text naming the narrative carries no summary to skip it by."""
+        body = self.narrated() + (
+            "\n<details>\nWhat changed in this PR\n- **Confidence:** high\n</details>\n"
+        )
+        self.assertIn("metadata label: Confidence", pr_review.unrecognized_in(body))
+
+    def test_a_block_nested_in_the_narrative_is_still_vetted(self) -> None:
+        """Only the narrative's own lines are skipped, and a block inside it reads as any other."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n\n<details>\n<summary>Review details</summary>\n\n"
+            "- **Confidence:** high\n</details>\n</details>\n"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_narrative_nested_in_another_block_is_still_skipped(self) -> None:
+        """The narrative is found at any depth, so wrapping it does not bring the refusal back."""
+        body = self.narrated() + (
+            "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+            "<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Gadget (#1):** x\n</details>\n</details>\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_deeply_nested_body_is_read_without_exhausting_the_stack(self) -> None:
+        """Nesting depth is bounded only by the body size, so the walk holds no call per level."""
+        body = (
+            self.narrated() + "\n" + "<details>\n" * 600 + "- **Deep:** x\n" + "</details>\n" * 600
+        )
+        self.assertEqual(["metadata label: Deep"], pr_review.unrecognized_in(body))
+
+    def test_unvetted_labels_are_listed_in_body_order(self) -> None:
+        """The narrative is blanked in place, so a label inside a block keeps its position."""
+        body = self.narrated() + (
+            "\n<details>\n<summary>Review details</summary>\n\n- **Aaa:** x\n</details>\n\n"
+            "- **Bbb:** x\n"
+        )
+        self.assertEqual(
+            ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
+        )
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 

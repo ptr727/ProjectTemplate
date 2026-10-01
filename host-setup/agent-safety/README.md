@@ -55,7 +55,7 @@ text says, because the harm it covers was never in the text.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
-   `--no-verify` on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
+   `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -209,7 +209,7 @@ text says, because the harm it covers was never in the text.
    rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
-   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a loop whose condition is a
+   `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a `while` loop whose condition is a
    `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
    which is bounded by that input, so throttling between iterations with a `sleep` is ordinary work
    rather than a leak. Four things have to hold, and a real command defeated each of them.
@@ -325,7 +325,7 @@ flowchart TD
     isgit -- yes --> deny4["DENY - requirement 4\n(fails closed for a\nprotected-default branch\nwith undeterminable rules)"]
     isgit -- no --> isprimary{"A mutating git op\ntargeting a primary\ncheckout, not exempt?"}
     isprimary -- yes --> deny6["DENY - requirement 6"]
-    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nread of an input redirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
+    isprimary -- no --> iswait{"A while, until or\narithmetic-for loop\nthat sleeps, with no\narithmetic guard, no\nwhile read of an input\nredirect,\nand (no timeout, or a\nfork out of the timeout's\nreach)?"}
     iswait -- yes --> deny7["DENY - requirement 7"]
     iswait -- no --> isghwrite{"A GitHub-write\ncommand at all?"}
     isghwrite -- no --> allow["ALLOW"]
@@ -379,9 +379,10 @@ opt-in per clone, visible to anyone reading the repo, and bypassable on purpose,
 rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
-The two layers meet at requirement 4, which denies `--no-verify` unconditionally, so a Claude Code
-session meets a committed hook it cannot wave through with that flag while a human keeps the escape
-hatch. They do not compose into a seal, and saying so would be the more comfortable claim rather
+The two layers meet at requirement 4, which denies `--no-verify` and a `-c core.hooksPath=`
+override unconditionally, so a Claude Code session meets a committed hook it
+cannot wave through with either while a human keeps the escape hatch. They do not compose into a
+seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
 invocation, and `--no-verify` is the documented route rather than the only one. This requirement
 list also reaches Claude Code alone today, per the Per-Agent Status table below, so a Codex or
