@@ -3803,6 +3803,37 @@ class TestCoverageExitCodes(GqlCase):
         self.answer(payload([review(body=body)], files=["app/[id].tsx"]))
         self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
 
+    def test_a_bracket_in_a_row_is_a_literal_rather_than_a_character_class(self) -> None:
+        """A bracketed directory is a route name, grouped under a wildcard and naming no other."""
+        files = ["app/[slug]/page.tsx", "app/[slug]/layout.tsx"]
+        pr = payload([review(body=self.balanced(["app/[slug]/*.tsx"]))], files=files)
+        self.assertEqual("", pr_review.table_shortfall(pr))
+        pr = payload([review(body=self.balanced(["app/[id]/page.tsx"]))], files=["app/i/page.tsx"])
+        self.assertIn("names app/[id]/page.tsx, which the diff", pr_review.table_shortfall(pr))
+
+    def test_a_shortened_row_reads_a_wildcard_in_its_text_literally(self) -> None:
+        """A long title can carry a `?`, and the gap is what shortened it."""
+        long = "docs/Why Not? - A Rather Long Descriptive Name.md"
+        pr = payload([review(body=self.balanced(["docs/Why Not? - ... Name.md"]))], files=[long])
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_row_of_bare_wildcards_names_nothing(self) -> None:
+        """A row like `*/*` carries no evidence that any file was read, so it covers none."""
+        for row, path in (("*", "a"), ("*/*", "dir/a"), ("dir/*", "dir/a"), ("dir/?", "dir/a")):
+            with self.subTest(row=row):
+                pr = payload([review(body=self.balanced([row]))], files=[path])
+                self.assertIn(f"names {row}, which the diff", pr_review.table_shortfall(pr))
+
+    def test_a_row_with_several_gaps_is_decided_in_one_pass(self) -> None:
+        """Each gap stands for at least one character, and a near miss returns at once."""
+        self.assertTrue(pr_review.gap_fits("a-x-b-y-c", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("ab-c", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("a-bc", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("ab", ["ab", "b"]))
+        started = time.monotonic()
+        self.assertFalse(pr_review.gap_fits("a" * 60 + "c", ["a"] * 12 + ["b"]))
+        self.assertLess(time.monotonic() - started, 1.0)
+
     def test_a_pattern_or_gap_row_matching_nothing_or_too_much_keeps_the_table_out(self) -> None:
         """A pattern matching nothing, or a gap matching anything but one path, is a mismatch."""
         for rows, files, reason in (

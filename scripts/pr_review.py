@@ -473,7 +473,7 @@ TABLE_HEADER = re.compile(r"\s*\|\s*File\s*\|", re.IGNORECASE)
 # The alignment row under the header, which is punctuation rather than a file.
 TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
 TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
-TABLE_GLOB = frozenset("*?[")
+TABLE_GLOB = frozenset("*?")
 TABLE_GAP = " ... "
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
@@ -1846,28 +1846,60 @@ def bare_path(path: str) -> str:
     return "".join(c for c in path if unicodedata.category(c) != "Cf")
 
 
+def gap_fits(path: str, parts: list[str]) -> bool:
+    """Whether `path` holds `parts` in order, the first opening it, the last closing it.
+
+    At least one character stands between each part and the next. Each middle part is taken at
+    its leftmost place, which leaves the most room for the parts after it, so one pass decides it.
+    """
+    head, *middle, tail = parts
+    if not path.startswith(head) or not path.endswith(tail):
+        return False
+    at, end = len(head), len(path) - len(tail)
+    for part in middle:
+        found = path.find(part, at + 1, end - 1)
+        if found < 0:
+            return False
+        at = found + len(part)
+    return end - at >= 1
+
+
+def segment_fits(segment: str, pattern: str) -> bool:
+    """Whether one path segment matches one row segment, a `[` in either being a literal.
+
+    A segment holding a wildcard must also hold a literal character, so a row of bare wildcards
+    such as `*/*` names nothing rather than every path at that depth.
+    """
+    if not TABLE_GLOB & set(pattern):
+        return segment == pattern
+    if not set(pattern) - TABLE_GLOB:
+        return False
+    return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
+
+
 def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
     """The changed paths one table row names, out of `diff`, and whether it names one at most.
 
-    A row the diff carries names that path, whatever characters it holds. Otherwise a row holding
-    a glob character names every path it matches one segment at a time, so a `*` never crosses a
-    `/`. A row holding `TABLE_GAP` names every path that starts with the text before the gap and
-    ends with the text after it, the gap standing for at least one character. A gap row shortens
-    one path, so it names one at most.
+    A row names a path in one of three ways, and every claim here and in the digest that a table
+    names a set of paths counts all three. A row the diff carries names that path, whatever
+    characters it holds. Otherwise a row holding `TABLE_GAP` names every path `gap_fits`, its
+    other characters read literally, and since it shortens one path it names one at most.
+    Otherwise a row holding a wildcard names every path it matches one segment at a time, so a
+    `*` never crosses a `/`, per `segment_fits`.
     """
     if row in diff:
         return [row], True
+    if TABLE_GAP in row:
+        parts = row.split(TABLE_GAP)
+        return sorted(p for p in diff if gap_fits(p, parts)), True
     if TABLE_GLOB & set(row):
         parts = row.split("/")
         return sorted(
             p
             for p in diff
             if len(segments := p.split("/")) == len(parts)
-            and all(map(fnmatch.fnmatchcase, segments, parts))
+            and all(map(segment_fits, segments, parts))
         ), False
-    if TABLE_GAP in row:
-        gap = re.compile(".+".join(map(re.escape, row.split(TABLE_GAP))))
-        return sorted(p for p in diff if gap.fullmatch(p)), True
     return [], True
 
 
@@ -2172,8 +2204,8 @@ def table_covers(pr: dict) -> bool:
     or not, and the whole review history is in view. A pull request that ever had a partial
     round goes to the maintainer, since whether that partial still describes this diff is what
     a carry bound refusing, failing, or never reaching it cannot settle. A table naming a file
-    the diff does not carry, or leaving one out, is not this reading either, and neither is a
-    changed-file list the query cut short or returned malformed.
+    the diff does not carry, leaving one out, or shortening a path to fit several is not this
+    reading either, and neither is a changed-file list the query cut short or returned malformed.
     """
     return not table_shortfall(pr)
 
