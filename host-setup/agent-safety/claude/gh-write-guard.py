@@ -2415,6 +2415,8 @@ def _redirects_stdin(after_done, quoted=None):
     that is not skips the later binding that applies.
     It is not sure where the quoting is unknown or after an expansion that can hold a space,
     as in `< ${g:- #x} < /dev/zero`, where a `$(` arrives as a token ending in `$`.
+    The caller passes no mask where the command holds a carriage return, which the lex splits
+    words at and bash does not, so `log\r#x` is one word rather than a comment.
     A redirect whose target opens a comment has none, so it bounds nothing.
     """
 
@@ -2793,7 +2795,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # Measured: the same leak as having written no bound at all.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
-                tok, cond, toks[done_at + 1 :], mask[done_at + 1 :] if mask else None
+                tok,
+                cond,
+                toks[done_at + 1 :],
+                mask[done_at + 1 :] if mask and "\r" not in cmd else None,
             )
             quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
             if sleeps and not bounded and not _bound_in_condition(cond, quoted):
@@ -5644,6 +5649,11 @@ _WAIT_CASES = [
         "while read l; do sleep 30; done < f < '#x' < /dev/zero\n# don't",
         "deny",
         "nor does one whose quoting is unknown end the scan before the stream that binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f > log\r#x < /dev/zero",
+        "deny",
+        "and a `#` after a carriage return sits inside a word bash reads whole",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",
