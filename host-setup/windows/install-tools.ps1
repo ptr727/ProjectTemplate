@@ -123,8 +123,9 @@ Options:
 
 -Json writes one object carrying the same rows: "schema" (1), "platform" ("windows"), "tools",
 one entry per tool with "tool", "installed", "available", "source" (the winget package id),
-"mechanism" ("winget", how this script manages every tool), "status", "scope" and that tool's own "notes", and a top-level "notes" for
-what belongs to no tool. A version that was not read, or that did not resolve to one, is null.
+"mechanism" ("winget", how this script manages every tool), "status", "scope" and that tool's
+own "notes", and a top-level "notes" for what belongs to no tool. A version that was not read, or
+that did not resolve to one, is null.
 
 Run this without elevation. No scope is passed unless -Scope names one, so winget acts on the copy
 it finds and an installer that needs administrator asks for it itself. Naming a scope that

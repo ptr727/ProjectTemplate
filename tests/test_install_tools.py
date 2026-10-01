@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
 WINDOWS_INSTALLER = ROOT / "host-setup" / "windows" / "install-tools.ps1"
 
-AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f é end'
+AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f \u00e9 end'
 
 
 def linux_functions() -> str:
