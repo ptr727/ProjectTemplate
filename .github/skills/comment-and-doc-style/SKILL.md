@@ -286,7 +286,7 @@ would report a fixture rather than a claim about this repository.
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
 descriptions. A non-ASCII character is read against three tiers, because whether one is
 typography or meaning depends on where it sits. A character in no tier is a finding rather than a
-silent pass.
+silent pass, a letter of a recorded name excepted per the bullet below.
 
 - **Tier 1, never legitimate.** Typography carrying no meaning its ASCII form loses. Remove on
   sight:
@@ -309,8 +309,12 @@ silent pass.
 - **Unicode a developer deliberately typed** stays regardless of tier, such as emoji used for
   emphasis or as callout markers. Never strip a developer's own characters, this is developer
   authored text and not a license for the agent to add its own.
+- **A letter in a recorded name keeps its actual spelling.** A person's or a place's name that a
+  document records as data is written with its own letters and the marks they carry, since
+  folding one to ASCII records a different name. Anywhere else a letter the agent writes that no
+  tier covers takes its ASCII form.
 - **An unrecognized non-ASCII character is reported, not allowed.** Classify it into a tier above
-  before using it.
+  before using it. A letter of a recorded name is the one exception, per the bullet above.
 - **No semicolon in agent-authored prose.** Recast a mid-sentence semicolon as a comma or as two
   sentences. A semicolon separating items in a list that already contains commas, or a statement
   terminator in code, is unaffected.

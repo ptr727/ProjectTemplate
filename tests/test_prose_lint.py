@@ -144,6 +144,52 @@ class TestTierTables(BaitCase):
             ["charset-unknown"], self.kinds(f"a {unknown} here\n", {"charset-unknown"})
         )
 
+    def test_a_latin_letter_in_a_recorded_name_is_left_alone(self) -> None:
+        """Folding a name's letter to ASCII records a different name, so no tier rule reports it."""
+        rules = {"charset", "charset-unknown"}
+        line = "- b2 Zo\u00eb: married 1702 Ren\u00e9 M\u00fcller\n"
+        self.assertEqual([], self.kinds(line, rules))
+        for text in ("\u00c5se", "\u0141\u00f3d\u017a", "Rene\u0301", "o\u0323\u0301 here"):
+            with self.subTest(text=text):
+                self.assertEqual([], self.kinds(f"{text}\n", rules))
+
+    def test_a_letter_outside_the_latin_subset_is_still_reported(self) -> None:
+        """The gate accepts only a Latin letter, so another script or a styled form is reported."""
+        rules = {"charset", "charset-unknown"}
+        for ch in ("\u0430", "\u03bf", "\u02bc", "\u00aa", "\uff41", "\ufb01", "\u2090"):
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertEqual(["charset-unknown"], self.kinds(f"p{ch}ss here\n", rules))
+
+    def test_a_latin_named_symbol_is_still_reported(self) -> None:
+        """A Latin name alone is not a letter, so a symbol carrying one is reported, not passed."""
+        self.assertEqual(
+            ["charset-unknown"],
+            self.kinds("a \u271d here\n", {"charset", "charset-unknown"}),
+        )
+
+    def test_a_mark_that_spells_no_name_is_still_reported(self) -> None:
+        """A mark that is no diacritic, or that no Latin letter carries, is reported, not passed."""
+        rules = {"charset", "charset-unknown"}
+        for text in (
+            "a \u0301 here",
+            "\u0301 here",
+            "3\u0301 here",
+            "\u0436\u0301 here",
+            "pass\ufe0f word",
+            "a\U000e0100 b",
+            "a\u034fb",
+            "a\u0941 here",
+        ):
+            with self.subTest(text=text):
+                self.assertIn("charset-unknown", self.kinds(f"{text}\n", rules))
+
+    def test_tier_one_typography_beside_a_name_is_still_reported(self) -> None:
+        """Accepting a name's letters leaves the typography around it a finding."""
+        self.assertEqual(
+            ["charset"],
+            self.kinds("Ren\u00e9 M\u00fcller \u2014 married\n", {"charset", "charset-unknown"}),
+        )
+
     def test_keys_are_single_non_ascii_characters(self) -> None:
         """A key is a substitution target, so an ASCII key would flag text that is already fine."""
         for label, table in (
@@ -518,6 +564,36 @@ class TestSemicolon2(BaitCase):
                 {"semicolon"},
             ),
         )
+
+    def test_a_blockquoted_bullet_label_colon_does_not_announce_a_list(self) -> None:
+        """A callout's `>` is structure, so its bullet is judged as the same bullet unquoted."""
+        for text in (
+            "- **Label**: one, two; three\n",
+            "> - **Label**: one, two; three\n",
+            ">- **Label**: one, two; three\n",
+            "> > - **Label**: one, two; three\n",
+            "> 1. **Label:** one, two; three\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_blockquoted_line_keeps_the_exemptions_it_has_unquoted(self) -> None:
+        """Only the prefix is blanked, so a list in a callout keeps its semicolons."""
+        self.assertEqual(
+            [], self.kinds("> Inputs: a, b, and c; outputs: d and e.\n", {"semicolon"})
+        )
+
+    def test_a_blockquoted_table_row_judges_each_cell_alone(self) -> None:
+        """A row inside a callout is still a record of fields rather than one sentence.
+
+        Read whole, the first cell's colon and the last cell's comma made the row a list.
+        """
+        for text in (
+            "| S1: x | it runs; it gates | D1, D2 |\n",
+            "> | S1: x | it runs; it gates | D1, D2 |\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_an_abbreviation_does_not_end_a_sentence(self) -> None:
         """Splitting at `e.g.` cuts a list in half and flags the separator the exemption protects."""
