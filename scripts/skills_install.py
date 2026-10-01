@@ -79,6 +79,8 @@ def git_in(root, *args):
             check=False,
             timeout=SUBPROCESS_TIMEOUT,
         )
+    except UnicodeDecodeError:
+        raise
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() if r.returncode == 0 else None

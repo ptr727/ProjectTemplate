@@ -404,6 +404,14 @@ class GitInCase(unittest.TestCase):
             self.assertIsNone(skills_install.git_in(Path("."), "status"))
         self.assertEqual(run.call_args.kwargs["timeout"], skills_install.SUBPROCESS_TIMEOUT)
 
+    def test_output_that_does_not_decode_is_raised_rather_than_read_as_no_answer(self) -> None:
+        undecodable = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        with (
+            mock.patch("subprocess.run", side_effect=undecodable),
+            self.assertRaises(UnicodeDecodeError),
+        ):
+            skills_install.git_in(Path("."), "status", "--porcelain")
+
 
 class IntendedCommitCase(unittest.TestCase):
     """The default intended revision is the promoted main, remote-tracking ref first."""
