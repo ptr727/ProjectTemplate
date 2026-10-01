@@ -2554,6 +2554,8 @@ def _runs_as_command(toks, w):
     start = w
     while start > 0 and not _is_separator(toks[start - 1]):
         start -= 1
+        if _opens_with_separator(toks[start]):
+            break
     # A leading redirection and its target are not the run's command.
     # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
     while start < w and _is_redir_op(toks[start]):
@@ -2740,37 +2742,60 @@ def _eval_payload(toks, i, quoted=None):
     among the arguments is one of them, and becomes a separator only once bash rereads the payload.
     Where the quoting is unknown the payload runs to the end of the eval's line, since any separator
     on it may be a quoted one. A newline token is a real line break, since a quoted newline stays
-    inside its word, so no later line is read as the payload.
+    inside its word, so no later line is read as the payload. The index returned there is that of
+    the first separator-shaped token, since one may be real, and then a later eval is a command whose
+    own words the joined payload would no longer keep apart, so a reader reads that eval itself.
+    The tokenizer fuses a separator and a redirection that touch, as in `;>`, and that token ends the
+    arguments, since what follows its separator is another command.
 
     A redirection on the `eval` applies to the whole payload, so the payload is read as a group the
     redirection follows, with its target quoted, and binds no single command inside it.
     """
     n = len(toks)
-    if quoted is None:
-        k = next((j for j in range(i + 1, n) if toks[j] == "\n"), n)
-        words, redirs = toks[i + 1 : k], []
-    else:
-        words, redirs = [], []
-        k = i + 1
-        while k < n:
-            t = toks[k]
-            if not quoted[k] and _is_separator(t):
-                break
-            if not quoted[k] and _is_redir_op(t):
-                if words and words[-1].isdigit() and not quoted[k - 1]:
-                    redirs.append(words.pop())
-                redirs.append(t)
-                if k + 1 < n and (quoted[k + 1] or not _is_shell_op(toks[k + 1])):
-                    redirs.append(shlex.quote(toks[k + 1]))
-                    k += 1
-            else:
-                words.append(t)
-            k += 1
+    known = quoted is not None
+    mask = quoted if known else [False] * n
+    words, redirs = [], []
+    k = i + 1
+    while k < n:
+        t = toks[k]
+        if t == "\n" or (known and not mask[k] and _opens_with_separator(t)):
+            break
+        if not mask[k] and _is_redir_op(t) and not _opens_with_separator(t):
+            if words and words[-1].isdigit() and not mask[k - 1]:
+                redirs.append(words.pop())
+            redirs.append(t)
+            if k + 1 < n and (mask[k + 1] or not _is_shell_op(toks[k + 1])):
+                redirs.append(shlex.quote(toks[k + 1]))
+                k += 1
+        else:
+            words.append(t)
+        k += 1
     if words[:1] == ["--"]:
         words = words[1:]
+    end = k
+    if not known:
+        end = next(
+            (
+                j
+                for j in range(i + 1, k)
+                if _is_separator(toks[j]) or _opens_with_separator(toks[j])
+            ),
+            k,
+        )
     if not redirs:
-        return " ".join(words), k
-    return "{ " + " ".join(words) + "\n} " + " ".join(redirs), k
+        return " ".join(words), end
+    return "{ " + " ".join(words) + "\n} " + " ".join(redirs), end
+
+
+def _opens_with_separator(tok):
+    """True if the operator token `tok` starts with a separator, alone or fused to a redirection.
+
+    `;>`, `|>`, and `&&>` each end the command before the redirection, where `&>` and `>|` are
+    redirections whole.
+    """
+    if not _is_shell_op(tok):
+        return False
+    return tok[0] in ";|()\n" or tok.startswith("&&") or (tok[0] == "&" and tok[1:2] != ">")
 
 
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
@@ -4991,6 +5016,31 @@ _WAIT_CASES = [
         "where the quoting is unknown an eval payload still ends at its own line, so a later line keeps its quoting",
     ),
     (
+        'eval >/dev/null \'until false; do sleep 1; done\'\necho "$(echo "it\'s")"',
+        "deny",
+        "where the quoting is unknown an eval's redirection still binds the whole payload rather than opening it",
+    ),
+    (
+        'eval true; eval \'until false; do sleep 1; done\'\necho "$(echo "it\'s")"',
+        "deny",
+        "where the quoting is unknown an eval after a separator is read itself, its own words kept apart",
+    ),
+    (
+        "eval echo;>/dev/null eval 'until false; do sleep 1; done'",
+        "deny",
+        "a separator fused to a redirection ends an eval's arguments, so the eval after it is a command",
+    ),
+    (
+        "echo x;>/dev/null bash -c 'until false; do sleep 1; done'",
+        "deny",
+        "a separator fused to a redirection starts a new run, so the wrapper after it runs",
+    ),
+    (
+        "eval echo &>/dev/null eval 'until false; do sleep 1; done'",
+        "allow",
+        "`&>` is a redirection whole, so the eval after it is an argument and its loop's quoting is gone",
+    ),
+    (
         "while true; do eval 'sleep 5'; done",
         "deny",
         "a sleep an eval runs is a sleep, the same as one a wrapper runs",
@@ -6256,6 +6306,10 @@ def _selftest():
             lambda: _unbounded_wait_loop("eval " * 200 + "echo sleep > f"),
         ),
         ("a sleep scan", lambda: _sleeps(_shell_tokens("eval " * 200 + "echo x > f"))),
+        (
+            "an unknown-quoting wait-loop scan",
+            lambda: _unbounded_wait_loop("eval " * 200 + 'x\necho "$(echo "it\'s")"'),
+        ),
     ):
         start = time.monotonic()
         read()
