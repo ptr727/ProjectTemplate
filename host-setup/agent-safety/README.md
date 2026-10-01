@@ -197,10 +197,15 @@ text says, because the harm it covers was never in the text.
    (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner wait is
    denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
-   document quoting the forbidden shape is written rather than denied. A line holding `((` beside
-   a `<<` is read once as opening nothing and once per `<<` whose tag the rule accepts and whose
-   non-empty body a later line closes, since an arithmetic shift tokenizes as a redirection does, and any
-   reading holding an unbounded wait denies the command. A command with more readings than the
+   document quoting the forbidden shape is written rather than denied. A line opening several
+   heredocs is read as opening its first alone and, where every body closes, as opening each in
+   order through the last one that is data, as bash reads them, keeping whole a body fed to a shell
+   before it. The first reading covers a quoted `<<` word or one inside a substitution, which the
+   rule tokenizes as an opener although bash queues no body for it. A line holding `((` or `$[`
+   beside a `<<` is read as opening nothing, and as opening each `<<` whose tag the rule accepts
+   alone and together with every later one whose body closes, wherever that reading closes its
+   first body, ends on a body that is data, and removes at least one line, since an arithmetic
+   shift tokenizes as a redirection does. Any reading holding an unbounded wait denies the command. A command with more readings than the
    rule builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
