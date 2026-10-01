@@ -588,6 +588,10 @@ class WriteScopeCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("registry drift", err)
         self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
+        fake = FakeGh(fork=False)
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
+        self.assertEqual(code, 1)
+        self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
 
     def test_a_labeled_unregistered_fork_files_and_asks_once_whether_it_is_one(self) -> None:
         fake = FakeGh()

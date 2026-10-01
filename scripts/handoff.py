@@ -69,10 +69,11 @@ label set does not belong on it. There the reads warn and answer as an empty cha
 missing the label refuses, a repository under another owner and an unregistered repository of the
 owner's that is not a fork among them.
 
-The two writing subcommands, `new` and `link`, are bounded whatever the label state, as
-`pr_review.py` bounds its own writes. They refuse a repository under another owner before any
-call, and an unregistered repository of the owner's unless it is a fork, since these writes run as
-subprocesses a write guard on the caller never sees. The reads stay open everywhere.
+The two writing subcommands, `new` and `link`, are bounded whatever the label state, an
+in-process refusal of the kind `pr_review.py` makes, with the owner read from the registry. They
+refuse a repository under another owner before any call, and an unregistered repository of the
+owner's unless it is a fork, since these writes run as subprocesses a write guard on the caller
+never sees. That write scope bounds no read.
 """
 
 from __future__ import annotations
