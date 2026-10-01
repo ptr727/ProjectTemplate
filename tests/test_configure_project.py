@@ -199,13 +199,26 @@ class LabelsPayloadCase(unittest.TestCase):
                 self.assertIn(expected, out)
 
     def test_a_jq_that_fails_is_not_blamed_on_the_payload(self) -> None:
-        """A jq that fails, whether at parsing or at compiling test/1, must not read as a bad label."""
-        prelude = 'jq() {\n  echo "jq: error: test/1 is not defined" >&2\n  return 3\n}\n'
+        """A jq failing inside a contract step, as one lacking test/1 does, must not read as a bad label."""
+        prelude = (
+            "jq() {\n"
+            '  case "$*" in\n'
+            '    *"test("*) echo "jq: error: test/1 is not defined" >&2; return 3 ;;\n'
+            '    *) command jq "$@" ;;\n'
+            "  esac\n"
+            "}\n"
+        )
         ok, out = self.verdict('[{"name": "a", "color": "a2eeef", "description": "x"}]', prelude)
         self.assertFalse(ok)
         self.assertIn("jq failed (exit 3", out)
         self.assertIn("test/1 is not defined", out)
         self.assertNotIn("field contract", out)
+
+    def test_a_jq_that_fails_while_parsing_is_not_blamed_on_the_payload(self) -> None:
+        prelude = 'jq() {\n  echo "jq: unusable" >&2\n  return 3\n}\n'
+        ok, out = self.verdict('[{"name": "a", "color": "a2eeef", "description": "x"}]', prelude)
+        self.assertFalse(ok)
+        self.assertIn("jq failed (exit 3", out)
 
 
 class ProjectLookupCase(unittest.TestCase):
