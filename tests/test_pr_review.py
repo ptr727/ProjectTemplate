@@ -3013,12 +3013,25 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn(f"is on {OLD[:8]}, where the table leaves out c.py", out)
 
     def test_a_partial_on_record_keeps_a_carried_table_out(self) -> None:
+        """The partial sits on a commit the statement carry refuses, so the table path decides."""
+        older = "c" * 40
         pr = self.tabled()
-        pr["reviews"]["nodes"].insert(0, review(oid=OLD, body=self.PART, at=EARLY, rid="P"))
+        pr["reviews"]["nodes"].insert(
+            0, review(oid=older, body=self.PART, at="2026-08-02T09:00:00Z", rid="P")
+        )
+        with self.compare(**{older: ["a.py"], OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn("COVERAGE IS NOT CARRIED", out)
+        self.assertIn("NO FILE TABLE STANDS IN: a Copilot round on this pull request states", out)
+
+    def test_a_review_history_past_the_window_keeps_a_carried_table_out(self) -> None:
+        pr = self.tabled()
+        pr["reviews"]["pageInfo"]["hasPreviousPage"] = True
         with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
             code, out = self.verdict(pr)
-        self.assertEqual(42, code)
-        self.assertNotIn("FILE TABLE", out)
+        self.assertEqual(45, code)
+        self.assertIn("NO FILE TABLE STANDS IN: the review history is longer", out)
 
     def test_a_head_table_that_misses_the_diff_is_not_overruled_by_an_earlier_one(self) -> None:
         pr = self.tabled(head_body=summarized(["a.py"], covers=""))
