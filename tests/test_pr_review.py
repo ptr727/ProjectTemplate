@@ -5504,15 +5504,15 @@ class TestCli(GqlCase):
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("status=PENDING", out)
 
-    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_still_signals(self) -> None:
-        """This pull request's own older refusal is exactly as much evidence as any other pull
-        request's, once nothing on the current head answers it directly first."""
-        self.answer(payload([]))
+    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_is_46(self) -> None:
+        """This pull request's own older refusal is read from its own reviews, ahead of 47."""
+        self.answer(payload([review(oid=OLD, body=QUOTA_REFUSED, at=EARLY)]))
         self.wire_history([hist_review(7, QUOTA_REFUSED, at=EARLY)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(47, self.cli(["wait", "7"]))
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
-        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED", self.out.getvalue())
+        self.assertNotIn("REPO_WIDE", self.out.getvalue())
 
     def test_a_genuine_review_since_the_refusal_clears_the_signal(self) -> None:
         """The most recent record settles it: a working round after the refusal spends it."""
@@ -5557,6 +5557,19 @@ class TestCli(GqlCase):
             payload([review(oid=OLD, body=ERROR_REFUSED), review(rid="PRR_new")]),
         )
         calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_pending_request_past_a_quota_round_is_still_polled_for(self) -> None:
+        """The repo-wide signal holds back a request too, and a pending one still lands."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD, body=QUOTA_REFUSED)], pending=True),
+            payload([review(oid=OLD, body=QUOTA_REFUSED), review(rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, QUOTA_REFUSED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_called()

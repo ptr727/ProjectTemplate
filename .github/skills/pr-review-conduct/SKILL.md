@@ -65,8 +65,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    the loop does clears, the pull request's newest Copilot review being an account-quota refusal
    or an error refusal read as a possible quota hit, on this head or an earlier one, which is the
    case "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account
-   state read from the reviewer's activity elsewhere when this head carries none of its own, and exit
-   `41` holding across several heads with no cause its body names reaches it the slower way.
+   state read from the reviewer's activity elsewhere when this head carries none of its own, and
+   exit `41` holding across several heads with no cause its body names reaches it the slower way.
    Those three are `wait`'s alone: `status` exits 0 over a refusal, carrying it as `refusal=` in
    the digest line instead, so reading that exit code as the absence of one would falsely satisfy
    this item on the exact state it exists to catch. That is where the
@@ -156,7 +156,7 @@ must have done.
   than a review, and so is one saying only that Copilot encountered an error, which is what the
   weekly rate limit posts. Either covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
-  reviewer's run log names a reset time `pr_review.py` reports it. That case goes to the
+  reviewer's run log names a reset time `pr_review.py` reports it. Either refusal goes to the
   maintainer, rather than into a wait.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's

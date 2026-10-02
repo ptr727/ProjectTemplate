@@ -58,12 +58,13 @@ Subcommands
            comparison could not be read, run `status` again. Past those,
            hand the state to the maintainer rather than retrying into it, since a round
            re-requested on the same head states coverage or carries a table only by chance.
-           A refusal naming the account quota still reads as absent here, exit 0, since a
-           refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
-           regardless, and `refusal=ERROR` for an error refusal whose run log names no rate
-           limit or could not be read. Either field reads a refusal on an earlier head where it
-           is the pull request's newest Copilot review and nothing covers the head. `wait` is where that state gets its own exit codes, 46 and 47 below,
-           because only `wait` is the command a caller might otherwise poll out a timeout on.
+           A refusal naming the account quota still reads as absent here, exit 0, since a refusal
+           covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
+           `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
+           read. Either field reads a refusal on an earlier head where it is the pull request's
+           newest Copilot review and nothing covers the head. `wait` is where that state gets its
+           own exit codes, 46 and 47 below, because only `wait` is the command a caller might
+           otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
            CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
            tracked at the identity and thread-resolution level, since an open thread blocks a
@@ -166,17 +167,17 @@ Subcommands
   wait     Request a review where none is outstanding, then poll until Copilot's review lands
            on the current head, then print the digest. The auto-request is skipped once a
            review already covers the head, once Copilot has already answered outside a formal
-           review, or once one is already in the pending request set, so calling `wait` again on
-           the same PR never double-requests. It is also skipped under 46's and 47's quota
-           readings below, since a request into a reached limit spends quota and returns nothing. It reads the Copilot reviewer's bot id from the
-           repository's own most recently updated PRs rather than a fixed id: the last
-           HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window carries no
-           Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would otherwise
-           empty it on every call for as long as the outage runs. Requests nothing
-           (falling back to polling only) where both windows come up empty, since a repository
-           with no Copilot review in either has nothing to read the id from and a fabricated one
-           is never an option. The loop runs in-process, so a 45-minute wait costs one agent
-           turn, not 90.
+           review, or once one is already in the pending request set, so calling `wait` again on the
+           same PR never double-requests. It is also skipped under 46's and 47's quota readings
+           below, since a request into a reached limit spends quota and returns the same refusal. It
+           reads the Copilot reviewer's bot id from the repository's own most recently updated PRs
+           rather than a fixed id: the last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that
+           narrow window carries no Copilot activity at all, since an outage that outlasts
+           HISTORY_PRS PRs would otherwise empty it on every call for as long as the outage runs.
+           Requests nothing (falling back to polling only) where both windows come up empty, since a
+           repository with no Copilot review in either has nothing to read the id from and a
+           fabricated one is never an option. The loop runs in-process, so a 45-minute wait costs
+           one agent turn, not 90.
            Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
@@ -193,27 +194,25 @@ Subcommands
            not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
            since the rollup carries checks no ruleset requires. The digest reports the check
            in both cases, so a shape outside 44 is still named rather than lost.
-           46 = the newest Copilot review on the pull request, on this head or an earlier one,
-           is a refusal naming the account quota, or one saying only that it encountered an
-           error, printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts
-           that error body and writes its cause to the reviewer's own Actions run, so that run's
-           job log is read: a logged rate limit reports as the quota with its reset time, and
-           anything else, an unreadable log included, as a possible quota hit. Either way no
-           request is sent, and a request already pending is still polled for. That is an
-           account-level state a re-request or a further wait does not clear, unlike 41's other
-           causes (a file count
-           over the limit, cleared by splitting the pull request), so it is its own code rather
-           than folded into 41: proceed on the other reviewers' coverage instead of retrying.
-           47 = this pull request's current head carries no Copilot activity of its own, and
-           the reviewer's own most recent activity found in the repository, a review or comment
-           on any other pull request, is that same account-quota refusal with nothing having
-           answered it since. A refusal on this pull request itself is 46 instead. The poll that would
-           otherwise have run is skipped for this reason, printed as a `note:` line before the
-           digest, rather than spent finding the same account state out a call late, and no
-           request is sent. Pass --ignore-quota-signal to request and poll --timeout anyway once
-           the quota is believed to have reset. 46 is read from this pull request's own reviews
-           and always takes priority over 47,
-           so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
+           46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
+           refusal naming the account quota, or one saying only that it encountered an error,
+           printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
+           body and writes its cause to the reviewer's own Actions run, so that run's job log is
+           read: a logged rate limit reports as the quota with its reset time, and anything else, an
+           unreadable log included, as a possible quota hit. Either way no request is sent, and a
+           request already pending is still polled for. That is an account-level state a re-request
+           or a further wait does not clear, unlike 41's other causes (a file count over the limit,
+           cleared by splitting the pull request), so it is its own code rather than folded into 41:
+           proceed on the other reviewers' coverage instead of retrying.
+           47 = this pull request's current head carries no Copilot activity of its own, and the
+           reviewer's own most recent activity found in the repository, a review or comment on any
+           other pull request, is that same account-quota refusal with nothing having answered it
+           since. A refusal on this pull request itself is 46 instead. The poll that would otherwise
+           have run is skipped for this reason, printed as a `note:` line before the digest, rather
+           than spent finding the same account state out a call late, and no request is sent. Pass
+           --ignore-quota-signal to request and poll --timeout anyway once the quota is believed to
+           have reset. 46 is read from this pull request's own reviews and always takes priority
+           over 47, so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
            would otherwise apply.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
@@ -4132,7 +4131,7 @@ def main(argv: list[str] | None = None) -> int:
             "nothing and stops here. Pass --ignore-quota-signal to request and poll anyway, "
             "once the limit is believed to have reset."
         )
-    elif signal:
+    elif signal and not reviewer_requested(pr):
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
