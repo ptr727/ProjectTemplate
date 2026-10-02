@@ -7562,7 +7562,8 @@ class TestAttest(unittest.TestCase):
             "import json, os, sys\n"
             f"open({str(record)!r}, 'a').write(os.getcwd() + '|' + ' '.join(sys.argv[1:]) + '\\n')\n"
             "if sys.argv[1] == 'status':\n"
-            "    print(json.dumps({'findings': {'agent-skill': 2, 'coderabbit-cli': 1}}))\n"
+            f"    print(json.dumps({{'covered': {check_exit == 0}, 'receiptProblems': [],"
+            " 'findings': {'agent-skill': 2, 'coderabbit-cli': 1}}))\n"
             f"sys.exit({check_exit})\n"
         )
         self.addCleanup(stub.unlink)
@@ -7585,9 +7586,7 @@ class TestAttest(unittest.TestCase):
             self.posted[0],
         )
         calls = [line.split("|") for line in self.record.read_text().splitlines()]
-        self.assertEqual(
-            ["check --target develop", "status --target develop"], [c[1] for c in calls]
-        )
+        self.assertEqual(["status --target develop"], [c[1] for c in calls])
         for cwd, _ in calls:
             self.assertEqual(os.path.realpath(self.dir), os.path.realpath(cwd))
 
@@ -7674,6 +7673,7 @@ class TestAttestationReadings(unittest.TestCase):
             ),
             ([self.comment(f"Attest posts `{marker}` as its last line.")], False),
             ([self.comment(f"Quoted:\n\n```\n{marker}\n```\n")], False),
+            ([self.comment(f"A span `\n{marker}\n` across lines.")], False),
             ([], False),
         ):
             with self.subTest(nodes=nodes):

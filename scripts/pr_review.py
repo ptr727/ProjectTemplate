@@ -14,11 +14,12 @@ Subcommands
            `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
            refuses unless the checkout (--checkout, default the current directory) is at the pull
            request's head with no change beyond it, its merge base with the base branch is the pull
-           request's own, and `local_review.py check` passes against the base. Exit 0 = posted, 64 =
-           the write scope could not be established or excludes the target, 65 = the pull request
-           could not be read, 66 = the response did not confirm the comment, 67 = the checkout is
-           not the head, holds changes, or measures another merge base, or that merge base could not
-           be read, 68 = no current local pass covers the content.
+           request's own, and `local_review.py status` reports a covering pass against the base,
+           read once for the coverage and the findings count alike. Exit 0 = posted, 64 = the write
+           scope could not be established or excludes the target, 65 = the pull request could not be
+           read, 66 = the response did not confirm the comment, 67 = the checkout is not the head,
+           holds changes, or measures another merge base, or that merge base could not be read, 68 =
+           no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
@@ -3783,13 +3784,13 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
     The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
-    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt
-    where it lives and posts a comment the gate can read, and only after four checks, each of
-    which would otherwise vouch for content the pull request does not carry: the checkout's
-    HEAD is the pull request's head, the checkout holds no change beyond that commit, its merge
-    base with the base branch is the pull request's own, and `local_review.py check` finds a
-    current pass against the pull request's base. The first two are read again once the check
-    returns, since the checkout can move while it runs.
+    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt where it
+    lives and posts a comment the gate can read, and only after four checks, each of which would
+    otherwise vouch for content the pull request does not carry: the checkout's HEAD is the pull
+    request's head, the checkout holds no change beyond that commit, its merge base with the base
+    branch is the pull request's own, and `local_review.py status` reports a current pass against
+    the pull request's base, one read answering the coverage and the findings count alike. The first
+    two are read again once the check returns, since the checkout can move while it runs.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -3851,27 +3852,15 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
             "repository"
         )
         return 67
-    try:
-        check = subprocess.run(
-            [sys.executable, str(LOCAL_REVIEW), "check", "--target", base],
-            cwd=checkout,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        check = subprocess.CompletedProcess([], 2, "", "local_review.py could not be run")
-    if check.returncode != 0:
+    covered, findings, said = receipt_reading(checkout, base)
+    if not covered:
         print(
-            f"status=NO_LOCAL_PASS nothing was written: `local_review.py check --target {base}` "
-            f"exited {check.returncode}, so no recorded pass covers this content. Run the "
-            "local strict review, record it, and attest again"
+            f"status=NO_LOCAL_PASS nothing was written: `local_review.py status --target {base}` "
+            "reports no recorded pass covering this content. Run the local strict review, "
+            "record it, and attest again"
         )
-        print(f"  {(check.stdout or check.stderr).strip()[:400]}")
+        print(f"  {said.strip()[:400]}")
         return 68
-    findings = pass_findings(checkout, base)
     after = _git(checkout, "rev-parse", "HEAD")
     still = _git(
         checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
@@ -3891,11 +3880,13 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     return comment_on_pr(owner, repo, num, body)
 
 
-def pass_findings(checkout: str, base: str) -> str:
-    """The findings the covering passes recorded, summed, or "unknown" where any recorded none.
+def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
+    """Whether a recorded pass covers the checkout's content, its findings, and what was read.
 
-    Shown rather than gated, since a local pass's findings are advisory, and a pass that raised
-    some is otherwise invisible on the pull request it now covers.
+    One `local_review.py status` read answers both, so the coverage and the count describe the
+    same receipt, where a check followed by a second read could straddle a record replacing it.
+    The findings are the covering passes' counts summed, or "unknown" where any recorded none,
+    and they are shown rather than gated, since a local pass's findings are advisory.
     """
     try:
         proc = subprocess.run(
@@ -3907,12 +3898,24 @@ def pass_findings(checkout: str, base: str) -> str:
             timeout=120,
             check=False,
         )
-        counts = json.loads(proc.stdout).get("findings") or {}
-    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
-        return "unknown"
-    if not counts or not all(isinstance(n, int) and n >= 0 for n in counts.values()):
-        return "unknown"
-    return str(sum(counts.values()))
+    except (OSError, subprocess.SubprocessError):
+        return False, "unknown", "local_review.py could not be run"
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return False, "unknown", proc.stdout or proc.stderr
+    if proc.returncode != 0 or not isinstance(data, dict) or data.get("covered") is not True:
+        return False, "unknown", proc.stdout or proc.stderr
+    if data.get("receiptProblems"):
+        return False, "unknown", proc.stdout
+    counts = data.get("findings")
+    if (
+        not isinstance(counts, dict)
+        or not counts
+        or not all(isinstance(n, int) and n >= 0 for n in counts.values())
+    ):
+        return True, "unknown", proc.stdout
+    return True, str(sum(counts.values())), proc.stdout
 
 
 def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
@@ -3950,7 +3953,7 @@ def attestation(pr: dict) -> str | None:
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
-        body = strip_fences(node.get("body") or "", to_end=True)
+        body = CODE_SPAN.sub(" ", strip_fences(node.get("body") or "", to_end=True))
         for m in ATTESTATION.finditer(body):
             if m.group(1) == head and m.group(2) == base:
                 return m.group(3)
