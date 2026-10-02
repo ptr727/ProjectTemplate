@@ -7011,6 +7011,7 @@ WRITE_COMMANDS: dict[str, list[str]] = {
         "Fixed.",
     ],
     "wait": ["wait", "7", "--repo", "someone-else/r"],
+    "attest": ["attest", "7", "--repo", "someone-else/r"],
 }
 
 # The parser's remaining `cmd` choices, none of which write.
@@ -7045,6 +7046,113 @@ class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
                 self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
                 gql.assert_not_called()
                 gh_graphql.assert_not_called()
+
+
+class TestAttest(unittest.TestCase):
+    """A local pass is published only for the content the pull request's head carries."""
+
+    def setUp(self) -> None:
+        self.dir = self.enterContext(tempfile.TemporaryDirectory())
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        for args in (
+            ["init", "-q", "-b", "feature"],
+            [
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "base",
+            ],
+        ):
+            subprocess.run(["git", "-C", self.dir, *args], check=True, env=env)
+        self.head = subprocess.run(
+            ["git", "-C", self.dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        ).stdout.strip()
+        self.enterContext(mock.patch.object(pr_review, "in_scope", return_value=(True, "")))
+        self.posted: list[str] = []
+
+        def post(_o: str, _r: str, _n: int, body: str) -> int:
+            self.posted.append(body)
+            return 0
+
+        self.enterContext(mock.patch.object(pr_review, "comment_on_pr", side_effect=post))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def run_attest(self, head: str, check_exit: int = 0) -> int:
+        stub = Path(self.dir).parent / f"stub-{check_exit}.py"
+        stub.write_text(f"import sys\nsys.exit({check_exit})\n")
+        self.addCleanup(stub.unlink)
+        target = {"headRefOid": head, "baseRefName": "develop"}
+        with (
+            mock.patch.object(pr_review, "gql", return_value=target),
+            mock.patch.object(pr_review, "LOCAL_REVIEW", stub),
+        ):
+            return pr_review.attest("o", "r", 7, self.dir)
+
+    def test_a_covered_head_is_attested_by_its_full_commit(self) -> None:
+        self.assertEqual(0, self.run_attest(self.head))
+        self.assertEqual(1, len(self.posted))
+        self.assertIn(f"<!-- fleet-local-review: head={self.head} -->", self.posted[0])
+
+    def test_a_checkout_at_another_commit_is_refused(self) -> None:
+        self.assertEqual(67, self.run_attest("f" * 40))
+        self.assertEqual([], self.posted)
+
+    def test_a_checkout_holding_changes_is_refused(self) -> None:
+        (Path(self.dir) / "extra.txt").write_text("not in the head\n")
+        self.assertEqual(67, self.run_attest(self.head))
+        self.assertEqual([], self.posted)
+
+    def test_no_current_local_pass_is_refused(self) -> None:
+        self.assertEqual(68, self.run_attest(self.head, check_exit=1))
+        self.assertEqual([], self.posted)
+
+
+class TestAttestationReadings(unittest.TestCase):
+    """What the gate reads an attestation, a promotion, and a first round from."""
+
+    def comment(self, body: str, association: str = "OWNER") -> dict:
+        return {"body": body, "authorAssociation": association, "author": {"login": "someone"}}
+
+    def test_only_a_writer_s_marker_for_the_current_head_attests(self) -> None:
+        marker = f"<!-- fleet-local-review: head={HEAD} -->"
+        for nodes, expected in (
+            ([self.comment(marker)], True),
+            ([self.comment(marker, "COLLABORATOR")], True),
+            ([self.comment(marker, "NONE")], False),
+            ([self.comment(marker, "CONTRIBUTOR")], False),
+            ([self.comment(f"<!-- fleet-local-review: head={OLD} -->")], False),
+            ([], False),
+        ):
+            with self.subTest(nodes=nodes):
+                pr = {"headRefOid": HEAD, "comments": {"nodes": nodes}}
+                self.assertIs(expected, pr_review.attested(pr))
+
+    def test_a_promotion_is_a_pull_request_into_the_default_branch(self) -> None:
+        for base, default, expected in (
+            ("main", "main", True),
+            ("develop", "main", False),
+            ("develop", None, True),
+        ):
+            with self.subTest(base=base, default=default):
+                pr = {
+                    "baseRefName": base,
+                    "baseRepository": {"defaultBranchRef": {"name": default} if default else None},
+                }
+                self.assertIs(expected, pr_review.promotion(pr))
+
+    def test_a_refusal_is_not_a_first_round(self) -> None:
+        self.assertFalse(pr_review.first_round_done(payload([review(body=REFUSED)])))
+        self.assertTrue(pr_review.first_round_done(payload([review(oid=OLD)])))
+        self.assertFalse(pr_review.first_round_done(payload([])))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):

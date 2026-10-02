@@ -814,6 +814,14 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ id url } }}
 """
 
+Q_ATTEST_TARGET = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
+"""
+ATTESTATION = re.compile(r"<!-- fleet-local-review: head=([0-9a-f]{40}) -->")
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
+
 # The conversation-comment and thread mutations the runbook publishes.
 # `url` is fetched because it is the one field that confirms a comment or reply carried a body.
 # A reply that posted empty still returns a comment, and three did, each then resolved.
@@ -3552,6 +3560,123 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     return 0
 
 
+def attest(owner: str, repo: str, num: int, checkout: str) -> int:
+    """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
+
+    The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
+    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt
+    where it lives and posts a comment the gate can read, and only after three checks, each of
+    which would otherwise vouch for content the pull request does not carry: the checkout's
+    HEAD is the pull request's head, the checkout holds no change beyond that commit, and
+    `local_review.py check` finds a current pass against the pull request's base.
+    """
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
+        return 64
+    target = gql(Q_ATTEST_TARGET, owner, repo, num) or {}
+    head, base = target.get("headRefOid") or "", target.get("baseRefName") or ""
+    if not head or not base:
+        print(
+            f"status=TARGET_NOT_READ nothing was written: {owner}/{repo} #{num} did not return "
+            "its head commit and base branch"
+        )
+        return 65
+    local = _git(checkout, "rev-parse", "HEAD")
+    dirty = _git(checkout, "status", "--porcelain")
+    if local.returncode != 0 or dirty.returncode != 0:
+        print(
+            f"status=CHECKOUT_NOT_READ nothing was written: {checkout} is not a readable checkout"
+        )
+        return 67
+    if local.stdout.strip() != head:
+        print(
+            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout is at "
+            f"{local.stdout.strip()[:8]} and the pull request's head is {head[:8]}, so push or "
+            "fetch until they agree"
+        )
+        return 67
+    if dirty.stdout.strip():
+        print(
+            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout holds changes the "
+            "head commit does not, so a pass over it does not describe what was pushed"
+        )
+        return 67
+    try:
+        check = subprocess.run(
+            [sys.executable, str(LOCAL_REVIEW), "check", "--target", base],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        check = subprocess.CompletedProcess([], 2, "", "local_review.py could not be run")
+    if check.returncode != 0:
+        print(
+            f"status=NO_LOCAL_PASS nothing was written: `local_review.py check --target {base}` "
+            f"exited {check.returncode}, so no recorded pass covers this content. Run the "
+            "local strict review, record it, and attest again"
+        )
+        print(f"  {(check.stdout or check.stderr).strip()[:400]}")
+        return 68
+    body = (
+        f"A recorded local strict-review pass covers head `{head}`, the content this pull "
+        f"request carries at that commit against `{base}`.\n\n<!-- fleet-local-review: head={head} -->"
+    )
+    return comment_on_pr(owner, repo, num, body)
+
+
+def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
+    """One read-only git command in `checkout`, returned whole rather than raised."""
+    try:
+        return subprocess.run(
+            ["git", "-C", checkout, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess([], 1, "", "git could not be run")
+
+
+def attested(pr: dict) -> bool:
+    """Whether a comment from someone who can write here vouches for this pull request's head.
+
+    Read over every comment rather than the reviewer's own, since an attestation is the
+    maintainer's account speaking. The association is what keeps a passer-by's comment carrying
+    the same marker from vouching for anything.
+    """
+    head = pr.get("headRefOid") or ""
+    for node in (pr.get("comments") or {}).get("nodes") or []:
+        if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
+            continue
+        if any(m.group(1) == head for m in ATTESTATION.finditer(node.get("body") or "")):
+            return True
+    return False
+
+
+def promotion(pr: dict) -> bool:
+    """Whether the pull request merges into the repository's default branch.
+
+    That is the promotion, whose own Copilot round is the backstop reading the whole diff, so
+    the local pass never stands in for it. A default branch the payload does not name reads as
+    a promotion too, since the failure that way is one more Copilot request rather than a gate
+    passed on a local pass alone.
+    """
+    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
+    return not default or pr.get("baseRefName") == default
+
+
+def first_round_done(pr: dict) -> bool:
+    """Whether Copilot has reviewed this pull request at all, on any head, a refusal not counting."""
+    return any(not refusal_of(n) for n in reviewer_nodes(pr, "reviews"))
+
+
 def reply_to_thread(
     owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
 ) -> int:
@@ -3811,7 +3936,7 @@ def utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["claims", "comment", "status", "reply", "wait"])
+    ap.add_argument("cmd", choices=["attest", "claims", "comment", "status", "reply", "wait"])
     ap.add_argument("number", type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
@@ -3888,6 +4013,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="reply: resolve the thread once the reply is confirmed",
     )
+    ap.add_argument(
+        "--checkout",
+        metavar="DIR",
+        help="attest: the checkout holding the pull request's head and its recorded local pass "
+        "(default the current directory)",
+    )
     a = ap.parse_args(argv)
     # Named for the command they belong to, since one silently ignored reads as one that took effect.
     # A `status` given --body reports a clean digest and writes nothing.
@@ -3901,6 +4032,8 @@ def main(argv: list[str] | None = None) -> int:
         for flag, value in reply_only.items():
             if value is not None:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
+    if a.cmd != "attest" and a.checkout is not None:
+        ap.error(f"--checkout belongs to `attest`, not `{a.cmd}`")
     if a.cmd not in ("comment", "reply") and a.body is not None:
         ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
@@ -3936,6 +4069,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
+
+    if a.cmd == "attest":
+        return attest(owner, repo, a.number, a.checkout or ".")
 
     if a.cmd == "comment":
         return comment_on_pr(owner, repo, a.number, a.body)

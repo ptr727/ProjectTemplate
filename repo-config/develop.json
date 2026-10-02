@@ -52,8 +52,8 @@
         },
         {
             "parameters": {
-                "review_draft_pull_requests": true,
-                "review_on_push": true
+                "review_draft_pull_requests": false,
+                "review_on_push": false
             },
             "type": "copilot_code_review"
         }
