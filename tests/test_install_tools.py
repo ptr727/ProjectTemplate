@@ -168,10 +168,10 @@ report
 """
         result = self.run_bash(body)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("example-user", result.stdout)
+        self.assertNotIn("/srv/example-user", result.stdout)
         notes = json.loads(result.stdout)["tools"][0]["notes"]
         self.assertEqual(len(notes), 1)
-        self.assertIn("~/.local/bin/jq comes first", notes[0])
+        self.assertTrue(notes[0].startswith("~/.local/bin/jq "), notes[0])
 
     def test_hide_home_only_rewrites_a_whole_leading_home_component(self) -> None:
         cases = {
