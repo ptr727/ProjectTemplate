@@ -919,6 +919,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "changedPaths": changed,
                 "covered": bool(passes),
                 "reviewers": [p["reviewer"] for p in passes],
+                "findings": {p["reviewer"]: p.get("findings") for p in passes},
                 "receiptProblems": problems,
             },
             indent=2,

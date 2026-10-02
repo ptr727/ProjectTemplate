@@ -103,7 +103,7 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **Stand a repository up** - carry the baseline a project is owed for its declared types and workflow model, per [STANDUP.md][standup]. An absent file is a baseline that never arrived rather than drift.
 - **Audit a repository** - read a live project against the spec and report its drift, per [AUDIT.md][audit]. The audit never edits what it measures, so a fix is a separate change.
 - **Resync a repository** - bring an already-stood-up project up to the current hub, per [RESYNC.md][resync]. It audits for the findings and then applies them in order, which includes deleting what the hub hosts rather than carries.
-- **Close the review loop** - request a review on every push, confirm it covered the head commit, triage every finding, reply and resolve, and escalate when stuck, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
+- **Close the review loop** - request a review at the defined moments, confirm the head commit is covered, triage every finding, reply and resolve, and escalate when stuck, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Carried against reached** - a project carries the content it is audited against and reaches the machinery that is identical everywhere, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling].
 
 ## What It Achieves

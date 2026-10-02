@@ -118,7 +118,7 @@ The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a proj
 
 - **One focused pull request per drift class**, branched from the target's `develop`, cross-referencing the finding it closes. A sprawling all-drifts pull request draws many review rounds and never feels done.
 - **Never push a fix directly to a protected branch**, and never hand-edit a target outside a pull request. An operational repository commits to `develop` directly by design, and a conformance change is still a reviewable change.
-- **Close the review loop.** Request a review on every push, confirm it covered the head commit, and answer and resolve every thread, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook].
+- **Close the review loop.** Request a review at the defined moments, confirm the head commit is covered, and answer and resolve every thread, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook].
 - **The maintainer merges.** The agent drives to green and stops.
 - **Fix systemic drift in the hub instead.** Where many repositories share a drift, fix the rule or add a check here and let a re-audit re-flag it, rather than hand-patching each repository for a shared cause.
 

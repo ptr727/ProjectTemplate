@@ -8,6 +8,18 @@ invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and D
 Discipline" for the rule this implements.
 
 Subcommands
+  attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
+           `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
+           `wait` read, an attestation counting only against the base it names. It reads the receipt
+           `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
+           refuses unless the checkout (--checkout, default the current directory) is at the pull
+           request's head with no change beyond it, its merge base with the base branch is the pull
+           request's own, and `local_review.py status` reports a covering pass against the base,
+           read once for the coverage and the findings count alike. Exit 0 = posted, 64 = the write
+           scope could not be established or excludes the target, 65 = the pull request could not be
+           read, 66 = the response did not confirm the comment, 67 = the checkout is not the head,
+           holds changes, or measures another merge base, or that merge base could not be read, 68 =
+           no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
@@ -31,6 +43,10 @@ Subcommands
            commit while Copilot's own `review_on_head` still reads `NO`, and an empty body from
            that other reviewer on that head is its own ordinary "reviewed, nothing to flag"
            shape, the same reading an empty-bodied Copilot round already gets, not a gap.
+           `review_on_head=local` reads a head no Copilot round covers on a pull request into a
+           branch other than the default, after Copilot's first round, where an attestation vouches
+           for it and no round on record states or appears to state partial coverage, with
+           `coverage=local` beside it.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -65,9 +81,10 @@ Subcommands
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
            covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
            `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
-           read. Either field reads a refusal on an earlier head where it is the pull request's
-           newest Copilot review and nothing covers the head. `wait` is where that state gets its
-           own exit codes, 46 and 47 below, because only `wait` is the command a caller might
+           read. Either field reads the pull request's newest Copilot review where it is a quota or
+           error refusal, on an earlier head or over a head a genuine round covered before it, and a
+           file-count refusal is spent by coverage of the same head. `wait` is where that state gets
+           its own exit codes, 46 and 47 below, because only `wait` is the command a caller might
            otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
            CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
@@ -168,21 +185,28 @@ Subcommands
            done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
-  wait     Request a review where none is outstanding, then poll until Copilot's review lands
-           on the current head, then print the digest. The auto-request is skipped once a
-           review already covers the head, once Copilot has already answered outside a formal
-           review, or once one is already in the pending request set, so calling `wait` again on the
-           same PR never double-requests. It is also skipped under 46's and 47's quota readings
-           below, since a request into a reached limit spends quota and returns the same refusal. It
-           reads the Copilot reviewer's bot id from the repository's own most recently updated PRs
-           rather than a fixed id: the last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that
-           narrow window carries no Copilot activity at all, since an outage that outlasts
-           HISTORY_PRS PRs would otherwise empty it on every call for as long as the outage runs.
-           Requests nothing (falling back to polling only) where both windows come up empty, since a
-           repository with no Copilot review in either has nothing to read the id from and a
-           fabricated one is never an option. The loop runs in-process, so a 45-minute wait costs
-           one agent turn, not 90.
-           Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
+  wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
+           current head, then print the digest. The auto-request is skipped once a review already
+           covers the head, once Copilot has already answered outside a formal review, or once one
+           is already in the pending request set, so calling `wait` again on the same PR never
+           double-requests. It is also skipped under 46's and 47's quota readings below, since a
+           request into a reached limit spends quota and returns the same refusal. It is skipped too
+           on a pull request into a branch other than the default once Copilot has reviewed it at
+           all, since a fix push there is covered by an attested local pass: an attested head ends
+           the wait as covered, and one with no attestation exits 49 naming the `attest` step.
+           --request asks for a round anyway. A pull request into the default branch, a promotion
+           among them, a pull request Copilot has not reviewed yet, and one with a partial on record
+           or a review history past the window are requested as before. The comment also carries the
+           findings count the pass recorded, shown and not gated. It reads the Copilot reviewer's
+           bot id from the repository's own most recently updated PRs rather than a fixed id: the
+           last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window carries no
+           Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would otherwise
+           empty it on every call for as long as the outage runs. Requests nothing (falling back to
+           polling only) where both windows come up empty, since a repository with no Copilot review
+           in either has nothing to read the id from and a fabricated one is never an option. The
+           loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
+           Exit 0 = review present, or on a held head an attested local pass, 30 = still pending at
+           timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -230,6 +254,10 @@ Subcommands
            request exists to answer. It cannot meet 46 or 47, since neither sends a request,
            and ranks under 0/40/41/42/43/44/45. `status` cannot report it, since a request that
            recorded nothing leaves nothing for a later read to find.
+           49 = no Copilot round covers this head and none was requested, the pull request merging
+           into a branch other than the default after Copilot's first round, and no attestation
+           vouches for the head. Run the local strict review, record it, push, and run `attest`, or
+           pass --request.
            64 = the write scope could not be established or excludes the target, checked before
            the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
@@ -503,6 +531,7 @@ UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
 # Not a state a round reports, but the reading that carries an earlier round's forward.
 CARRIED = "carried"
 TABLE = "table"
+LOCAL = "local"
 NO_HEAD_TABLE = "no round covering the head carries a file table of its own"
 SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
 # Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
@@ -515,6 +544,7 @@ COVERAGE_FIELD = {
     FULL: "full",
     UNSTATED: "unstated",
     TABLE: "table",
+    LOCAL: "local",
 }
 
 # Every structural marker the reviewer's own bodies carry, measured over the same 333.
@@ -763,10 +793,11 @@ Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
     headRefOid baseRefName mergeable mergeStateStatus
+    baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
-    comments(last:100){ nodes{ author{login} createdAt body } pageInfo{ hasPreviousPage } }
+    comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
@@ -835,6 +866,17 @@ Q_COMMENT_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ id url } }}
 """
+
+Q_ATTEST_TARGET = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
+"""
+ATTESTATION = re.compile(
+    r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
+    re.MULTILINE,
+)
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
 # The conversation-comment and thread mutations the runbook publishes.
 # `url` is fetched because it is the one field that confirms a comment or reply carried a body.
@@ -3097,6 +3139,9 @@ def digest(
     )
     if cover == UNSTATED and on_head and not table_short:
         cover = TABLE
+    local = not on_head and local_cover(pr)
+    if local:
+        cover = LOCAL
     unknown = unrecognized_shapes(pr)
     threads = pr["reviewThreads"]["nodes"]
     # True where the connection cut off before this pull request's actual thread count.
@@ -3148,10 +3193,7 @@ def digest(
     unlisted = unlisted_findings(manifest)
 
     answer = answered_outside_review(pr)
-    # Spent where coverage of the same head landed, the precedence the exit codes already hold.
-    # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
-    # That tells a reader to split a pull request the reviewer has just reviewed.
-    refusal = None if on_head else (refusing_review(pr) or stopping_refusal(pr))
+    refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
     # Read once and handed to the line below, since `quota_refusal` re-walks `refusal_of`.
     refusal_field = (
         "no"
@@ -3204,7 +3246,7 @@ def digest(
         # The repository leads the line, since a number alone reads as correct anywhere.
         # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
         f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
-        f"review_on_head={'yes' if on_head else 'NO'} "
+        f"review_on_head={'yes' if on_head else 'local' if local else 'NO'} "
         # Present only where at least one other tracked reviewer has posted on this exact head.
         # No verdict rides on it, unlike `review_on_head`, since nothing here reads what a CodeRabbit or qodo round said, only that one landed.
         + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
@@ -3363,6 +3405,13 @@ def digest(
         )
     elif cover == UNSTATED and on_head:
         lines.append(f"  NO FILE TABLE STANDS IN: {table_short}")
+    elif cover == LOCAL:
+        lines.append(
+            "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
+            "follows the pull request's first round, and a comment from an owner, member, or "
+            "collaborator attests a recorded local strict-review pass over exactly this head's "
+            f"content, which recorded {attestation(pr)} finding(s)"
+        )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
         # The counts say how much of the diff went unread, and no thread carries them.
@@ -3731,6 +3780,237 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     return 0
 
 
+def attest(owner: str, repo: str, num: int, checkout: str) -> int:
+    """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
+
+    The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
+    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt where it
+    lives and posts a comment the gate can read, and only after four checks, each of which would
+    otherwise vouch for content the pull request does not carry: the checkout's HEAD is the pull
+    request's head, the checkout holds no change beyond that commit, its merge base with the base
+    branch is the pull request's own, and `local_review.py status` reports a current pass against
+    the pull request's base, one read answering the coverage and the findings count alike. The first
+    two are read again once the check returns, since the checkout can move while it runs.
+    """
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
+        return 64
+    target = gql(Q_ATTEST_TARGET, owner, repo, num) or {}
+    head, base = target.get("headRefOid") or "", target.get("baseRefName") or ""
+    if not head or not base:
+        print(
+            f"status=TARGET_NOT_READ nothing was written: {owner}/{repo} #{num} did not return "
+            "its head commit and base branch"
+        )
+        return 65
+    local = _git(checkout, "rev-parse", "HEAD")
+    dirty = _git(
+        checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
+    )
+    if local.returncode != 0 or dirty.returncode != 0:
+        print(
+            f"status=CHECKOUT_NOT_READ nothing was written: {checkout} is not a readable checkout"
+        )
+        return 67
+    if local.stdout.strip() != head:
+        print(
+            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout is at "
+            f"{local.stdout.strip()[:8]} and the pull request's head is {head[:8]}, so push or "
+            "fetch until they agree"
+        )
+        return 67
+    if dirty.stdout.strip():
+        print(
+            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout holds changes the "
+            "head commit does not, so a pass over it does not describe what was pushed"
+        )
+        return 67
+    if UNSAFE_REF.search(base) or DOT_SEGMENT.search(base):
+        print(
+            f"status=MERGE_BASE_NOT_READ nothing was written: the base branch {base!r} carries a "
+            "character that would change the compare path rather than travel along it"
+        )
+        return 67
+    ours = _git(checkout, "merge-base", f"refs/remotes/origin/{base}", "HEAD")
+    theirs = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{head}", ".merge_base_commit.sha // empty"
+    )
+    if ours.returncode != 0 or theirs.returncode != 0 or not theirs.stdout.strip():
+        print(
+            f"status=MERGE_BASE_NOT_READ nothing was written: the merge base with {base} could "
+            "not be read in the checkout or from GitHub, so the pass's scope cannot be compared "
+            "with the pull request's"
+        )
+        print(f"  {(ours.stderr or theirs.stderr).strip()[:400]}")
+        return 67
+    if ours.stdout.strip() != theirs.stdout.strip():
+        print(
+            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout's merge base with "
+            f"origin/{base} is not the pull request's own, so a pass against it measured a "
+            "different change set. Fetch, or attest from a checkout of the pull request's own "
+            "repository"
+        )
+        return 67
+    covered, findings, said = receipt_reading(checkout, base)
+    if not covered:
+        print(
+            f"status=NO_LOCAL_PASS nothing was written: `local_review.py status --target {base}` "
+            "reports no recorded pass covering this content. Run the local strict review, "
+            "record it, and attest again"
+        )
+        print(f"  {said.strip()[:400]}")
+        return 68
+    after = _git(checkout, "rev-parse", "HEAD")
+    still = _git(
+        checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
+    )
+    if after.stdout.strip() != head or still.returncode != 0 or still.stdout.strip():
+        print(
+            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout moved or changed "
+            "while the pass was being checked, so the check no longer describes the head"
+        )
+        return 67
+    body = (
+        f"A recorded local strict-review pass covers head `{head}`, the content this pull "
+        f"request carries at that commit against `{base}`, and it recorded {findings} "
+        f"finding{'' if findings == '1' else 's'}.\n\n"
+        f"<!-- fleet-local-review: head={head} base={base} findings={findings} -->"
+    )
+    return comment_on_pr(owner, repo, num, body)
+
+
+def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
+    """Whether a recorded pass covers the checkout's content, its findings, and what was read.
+
+    One `local_review.py status` read answers both, so the coverage and the count describe the
+    same receipt, where a check followed by a second read could straddle a record replacing it.
+    The findings are the covering passes' counts summed, or "unknown" where any recorded none,
+    and they are shown rather than gated, since a local pass's findings are advisory.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(LOCAL_REVIEW), "status", "--target", base],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False, "unknown", "local_review.py could not be run"
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return False, "unknown", proc.stdout or proc.stderr
+    if proc.returncode != 0 or not isinstance(data, dict) or data.get("covered") is not True:
+        return False, "unknown", proc.stdout or proc.stderr
+    if data.get("receiptProblems"):
+        return False, "unknown", proc.stdout
+    counts = data.get("findings")
+    if (
+        not isinstance(counts, dict)
+        or not counts
+        or not all(isinstance(n, int) and n >= 0 for n in counts.values())
+    ):
+        return True, "unknown", proc.stdout
+    return True, str(sum(counts.values())), proc.stdout
+
+
+def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
+    """One read-only git command in `checkout`, returned whole rather than raised."""
+    try:
+        return subprocess.run(
+            ["git", "-C", checkout, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess([], 1, "", "git could not be run")
+
+
+def attested(pr: dict) -> bool:
+    """Whether an attestation vouches for this pull request's head, per `attestation`."""
+    return attestation(pr) is not None
+
+
+def attestation(pr: dict) -> str | None:
+    """The findings count an owner's, member's, or collaborator's attestation of this head carries.
+
+    None where no attestation vouches for the head against the pull request's current base, so
+    a retargeted pull request needs a new one, and "unknown" where the pass recorded no count.
+
+    Read over every comment rather than the reviewer's own, since an attestation is the
+    maintainer's account speaking. The association is what keeps a passer-by's comment carrying
+    the same marker from vouching for anything. The marker counts only as a line of its own
+    outside a fence, so a comment quoting it in a span or a code block vouches for nothing.
+    """
+    head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
+    for node in (pr.get("comments") or {}).get("nodes") or []:
+        if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
+            continue
+        body = CODE_SPAN.sub(" ", strip_fences(node.get("body") or "", to_end=True))
+        for m in ATTESTATION.finditer(body):
+            if m.group(1) == head and m.group(2) == base:
+                return m.group(3)
+    return None
+
+
+def promotion(pr: dict) -> bool:
+    """Whether the pull request merges into the repository's default branch.
+
+    That is the promotion, whose own Copilot round is the backstop reading the whole diff, so
+    the local pass never stands in for it. A default branch the payload does not name reads as
+    a promotion too, since the failure that way is one more Copilot request rather than a gate
+    passed on a local pass alone.
+    """
+    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
+    return not default or pr.get("baseRefName") == default
+
+
+def first_round_done(pr: dict) -> bool:
+    """Whether Copilot has reviewed this pull request at all, on any head, a refusal not counting."""
+    return any(not refusal_of(n) for n in reviewer_nodes(pr, "reviews"))
+
+
+def holds(pr: dict) -> bool:
+    """Whether this head is a fix push the local pass covers, so `wait` requests no round for it.
+
+    Read again on the payload the verdict is graded on, since a push between two reads moves the
+    head the hold was decided for.
+    """
+    return (
+        not promotion(pr)
+        and first_round_done(pr)
+        and not reviews_truncated(pr)
+        and not partial_shaped(pr)
+        and not reviewer_requested(pr)
+    )
+
+
+def local_cover(pr: dict) -> bool:
+    """Whether a recorded local pass stands in for a Copilot round on this head.
+
+    Only on a pull request into a branch other than the default, after Copilot's first round, on
+    a head its writer attests, and only where nothing on record says any round read part of a
+    diff and the whole review history is in view, the bound a file table stands in under. A fix
+    push after the first round is covered by the local pass, and a promotion keeps its own
+    Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
+    """
+    return (
+        not refusing_review(pr)
+        and not promotion(pr)
+        and first_round_done(pr)
+        and attested(pr)
+        and not reviews_truncated(pr)
+        and not partial_shaped(pr)
+    )
+
+
 def reply_to_thread(
     owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
 ) -> int:
@@ -4008,7 +4288,7 @@ def utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["claims", "comment", "status", "reply", "wait"])
+    ap.add_argument("cmd", choices=["attest", "claims", "comment", "status", "reply", "wait"])
     ap.add_argument("number", type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
@@ -4051,6 +4331,12 @@ def main(argv: list[str] | None = None) -> int:
         "error refusal, pass this once the quota is believed to have reset",
     )
     ap.add_argument(
+        "--request",
+        action="store_true",
+        help="wait: request a Copilot round even on a fix push into a branch other than the "
+        "default, which an attested local pass otherwise covers",
+    )
+    ap.add_argument(
         "--min-rounds",
         type=int,
         default=0,
@@ -4086,6 +4372,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="reply: resolve the thread once the reply is confirmed",
     )
+    ap.add_argument(
+        "--checkout",
+        metavar="DIR",
+        help="attest: the checkout holding the pull request's head and its recorded local pass "
+        "(default the current directory)",
+    )
     a = ap.parse_args(argv)
     # Named for the command they belong to, since one silently ignored reads as one that took effect.
     # A `status` given --body reports a clean digest and writes nothing.
@@ -4099,6 +4391,10 @@ def main(argv: list[str] | None = None) -> int:
         for flag, value in reply_only.items():
             if value is not None:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
+    if a.cmd != "wait" and a.request:
+        ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
+    if a.cmd != "attest" and a.checkout is not None:
+        ap.error(f"--checkout belongs to `attest`, not `{a.cmd}`")
     if a.cmd not in ("comment", "reply") and a.body is not None:
         ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
@@ -4134,6 +4430,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
+
+    if a.cmd == "attest":
+        return attest(owner, repo, a.number, a.checkout or ".")
 
     if a.cmd == "comment":
         return comment_on_pr(owner, repo, a.number, a.body)
@@ -4179,10 +4478,16 @@ def main(argv: list[str] | None = None) -> int:
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
+    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
     stopped = (
-        None
-        if a.ignore_quota_signal or done or answer or drift
-        else stopping_refusal(gql(Q_FULL, owner, repo, a.number))
+        None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
+    )
+    held = (
+        snapshot is not None
+        and not a.request
+        and not reviewer_requested(pr)
+        and holds(snapshot)
+        and (not answer or attested(snapshot))
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
@@ -4195,6 +4500,7 @@ def main(argv: list[str] | None = None) -> int:
         and not drift
         and not signal
         and not stopped
+        and not held
         and not reviewer_requested(pr)
     ):
         line, recorded = request_copilot_review(
@@ -4212,6 +4518,13 @@ def main(argv: list[str] | None = None) -> int:
             "note: the review request returned success and recorded nothing on this pull "
             "request, no pending reviewer and no review-request event, so this wait stops here "
             "rather than polling --timeout out against a request that does not exist."
+        )
+    elif held:
+        print(
+            "note: this pull request merges into a branch other than the default and Copilot "
+            "has reviewed it already, so a fix push is covered by an attested local pass rather "
+            "than another Copilot round, and this wait requests nothing. Pass --request to ask "
+            "for a round anyway."
         )
     elif stopped and not reviewer_requested(pr):
         print(
@@ -4276,7 +4589,14 @@ def main(argv: list[str] | None = None) -> int:
     # Gating the verdict behind it left the login check unable to reach an exit code.
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
-    if unrecognized_shapes(final) or head_review_done(final, a.min_rounds):
+    held = held and holds(final)
+    covered = held and local_cover(final)
+    halted = None if a.ignore_quota_signal else stopping_refusal(final)
+    if (
+        unrecognized_shapes(final)
+        or covered
+        or (not halted and head_review_done(final, a.min_rounds))
+    ):
         verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.
@@ -4344,6 +4664,14 @@ def main(argv: list[str] | None = None) -> int:
             "--ignore-quota-signal once the limit is believed to have reset"
         )
         return 46
+    if held and not refusal:
+        print(
+            "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
+            "since a fix push after the first round is covered by a local pass. Run the local "
+            "strict review, record it, push, and run `pr_review.py attest` from the checkout, "
+            "or pass --request to ask Copilot for a round instead"
+        )
+        return 49
     if refusal:
         print(
             "status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, "

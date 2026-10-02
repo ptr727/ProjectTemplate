@@ -1,9 +1,9 @@
 ---
 name: pr-review-conduct
 description: >-
-  Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate
-  fleet repo: requesting a review after a push, triaging findings, replying and resolving threads,
-  and deciding whether a PR is actually mergeable. Use this whenever about to open a PR,
+  Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate fleet
+  repo: requesting a review at its defined moments, triaging findings, replying and resolving
+  threads, and deciding whether a PR is actually mergeable. Use this whenever about to open a PR,
   immediately after creating one, about to merge a PR, enable auto-merge, ask the maintainer for
   merge permission, push a fix and move on without re-checking review state, or judge a PR "green"
   or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds routine,
@@ -37,10 +37,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 1. Required status checks are green, and where they are not, the reason is **read**, never
    inferred. `BLOCKED` covers a failed check, a required check nothing is running, an unresolved
    thread, and a missing approval alike, and the response differs by cause.
-2. A review is confirmed on the **current head SHA**, matched by commit SHA rather than assumed
-   from a green merge-state. A push makes checks go green *before* the re-review lands, and the
-   matched review is **read**, not just counted. A review can carry the head SHA and still decline
-   the PR outright, or say it read only part of the changed files. Where the round covering the
+2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
+   default, a head after Copilot's first round can carry an attested local pass instead,
+   `review_on_head=local` in the digest, where the whole review history is in view and no round on
+   record states or appears to state partial coverage, and a pull request into the default branch, a
+   promotion among them, always carries a Copilot round on its head. A review is matched by commit
+   SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
+   re-review lands, and the matched review is **read**, not just counted. A review can carry the
+   head SHA and still decline the PR outright, or say it read only part of the changed files. Where
+   the round covering the
    head states no coverage at all, the newest round that does state some stands in for it, and
    only where the pull request changes the same set of files at both commits, since a statement
    about a diff this head no longer has says nothing about this one. A head round's own
@@ -52,12 +57,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    carries a table of its own, the newest round that does, its table naming exactly the changed
    files, stands in under the bound a statement carries under, the pull request changing the same
    set of files at both commits, and that reading shows as `coverage=carried:table`. The table
-   stands in only where no
-   Copilot round on the pull request, on any commit, states or appears to state partial
-   coverage, so a pull request that ever had a partial round goes to the maintainer. The
-   coverage this item
-   requires is Copilot's, and CodeRabbit and Qodo are advisory, since the hub's
-   `docs/pr-reviewer-evaluation.md` "Status" names Copilot the incumbent and says no candidate is
+   stands in only where no Copilot round on the pull request, on any commit, states or appears to
+   state partial coverage, so a pull request that ever had a partial round goes to the maintainer.
+   The coverage this item requires is Copilot's, or the attested local pass above, and CodeRabbit
+   and Qodo are advisory, since the hub's `docs/pr-reviewer-evaluation.md` "Status" names Copilot
+   the incumbent and says no candidate is
    a required reviewer: an advisory reviewer's absence blocks nothing, while its findings owe
    item 3 exactly as Copilot's do. `pr_review.py`'s `review_on_head` names Copilot's own coverage
    specifically, not "no review of any kind covers this head": an advisory reviewer carrying the
@@ -143,20 +147,23 @@ must have done.
   automatically, which is not the same as not reviewing at all. Comment the reviewer's documented
   review command, such as `@coderabbitai review`, and wait for the result as with any other
   requested review. The agent driving the loop posts that comment itself, on the same standing as
-  requesting a review after a push.
+  requesting a Copilot round, and at most once per pull request, on the head the drive judges
+  final, and never after a rate-limit notice, since the reviewer caps its reviews per pull request
+  and its absence blocks nothing.
 - **A notice naming when the reviewer can next run is a rate limit, and asking does not clear
   it.** It reads like the skip notice above and is the opposite case: the trigger returns the same
   notice rather than a review, so a loop that keeps asking waits on something no amount of asking
-  produces. Wait for the time it names, or proceed on the reviewers that did run, since an advisory
-  reviewer blocks nothing.
+  produces. Do not ask again on that pull request, and proceed on the reviewers that did run,
+  since an advisory reviewer blocks nothing.
 - **Silence is not evidence, and is never read as one on its own.** A reviewer that has posted
   nothing may not have started yet, may not cover this repository at all, or may have reviewed and
   had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
   no comment to read. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
 - **Copilot's absence blocks, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
-  coverage of the current head, and the loop's own re-request step below is where a missing one is
-  answered, on the terms stated there. A refusal naming the account quota is its own case rather
+  coverage of the current head, or on a fix push into a branch other than the default an attested
+  local pass, and the loop's own request step below is where a missing one is answered, on the
+  terms stated there. A refusal naming the account quota is its own case rather
   than a review, and so is one saying only that Copilot encountered an error, which is what the
   weekly rate limit posts. Either covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
@@ -185,11 +192,17 @@ Run `local-strict-review` against the branch's current diff before every push th
 
 1. Push changes to the PR branch and open the pull request when it does not exist.
 2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Re-request a review for the **current head SHA**. Auto-trigger is unreliable, so request it
-   explicitly, which step 4's `wait` is what does, though it skips the request where a review
-   already covers the head, where the answer came outside a formal review, where it detects
-   drift, and where something is already in the request set, which is the condition the recovery
-   below clears. Requesting in the pull request UI is the maintainer's route rather than this loop's.
+3. Request a Copilot round at the defined moments only: the pull request's first round, and the head
+   of a pull request into the default branch, a promotion among them. Auto-trigger is unreliable, so
+   request it explicitly, which step 4's `wait` is what does. On a fix push into any other branch
+   after the first round, `wait` requests nothing, since that push is covered by the pass the
+   paragraph above records. Publish it once the push lands by running `scripts/pr_review.py attest
+   <number> --repo <owner>/<repo> --checkout <worktree>`, which refuses unless the checkout is the
+   pushed head and a recorded pass covers it, and pass `wait --request` where a fix deserves a
+   Copilot round anyway. `wait` also skips the request where a review already covers the head, where
+   the answer came outside a formal review, where it detects drift, under a quota or error refusal,
+   and where something is already in the request set, which is the condition the recovery below
+   clears. Requesting in the pull request UI is the maintainer's route rather than this loop's.
 4. Run a bounded `scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
@@ -199,7 +212,8 @@ Run `local-strict-review` against the branch's current diff before every push th
 6. Apply fixes or write a rationale for declines.
 7. Reply to each thread, and resolve what was addressed and what was declined on evidence the
    reviewer could check for itself, per outcome 2 below.
-8. Re-run the loop after every fix push until the checks are green and no finding remains open.
+8. Re-run the loop after every fix push until the checks are green, the current head is covered,
+   and no finding remains open.
 
 The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `effort=lite`, `effort=balanced`, or `effort=max` when the completed review exposes that metadata, lowercased, and names an inherited setting apart from a chosen one in a separate `effort_source=default|explicit` field, both reading `unknown` when no effort line parses. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives. `requested=yes` reports that the request was accepted rather than that a round is coming. An accepted request can sit unpicked, printing the same digest as one about to be served, so a driver reading that field as progress is waiting on evidence it does not hold. After a timeout carrying it, rerun `wait` for another bounded interval by default, because the request may still be active. Where a second bounded wait times out as well, read the pending set, and clear it only where no human or team reviewer is requested alongside the bot, because the clear replaces that set rather than adding to it and nothing restores a request it drops. A stall on a pull request that has a human or team reviewer requested goes to the maintainer instead, and so does one still pending after the wait that follows a clear. The clear leaves the next `wait` nothing outstanding to defer to, so that run requests afresh, and its own auto-request line is what says so, since `wait` reads the reviewer's node id out of the repository's recent reviews and polls without requesting where it finds none. The hub's `docs/pr-reviewer-reference.md` carries the mutation, and an agent seat can run it, where removing and re-adding the reviewer in the pull request UI is a step only the maintainer can take. This recovery replaces only the review request and never changes the effort setting. A `wait` ending `REQUEST_NOT_RECORDED`, exit 48, is a different state and takes none of this recovery: the request returned success and left neither a pending reviewer nor a review-request event, which is how an exhausted Copilot allowance has shown itself, so clearing and requesting again does not clear it and it goes to the maintainer.
 
