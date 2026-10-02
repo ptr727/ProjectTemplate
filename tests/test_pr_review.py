@@ -5601,6 +5601,16 @@ class TestCli(GqlCase):
             self.cli(["wait", "7", "--timeout", "0", "--ignore-quota-signal"])
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_a_newer_comment_spends_an_earlier_head_refusal(self) -> None:
+        pr = payload(
+            [review(oid=OLD, body=ERROR_REFUSED, at=EARLY)],
+            comments=[comment(at=LATE)],
+        )
+        self.assertIsNone(pr_review.stopping_refusal(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=no", out)
+
     def test_status_reports_an_error_round_on_an_earlier_head(self) -> None:
         self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
         out, _ = pr_review.digest("o", "r", 7)

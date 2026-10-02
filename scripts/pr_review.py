@@ -1299,8 +1299,11 @@ def stopping_refusal(pr: dict) -> dict | None:
 
     Read across heads rather than on the head alone, since a push after such a refusal moves the
     head and the account state the refusal reports does not move with it. A genuine round since
-    spends it, the newest review being the one read.
+    spends it, the newest review being the one read, and so does a plain comment of the
+    reviewer's since, which `answered_outside_review` already reads as spending one.
     """
+    if answered_outside_review(pr):
+        return None
     newest = newest_of(reviewer_nodes(pr, "reviews"))
     if newest is None or not (quota_refusal(newest) or possible_quota(newest)):
         return None
