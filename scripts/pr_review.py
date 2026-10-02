@@ -3782,10 +3782,12 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
 
     The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
     GitHub can read it, and the review gate for a fix push needs to. This reads the receipt
-    where it lives and posts a comment the gate can read, and only after three checks, each of
+    where it lives and posts a comment the gate can read, and only after four checks, each of
     which would otherwise vouch for content the pull request does not carry: the checkout's
-    HEAD is the pull request's head, the checkout holds no change beyond that commit, and
-    `local_review.py check` finds a current pass against the pull request's base.
+    HEAD is the pull request's head, the checkout holds no change beyond that commit, its merge
+    base with the base branch is the pull request's own, and `local_review.py check` finds a
+    current pass against the pull request's base. The first two are read again once the check
+    returns, since the checkout can move while it runs.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -3961,6 +3963,21 @@ def promotion(pr: dict) -> bool:
 def first_round_done(pr: dict) -> bool:
     """Whether Copilot has reviewed this pull request at all, on any head, a refusal not counting."""
     return any(not refusal_of(n) for n in reviewer_nodes(pr, "reviews"))
+
+
+def holds(pr: dict) -> bool:
+    """Whether this head is a fix push the local pass covers, so `wait` requests no round for it.
+
+    Read again on the payload the verdict is graded on, since a push between two reads moves the
+    head the hold was decided for.
+    """
+    return (
+        not promotion(pr)
+        and first_round_done(pr)
+        and not reviews_truncated(pr)
+        and not partial_shaped(pr)
+        and not reviewer_requested(pr)
+    )
 
 
 def local_cover(pr: dict) -> bool:
@@ -4456,11 +4473,8 @@ def main(argv: list[str] | None = None) -> int:
     held = (
         snapshot is not None
         and not a.request
-        and not promotion(snapshot)
-        and first_round_done(snapshot)
-        and not reviews_truncated(snapshot)
-        and not partial_shaped(snapshot)
         and not reviewer_requested(pr)
+        and holds(snapshot)
         and (not answer or attested(snapshot))
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
@@ -4494,7 +4508,6 @@ def main(argv: list[str] | None = None) -> int:
             "rather than polling --timeout out against a request that does not exist."
         )
     elif held:
-        final = snapshot
         print(
             "note: this pull request merges into a branch other than the default and Copilot "
             "has reviewed it already, so a fix push is covered by an attested local pass rather "
@@ -4564,6 +4577,7 @@ def main(argv: list[str] | None = None) -> int:
     # Gating the verdict behind it left the login check unable to reach an exit code.
     # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
+    held = held and holds(final)
     covered = held and local_cover(final)
     halted = None if a.ignore_quota_signal else stopping_refusal(final)
     if (

@@ -5841,6 +5841,17 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_a_push_during_a_held_wait_grades_the_new_head(self) -> None:
+        """An attestation of the head read first does not cover the head the verdict reads."""
+        first = self.into(payload([review(oid=OLD)]), attest=True)
+        moved = self.into(payload([review(oid=OLD)]), attest=True)
+        moved["headRefOid"] = "c" * 40
+        self.answer(first, first, moved)
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_a_truncated_review_history_requests_a_round_rather_than_holding(self) -> None:
         self.answer(self.into(payload([review(oid=OLD)], older_reviews=True), attest=True))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
