@@ -4086,6 +4086,11 @@ def main(argv: list[str] | None = None) -> int:
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
     done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
+    if done and a.ignore_quota_signal:
+        full = gql(Q_FULL, owner, repo, a.number)
+        if refusing_review(full) and not reviewed_head(full):
+            a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
+            done = False
     # A drifted login matches no filter here, so `done` stays false however long this runs.
     # Waiting it out reports a review that landed as one that never did, at the timeout.
     # The liveness query carries the authors, so this costs the loop no extra call.

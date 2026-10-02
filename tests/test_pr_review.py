@@ -5594,6 +5594,19 @@ class TestCli(GqlCase):
         slept.assert_called()
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_ignore_quota_signal_requests_past_a_current_head_refusal(self) -> None:
+        """The body-less liveness read counts a head refusal as done, so the override re-reads it."""
+        refused = review(body=QUOTA_REFUSED, at=EARLY)
+        self.answer(
+            payload([{k: v for k, v in refused.items() if k != "body"}]),
+            payload([refused]),
+            payload([refused, review(at=LATE, rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--ignore-quota-signal"]))
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_ignore_quota_signal_requests_past_the_repo_wide_signal(self) -> None:
         self.answer(payload([]))
         calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
