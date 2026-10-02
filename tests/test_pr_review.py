@@ -5733,6 +5733,90 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7", "--ignore-quota-signal"]))
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def into(self, pr: dict, base: str = "develop", attest: bool = False) -> dict:
+        """A pull request into `base` on a repository whose default branch is main."""
+        pr = {**pr, "baseRefName": base, "baseRepository": {"defaultBranchRef": {"name": "main"}}}
+        if attest:
+            marker = {
+                "author": {"login": "maintainer"},
+                "authorAssociation": "OWNER",
+                "createdAt": LATE,
+                "body": f"Attested.\n\n<!-- fleet-local-review: head={HEAD} -->",
+            }
+            pr["comments"] = {"nodes": [marker], "pageInfo": {"hasPreviousPage": False}}
+        return pr
+
+    def test_a_newer_quota_refusal_outranks_older_coverage_of_the_head(self) -> None:
+        """A re-request answered by the limit is the newest word, whatever the head already had."""
+        pr = payload(
+            [
+                review(at=EARLY, rid="PRR_a"),
+                review(body=QUOTA_REFUSED, at=LATE, rid="PRR_b"),
+            ]
+        )
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=QUOTA", out)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_an_older_file_count_refusal_still_yields_to_coverage(self) -> None:
+        pr = payload([review(body=REFUSED, at=EARLY, rid="PRR_a"), review(at=LATE, rid="PRR_b")])
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=no", out)
+
+    def test_a_fix_push_after_the_first_round_is_not_requested(self) -> None:
+        self.answer(self.into(payload([review(oid=OLD)])))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertIn("status=AWAITING_LOCAL_PASS", self.out.getvalue())
+
+    def test_an_attested_fix_push_closes_the_wait(self) -> None:
+        self.answer(self.into(payload([review(oid=OLD)]), attest=True))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("review_on_head=local", out)
+        self.assertIn("coverage=local", out)
+
+    def test_request_asks_for_a_round_on_a_fix_push(self) -> None:
+        self.answer(self.into(payload([review(oid=OLD)])))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0", "--request"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_promotion_and_a_first_round_are_still_requested(self) -> None:
+        for pr in (
+            self.into(payload([review(oid=OLD)]), base="main", attest=True),
+            self.into(payload([])),
+        ):
+            with self.subTest(base=pr["baseRefName"]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(pr)
+                calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.cli(["wait", "7", "--timeout", "0"])
+                self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        for rounds, field in (
+            ([review(oid=OLD)], "review_on_head=local"),
+            ([review(oid=OLD, body=part)], "review_on_head=NO"),
+        ):
+            with self.subTest(field=field):
+                self.answer(self.into(payload(rounds), attest=True))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(field, out)
+
     def test_ignore_quota_signal_requests_past_the_repo_wide_signal(self) -> None:
         self.answer(payload([]))
         calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
