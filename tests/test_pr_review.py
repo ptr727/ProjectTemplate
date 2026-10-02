@@ -259,6 +259,17 @@ REFUSED = (
     "review from Copilot again."
 )
 
+ERROR_REFUSED = (
+    "Copilot encountered an error and was unable to review this pull request. You can try again "
+    "by re-requesting a review."
+)
+RATE_LIMIT_LOG = (
+    "2026-08-02T10:59:00.0000000Z Error creating PR review request: SessionModelError: You've "
+    "reached your weekly rate limit. Please wait for your limit to reset on August 9, 2026 at "
+    "12:00 AM or switch to auto model to continue. Learn More (https://docs.example.test).\n"
+    "2026-08-02T10:59:00.0000000Z   errorType: 'rate_limit',\n"
+)
+
 # Quoted from the corpus rather than invented: the body a refused review carried, byte for byte.
 QUOTA_REFUSED = (
     "Copilot was unable to review this pull request because the user who requested the "
@@ -433,6 +444,8 @@ class GqlCase(unittest.TestCase):
         # Without this a case inherits another's compares and the suite becomes order-dependent.
         pr_review.changed_at.cache_clear()
         self.addCleanup(pr_review.changed_at.cache_clear)
+        pr_review.run_cause.cache_clear()
+        self.addCleanup(pr_review.run_cause.cache_clear)
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -2958,6 +2971,25 @@ class TestCoverageCarriesForward(CarryCase):
         self.assertNotIn("carried", out)
 
 
+class TestRawLogRead(unittest.TestCase):
+    """A job log read keeps working on a `gh` older than the escape-sequence flag."""
+
+    def test_an_unknown_flag_is_retried_without_it(self) -> None:
+        refused = subprocess.CompletedProcess([], 1, "", "unknown flag: --allow-escape-sequences")
+        read = subprocess.CompletedProcess([], 0, "the log", "")
+        with mock.patch.object(pr_review, "_gh_run", side_effect=[refused, read]) as run:
+            proc = pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+        self.assertEqual("the log", proc.stdout)
+        self.assertIn("--allow-escape-sequences", run.call_args_list[0].args[0])
+        self.assertNotIn("--allow-escape-sequences", run.call_args_list[1].args[0])
+
+    def test_another_failure_is_not_retried(self) -> None:
+        failed = subprocess.CompletedProcess([], 1, "", "HTTP 404")
+        with mock.patch.object(pr_review, "_gh_run", return_value=failed) as run:
+            pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+        self.assertEqual(1, run.call_count)
+
+
 class TestFileTableCarriesForward(CarryCase):
     """An earlier round's full file table carries to a head whose rounds carry none.
 
@@ -5456,6 +5488,7 @@ class TestCli(GqlCase):
         """An answer lagging the request it reports is corrected by the next read, so the wait polls."""
         self.answer(
             payload([review(oid=OLD)]),
+            payload([review(oid=OLD)]),
             payload([review(oid=OLD)], pending=True),
             payload([review()]),
         )
@@ -5467,19 +5500,6 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertNotIn("recorded nothing", out)
         self.assertNotIn("status=REQUEST_NOT_RECORDED", out)
-
-    def test_an_unrecorded_request_outranks_the_repo_wide_quota_signal(self) -> None:
-        """Read on this pull request, so it ranks above the reading from elsewhere."""
-        self.answer(payload([]))
-        unchanged = request_state(events=("RRE_1",))
-        self.wire_history([hist_review(962, QUOTA_REFUSED)], (unchanged, unchanged))
-        with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(48, self.cli(["wait", "7"]))
-        slept.assert_called_once_with(15)
-        out = self.out.getvalue()
-        self.assertNotIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
-        self.assertIn("note: the review request returned success and recorded nothing", out)
-        self.assertNotIn("note: the reviewer's own most recent activity", out)
 
     def test_a_drifted_login_in_the_answer_is_not_read_as_unrecorded(self) -> None:
         """A renamed reviewer is what the poll reports, so the request is not judged on its spelling."""
@@ -5586,9 +5606,7 @@ class TestCli(GqlCase):
         self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("#962", out)
         self.assertIn("note: the reviewer's own most recent activity", out)
-        # The auto-request still fires: it is harmless and idempotent.
-        # It costs nothing extra either, since the same history read already answered the bot-id lookup it needs.
-        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
     def test_the_current_pull_requests_own_bot_id_still_seeds_the_auto_request(self) -> None:
         """An earlier round on this very pull request is still a valid id to request with."""
@@ -5631,15 +5649,15 @@ class TestCli(GqlCase):
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("status=PENDING", out)
 
-    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_still_signals(self) -> None:
-        """This pull request's own older refusal is exactly as much evidence as any other pull
-        request's, once nothing on the current head answers it directly first."""
-        self.answer(payload([]))
+    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_is_46(self) -> None:
+        """This pull request's own older refusal is read from its own reviews, ahead of 47."""
+        self.answer(payload([review(oid=OLD, body=QUOTA_REFUSED, at=EARLY)]))
         self.wire_history([hist_review(7, QUOTA_REFUSED, at=EARLY)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(47, self.cli(["wait", "7"]))
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
-        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED", self.out.getvalue())
+        self.assertNotIn("REPO_WIDE", self.out.getvalue())
 
     def test_a_genuine_review_since_the_refusal_clears_the_signal(self) -> None:
         """The most recent record settles it: a working round after the refusal spends it."""
@@ -5671,6 +5689,167 @@ class TestCli(GqlCase):
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertNotIn("note: the reviewer's own most recent activity", out)
         self.assertIn("status=PENDING", out)
+
+    def bodyless(self, oid: str) -> dict:
+        """A liveness payload, whose reviews carry no body, as `Q_LIVE` asks for none."""
+        return payload([{k: v for k, v in review(oid=oid).items() if k != "body"}])
+
+    def test_a_pending_request_past_an_error_round_is_still_polled_for(self) -> None:
+        """The stop withholds a request, and a review already on its way still lands."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD, body=ERROR_REFUSED)], pending=True),
+            payload([review(oid=OLD, body=ERROR_REFUSED), review(rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_pending_request_past_a_quota_round_is_still_polled_for(self) -> None:
+        """The repo-wide signal holds back a request too, and a pending one still lands."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD, body=QUOTA_REFUSED)], pending=True),
+            payload([review(oid=OLD, body=QUOTA_REFUSED), review(rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_ignore_quota_signal_requests_past_a_current_head_refusal(self) -> None:
+        """The body-less liveness read counts a head refusal as done, so the override re-reads it."""
+        refused = review(body=QUOTA_REFUSED, at=EARLY)
+        self.answer(
+            payload([{k: v for k, v in refused.items() if k != "body"}]),
+            payload([refused]),
+            payload([refused, review(at=LATE, rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--ignore-quota-signal"]))
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_ignore_quota_signal_requests_past_the_repo_wide_signal(self) -> None:
+        self.answer(payload([]))
+        calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0", "--ignore-quota-signal"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_newer_comment_spends_an_earlier_head_refusal(self) -> None:
+        pr = payload(
+            [review(oid=OLD, body=ERROR_REFUSED, at=EARLY)],
+            comments=[comment(at=LATE)],
+        )
+        self.assertIsNone(pr_review.stopping_refusal(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=no", out)
+
+    def test_status_reports_an_error_round_on_an_earlier_head(self) -> None:
+        self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("review_on_head=NO", out)
+        self.assertIn("refusal=ERROR", out)
+        self.assertIn("COPILOT REFUSED THIS ROUND", out)
+
+    def test_the_run_read_is_bounded_to_the_reviewer_s_failed_runs_before_the_round(self) -> None:
+        seen: list[str] = []
+
+        def rest(
+            path: str, jq: str | None = None, raw: bool = False
+        ) -> subprocess.CompletedProcess:
+            seen.append(jq or "")
+            return subprocess.CompletedProcess([], 1, "", "not read")
+
+        with mock.patch.object(pr_review, "gh_rest", side_effect=rest):
+            pr_review.run_cause("o", "r", HEAD, LATE)
+        self.assertIn(f'.path == "{pr_review.COPILOT_RUN_PATH}"', seen[0])
+        self.assertIn('.conclusion == "failure"', seen[0])
+        self.assertIn(f'.created_at <= "{LATE}"', seen[0])
+
+    def test_any_rate_limit_error_in_the_log_is_the_cause(self) -> None:
+        log = "x errorType: 'network',\n" + RATE_LIMIT_LOG + "y errorType: 'internal',\n"
+        self.run_log(log)
+        cause = pr_review.run_cause("o", "r", HEAD, LATE)
+        self.assertEqual("rate_limit", cause[0] if cause else None)
+
+    def run_log(self, log: str | None) -> None:
+        """Answer the three reads `run_cause` makes, or fail all three where `log` is None."""
+
+        def rest(
+            path: str, jq: str | None = None, raw: bool = False
+        ) -> subprocess.CompletedProcess:
+            if log is None:
+                return subprocess.CompletedProcess([], 1, "", "not read")
+            if "/actions/runs?" in path:
+                return subprocess.CompletedProcess([], 0, "101\n", "")
+            if path.endswith("/jobs"):
+                return subprocess.CompletedProcess([], 0, "202\n", "")
+            if path.endswith("/actions/jobs/202/logs") and raw:
+                return subprocess.CompletedProcess([], 0, "\x1b[36;1m" + log, "")
+            return subprocess.CompletedProcess([], 1, "", "unexpected read")
+
+        self.enterContext(mock.patch.object(pr_review, "gh_rest", side_effect=rest))
+
+    def test_an_error_round_on_an_earlier_head_stops_the_auto_request(self) -> None:
+        """The weekly limit does not move with a push, so the next head is not requested into it.
+
+        The liveness read carries no bodies, as the real query does not, so the stop is read
+        from the full payload that follows it.
+        """
+        self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(None)
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertIn("status=COPILOT_ERROR_POSSIBLE_QUOTA", self.out.getvalue())
+
+    def test_a_rate_limit_in_the_run_log_confirms_the_quota_and_names_the_reset(self) -> None:
+        self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(RATE_LIMIT_LOG)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(46, self.cli(["wait", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED", out)
+        self.assertIn("reset on August 9, 2026 at 12:00 AM. Do not re-request", out)
+
+    def test_ignore_quota_signal_requests_past_an_error_round(self) -> None:
+        self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0", "--ignore-quota-signal"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_genuine_round_since_the_error_spends_it(self) -> None:
+        pr = payload(
+            [
+                review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a"),
+                review(oid=OLD, body=OVERVIEW + "\n" + COVERED, at=LATE, rid="PRR_b"),
+            ]
+        )
+        self.assertIsNone(pr_review.stopping_refusal(pr))
+
+    def test_the_digest_reads_an_error_round_by_what_its_run_logged(self) -> None:
+        for log, field, line in (
+            (None, "refusal=ERROR", False),
+            (RATE_LIMIT_LOG, "refusal=QUOTA", True),
+            ("2026-08-02T10:59:00Z   errorType: 'internal',\n", "refusal=ERROR", False),
+        ):
+            with self.subTest(field=field, line=line):
+                pr_review.run_cause.cache_clear()
+                self.answer(payload([review(body=ERROR_REFUSED)]))
+                self.run_log(log)
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(field, out)
+                self.assertEqual(line, "RATE LIMIT FROM THE REVIEWER'S RUN LOG" in out)
 
 
 class TestCopilotHistoryReadings(GqlCase):
