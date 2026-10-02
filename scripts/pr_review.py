@@ -210,11 +210,11 @@ Subcommands
            other pull request, is that same account-quota refusal with nothing having answered it
            since. A refusal on this pull request itself is 46 instead. The poll that would otherwise
            have run is skipped for this reason, printed as a `note:` line before the digest, rather
-           than spent finding the same account state out a call late, and no request is sent. Pass
-           --ignore-quota-signal to request and poll --timeout anyway once the quota is believed to
-           have reset. 46 is read from this pull request's own reviews and always takes priority
-           over 47, so a genuine 0/40/41/42/43/45 on this pull request outranks 47 whenever both
-           would otherwise apply.
+           than spent finding the same account state out a call late, and no request is sent, while
+           a request already pending is still polled for. Pass --ignore-quota-signal to request and
+           poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
+           request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
+           this pull request outranks 47 whenever both would otherwise apply.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -3745,7 +3745,7 @@ def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.C
     """
     base = ["gh", "api", path] + (["--jq", jq] if jq else [])
     proc = _gh_run(base + (["--allow-escape-sequences"] if raw else []), raw)
-    if raw and proc.returncode != 0 and "unknown flag" in proc.stderr:
+    if raw and proc.returncode != 0 and "unknown flag: --allow-escape-sequences" in proc.stderr:
         proc = _gh_run(base, raw)
     return proc
 
