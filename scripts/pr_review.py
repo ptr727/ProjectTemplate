@@ -3862,6 +3862,16 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         print(f"  {(check.stdout or check.stderr).strip()[:400]}")
         return 68
     findings = pass_findings(checkout, base)
+    after = _git(checkout, "rev-parse", "HEAD")
+    still = _git(
+        checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
+    )
+    if after.stdout.strip() != head or still.returncode != 0 or still.stdout.strip():
+        print(
+            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout moved or changed "
+            "while the pass was being checked, so the check no longer describes the head"
+        )
+        return 67
     body = (
         f"A recorded local strict-review pass covers head `{head}`, the content this pull "
         f"request carries at that commit against `{base}`, and it recorded {findings} "
@@ -3958,12 +3968,13 @@ def local_cover(pr: dict) -> bool:
 
     Only on a pull request into a branch other than the default, after Copilot's first round, on
     a head its writer attests, and only where nothing on record says any round read part of a
-    diff and the whole review history is in view, the bound a file table stands in under. The
-    maintainer's answer on the hub's issue 2261 set the moments: a fix push after the first
-    round is covered by the local pass, and a promotion keeps its own Copilot round.
+    diff and the whole review history is in view, the bound a file table stands in under. A fix
+    push after the first round is covered by the local pass, and a promotion keeps its own
+    Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
     """
     return (
-        not promotion(pr)
+        not refusing_review(pr)
+        and not promotion(pr)
         and first_round_done(pr)
         and attested(pr)
         and not reviews_truncated(pr)
@@ -4351,6 +4362,8 @@ def main(argv: list[str] | None = None) -> int:
         for flag, value in reply_only.items():
             if value is not None:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
+    if a.cmd != "wait" and a.request:
+        ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
     if a.cmd != "attest" and a.checkout is not None:
         ap.error(f"--checkout belongs to `attest`, not `{a.cmd}`")
     if a.cmd not in ("comment", "reply") and a.body is not None:

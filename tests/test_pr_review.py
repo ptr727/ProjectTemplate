@@ -5856,6 +5856,18 @@ class TestCli(GqlCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             pr_review.main(["status", "7", "--repo", "o/r", "--checkout", "."])
 
+    def test_request_belongs_to_wait_alone(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            pr_review.main(["status", "7", "--repo", "o/r", "--request"])
+
+    def test_a_refusal_on_the_head_is_not_overruled_by_an_attestation(self) -> None:
+        rounds = [
+            review(oid=OLD, at=EARLY, rid="PRR_a"),
+            review(body=REFUSED, at=LATE, rid="PRR_b"),
+        ]
+        pr = self.into(payload(rounds), attest=True)
+        self.assertFalse(pr_review.local_cover(pr))
+
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
         for rounds, field in (
@@ -7517,6 +7529,7 @@ class TestAttest(unittest.TestCase):
             ["git", "-C", self.dir, "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
             env=env,
         ).stdout.strip()
@@ -7566,6 +7579,22 @@ class TestAttest(unittest.TestCase):
 
     def test_a_checkout_measuring_another_merge_base_is_refused(self) -> None:
         self.assertEqual(67, self.run_attest(self.head, base="e" * 40))
+        self.assertEqual([], self.posted)
+
+    def test_a_checkout_that_moves_during_the_check_is_refused(self) -> None:
+        original = pr_review._git
+        reads: list[str] = []
+
+        def moved(checkout: str, *args: str) -> subprocess.CompletedProcess:
+            proc = original(checkout, *args)
+            if args == ("rev-parse", "HEAD"):
+                reads.append("HEAD")
+                if len(reads) > 1:
+                    return subprocess.CompletedProcess([], 0, "f" * 40 + "\n", "")
+            return proc
+
+        with mock.patch.object(pr_review, "_git", side_effect=moved):
+            self.assertEqual(67, self.run_attest(self.head))
         self.assertEqual([], self.posted)
 
     def test_an_unread_pull_request_is_refused(self) -> None:
