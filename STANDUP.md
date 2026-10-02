@@ -77,7 +77,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 - **The repository**, with its owner, name, and visibility.
 - **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
 - **The App secret values**, in the Actions and Dependabot stores both.
-- **Every publish credential the repo's mechanisms declare** in [`spec/secrets.json`][secrets], **and every environment its registry entry's `environments` names**, including any environment a deploy gates on, with the secrets and variables the deploy reads there. No hub file declares those environment names, so the maintainer supplies them.
+- **Every publish credential the repo's mechanisms declare** in [`spec/secrets.json`][secrets], **and every environment a deploy gates on**, which step 1 records in the registry entry's `environments`, with the secrets and variables the deploy reads there. No hub file declares the secret and variable names an environment holds, so the maintainer supplies them.
 
 **A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
 
