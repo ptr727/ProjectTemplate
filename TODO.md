@@ -155,7 +155,7 @@ One pull request giving a repo a declared way to say what it needs at runtime, t
   - **Settled** - Blog needs it immediately, since it deploys on the proxmox host through HomeAutomation-Config's Docker Compose stack and carries the copy destinations and the internal URI.
   - **Settled** - Adopting it in the hub comes first, since the hub carries neither piece.
   - **Settled** - The GitHub side has the same missing axis, surfaced by the `hugo` type, since a deploy's credentials are per-environment secrets and variables while `stores` is a closed enum of `actions` and `dependabot`, and [`spec/audit.py`][audit] seeds its map with those two keys and indexes it unguarded, so adding an `environments` value raises a key error for every repo whose publish maps to that mechanism.
-  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema] so a repo may declare its per-environment names, and no tool reads one where it exists, which is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
+  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema], but it has no per-repo dimension and downstream copies of `spec/secrets.json` are retired, so no repo declares its per-environment names there, and no tool would read one, which is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
 
 ### The Docker Image Freshness Rule
 
