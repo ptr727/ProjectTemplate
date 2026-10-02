@@ -12,9 +12,9 @@ Hub-only repository and branch configuration held as committed files, kept out o
 Two workflow models share `main.json` but differ on `develop` (registry `workflowModel`, default `release`):
 
 - **`release`** (`develop.json`): `develop` requires squash merges with linear history and a PR, the feature-branch pipeline.
-- **`operational`** (`operational/develop.json`): `develop` takes **direct signed pushes**, carrying only `deletion`, `non_fast_forward`, and `required_signatures`; no PR, no status-check, no Copilot-on-push. CI runs on the push as advisory feedback. Read the dropped rules as an allowance rather than a prohibition, since a PR into `develop` remains legal and the lint workflow triggers on it, with its result reported and not required (a required check here would gate the direct push as well). This is for live-service config repos that edit `develop` directly and promote a known-good snapshot to `main` via an occasional PR (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
+- **`operational`** (`operational/develop.json`): `develop` takes **direct signed pushes**, carrying only `deletion`, `non_fast_forward`, and `required_signatures`, with no PR, no status-check, and no Copilot review rule. CI runs on the push as advisory feedback. Read the dropped rules as an allowance rather than a prohibition, since a PR into `develop` remains legal and the lint workflow triggers on it, with its result reported and not required (a required check here would gate the direct push as well). This is for live-service config repos that edit `develop` directly and promote a known-good snapshot to `main` via an occasional PR (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
 
-`main` (both models) requires merge-commit merges (no linear-history rule), signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and blocks force-pushes and deletion, so a `develop -> main` promotion is always gated even when `develop` takes direct commits. Every ruleset intentionally leaves "Require branches to be up to date before merging" **off**, per [GOVERNANCE.md "Branching Model"][governance-branching-model].
+`main` (both models) requires merge-commit merges (no linear-history rule), signed commits, a passing `Check pull request workflow status job`, resolved review threads, and Copilot review, and blocks force-pushes and deletion, so a `develop -> main` promotion is always gated even when `develop` takes direct commits. The Copilot review rule in `develop.json` and `main.json` reviews a pull request when it opens and not on each push or while it is a draft, since a later round is requested deliberately per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] rather than spent on every push. Every ruleset intentionally leaves "Require branches to be up to date before merging" **off**, per [GOVERNANCE.md "Branching Model"][governance-branching-model].
 
 The result is **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`GOVERNANCE.md` and the workflows reference them). Only the `develop` *content* varies by model. The required check binds by name and only turns green after the repo's PR workflow runs once.
 
@@ -79,6 +79,7 @@ A repository linked to a project of its own is left alone, like a label the payl
 [governance-communicating-with-the-user]: ../GOVERNANCE.md#communicating-with-the-user
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
+[governance-pr-review-etiquette]: ../GOVERNANCE.md#pr-review-etiquette
 [governance-verification-discipline]: ../GOVERNANCE.md#verification-discipline
 [project-json]: ./project.json
 [repo-config-doc]: ../docs/repo-config.md
