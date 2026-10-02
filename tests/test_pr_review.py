@@ -5741,7 +5741,7 @@ class TestCli(GqlCase):
                 "author": {"login": "maintainer"},
                 "authorAssociation": "OWNER",
                 "createdAt": LATE,
-                "body": f"Attested.\n\n<!-- fleet-local-review: head={HEAD} -->",
+                "body": f"Attested.\n\n<!-- fleet-local-review: head={HEAD} base={base} findings=0 -->",
             }
             pr["comments"] = {"nodes": [marker], "pageInfo": {"hasPreviousPage": False}}
         return pr
@@ -7580,7 +7580,10 @@ class TestAttest(unittest.TestCase):
     def test_a_covered_head_is_attested_by_its_full_commit(self) -> None:
         self.assertEqual(0, self.run_attest(self.head))
         self.assertEqual(1, len(self.posted))
-        self.assertIn(f"\n<!-- fleet-local-review: head={self.head} findings=3 -->", self.posted[0])
+        self.assertIn(
+            f"\n<!-- fleet-local-review: head={self.head} base=develop findings=3 -->",
+            self.posted[0],
+        )
         calls = [line.split("|") for line in self.record.read_text().splitlines()]
         self.assertEqual(
             ["check --target develop", "status --target develop"], [c[1] for c in calls]
@@ -7606,6 +7609,16 @@ class TestAttest(unittest.TestCase):
 
         with mock.patch.object(pr_review, "_git", side_effect=moved):
             self.assertEqual(67, self.run_attest(self.head))
+        self.assertEqual([], self.posted)
+
+    def test_a_base_that_would_change_the_compare_path_is_refused(self) -> None:
+        target = {"headRefOid": self.head, "baseRefName": "develop#frag"}
+        with (
+            mock.patch.object(pr_review, "gql", return_value=target),
+            mock.patch.object(pr_review, "gh_rest") as rest,
+        ):
+            self.assertEqual(67, pr_review.attest("o", "r", 7, self.dir))
+        rest.assert_not_called()
         self.assertEqual([], self.posted)
 
     def test_an_unread_pull_request_is_refused(self) -> None:
@@ -7635,28 +7648,36 @@ class TestAttestationReadings(unittest.TestCase):
 
     def test_the_attestation_carries_the_findings_count(self) -> None:
         for line, expected in (
-            (f"<!-- fleet-local-review: head={HEAD} findings=4 -->", "4"),
-            (f"<!-- fleet-local-review: head={HEAD} findings=unknown -->", "unknown"),
-            (f"<!-- fleet-local-review: head={HEAD} -->", "unknown"),
+            (f"<!-- fleet-local-review: head={HEAD} base=develop findings=4 -->", "4"),
+            (f"<!-- fleet-local-review: head={HEAD} base=develop findings=unknown -->", "unknown"),
+            (f"<!-- fleet-local-review: head={HEAD} base=feature findings=4 -->", None),
+            (f"<!-- fleet-local-review: head={HEAD} -->", None),
         ):
             with self.subTest(line=line):
-                pr = {"headRefOid": HEAD, "comments": {"nodes": [self.comment(line)]}}
+                pr = {
+                    "headRefOid": HEAD,
+                    "baseRefName": "develop",
+                    "comments": {"nodes": [self.comment(line)]},
+                }
                 self.assertEqual(expected, pr_review.attestation(pr))
 
     def test_only_a_writer_s_marker_for_the_current_head_attests(self) -> None:
-        marker = f"<!-- fleet-local-review: head={HEAD} -->"
+        marker = f"<!-- fleet-local-review: head={HEAD} base=develop findings=0 -->"
         for nodes, expected in (
             ([self.comment(marker)], True),
             ([self.comment(marker, "COLLABORATOR")], True),
             ([self.comment(marker, "NONE")], False),
             ([self.comment(marker, "CONTRIBUTOR")], False),
-            ([self.comment(f"<!-- fleet-local-review: head={OLD} -->")], False),
+            (
+                [self.comment(f"<!-- fleet-local-review: head={OLD} base=develop findings=0 -->")],
+                False,
+            ),
             ([self.comment(f"Attest posts `{marker}` as its last line.")], False),
             ([self.comment(f"Quoted:\n\n```\n{marker}\n```\n")], False),
             ([], False),
         ):
             with self.subTest(nodes=nodes):
-                pr = {"headRefOid": HEAD, "comments": {"nodes": nodes}}
+                pr = {"headRefOid": HEAD, "baseRefName": "develop", "comments": {"nodes": nodes}}
                 self.assertIs(expected, pr_review.attested(pr))
 
     def test_a_promotion_is_a_pull_request_into_the_default_branch(self) -> None:

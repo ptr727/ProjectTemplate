@@ -9,15 +9,16 @@ Discipline" for the rule this implements.
 
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
-           `<!-- fleet-local-review: head=<sha> -->` that `status` and `wait` read. It reads the
-           receipt `local_review.py` keeps in the checkout's git directory, which nothing on GitHub
-           can, and refuses unless the checkout (--checkout, default the current directory) is at
-           the pull request's head with no change beyond it, its merge base with the base branch is
-           the pull request's own, and `local_review.py check` passes against the base. Exit 0 =
-           posted, 64 = the write scope could not be established or excludes the target, 65 = the
-           pull request could not be read, 66 = the response did not confirm the comment, 67 = the
-           checkout is not the head, holds changes, or measures another merge base, or that merge
-           base could not be read, 68 = no current local pass covers the content.
+           `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
+           `wait` read, an attestation counting only against the base it names. It reads the receipt
+           `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
+           refuses unless the checkout (--checkout, default the current directory) is at the pull
+           request's head with no change beyond it, its merge base with the base branch is the pull
+           request's own, and `local_review.py check` passes against the base. Exit 0 = posted, 64 =
+           the write scope could not be established or excludes the target, 65 = the pull request
+           could not be read, 66 = the response did not confirm the comment, 67 = the checkout is
+           not the head, holds changes, or measures another merge base, or that merge base could not
+           be read, 68 = no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
@@ -870,7 +871,8 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
 """
 ATTESTATION = re.compile(
-    r"^<!-- fleet-local-review: head=([0-9a-f]{40})(?: findings=(\d+|unknown))? -->$", re.MULTILINE
+    r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
+    re.MULTILINE,
 )
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
@@ -3823,6 +3825,12 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
             "head commit does not, so a pass over it does not describe what was pushed"
         )
         return 67
+    if UNSAFE_REF.search(base) or DOT_SEGMENT.search(base):
+        print(
+            f"status=MERGE_BASE_NOT_READ nothing was written: the base branch {base!r} carries a "
+            "character that would change the compare path rather than travel along it"
+        )
+        return 67
     ours = _git(checkout, "merge-base", f"refs/remotes/origin/{base}", "HEAD")
     theirs = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{head}", ".merge_base_commit.sha // empty"
@@ -3878,7 +3886,7 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         f"A recorded local strict-review pass covers head `{head}`, the content this pull "
         f"request carries at that commit against `{base}`, and it recorded {findings} "
         f"finding{'' if findings == '1' else 's'}.\n\n"
-        f"<!-- fleet-local-review: head={head} findings={findings} -->"
+        f"<!-- fleet-local-review: head={head} base={base} findings={findings} -->"
     )
     return comment_on_pr(owner, repo, num, body)
 
@@ -3930,21 +3938,22 @@ def attested(pr: dict) -> bool:
 def attestation(pr: dict) -> str | None:
     """The findings count an owner's, member's, or collaborator's attestation of this head carries.
 
-    None where no attestation vouches for the head, and "unknown" where one carries no count.
+    None where no attestation vouches for the head against the pull request's current base, so
+    a retargeted pull request needs a new one, and "unknown" where the pass recorded no count.
 
     Read over every comment rather than the reviewer's own, since an attestation is the
     maintainer's account speaking. The association is what keeps a passer-by's comment carrying
     the same marker from vouching for anything. The marker counts only as a line of its own
     outside a fence, so a comment quoting it in a span or a code block vouches for nothing.
     """
-    head = pr.get("headRefOid") or ""
+    head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
         body = strip_fences(node.get("body") or "", to_end=True)
         for m in ATTESTATION.finditer(body):
-            if m.group(1) == head:
-                return m.group(2) or "unknown"
+            if m.group(1) == head and m.group(2) == base:
+                return m.group(3)
     return None
 
 
