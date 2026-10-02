@@ -82,13 +82,16 @@ repo_arg="${1:-}"
 model="${2:-}"
 # Allow the model as the sole positional (`configure.sh check operational`): a model name is not a repo.
 case "$repo_arg" in release | operational)
+    if [ -n "$model" ]; then
+        refuse "The model '$repo_arg' comes before the repo (expected the repo, then the model)"
+    fi
     model="$repo_arg"
     repo_arg=""
     ;;
 esac
 # A name of only dots is refused too, since the API resolves `.` and `..` as path segments rather than as a repo.
 if [ -n "$repo_arg" ]; then
-    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
+    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
         refuse "Repo '$repo_arg' is not shaped owner/name"
     fi
 fi

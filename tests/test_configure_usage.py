@@ -71,6 +71,8 @@ class UsageCase(unittest.TestCase):
             ("apply", "owner/."): "Repo 'owner/.' is not shaped owner/name",
             ("apply", "../name"): "Repo '../name' is not shaped owner/name",
             ("check", "owner/name", "bogus"): "Unknown workflow model 'bogus'",
+            ("apply", "release", "owner/name"): "The model 'release' comes before the repo",
+            ("check", "release", "operational"): "The model 'release' comes before the repo",
         }
         for args, message in cases.items():
             with self.subTest(args=args):
@@ -82,8 +84,14 @@ class UsageCase(unittest.TestCase):
 
     def test_valid_arguments_reach_gh(self) -> None:
         """The control: a well-formed run gets past argument handling to its first API call."""
-        result, calls = self.run_configure("check", "owner/a.b_c-d", "release")
-        self.assertNotEqual(calls, "", result.stderr)
+        for args in (
+            ["check", "owner/a.b_c-d", "release"],
+            ["check", "owner_x/name", "operational"],
+            ["check", "operational"],
+        ):
+            with self.subTest(args=args):
+                result, calls = self.run_configure(*args)
+                self.assertNotEqual(calls, "", result.stderr)
 
 
 if __name__ == "__main__":
