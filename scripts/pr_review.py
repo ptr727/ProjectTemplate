@@ -200,10 +200,11 @@ Subcommands
            body and writes its cause to the reviewer's own Actions run, so that run's job log is
            read: a logged rate limit reports as the quota with its reset time, and anything else, an
            unreadable log included, as a possible quota hit. Either way no request is sent, and a
-           request already pending is still polled for. That is an account-level state a re-request
-           or a further wait does not clear, unlike 41's other causes (a file count over the limit,
-           cleared by splitting the pull request), so it is its own code rather than folded into 41:
-           proceed on the other reviewers' coverage instead of retrying.
+           request already pending after a refusal on an earlier head is still polled for. That is
+           an account-level state a re-request or a further wait does not clear, unlike 41's other
+           causes (a file count over the limit, cleared by splitting the pull request), so it is its
+           own code rather than folded into 41: proceed on the other reviewers' coverage instead of
+           retrying.
            47 = this pull request's current head carries no Copilot activity of its own, and the
            reviewer's own most recent activity found in the repository, a review or comment on any
            other pull request, is that same account-quota refusal with nothing having answered it
@@ -3738,14 +3739,19 @@ def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.C
     Unlike `gh_graphql` this does not raise on a non-zero exit, because a 404 here is an answer
     the caller acts on rather than a failure. Reads only: every path passed in is a GET.
 
-    `raw` is for a job log, which carries terminal escape sequences that `gh` refuses to print
-    without being told it may.
+    `raw` is for a job log, which carries terminal escape sequences that `gh` 2.97 and later
+    refuse to print without `--allow-escape-sequences`. An older `gh` has no such flag and
+    prints the log as it is, so a run refused on the flag is retried without it.
     """
-    argv = (
-        ["gh", "api", path]
-        + (["--jq", jq] if jq else [])
-        + (["--allow-escape-sequences"] if raw else [])
-    )
+    base = ["gh", "api", path] + (["--jq", jq] if jq else [])
+    proc = _gh_run(base + (["--allow-escape-sequences"] if raw else []), raw)
+    if raw and proc.returncode != 0 and "unknown flag" in proc.stderr:
+        proc = _gh_run(base, raw)
+    return proc
+
+
+def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
+    """Run one `gh` read, a log decoded leniently since its bytes are the runner's own."""
     try:
         return subprocess.run(
             argv,

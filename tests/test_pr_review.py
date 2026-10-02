@@ -2967,6 +2967,25 @@ class TestCoverageCarriesForward(GqlCase):
         self.assertNotIn("carried", out)
 
 
+class TestRawLogRead(unittest.TestCase):
+    """A job log read keeps working on a `gh` older than the escape-sequence flag."""
+
+    def test_an_unknown_flag_is_retried_without_it(self) -> None:
+        refused = subprocess.CompletedProcess([], 1, "", "unknown flag: --allow-escape-sequences")
+        read = subprocess.CompletedProcess([], 0, "the log", "")
+        with mock.patch.object(pr_review, "_gh_run", side_effect=[refused, read]) as run:
+            proc = pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+        self.assertEqual("the log", proc.stdout)
+        self.assertIn("--allow-escape-sequences", run.call_args_list[0].args[0])
+        self.assertNotIn("--allow-escape-sequences", run.call_args_list[1].args[0])
+
+    def test_another_failure_is_not_retried(self) -> None:
+        failed = subprocess.CompletedProcess([], 1, "", "HTTP 404")
+        with mock.patch.object(pr_review, "_gh_run", return_value=failed) as run:
+            pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+        self.assertEqual(1, run.call_count)
+
+
 class TestTheDeltaSinceTheCarriedRound(unittest.TestCase):
     """What changed between the round that stated coverage and the head, reported not judged."""
 
