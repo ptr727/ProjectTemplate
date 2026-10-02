@@ -1420,6 +1420,7 @@ class ExitCodeCase(RepoCase):
         self.assertEqual(code, 0)
         data = json.loads(buf.getvalue())
         self.assertEqual(data["reviewers"], ["agent-skill"])
+        self.assertEqual(data["findings"], {"agent-skill": 2})
         self.assertTrue(data["covered"])
 
     def test_record_reports_what_it_recorded(self) -> None:

@@ -5841,6 +5841,13 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_a_truncated_review_history_requests_a_round_rather_than_holding(self) -> None:
+        self.answer(self.into(payload([review(oid=OLD)], older_reviews=True), attest=True))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_a_truncated_review_history_is_no_local_cover(self) -> None:
         pr = self.into(payload([review(oid=OLD)], older_reviews=True), attest=True)
         self.assertFalse(pr_review.local_cover(pr))
@@ -7528,8 +7535,10 @@ class TestAttest(unittest.TestCase):
         record = Path(self.dir).parent / f"calls-{check_exit}.txt"
         stub = Path(self.dir).parent / f"stub-{check_exit}.py"
         stub.write_text(
-            "import os, sys\n"
-            f"open({str(record)!r}, 'w').write(os.getcwd() + '\\n' + ' '.join(sys.argv[1:]))\n"
+            "import json, os, sys\n"
+            f"open({str(record)!r}, 'a').write(os.getcwd() + '|' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "if sys.argv[1] == 'status':\n"
+            "    print(json.dumps({'findings': {'agent-skill': 2, 'coderabbit-cli': 1}}))\n"
             f"sys.exit({check_exit})\n"
         )
         self.addCleanup(stub.unlink)
@@ -7547,10 +7556,13 @@ class TestAttest(unittest.TestCase):
     def test_a_covered_head_is_attested_by_its_full_commit(self) -> None:
         self.assertEqual(0, self.run_attest(self.head))
         self.assertEqual(1, len(self.posted))
-        self.assertIn(f"\n<!-- fleet-local-review: head={self.head} -->", self.posted[0])
-        cwd, argv = self.record.read_text().split("\n")
-        self.assertEqual(os.path.realpath(self.dir), os.path.realpath(cwd))
-        self.assertEqual("check --target develop", argv)
+        self.assertIn(f"\n<!-- fleet-local-review: head={self.head} findings=3 -->", self.posted[0])
+        calls = [line.split("|") for line in self.record.read_text().splitlines()]
+        self.assertEqual(
+            ["check --target develop", "status --target develop"], [c[1] for c in calls]
+        )
+        for cwd, _ in calls:
+            self.assertEqual(os.path.realpath(self.dir), os.path.realpath(cwd))
 
     def test_a_checkout_measuring_another_merge_base_is_refused(self) -> None:
         self.assertEqual(67, self.run_attest(self.head, base="e" * 40))
@@ -7580,6 +7592,16 @@ class TestAttestationReadings(unittest.TestCase):
 
     def comment(self, body: str, association: str = "OWNER") -> dict:
         return {"body": body, "authorAssociation": association, "author": {"login": "someone"}}
+
+    def test_the_attestation_carries_the_findings_count(self) -> None:
+        for line, expected in (
+            (f"<!-- fleet-local-review: head={HEAD} findings=4 -->", "4"),
+            (f"<!-- fleet-local-review: head={HEAD} findings=unknown -->", "unknown"),
+            (f"<!-- fleet-local-review: head={HEAD} -->", "unknown"),
+        ):
+            with self.subTest(line=line):
+                pr = {"headRefOid": HEAD, "comments": {"nodes": [self.comment(line)]}}
+                self.assertEqual(expected, pr_review.attestation(pr))
 
     def test_only_a_writer_s_marker_for_the_current_head_attests(self) -> None:
         marker = f"<!-- fleet-local-review: head={HEAD} -->"

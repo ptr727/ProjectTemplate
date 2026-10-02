@@ -12,11 +12,12 @@ Subcommands
            `<!-- fleet-local-review: head=<sha> -->` that `status` and `wait` read. It reads the
            receipt `local_review.py` keeps in the checkout's git directory, which nothing on GitHub
            can, and refuses unless the checkout (--checkout, default the current directory) is at
-           the pull request's head with no change beyond it and `local_review.py check` passes
-           against the base. Exit 0 = posted, 64 = the write scope could not be established or
-           excludes the target, 65 = the pull request could not be read, 66 = the response did not
-           confirm the comment, 67 = the checkout is not the head or holds changes, 68 = no current
-           local pass covers the content.
+           the pull request's head with no change beyond it, its merge base with the base branch is
+           the pull request's own, and `local_review.py check` passes against the base. Exit 0 =
+           posted, 64 = the write scope could not be established or excludes the target, 65 = the
+           pull request could not be read, 66 = the response did not confirm the comment, 67 = the
+           checkout is not the head, holds changes, or measures another merge base, or that merge
+           base could not be read, 68 = no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
@@ -191,15 +192,17 @@ Subcommands
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head ends
            the wait as covered, and one with no attestation exits 49 naming the `attest` step.
-           --request asks for a round anyway. A promotion into the default branch, and a pull
-           request Copilot has not reviewed yet, are requested as before. It reads the Copilot
-           reviewer's bot id from the repository's own most recently updated PRs rather than a fixed
-           id: the last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window
-           carries no Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would
-           otherwise empty it on every call for as long as the outage runs. Requests nothing
-           (falling back to polling only) where both windows come up empty, since a repository with
-           no Copilot review in either has nothing to read the id from and a fabricated one is never
-           an option. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
+           --request asks for a round anyway. A pull request into the default branch, a promotion
+           among them, a pull request Copilot has not reviewed yet, and one with a partial on record
+           or a review history past the window are requested as before. The comment also carries the
+           findings count the pass recorded, shown and not gated. It reads the Copilot reviewer's
+           bot id from the repository's own most recently updated PRs rather than a fixed id: the
+           last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow window carries no
+           Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs would otherwise
+           empty it on every call for as long as the outage runs. Requests nothing (falling back to
+           polling only) where both windows come up empty, since a repository with no Copilot review
+           in either has nothing to read the id from and a fabricated one is never an option. The
+           loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass, 30 = still pending at
            timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
@@ -866,7 +869,9 @@ Q_ATTEST_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
 """
-ATTESTATION = re.compile(r"^<!-- fleet-local-review: head=([0-9a-f]{40}) -->$", re.MULTILINE)
+ATTESTATION = re.compile(
+    r"^<!-- fleet-local-review: head=([0-9a-f]{40})(?: findings=(\d+|unknown))? -->$", re.MULTILINE
+)
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
@@ -3402,7 +3407,7 @@ def digest(
             "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
             "follows the pull request's first round, and a comment from an owner, member, or "
             "collaborator attests a recorded local strict-review pass over exactly this head's "
-            "content"
+            f"content, which recorded {attestation(pr)} finding(s)"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
@@ -3816,11 +3821,19 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
             "head commit does not, so a pass over it does not describe what was pushed"
         )
         return 67
-    ours = _git(checkout, "merge-base", f"origin/{base}", "HEAD")
+    ours = _git(checkout, "merge-base", f"refs/remotes/origin/{base}", "HEAD")
     theirs = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{head}", ".merge_base_commit.sha // empty"
     )
-    if ours.returncode != 0 or ours.stdout.strip() != theirs.stdout.strip():
+    if ours.returncode != 0 or theirs.returncode != 0 or not theirs.stdout.strip():
+        print(
+            f"status=MERGE_BASE_NOT_READ nothing was written: the merge base with {base} could "
+            "not be read in the checkout or from GitHub, so the pass's scope cannot be compared "
+            "with the pull request's"
+        )
+        print(f"  {(ours.stderr or theirs.stderr).strip()[:400]}")
+        return 67
+    if ours.stdout.strip() != theirs.stdout.strip():
         print(
             f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout's merge base with "
             f"origin/{base} is not the pull request's own, so a pass against it measured a "
@@ -3848,11 +3861,38 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         )
         print(f"  {(check.stdout or check.stderr).strip()[:400]}")
         return 68
+    findings = pass_findings(checkout, base)
     body = (
         f"A recorded local strict-review pass covers head `{head}`, the content this pull "
-        f"request carries at that commit against `{base}`.\n\n<!-- fleet-local-review: head={head} -->"
+        f"request carries at that commit against `{base}`, and it recorded {findings} "
+        f"finding{'' if findings == '1' else 's'}.\n\n"
+        f"<!-- fleet-local-review: head={head} findings={findings} -->"
     )
     return comment_on_pr(owner, repo, num, body)
+
+
+def pass_findings(checkout: str, base: str) -> str:
+    """The findings the covering passes recorded, summed, or "unknown" where any recorded none.
+
+    Shown rather than gated, since a local pass's findings are advisory, and a pass that raised
+    some is otherwise invisible on the pull request it now covers.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(LOCAL_REVIEW), "status", "--target", base],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
+        counts = json.loads(proc.stdout).get("findings") or {}
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        return "unknown"
+    if not counts or not all(isinstance(n, int) and n >= 0 for n in counts.values()):
+        return "unknown"
+    return str(sum(counts.values()))
 
 
 def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
@@ -3871,7 +3911,14 @@ def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def attested(pr: dict) -> bool:
-    """Whether a comment from an owner, member, or collaborator vouches for this pull request's head.
+    """Whether an attestation vouches for this pull request's head, per `attestation`."""
+    return attestation(pr) is not None
+
+
+def attestation(pr: dict) -> str | None:
+    """The findings count an owner's, member's, or collaborator's attestation of this head carries.
+
+    None where no attestation vouches for the head, and "unknown" where one carries no count.
 
     Read over every comment rather than the reviewer's own, since an attestation is the
     maintainer's account speaking. The association is what keeps a passer-by's comment carrying
@@ -3883,9 +3930,10 @@ def attested(pr: dict) -> bool:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
         body = strip_fences(node.get("body") or "", to_end=True)
-        if any(m.group(1) == head for m in ATTESTATION.finditer(body)):
-            return True
-    return False
+        for m in ATTESTATION.finditer(body):
+            if m.group(1) == head:
+                return m.group(2) or "unknown"
+    return None
 
 
 def promotion(pr: dict) -> bool:
