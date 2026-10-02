@@ -62,7 +62,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
    only cause on record that the loop can clear. `pr_review.py wait` exit `46` is the one nothing
-   the loop does clears, an account-quota refusal carrying the current head, which is the case
+   the loop does clears, the pull request's newest Copilot review being an account-quota refusal
+   or an error refusal read as a possible quota hit, on this head or an earlier one, which is the case
    "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account state
    read from the reviewer's activity elsewhere when this head carries none of its own, and exit
    `41` holding across several heads with no cause its body names reaches it the slower way.

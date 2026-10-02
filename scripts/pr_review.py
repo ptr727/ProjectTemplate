@@ -60,7 +60,7 @@ Subcommands
            re-requested on the same head states coverage or carries a table only by chance.
            A refusal naming the account quota still reads as absent here, exit 0, since a
            refusal covers no head either. Its printed digest line carries `refusal=QUOTA`
-           regardless. `wait` is where that state gets its own exit codes, 46 and 47 below,
+           regardless, and `refusal=ERROR` for an error refusal whose run logged no rate limit. `wait` is where that state gets its own exit codes, 46 and 47 below,
            because only `wait` is the command a caller might otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
            CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
@@ -190,8 +190,12 @@ Subcommands
            not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
            since the rollup carries checks no ruleset requires. The digest reports the check
            in both cases, so a shape outside 44 is still named rather than lost.
-           46 = the review carrying the head is a refusal naming the account quota specifically,
-           printed above under COPILOT REFUSED THIS ROUND. That is an account-level state a
+           46 = the newest Copilot review on the pull request, on this head or an earlier one,
+           is a refusal naming the account quota, or one saying only that it encountered an
+           error, printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts
+           that error body and writes its cause to the reviewer's own Actions run, so that run's
+           job log is read: a logged rate limit reports as the quota with its reset time, and
+           anything else as a possible quota hit. Either way no request is sent. That is an account-level state a
            re-request or a further wait does not clear, unlike 41's other causes (a file count
            over the limit, cleared by splitting the pull request), so it is its own code rather
            than folded into 41: proceed on the other reviewers' coverage instead of retrying.
@@ -327,6 +331,14 @@ REFUSAL = re.compile(
 # This script's own corpus and this file both quote the sentence below its overview, same as the refusal wording itself does.
 # Observed once here: "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit."
 QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNORECASE)
+ERROR_REFUSAL = re.compile(r"encountered an error", re.IGNORECASE)
+COPILOT_RUN_PATH = "dynamic/agents/copilot-pull-request-reviewer"
+RUN_ERROR_TYPE = re.compile(r"errorType: '([a-z_]+)'")
+RUN_RATE_LIMIT = re.compile(
+    r"(You.ve reached your [^\n]*?rate limit\.[^\n]*?)(?= or switch| Learn More|$)", re.MULTILINE
+)
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 # A structural marker rather than prose, so reading it needs no per-bot wording model the way `QUOTA` above needs one for Copilot's free-text refusal.
 # Observed on CodeRabbit, a plain PR comment rather than a formal review: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
 # The service name is captured rather than assumed.
@@ -1214,6 +1226,78 @@ def quota_refusal(node: dict) -> bool:
     that does nothing here.
     """
     return bool(QUOTA.search(refusal_of(node)))
+
+
+def possible_quota(node: dict) -> bool:
+    """True where a refusal on this node names an error rather than any cause.
+
+    The weekly rate limit posts exactly this body, its cause written only to the task log, so it
+    reads as a possible quota hit rather than as a transient failure. A re-request into a reached
+    limit spends nothing it can recover and returns the same body, which is why one is enough.
+    """
+    return bool(ERROR_REFUSAL.search(refusal_of(node)))
+
+
+@functools.cache
+def run_cause(owner: str, repo: str, oid: str, before: str) -> tuple[str, str] | None:
+    """The error type and rate-limit sentence the reviewer's own failed run logged, or None.
+
+    An error refusal's body names no cause, and the run that produced it does: the reviewer runs
+    as an Actions workflow on the reviewed commit, and its job log states the weekly limit and
+    when it resets. The run read is the newest failed one on that commit created no later than
+    the review, so a later run on the same commit is not read as this round's.
+
+    None wherever any read fails or finds nothing, which leaves the round a possible quota hit
+    rather than a confirmed one or a cleared one. Memoized for the run, so the digest and the exit
+    code read one log once.
+    """
+    if not oid or not ISO_STAMP.fullmatch(before):
+        return None
+    proc = gh_rest(
+        f"repos/{owner}/{repo}/actions/runs?event=dynamic&head_sha={oid}&per_page=50",
+        f'[.workflow_runs[] | select(.path == "{COPILOT_RUN_PATH}" and .conclusion == "failure"'
+        f' and .created_at <= "{before}")] | max_by(.created_at) | .id // empty',
+    )
+    run = proc.stdout.strip()
+    if proc.returncode != 0 or not run.isdigit():
+        return None
+    proc = gh_rest(f"repos/{owner}/{repo}/actions/runs/{run}/jobs", ".jobs[0].id // empty")
+    job = proc.stdout.strip()
+    if proc.returncode != 0 or not job.isdigit():
+        return None
+    proc = gh_rest(f"repos/{owner}/{repo}/actions/jobs/{job}/logs", raw=True)
+    if proc.returncode != 0:
+        return None
+    log = ANSI.sub("", proc.stdout)
+    kind, said = RUN_ERROR_TYPE.search(log), RUN_RATE_LIMIT.search(log)
+    if kind is None:
+        return None
+    return kind.group(1), said.group(1).strip() if said else ""
+
+
+def confirmed_quota(owner: str, repo: str, node: dict) -> str:
+    """The run log's rate-limit sentence where an error refusal's run logged a rate limit, else ""."""
+    if not possible_quota(node):
+        return ""
+    cause = run_cause(
+        owner, repo, (node.get("commit") or {}).get("oid") or "", node.get("submittedAt") or ""
+    )
+    if cause is None or cause[0] != "rate_limit":
+        return ""
+    return cause[1] or "the run logged a rate limit and stated no reset"
+
+
+def stopping_refusal(pr: dict) -> dict | None:
+    """The reviewer's newest review on this pull request, on any head, where it is a quota refusal or an error.
+
+    Read across heads rather than on the head alone, since a push after such a refusal moves the
+    head and the account state the refusal reports does not move with it. A genuine round since
+    spends it, the newest review being the one read.
+    """
+    newest = newest_of(reviewer_nodes(pr, "reviews"))
+    if newest is None or not (quota_refusal(newest) or possible_quota(newest)):
+        return None
+    return newest
 
 
 def refusing_review(pr: dict) -> dict | None:
@@ -2992,7 +3076,15 @@ def digest(
     # That tells a reader to split a pull request the reviewer has just reviewed.
     refusal = None if on_head else refusing_review(pr)
     # Read once and handed to the line below, since `quota_refusal` re-walks `refusal_of`.
-    refusal_field = "no" if not refusal else ("QUOTA" if quota_refusal(refusal) else "YES")
+    refusal_field = (
+        "no"
+        if not refusal
+        else "QUOTA"
+        if quota_refusal(refusal) or confirmed_quota(owner, repo, refusal)
+        else "ERROR"
+        if possible_quota(refusal)
+        else "YES"
+    )
     blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
     answered = "yes" if answer else ("unknown" if blind else "no")
     # Normalized once and handed to both readers, since the parse is the cost here.
@@ -3122,6 +3214,8 @@ def digest(
         lines += [
             f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()
         ]
+        if limit := confirmed_quota(owner, repo, refusal):
+            lines.append(f"  RATE LIMIT FROM THE REVIEWER'S RUN LOG: {limit}")
     if unknown:
         # First of the blocks, since it says how far the rest of them can be trusted.
         lines.append(
@@ -3632,13 +3726,20 @@ def reply_to_thread(
     return 0
 
 
-def gh_rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.CompletedProcess:
     """One REST read, returned whole so the caller can tell an absent object from an unread one.
 
     Unlike `gh_graphql` this does not raise on a non-zero exit, because a 404 here is an answer
     the caller acts on rather than a failure. Reads only: every path passed in is a GET.
+
+    `raw` is for a job log, which carries terminal escape sequences that `gh` refuses to print
+    without being told it may.
     """
-    argv = ["gh", "api", path] + (["--jq", jq] if jq else [])
+    argv = (
+        ["gh", "api", path]
+        + (["--jq", jq] if jq else [])
+        + (["--allow-escape-sequences"] if raw else [])
+    )
     try:
         return subprocess.run(
             argv, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False
@@ -3848,9 +3949,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--ignore-quota-signal",
         action="store_true",
-        help="wait: poll the full --timeout even where the reviewer's own most recent "
-        "activity elsewhere in this repository is a quota-limit refusal with nothing "
-        "answering it since, pass this once the quota is believed to have reset",
+        help="wait: request and poll the full --timeout even where the reviewer's own most "
+        "recent activity elsewhere in this repository is a quota-limit refusal with nothing "
+        "answering it since, or this pull request's newest Copilot review is a quota or "
+        "error refusal, pass this once the quota is believed to have reset",
     )
     ap.add_argument(
         "--min-rounds",
@@ -3976,12 +4078,20 @@ def main(argv: list[str] | None = None) -> int:
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
+    stopped = None if a.ignore_quota_signal else stopping_refusal(pr)
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
     # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     recorded: bool | None = None
     final: dict | None = None
-    if not done and not answer and not drift and not reviewer_requested(pr):
+    if (
+        not done
+        and not answer
+        and not drift
+        and not signal
+        and not stopped
+        and not reviewer_requested(pr)
+    ):
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history), delays[0]
         )
@@ -3997,6 +4107,13 @@ def main(argv: list[str] | None = None) -> int:
             "note: the review request returned success and recorded nothing on this pull "
             "request, no pending reviewer and no review-request event, so this wait stops here "
             "rather than polling --timeout out against a request that does not exist."
+        )
+    elif stopped:
+        print(
+            "note: this pull request's newest Copilot review is a refusal naming the account "
+            "quota or an error, which is what the weekly rate limit posts, so this wait requests "
+            "nothing and stops here. Pass --ignore-quota-signal to request and poll anyway, "
+            "once the limit is believed to have reset."
         )
     elif signal:
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
@@ -4092,13 +4209,32 @@ def main(argv: list[str] | None = None) -> int:
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
     refusal = refusing_review(final)
+    if refusal is None and not a.ignore_quota_signal:
+        refusal = stopping_refusal(final)
     if refusal and quota_refusal(refusal):
         print(
-            "status=COPILOT_QUOTA_EXHAUSTED the review carrying the head declined because the "
+            "status=COPILOT_QUOTA_EXHAUSTED the newest Copilot review declined because the "
             "requesting account has reached its Copilot review quota, printed above under "
             "COPILOT REFUSED THIS ROUND: that is an account-level state, not one this pull "
             "request or a re-request clears, so proceed on the coverage the other reviewers "
             "already gave this pull request rather than waiting on Copilot again"
+        )
+        return 46
+    if refusal and (limit := confirmed_quota(owner, repo, refusal)):
+        print(
+            "status=COPILOT_QUOTA_EXHAUSTED the newest Copilot review on this pull request says "
+            "it encountered an error, and the reviewer's own run log names the cause: "
+            f"{limit}. Do not re-request before then, and proceed on the coverage the other "
+            "reviewers already gave"
+        )
+        return 46
+    if refusal and possible_quota(refusal):
+        print(
+            "status=COPILOT_ERROR_POSSIBLE_QUOTA the newest Copilot review on this pull request "
+            "says it encountered an error and did not review, printed above under COPILOT "
+            "REFUSED THIS ROUND, which is the body the weekly rate limit posts. Read it as a "
+            "possible quota hit: do not re-request, proceed on the coverage the other reviewers "
+            "already gave, and hand the state to the maintainer"
         )
         return 46
     if refusal:
