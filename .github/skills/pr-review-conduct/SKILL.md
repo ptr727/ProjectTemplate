@@ -135,9 +135,10 @@ the pull request in front of you, rather than deciding from a repository propert
 must have done.
 
 - **A reviewer that posted a skip notice is available for the asking.** It says it did not review
-  automatically, which is not the same as not reviewing at all. Comment `@coderabbitai review`, or
-  Qodo's `/review`, and wait for the result as with any other requested review. The agent driving
-  the loop posts that comment itself, on the same standing as requesting a review after a push.
+  automatically, which is not the same as not reviewing at all. Comment the reviewer's documented
+  review command, such as `@coderabbitai review`, and wait for the result as with any other
+  requested review. The agent driving the loop posts that comment itself, on the same standing as
+  requesting a review after a push.
 - **A notice naming when the reviewer can next run is a rate limit, and asking does not clear
   it.** It reads like the skip notice above and is the opposite case: the trigger returns the same
   notice rather than a review, so a loop that keeps asking waits on something no amount of asking

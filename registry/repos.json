@@ -21,7 +21,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["."],
-            "driftNotes": ["Governance hub; audits its own rules against itself."]
+            "driftNotes": ["Governance hub, which audits its own rules against itself."]
         },
         {
             "name": "Utilities",
@@ -34,7 +34,7 @@
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["No get-version-task; relies on validate-task."]
+            "driftNotes": ["No get-version-task, relying on validate-task instead."]
         },
         {
             "name": "LanguageTags",
@@ -47,7 +47,7 @@
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["No get-version-task; relies on validate-task."]
+            "driftNotes": ["No get-version-task, relying on validate-task instead."]
         },
         {
             "name": "aiopurpleair",
@@ -91,7 +91,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
             "driftNotes": [
-                "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs); private.",
+                "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs), private.",
                 "Source-release repo: source-only, no PyPI - a tag plus a source zip on manual dispatch (releaseTrigger dispatch-only).",
                 "PR CI established (test-pull-request.yml -> validate-task.yml: ruff + mypy + pytest/coverage). Python profile: mypy is the CI type checker (pyright editor-only via Pylance), deps via PEP 621 [project.optional-dependencies], static version (no _version.py).",
                 "Carries the AGENTS.md router split: GOVERNANCE.md with the verbatim sections, repo-specific content extracted to OPERATIONS.md, plus .markdownlint-cli2.jsonc, CODESTYLE.md, .editorconfig, .gitattributes, WORKFLOW.md, version.json + NBGV, the dispatch publisher, and dependabot.yml."
@@ -112,7 +112,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["RegressionTests"],
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config; PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). The subtree has no tests yet and its validator callers pass no python-directories input, both owed on adoption (python.directories.declared). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). The subtree has no tests yet and its validator callers pass no python-directories input, both owed on adoption (python.directories.declared). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
             "name": "ESPHome-NonRoot",
@@ -151,7 +151,7 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Docker image wrapping upstream Nx products; C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish; ordinary merges do not) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete; main+develop otherwise clean after the 2026-07 sweep."]
+            "driftNotes": ["Docker image wrapping upstream Nx products. C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish, not ordinary merges) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete, and main+develop are otherwise clean after the 2026-07 sweep."]
         },
         {
             "name": "HomeAutomation-Config",
@@ -166,7 +166,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model; Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425); the -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Vantage-Config repo (lf default, only `.dc` pinned CRLF), not carried here; the legacy Vantage/ subtree is stripped."]
+            "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model. It is Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425). The -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Vantage-Config repo (lf default, only `.dc` pinned CRLF), not carried here, and the legacy Vantage/ subtree is stripped."]
         },
         {
             "name": "KiCadLibrary",
@@ -178,7 +178,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad part library; delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml; no repo-config/ rulesets."]
+            "driftNotes": ["EDA/KiCad part library that delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml. No repo-config/ rulesets."]
         },
         {
             "name": "EspDinIoT",
@@ -190,7 +190,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design; main is a stub - the real design lives on develop and feature/schematic, populate main.", "No CI on any branch; develop has partial governance adoption (AGENTS.md/.editorconfig) but no workflows."]
+            "driftNotes": ["EDA/KiCad PCB design. Its main is a stub - the real design lives on develop and feature/schematic, populate main.", "No CI on any branch, and develop has partial governance adoption (AGENTS.md/.editorconfig) but no workflows."]
         },
         {
             "name": "ESPHome-Config",
@@ -221,7 +221,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational onboarding completed 2026-07-17 (HomeAssistant-Config #16): master->main rename + develop created, advisory lint CI (Check pull request workflow status job required check), dispatch-only source release (version.json + NBGV + publish-release.yml), repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the CODEGEN_APP_* pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json); baseline promoted develop->main via HomeAssistant-Config #17.", "groundTruthBranch intentionally main: develop is the working branch (direct signed commits), main the promoted stable snapshot the audit targets - deliberately not flipped to develop (ptr727/ProjectTemplate#340).", "Private; deployed by git pull into the HA config dir."]
+            "driftNotes": ["Home Assistant CONFIGURATION (configuration.yaml + automations/blueprints), NOT a HACS integration (no custom_components/manifest.json, no hacs.json).", "Operational onboarding completed 2026-07-17 (HomeAssistant-Config #16): master->main rename + develop created, advisory lint CI (Check pull request workflow status job required check), dispatch-only source release (version.json + NBGV + publish-release.yml), repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the CODEGEN_APP_* pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json). The baseline was promoted develop->main via HomeAssistant-Config #17.", "groundTruthBranch intentionally main: develop is the working branch (direct signed commits), main the promoted stable snapshot the audit targets - deliberately not flipped to develop (ptr727/ProjectTemplate#340).", "Private, deployed by git pull into the HA config dir."]
         },
         {
             "name": "DevKitCIoT",
@@ -234,7 +234,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM); no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone).", "Branch hygiene: develop and main have diverged (not forward-only); feature/kicad10-upgrade is merged (PR#4) but retained for the in-progress KiCad 10 migration. A stale THT branch was removed in the 2026-07 sweep."]
+            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM), with no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone).", "Branch hygiene: develop and main have diverged (not forward-only), and feature/kicad10-upgrade is merged (PR#4) but retained for the in-progress KiCad 10 migration. A stale THT branch was removed in the 2026-07 sweep."]
         },
         {
             "name": "PhotoCleaner",
@@ -259,7 +259,7 @@
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc (pending fleet-wide ratification, ptr727/ProjectTemplate#223); workflow comments carry the rationale inline."]
+            "driftNotes": ["Rulesets applied from the hub canonical repo-config/, not committed in-repo (no repo-config/ directory), as with NxWitness.", "No WORKFLOW.md sibling doc (pending fleet-wide ratification, ptr727/ProjectTemplate#223). Workflow comments carry the rationale inline."]
         },
         {
             "name": "AudioCleaner",
@@ -288,7 +288,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Follows the fleet LF default and pins only `*.dc` to CRLF (`.gitattributes` `*.dc text eol=crlf`, `.editorconfig` `[*.dc] end_of_line = crlf`), a repo-local exception for Design Center's own Windows-native XML export format (ptr727/Vantage-Config#28).", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept; split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
+            "driftNotes": ["Follows the fleet LF default and pins only `*.dc` to CRLF (`.gitattributes` `*.dc text eol=crlf`, `.editorconfig` `[*.dc] end_of_line = crlf`), a repo-local exception for Design Center's own Windows-native XML export format (ptr727/Vantage-Config#28).", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept. Split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
         },
         {
             "name": "HolidayLights",
@@ -300,23 +300,24 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["xLights show sequences/models (asset repo).", "main is near-empty - all content lives on develop; promote to main.", "No CI/governance scaffolding."]
+            "driftNotes": ["xLights show sequences/models (asset repo).", "main is near-empty - all content lives on develop. Promote to main.", "No CI/governance scaffolding."]
         },
         {
             "name": "Blog",
             "url": "https://github.com/ptr727/Blog",
             "status": "cataloged",
-            "types": ["hugo", "source-only"],
+            "types": ["hugo", "source-only", "python"],
             "groundTruthBranch": "main",
             "workflowModel": "release",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }, { "target": "self-hosted", "mechanism": "static-secret" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "environments": [{ "name": "production", "branchPolicy": "none" }, { "name": "staging", "branchPolicy": "none" }],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01; release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which spec/secrets.json has no vocabulary for, so requiredSecrets stays empty and the names are declared in this repo's own secrets.json environments block; listing them here would make the audit demand them in the repository actions store.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving."]
+            "pythonDirectories": ["checks", "scripts"],
+            "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01. Release model with a dispatch-only publisher that cuts the tag and a source archive.", "lineEndings lf on a release repo, where the rule grants the native-platform default to operational repos only: every consumer is Linux (the Hugo build, the Caddy container, and the rsync deploy).", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which the audit does not check, so requiredSecrets leaves them out. Listing them in requiredSecrets would make the audit demand them in the repository actions store.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving.", "capture/ is one-shot WordPress migration tooling that has already run, so the maintainer kept it out of pythonDirectories (Blog #356, 2026-10-01), forgoing the lint, format, type-check, test, and coverage obligations every Python directory owes. The audit's python-directories drift naming capture/ files is therefore expected."]
         },
         {
             "name": "DiskSpeedTest",
