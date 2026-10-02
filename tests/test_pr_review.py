@@ -5343,6 +5343,7 @@ class TestCli(GqlCase):
         """An answer lagging the request it reports is corrected by the next read, so the wait polls."""
         self.answer(
             payload([review(oid=OLD)]),
+            payload([review(oid=OLD)]),
             payload([review(oid=OLD)], pending=True),
             payload([review()]),
         )
@@ -5544,6 +5545,58 @@ class TestCli(GqlCase):
         self.assertNotIn("note: the reviewer's own most recent activity", out)
         self.assertIn("status=PENDING", out)
 
+    def bodyless(self, oid: str) -> dict:
+        """A liveness payload, whose reviews carry no body, as `Q_LIVE` asks for none."""
+        return payload([{k: v for k, v in review(oid=oid).items() if k != "body"}])
+
+    def test_a_pending_request_past_an_error_round_is_still_polled_for(self) -> None:
+        """The stop withholds a request, and a review already on its way still lands."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD, body=ERROR_REFUSED)], pending=True),
+            payload([review(oid=OLD, body=ERROR_REFUSED), review(rid="PRR_new")]),
+        )
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_ignore_quota_signal_requests_past_the_repo_wide_signal(self) -> None:
+        self.answer(payload([]))
+        calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0", "--ignore-quota-signal"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_status_reports_an_error_round_on_an_earlier_head(self) -> None:
+        self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("review_on_head=NO", out)
+        self.assertIn("refusal=ERROR", out)
+        self.assertIn("COPILOT REFUSED THIS ROUND", out)
+
+    def test_the_run_read_is_bounded_to_the_reviewer_s_failed_runs_before_the_round(self) -> None:
+        seen: list[str] = []
+
+        def rest(
+            path: str, jq: str | None = None, raw: bool = False
+        ) -> subprocess.CompletedProcess:
+            seen.append(jq or "")
+            return subprocess.CompletedProcess([], 1, "", "not read")
+
+        with mock.patch.object(pr_review, "gh_rest", side_effect=rest):
+            pr_review.run_cause("o", "r", HEAD, LATE)
+        self.assertIn(f'.path == "{pr_review.COPILOT_RUN_PATH}"', seen[0])
+        self.assertIn('.conclusion == "failure"', seen[0])
+        self.assertIn(f'.created_at <= "{LATE}"', seen[0])
+
+    def test_any_rate_limit_error_in_the_log_is_the_cause(self) -> None:
+        log = "x errorType: 'network',\n" + RATE_LIMIT_LOG + "y errorType: 'internal',\n"
+        self.run_log(log)
+        cause = pr_review.run_cause("o", "r", HEAD, LATE)
+        self.assertEqual("rate_limit", cause[0] if cause else None)
+
     def run_log(self, log: str | None) -> None:
         """Answer the three reads `run_cause` makes, or fail all three where `log` is None."""
 
@@ -5563,18 +5616,22 @@ class TestCli(GqlCase):
         self.enterContext(mock.patch.object(pr_review, "gh_rest", side_effect=rest))
 
     def test_an_error_round_on_an_earlier_head_stops_the_auto_request(self) -> None:
-        """The weekly limit does not move with a push, so the next head is not requested into it."""
-        self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        """The weekly limit does not move with a push, so the next head is not requested into it.
+
+        The liveness read carries no bodies, as the real query does not, so the stop is read
+        from the full payload that follows it.
+        """
+        self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED)]))
         calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
         self.run_log(None)
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(46, self.cli(["wait", "7"]))
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
         self.assertIn("status=COPILOT_ERROR_POSSIBLE_QUOTA", self.out.getvalue())
 
     def test_a_rate_limit_in_the_run_log_confirms_the_quota_and_names_the_reset(self) -> None:
-        self.answer(payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED)]))
         self.wire_history([hist_review(7, ERROR_REFUSED)])
         self.run_log(RATE_LIMIT_LOG)
         with mock.patch.object(pr_review.time, "sleep"):

@@ -63,9 +63,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
    only cause on record that the loop can clear. `pr_review.py wait` exit `46` is the one nothing
    the loop does clears, the pull request's newest Copilot review being an account-quota refusal
-   or an error refusal read as a possible quota hit, on this head or an earlier one, which is the case
-   "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account state
-   read from the reviewer's activity elsewhere when this head carries none of its own, and exit
+   or an error refusal read as a possible quota hit, on this head or an earlier one, which is the
+   case "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account
+   state read from the reviewer's activity elsewhere when this head carries none of its own, and exit
    `41` holding across several heads with no cause its body names reaches it the slower way.
    Those three are `wait`'s alone: `status` exits 0 over a refusal, carrying it as `refusal=` in
    the digest line instead, so reading that exit code as the absence of one would falsely satisfy
@@ -153,9 +153,11 @@ must have done.
 - **Copilot's absence blocks, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
   coverage of the current head, and the loop's own re-request step below is where a missing one is
   answered, on the terms stated there. A refusal naming the account quota is its own case rather
-  than a review: it covers no head, so the gate stays unsatisfied, and nothing the loop does
-  clears it, since the refusal names no time to wait for and re-requesting returns it again. That
-  one goes to the maintainer, rather than into a wait with no stated end.
+  than a review, and so is one saying only that Copilot encountered an error, which is what the
+  weekly rate limit posts. Either covers no head, so the gate stays unsatisfied, and nothing the
+  loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
+  reviewer's run log names a reset time `pr_review.py` reports it. That case goes to the
+  maintainer, rather than into a wait.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's
 `docs/pr-reviewer-reference.md` records what each one does, what shapes it, and which repositories
