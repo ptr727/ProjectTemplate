@@ -5,9 +5,9 @@
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it, and project access on the token, because the fleet project link is read and written through GraphQL.
-# The command defaults to apply, the repo to the current gh repo, and the model to the registry lookup.
+# The command is required, so a write is never the default, and an argument the usage does not name is refused before any read.
+# The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
-# The command may be omitted for the apply default, so `configure.sh owner/repo` still applies.
 #
 # The apply mode writes five groups, in order.
 # First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
@@ -39,12 +39,45 @@
 set -Eeuo pipefail
 
 # ----- Command + target + model -----
-cmd=apply
-case "${1:-}" in apply | check)
+usage() {
+    cat <<'USAGE'
+Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
+       repo-config/configure.sh --help
+
+  apply   create or update the fleet configuration on the repo (writes)
+  check   validate the repo against the fleet configuration, non-zero on drift (reads)
+
+The repo defaults to the current gh repo, and the model to the registry lookup.
+USAGE
+}
+refuse() {
+    echo "$1. Run repo-config/configure.sh --help for the usage." >&2
+    exit 1
+}
+case "${1:-}" in
+-h | --help)
+    usage
+    exit 0
+    ;;
+apply | check)
     cmd="$1"
     shift
     ;;
+"") refuse "No command given (expected apply or check)" ;;
+*) refuse "Unknown command '$1' (expected apply or check)" ;;
 esac
+for arg in "$@"; do
+    case "$arg" in
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -*) refuse "Unknown option '$arg'" ;;
+    esac
+done
+if [ "$#" -gt 2 ]; then
+    refuse "Too many arguments (expected at most a repo and a model)"
+fi
 repo_arg="${1:-}"
 model="${2:-}"
 # Allow the model as the sole positional (`configure.sh check operational`): a model name is not a repo.
@@ -52,6 +85,16 @@ case "$repo_arg" in release | operational)
     model="$repo_arg"
     repo_arg=""
     ;;
+esac
+# A name of only dots is refused too, since the API resolves `.` and `..` as path segments rather than as a repo.
+if [ -n "$repo_arg" ]; then
+    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
+        refuse "Repo '$repo_arg' is not shaped owner/name"
+    fi
+fi
+case "$model" in
+"" | release | operational) ;;
+*) refuse "Unknown workflow model '$model' (expected release or operational)" ;;
 esac
 repo="${repo_arg:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
