@@ -48,7 +48,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    both commits. Where no statement reaches the head either way, a round covering it whose own
    file table names exactly the changed files covers it, `coverage=table` in the digest, which is
    the reading a Copilot round at Balanced review effort gives, and a statement that reaches the
-   head, stated on it or carried to it, wins over that table. The table stands in only where no
+   head, stated on it or carried to it, wins over that table. Where no round covering the head
+   carries a table of its own, the newest round that does stands in under the bound a statement
+   carries under, the pull request changing the same set of files at both commits, which reads as
+   `coverage=carried:table`. The table stands in only where no
    Copilot round on the pull request, on any commit, states or appears to state partial
    coverage, so a pull request that ever had a partial round goes to the maintainer. The
    coverage this item
