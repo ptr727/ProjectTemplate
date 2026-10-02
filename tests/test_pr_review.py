@@ -2605,14 +2605,8 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertNotIn("<picture>", pr_review.normal(f"{single} {MISSED_TITLE}"))
 
 
-class TestCoverageCarriesForward(GqlCase):
-    """An earlier round's coverage statement stands until something changes it.
-
-    Five of ten rounds measured in the second overview format state no coverage, and the two
-    measured on one drive were re-reviews of a one-line and a four-file delta. Blocking each of
-    those asks for a re-request that produced the marker in one of the four measured, so the
-    block clears by chance rather than by asking and a reader learns to route around it.
-    """
+class CarryCase(GqlCase):
+    """The rounds and compares both carries read, a statement's and a table's."""
 
     NONE = OVERVIEW + "\n**Findings:** None"
     FULL = OVERVIEW + "\n<!-- fleet-review: reviewed=9 changed=9 findings=0 -->"
@@ -2647,6 +2641,16 @@ class TestCoverageCarriesForward(GqlCase):
         self.calls: list[str] = []
 
         return mock.patch.object(pr_review, "gh_rest", side_effect=rest)
+
+
+class TestCoverageCarriesForward(CarryCase):
+    """An earlier round's coverage statement stands until something changes it.
+
+    Five of ten rounds measured in the second overview format state no coverage, and the two
+    measured on one drive were re-reviews of a one-line and a four-file delta. Blocking each of
+    those asks for a re-request that produced the marker in one of the four measured, so the
+    block clears by chance rather than by asking and a reader learns to route around it.
+    """
 
     def test_the_newest_round_that_states_any_coverage_is_the_one_carried(self) -> None:
         pr = self.rounds(
@@ -2984,6 +2988,128 @@ class TestRawLogRead(unittest.TestCase):
         with mock.patch.object(pr_review, "_gh_run", return_value=failed) as run:
             pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
         self.assertEqual(1, run.call_count)
+
+
+class TestFileTableCarriesForward(CarryCase):
+    """An earlier round's full file table carries to a head whose rounds carry none.
+
+    Three pull requests in one session each had a table naming every changed file on round one
+    and a re-review on the next head carrying no table, the file set unchanged, and the
+    maintainer accepted the first table every time. The bound is the one a statement carries
+    under, the same set of changed files at both commits.
+    """
+
+    def tabled(self, head_body: str | None = None, files: list[str] | None = None) -> dict:
+        changed = ["a.py", "b.py"] if files is None else files
+        return payload(
+            [
+                review(oid=OLD, body=summarized(["a.py", "b.py"], covers=""), at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE if head_body is None else head_body, at=LATE),
+            ],
+            files=changed,
+        )
+
+    def verdict(self, pr: dict) -> tuple[int, str]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = pr_review.report_verdict(pr, "o", "r")
+        out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        return code, out
+
+    def test_a_full_table_on_an_unchanged_file_set_closes_the_head(self) -> None:
+        with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["b.py", "a.py"]}):
+            code, out = self.verdict(self.tabled())
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out)
+        self.assertIn(f"the newest round that does, on {OLD[:8]}, carries its table", out)
+        self.assertIn("names exactly the 2 changed files", out)
+
+    def test_a_moved_file_set_keeps_the_table_where_it_was(self) -> None:
+        with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(self.tabled())
+        self.assertEqual(45, code)
+        self.assertIn("coverage=unstated ", out)
+        self.assertIn("a diff this head no longer has", out)
+
+    def test_a_file_set_that_could_not_be_read_carries_no_table(self) -> None:
+        with self.compare(**{HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(self.tabled())
+        self.assertEqual(45, code)
+        self.assertIn("could not be read at both commits, so its table is not carried", out)
+
+    def test_a_partial_table_does_not_carry(self) -> None:
+        """A table that leaves out a changed file is partial, carried or not."""
+        pr = self.tabled(files=["a.py", "b.py", "c.py"])
+        with self.compare(**{OLD: ["a.py", "b.py", "c.py"], HEAD: ["a.py", "b.py", "c.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn(f"is on {OLD[:8]}, where the table leaves out c.py", out)
+
+    def test_a_partial_on_record_keeps_a_carried_table_out(self) -> None:
+        """The partial sits on a commit the statement carry refuses, so the table path decides."""
+        older = "c" * 40
+        pr = self.tabled()
+        pr["reviews"]["nodes"].insert(
+            0, review(oid=older, body=self.PART, at="2026-08-02T09:00:00Z", rid="P")
+        )
+        with self.compare(**{older: ["a.py"], OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn("COVERAGE IS NOT CARRIED", out)
+        self.assertIn("NO FILE TABLE STANDS IN: a Copilot round on this pull request states", out)
+
+    def test_a_review_history_past_the_window_keeps_a_carried_table_out(self) -> None:
+        pr = self.tabled()
+        pr["reviews"]["pageInfo"]["hasPreviousPage"] = True
+        with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn("NO FILE TABLE STANDS IN: the review history is longer", out)
+
+    def test_a_head_table_that_misses_the_diff_is_not_overruled_by_an_earlier_one(self) -> None:
+        pr = self.tabled(head_body=summarized(["a.py"], covers=""))
+        with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn("NO FILE TABLE STANDS IN: the table leaves out b.py", out)
+        self.assertNotIn("/compare/", " ".join(self.calls))
+
+    def test_only_the_newest_earlier_table_is_consulted(self) -> None:
+        """An older matching table does not stand in for a newer one that misses the diff."""
+        older = "c" * 40
+        for first, second, code in (
+            (["a.py", "b.py"], ["a.py"], 45),
+            (["a.py"], ["a.py", "b.py"], 0),
+        ):
+            with self.subTest(newer=second):
+                pr_review.changed_at.cache_clear()
+                pr = payload(
+                    [
+                        review(oid=older, body=summarized(first, covers=""), at=EARLY, rid="A"),
+                        review(oid=OLD, body=summarized(second, covers=""), at=LATE, rid="B"),
+                        review(oid=HEAD, body=self.NONE, at="2026-08-02T12:00:00Z", rid="C"),
+                    ],
+                    files=["a.py", "b.py"],
+                )
+                same = ["a.py", "b.py"]
+                with self.compare(**{older: same, OLD: same, HEAD: same}):
+                    self.assertEqual(code, self.verdict(pr)[0])
+
+    def test_a_refusal_carrying_a_table_is_not_the_table_carried(self) -> None:
+        refused = REFUSED + "\n\n" + summarized(["a.py", "b.py"], covers="")
+        pr = payload(
+            [
+                review(oid=OLD, body=refused, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE, rid="B"),
+            ],
+            files=["a.py", "b.py"],
+        )
+        self.assertIsNone(pr_review.carried_table(pr))
+
+    def test_no_table_anywhere_says_so(self) -> None:
+        pr = self.rounds(review(oid=HEAD, body=self.NONE))
+        code, out = self.verdict(pr)
+        self.assertEqual(45, code)
+        self.assertIn("no earlier round carries one either", out)
 
 
 class TestTheDeltaSinceTheCarriedRound(unittest.TestCase):
