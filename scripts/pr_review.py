@@ -78,9 +78,10 @@ Subcommands
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
            covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
            `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
-           read. Either field reads a refusal on an earlier head where it is the pull request's
-           newest Copilot review and nothing covers the head. `wait` is where that state gets its
-           own exit codes, 46 and 47 below, because only `wait` is the command a caller might
+           read. Either field reads the pull request's newest Copilot review where it is a quota or
+           error refusal, on an earlier head or over a head a genuine round covered before it, and a
+           file-count refusal is spent by coverage of the same head. `wait` is where that state gets
+           its own exit codes, 46 and 47 below, because only `wait` is the command a caller might
            otherwise poll out a timeout on.
            `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
            CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
@@ -199,7 +200,8 @@ Subcommands
            (falling back to polling only) where both windows come up empty, since a repository with
            no Copilot review in either has nothing to read the id from and a fabricated one is never
            an option. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
-           Exit 0 = review present, 30 = still pending at timeout (pending is not failure),
+           Exit 0 = review present, or on a held head an attested local pass, 30 = still pending at
+           timeout (pending is not failure),
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -864,7 +866,7 @@ Q_ATTEST_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
 """
-ATTESTATION = re.compile(r"<!-- fleet-local-review: head=([0-9a-f]{40}) -->")
+ATTESTATION = re.compile(r"^<!-- fleet-local-review: head=([0-9a-f]{40}) -->$", re.MULTILINE)
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
@@ -3183,9 +3185,6 @@ def digest(
     unlisted = unlisted_findings(manifest)
 
     answer = answered_outside_review(pr)
-    # Spent where coverage of the same head landed, the precedence the exit codes already hold.
-    # Reported regardless, it prints `review_on_head=yes refusal=YES` over a reviewed head.
-    # That tells a reader to split a pull request the reviewer has just reviewed.
     refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
     # Read once and handed to the line below, since `quota_refusal` re-walks `refusal_of`.
     refusal_field = (
@@ -3401,8 +3400,9 @@ def digest(
     elif cover == LOCAL:
         lines.append(
             "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
-            "follows the pull request's first round, and a comment from someone who can write "
-            "here attests a recorded local strict-review pass over exactly this head's content"
+            "follows the pull request's first round, and a comment from an owner, member, or "
+            "collaborator attests a recorded local strict-review pass over exactly this head's "
+            "content"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
@@ -3795,7 +3795,9 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         )
         return 65
     local = _git(checkout, "rev-parse", "HEAD")
-    dirty = _git(checkout, "status", "--porcelain")
+    dirty = _git(
+        checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
+    )
     if local.returncode != 0 or dirty.returncode != 0:
         print(
             f"status=CHECKOUT_NOT_READ nothing was written: {checkout} is not a readable checkout"
@@ -3812,6 +3814,18 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         print(
             "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout holds changes the "
             "head commit does not, so a pass over it does not describe what was pushed"
+        )
+        return 67
+    ours = _git(checkout, "merge-base", f"origin/{base}", "HEAD")
+    theirs = gh_rest(
+        f"repos/{owner}/{repo}/compare/{base}...{head}", ".merge_base_commit.sha // empty"
+    )
+    if ours.returncode != 0 or ours.stdout.strip() != theirs.stdout.strip():
+        print(
+            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout's merge base with "
+            f"origin/{base} is not the pull request's own, so a pass against it measured a "
+            "different change set. Fetch, or attest from a checkout of the pull request's own "
+            "repository"
         )
         return 67
     try:
@@ -3857,17 +3871,19 @@ def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def attested(pr: dict) -> bool:
-    """Whether a comment from someone who can write here vouches for this pull request's head.
+    """Whether a comment from an owner, member, or collaborator vouches for this pull request's head.
 
     Read over every comment rather than the reviewer's own, since an attestation is the
     maintainer's account speaking. The association is what keeps a passer-by's comment carrying
-    the same marker from vouching for anything.
+    the same marker from vouching for anything. The marker counts only as a line of its own
+    outside a fence, so a comment quoting it in a span or a code block vouches for nothing.
     """
     head = pr.get("headRefOid") or ""
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
-        if any(m.group(1) == head for m in ATTESTATION.finditer(node.get("body") or "")):
+        body = strip_fences(node.get("body") or "", to_end=True)
+        if any(m.group(1) == head for m in ATTESTATION.finditer(body)):
             return True
     return False
 
@@ -4372,14 +4388,19 @@ def main(argv: list[str] | None = None) -> int:
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
-    snapshot = None if done or answer or drift else gql(Q_FULL, owner, repo, a.number)
-    stopped = None if a.ignore_quota_signal or snapshot is None else stopping_refusal(snapshot)
+    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
+    stopped = (
+        None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
+    )
     held = (
         snapshot is not None
         and not a.request
         and not promotion(snapshot)
         and first_round_done(snapshot)
+        and not reviews_truncated(snapshot)
+        and not partial_shaped(snapshot)
         and not reviewer_requested(pr)
+        and (not answer or attested(snapshot))
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
@@ -4484,8 +4505,10 @@ def main(argv: list[str] | None = None) -> int:
     # Coverage of the head is the other half, returning 0 only once the diff is covered too.
     covered = held and local_cover(final)
     halted = None if a.ignore_quota_signal else stopping_refusal(final)
-    if unrecognized_shapes(final) or (
-        not halted and (head_review_done(final, a.min_rounds) or covered)
+    if (
+        unrecognized_shapes(final)
+        or covered
+        or (not halted and head_review_done(final, a.min_rounds))
     ):
         verdict = report_verdict(final, owner, repo)
         # The check reading ranks under both of those, and never replaces either.

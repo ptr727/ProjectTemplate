@@ -5806,6 +5806,49 @@ class TestCli(GqlCase):
                     self.cli(["wait", "7", "--timeout", "0"])
                 self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_an_attested_head_behind_a_stale_quota_refusal_is_covered(self) -> None:
+        rounds = [
+            review(oid="a" * 39 + "1", at=EARLY, rid="PRR_a"),
+            review(oid=OLD, body=QUOTA_REFUSED, at=LATE, rid="PRR_b"),
+        ]
+        self.answer(self.into(payload(rounds), attest=True))
+        self.wire_history([hist_review(7, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_partial_on_record_requests_a_round_rather_than_holding(self) -> None:
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        self.answer(self.into(payload([review(oid=OLD, body=part)]), attest=True))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertNotIn("AWAITING_LOCAL_PASS", self.out.getvalue())
+
+    def test_an_attested_head_past_an_old_plain_answer_is_covered(self) -> None:
+        pr = self.into(payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)]))
+        attested = self.into(pr, attest=True)
+        attested["comments"]["nodes"].append(comment(at=LATE))
+        self.answer(attested)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_pending_request_on_a_fix_push_is_polled_for(self) -> None:
+        self.answer(self.into(payload([review(oid=OLD)], pending=True), attest=True))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
+    def test_a_truncated_review_history_is_no_local_cover(self) -> None:
+        pr = self.into(payload([review(oid=OLD)], older_reviews=True), attest=True)
+        self.assertFalse(pr_review.local_cover(pr))
+
+    def test_checkout_belongs_to_attest_alone(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            pr_review.main(["status", "7", "--repo", "o/r", "--checkout", "."])
+
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
         for rounds, field in (
@@ -7458,6 +7501,11 @@ class TestAttest(unittest.TestCase):
             ],
         ):
             subprocess.run(["git", "-C", self.dir, *args], check=True, env=env)
+        subprocess.run(
+            ["git", "-C", self.dir, "update-ref", "refs/remotes/origin/develop", "HEAD"],
+            check=True,
+            env=env,
+        )
         self.head = subprocess.run(
             ["git", "-C", self.dir, "rev-parse", "HEAD"],
             capture_output=True,
@@ -7475,13 +7523,23 @@ class TestAttest(unittest.TestCase):
         self.enterContext(mock.patch.object(pr_review, "comment_on_pr", side_effect=post))
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def run_attest(self, head: str, check_exit: int = 0) -> int:
+    def run_attest(self, head: str, check_exit: int = 0, base: str | None = None) -> int:
+        """Run `attest` with a stub `local_review.py` that records how it was called."""
+        record = Path(self.dir).parent / f"calls-{check_exit}.txt"
         stub = Path(self.dir).parent / f"stub-{check_exit}.py"
-        stub.write_text(f"import sys\nsys.exit({check_exit})\n")
+        stub.write_text(
+            "import os, sys\n"
+            f"open({str(record)!r}, 'w').write(os.getcwd() + '\\n' + ' '.join(sys.argv[1:]))\n"
+            f"sys.exit({check_exit})\n"
+        )
         self.addCleanup(stub.unlink)
+        self.addCleanup(lambda: record.unlink(missing_ok=True))
+        self.record = record
         target = {"headRefOid": head, "baseRefName": "develop"}
+        merge_base = subprocess.CompletedProcess([], 0, (base or self.head) + "\n", "")
         with (
             mock.patch.object(pr_review, "gql", return_value=target),
+            mock.patch.object(pr_review, "gh_rest", return_value=merge_base),
             mock.patch.object(pr_review, "LOCAL_REVIEW", stub),
         ):
             return pr_review.attest("o", "r", 7, self.dir)
@@ -7489,7 +7547,19 @@ class TestAttest(unittest.TestCase):
     def test_a_covered_head_is_attested_by_its_full_commit(self) -> None:
         self.assertEqual(0, self.run_attest(self.head))
         self.assertEqual(1, len(self.posted))
-        self.assertIn(f"<!-- fleet-local-review: head={self.head} -->", self.posted[0])
+        self.assertIn(f"\n<!-- fleet-local-review: head={self.head} -->", self.posted[0])
+        cwd, argv = self.record.read_text().split("\n")
+        self.assertEqual(os.path.realpath(self.dir), os.path.realpath(cwd))
+        self.assertEqual("check --target develop", argv)
+
+    def test_a_checkout_measuring_another_merge_base_is_refused(self) -> None:
+        self.assertEqual(67, self.run_attest(self.head, base="e" * 40))
+        self.assertEqual([], self.posted)
+
+    def test_an_unread_pull_request_is_refused(self) -> None:
+        with mock.patch.object(pr_review, "gql", return_value={}):
+            self.assertEqual(65, pr_review.attest("o", "r", 7, self.dir))
+        self.assertEqual([], self.posted)
 
     def test_a_checkout_at_another_commit_is_refused(self) -> None:
         self.assertEqual(67, self.run_attest("f" * 40))
@@ -7519,6 +7589,8 @@ class TestAttestationReadings(unittest.TestCase):
             ([self.comment(marker, "NONE")], False),
             ([self.comment(marker, "CONTRIBUTOR")], False),
             ([self.comment(f"<!-- fleet-local-review: head={OLD} -->")], False),
+            ([self.comment(f"Attest posts `{marker}` as its last line.")], False),
+            ([self.comment(f"Quoted:\n\n```\n{marker}\n```\n")], False),
             ([], False),
         ):
             with self.subTest(nodes=nodes):
