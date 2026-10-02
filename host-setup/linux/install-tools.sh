@@ -72,6 +72,15 @@ note() {
     NOTE_TEXTS+=("$2")
 }
 
+hide_home() {
+    local path="$1"
+    if [[ -n ${HOME:-} && ($path == "$HOME" || $path == "$HOME/"*) ]]; then
+        printf '~%s' "${path#"$HOME"}"
+    else
+        printf '%s' "$path"
+    fi
+}
+
 json_string() (
     export LC_ALL=C
     local s="$1" out="" i n b c cp need min j hi lo
@@ -1038,7 +1047,7 @@ tool_note() {
         local resolved
         resolved=$(ripgrep_download_path)
         if [[ -n $resolved ]]; then
-            note "ripgrep" "$resolved is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
+            note "ripgrep" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
         fi
         ;;
     dotnet)
@@ -1060,9 +1069,9 @@ tool_note() {
         resolved=$(tool_shadow_path "$tool")
         if [[ -n $resolved ]]; then
             if [[ -x "$BIN_DIR/$tool" ]]; then
-                note "$tool" "$resolved comes first on the PATH and shadows the managed copy at $BIN_DIR/$tool"
+                note "$tool" "$(hide_home "$resolved") comes first on the PATH and shadows the managed copy at $BIN_DIR/$tool"
             else
-                note "$tool" "$resolved is installed outside $BIN_DIR and keeps answering once the managed copy is installed"
+                note "$tool" "$(hide_home "$resolved") is installed outside $BIN_DIR and keeps answering once the managed copy is installed"
             fi
         fi
         ;;
@@ -1410,7 +1419,9 @@ resolve_selection() {
     done
     for tool in "${MANAGED_TOOLS[@]}"; do
         for requested in "${REQUESTED[@]}"; do
-            [[ $tool == "$requested" ]] && SELECTED+=("$tool")
+            if [[ $tool == "$requested" ]]; then
+                SELECTED+=("$tool")
+            fi
         done
     done
 }
