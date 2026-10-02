@@ -151,6 +151,42 @@ PATH=$host_path
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected)
 
+    def test_selection_naming_a_tool_other_than_the_last_succeeds(self) -> None:
+        result = self.run_bash('REQUESTED=(jq)\nresolve_selection\nprintf "%s\\n" "${SELECTED[@]}"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "jq\n")
+
+    def test_note_paths_under_home_are_written_with_a_tilde(self) -> None:
+        body = """
+HOME=/srv/example-user
+JSON_OUTPUT=true
+SELECTED=(jq)
+tool_shadow_path() { printf '/srv/example-user/.local/bin/%s' "$1"; }
+jq_version() { :; }
+jq_target() { :; }
+report
+"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("example-user", result.stdout)
+        notes = json.loads(result.stdout)["tools"][0]["notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("~/.local/bin/jq comes first", notes[0])
+
+    def test_hide_home_only_rewrites_a_whole_leading_home_component(self) -> None:
+        cases = {
+            "/srv/example-user": "~",
+            "/srv/example-user/bin": "~/bin",
+            "/srv/example-user2/bin": "/srv/example-user2/bin",
+            "/usr/local/bin": "/usr/local/bin",
+            "": "",
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                result = self.run_bash('HOME=/srv/example-user\nhide_home "$1"', path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
     def test_report_with_no_rows_is_still_an_object(self) -> None:
         result = self.run_bash("JSON_OUTPUT=true\nSELECTED=()\nreport")
         self.assertEqual(result.returncode, 0, result.stderr)
