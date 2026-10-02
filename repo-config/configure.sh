@@ -42,6 +42,7 @@ set -Eeuo pipefail
 usage() {
     cat <<'USAGE'
 Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
+       repo-config/configure.sh apply|check release|operational
        repo-config/configure.sh --help
 
   apply   create or update the fleet configuration on the repo (writes)
@@ -91,7 +92,7 @@ case "$repo_arg" in release | operational)
 esac
 # A name of only dots is refused too, since the API resolves `.` and `..` as path segments rather than as a repo.
 if [ -n "$repo_arg" ]; then
-    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
+    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
         refuse "Repo '$repo_arg' is not shaped owner/name"
     fi
 fi

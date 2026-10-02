@@ -56,6 +56,7 @@ class UsageCase(unittest.TestCase):
                 result, calls = self.run_configure(*args)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Usage: repo-config/configure.sh apply|check", result.stdout)
+                self.assertIn("configure.sh apply|check release|operational", result.stdout)
                 self.assertEqual(calls, "")
 
     def test_a_usage_error_exits_one_before_any_gh_call(self) -> None:
@@ -70,6 +71,7 @@ class UsageCase(unittest.TestCase):
             ("apply", "owner/.."): "Repo 'owner/..' is not shaped owner/name",
             ("apply", "owner/."): "Repo 'owner/.' is not shaped owner/name",
             ("apply", "../name"): "Repo '../name' is not shaped owner/name",
+            ("apply", "owner_x/name"): "Repo 'owner_x/name' is not shaped owner/name",
             ("check", "owner/name", "bogus"): "Unknown workflow model 'bogus'",
             ("apply", "release", "owner/name"): "The model 'release' comes before the repo",
             ("check", "release", "operational"): "The model 'release' comes before the repo",
@@ -86,7 +88,6 @@ class UsageCase(unittest.TestCase):
         """The control: a well-formed run gets past argument handling to its first API call."""
         for args in (
             ["check", "owner/a.b_c-d", "release"],
-            ["check", "owner_x/name", "operational"],
             ["check", "operational"],
         ):
             with self.subTest(args=args):
