@@ -3041,6 +3041,38 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn("NO FILE TABLE STANDS IN: the table leaves out b.py", out)
         self.assertNotIn("/compare/", " ".join(self.calls))
 
+    def test_only_the_newest_earlier_table_is_consulted(self) -> None:
+        """An older matching table does not stand in for a newer one that misses the diff."""
+        older = "c" * 40
+        for first, second, code in (
+            (["a.py", "b.py"], ["a.py"], 45),
+            (["a.py"], ["a.py", "b.py"], 0),
+        ):
+            with self.subTest(newer=second):
+                pr_review.changed_at.cache_clear()
+                pr = payload(
+                    [
+                        review(oid=older, body=summarized(first, covers=""), at=EARLY, rid="A"),
+                        review(oid=OLD, body=summarized(second, covers=""), at=LATE, rid="B"),
+                        review(oid=HEAD, body=self.NONE, at="2026-08-02T12:00:00Z", rid="C"),
+                    ],
+                    files=["a.py", "b.py"],
+                )
+                same = ["a.py", "b.py"]
+                with self.compare(**{older: same, OLD: same, HEAD: same}):
+                    self.assertEqual(code, self.verdict(pr)[0])
+
+    def test_a_refusal_carrying_a_table_is_not_the_table_carried(self) -> None:
+        refused = REFUSED + "\n\n" + summarized(["a.py", "b.py"], covers="")
+        pr = payload(
+            [
+                review(oid=OLD, body=refused, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE, rid="B"),
+            ],
+            files=["a.py", "b.py"],
+        )
+        self.assertIsNone(pr_review.carried_table(pr))
+
     def test_no_table_anywhere_says_so(self) -> None:
         pr = self.rounds(review(oid=HEAD, body=self.NONE))
         code, out = self.verdict(pr)

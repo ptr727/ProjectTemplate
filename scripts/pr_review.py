@@ -50,8 +50,9 @@ Subcommands
            describes a different set of changed files, or that comparison could not be read.
            Past those, a round covering the head whose own table names exactly the changed
            files stands in, or where none carries a table, the newest round that does, its table
-           naming exactly the changed files, under the same change-set bound, and only where no Copilot round on the pull request, on any commit,
-           states or appears to state partial coverage, quoted or not, and the whole review
+           naming exactly the changed files, under the same change-set bound. Either table
+           stands in only where no Copilot round on the pull request, on any commit, states or
+           appears to state partial coverage, quoted or not, and the whole review
            history is in view, since over the rounds measured the table names the whole changed
            set on partial rounds too. The digest names why no table stood in.
            Copilot's Balanced review effort, the default since 2026-09-28, writes the table and
@@ -2130,9 +2131,9 @@ def carried_table(pr: dict) -> tuple[list[str], str] | None:
 def table_reading(owner: str, repo: str, pr: dict) -> tuple[str, str]:
     """Whether a file table stands in for this head's coverage, as the commit it was read on and why not.
 
-    The shortfall is empty where a table stands in. The commit is empty where the head's own
-    table is the one read, and names the earlier round whenever one was consulted, whether or not
-    its table carries.
+    The shortfall is empty where a table stands in. The commit names the earlier round's commit
+    where one was consulted and names one, whether or not its table carries, and is empty
+    otherwise.
 
     This is the coverage reading for a head that no round states coverage on and no earlier
     statement carries to. Copilot's Balanced review effort, the default since 2026-09-28, writes
@@ -2407,10 +2408,9 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "states none is the ordinary shape of the second overview format and carries the "
             "newest round that states some forward, bounded on the change set, and failing "
             "that, a round covering the head whose own file table names exactly the changed "
-            "files stands in, or where none carries a table, the newest round that does, its table "
-            "naming exactly the changed files, under "
-            "the same change-set bound, where no round on the pull request states or appears to state "
-            "partial coverage. Reaching here means no table stood in, for the reason the digest "
+            "files stands in, or where none carries a table, the newest round that does, its "
+            "table naming exactly the changed files, under the same change-set bound, where no "
+            "round on the pull request states or appears to state partial coverage. Reaching here means no table stood in, for the reason the digest "
             "above names, and also one of three things it says which of: no round ever stated "
             "coverage, the round that did describes a different set of changed files than this "
             "head has, or that comparison could not be read. Confirm the head branch carries "
