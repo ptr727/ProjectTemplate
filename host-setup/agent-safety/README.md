@@ -198,21 +198,21 @@ text says, because the harm it covers was never in the text.
    a `-k`/`--kill-after`, given before or after the `-s`, sends a SIGKILL after the signal 0. Such a
    `-k` counts where its value takes the form a duration takes here. A word in the run, before the
    `timeout` or between it and the wrapper, that the shell may rewrite at run time, by a
-   substitution such as `"$SIG"`, a brace expansion, a glob, a tilde expansion, or zsh's expansion
-   of a leading `=`, makes the run no bound, whatever follows it, since the text cannot say what the
-   word becomes and the rewrite may split it into words that end option parsing early. That is a
-   false deny wherever the rewrite yields a bound, as it does in
+   substitution such as `"$SIG"`, a brace expansion, a glob or extglob group, a tilde expansion, or
+   zsh's expansion of a leading `=`, makes the run no bound, whatever follows it, since the text
+   cannot say what the word becomes and the rewrite may split it into words that end option parsing
+   early. That is a false deny wherever the rewrite yields a bound, as it does in
    `timeout 900 env PATH=$HOME/bin bash -c '<the loop>'` and in an assignment prefix such as
    `X=$T timeout 900 bash -c '<the loop>'`, which the shell does not split, and wherever quoting
-   keeps a word holding one of those characters literal, as it does for `'a*b'`, since the
-   characters are read rather than the quoting. A brace expansion is read wherever a comma or `..`
-   sits between a word's first `{` and its last `}`, which is a false deny where bash leaves the
-   word alone, as it does `{a},{b}`. A tilde is read wherever it opens a word or follows a `=` or
-   `:`, a false deny where bash leaves it alone, as it does in `--chdir=~`. zsh's `EXTENDED_GLOB`
-   operators, such as `#` and `^`, are not read, since that option is off by default. The run
-   reaches back to the previous unquoted shell operator, an opening `(` or `<(` included. Where that
-   operator holds a redirection, or a group's `)` closing a command substitution, a process
-   substitution, or a glob group, as in
+   keeps literal a word holding a `$`, a backtick, a `[`, `*`, `?`, or `(`, as it does for `'a*b'`
+   and for `sudo -p 'Password (sudo):'`, since the characters are read rather than the quoting. A
+   brace expansion is read wherever a comma or `..` sits between a word's first `{` and its last
+   `}`, which is a false deny where bash leaves the word alone, as it does `{a},{b}`. A tilde is
+   read wherever it opens a word or follows a `=` or `:`, a false deny where bash leaves it alone,
+   as it does in `--chdir=~`. zsh's `EXTENDED_GLOB` operators, such as `#` and `^`, are not read,
+   since that option is off by default. The run reaches back to the previous unquoted shell
+   operator, an opening `(` or `<(` included. Where that operator holds a redirection, or a group's
+   `)` closing a command substitution, a process substitution, or a glob group, as in
    `timeout -s KILL 10 $(true) timeout 800 bash -c '<the loop>'`, the run is no bound too, since the
    text cannot say where the run starts. That is a false deny for a redirection the run really
    holds, as in `>log timeout 900 bash -c '<the loop>'`, and for a case pattern's `)`, as in
@@ -224,7 +224,7 @@ text says, because the harm it covers was never in the text.
    `)`, as zsh's anonymous `() { ... }` and `time -p f() { ... }` show. Any other function
    definition's `()` is no such group. Where a `timeout`'s command is another `timeout`, past any
    command prefix, the run is bounded only when every outer one sends signal 0, which is inert, with
-   no `-k` of any value, and the innermost one is a bound, so
+   no `-k` given a non-empty value, and the innermost one is a bound, so
    `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read
    as no bound, since an outer signal can end the inner `timeout` before its deadline and leave the
    loop running. Past the command prefixes and assignments directly after an outer duration, a word

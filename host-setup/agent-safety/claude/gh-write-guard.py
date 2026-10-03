@@ -2760,10 +2760,10 @@ def _timeout_bounds_wrapper(toks, w, quoted=None):
     bash -c '<loop>'`.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
-    only when every outer one sends signal 0, which is inert, with no `-k` of any value, and the
-    innermost one is a bound. Any other such nesting is read as no bound, since an outer signal can
-    end the inner `timeout` before its deadline and leave the loop under it running. Past the
-    command prefixes and assignments directly after an outer duration, a word naming `timeout`
+    only when every outer one sends signal 0, which is inert, with no `-k` given a non-empty value,
+    and the innermost one is a bound. Any other such nesting is read as no bound, since an outer
+    signal can end the inner `timeout` before its deadline and leave the loop under it running. Past
+    the command prefixes and assignments directly after an outer duration, a word naming `timeout`
     anywhere before the wrapper is read as that nesting. These readings are a false deny wherever
     the outer signal would have stopped the loop too, wherever the inner deadline ends the loop
     before any outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<loop>'`, and
