@@ -35,7 +35,15 @@ one alone, per `Vantage-Config`'s own `*.dc` pin below and
 ([`branching-and-release-model`][branching-and-release-model] Skill). Isolate the
 renormalization from any content edit in its own commit, verified with
 `git diff --ignore-cr-at-eol`, per [`references/line-endings.md`][line-endings] "Editing
-discipline". After merge, check the box below and reconcile the repo's `registry/repos.json`
+discipline". A `develop` ruleset that allows only squash merges collapses a pull request to one
+commit, so the conversion pull request carries the renormalization and its config changes and
+nothing else, which keeps the squashed commit isolated. Land it before any carried file, since
+the carried files are LF and fail the old CRLF default.
+
+Before renormalizing, look for vendor files Git's heuristic reads as text, such as STEP models
+and DXF or SVG artwork. Under `* text=auto eol=lf` the next add normalizes their line endings,
+so pin each such type `-text` in `.gitattributes`, and pin `binary` where a type must also skip
+diffs. After merge, check the box below and reconcile the repo's `registry/repos.json`
 entry per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] if the
 conversion surfaced anything the registry didn't already record.
 
@@ -66,7 +74,8 @@ registry as of this doc's authorship, except where an entry records a later recl
       `operational`, `lineEndings: lf`): already on the new default's value. Verify rather than
       convert, since its own `.editorconfig`/`.gitattributes` may still carry the old redundant
       per-type LF pins the hub dropped.
-- [ ] **KiCadLibrary** (`release`)
+- [x] **KiCadLibrary** (`release`): converted in ptr727/KiCadLibrary#57, with its vendor STEP,
+      DXF, and SVG files pinned `-text` and PDF and PNG pinned `binary`
 - [ ] **EspDinIoT** (`release`)
 - [ ] **ESPHome-Config** (`operational`, `lineEndings: lf`): verify, same reasoning as
       HomeAutomation-Config

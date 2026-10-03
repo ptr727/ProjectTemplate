@@ -172,13 +172,14 @@
             "name": "KiCadLibrary",
             "url": "https://github.com/ptr727/KiCadLibrary",
             "status": "cataloged",
-            "types": ["eda"],
+            "types": ["eda", "python"],
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad part library that delivers a github-release data zip.", "main is stale (data + README only): the full fleet CI, NBGV version.json, and the Python build/verify pipeline live only on develop - promote to main to converge.", "Python tooling uses requirements-dev.txt, not pyproject.toml. No repo-config/ rulesets."]
+            "pythonDirectories": ["."],
+            "driftNotes": ["EDA/KiCad part library that delivers a github-release data zip, built by its build-release-asset hook.", "Python tooling installs from requirements-dev.txt with a config-only pyproject.toml."]
         },
         {
             "name": "EspDinIoT",
