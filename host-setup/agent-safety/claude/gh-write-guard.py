@@ -2715,7 +2715,7 @@ _FUNCTION_DEFINITION_OPENERS = {
 def _closes_function_name(toks, k):
     """True if the `)` token at index k ends the `()` of a function definition, as in `f() {`.
 
-    The name has to follow a separator other than a `)`, or a word in
+    The name has to open the command, or follow a separator other than a `)` or a word in
     `_FUNCTION_DEFINITION_OPENERS`, and hold no `$` and no extglob operator, so the `$()` in
     `timeout -s KILL 10 $() timeout 800` and in `nice $() timeout 800` is none, and so is an `@()`,
     which expands to nothing under bash's `extglob` and `nullglob`. A `)` before the name ends a
