@@ -204,7 +204,9 @@ text says, because the harm it covers was never in the text.
    the rewrite yields a bound, as it does in `timeout 900 env PATH=$HOME/bin bash -c '<the loop>'`
    and in an assignment prefix such as `X=$T timeout 900 bash -c '<the loop>'`, which the shell does
    not split, and wherever quoting keeps a word holding one of those characters literal, as it does
-   for `'a*b'`, since the characters are read rather than the quoting. zsh's `EXTENDED_GLOB`
+   for `'a*b'`, since the characters are read rather than the quoting. A brace expansion is read
+   wherever a comma or `..` sits between a word's first `{` and its last `}`, which is a false deny
+   where bash leaves the word alone, as it does `{a},{b}`. zsh's `EXTENDED_GLOB`
    operators, such as `#` and `^`, are not read, since that option is off by default. The run
    reaches back to the previous unquoted shell operator, an opening `(` or `<(` included. Where that
    operator holds a redirection, or a group's `)` closing a command substitution, a process
@@ -302,8 +304,8 @@ text says, because the harm it covers was never in the text.
    `nohup`, which ignores it, and one the payload handles and ignores. An inline `trap` in the
    wrapper's payload shows that, as in `timeout 900 bash -c 'trap "" TERM; <the loop>'`, but no
    trap is read, and a trap set inside a script the payload runs is not in the command text at
-   all. A launcher that builds an inner `timeout` from its arguments or its input, as
-   `env -S 'timeout 800'` and `xargs -I% % 800` do, names no `timeout` in a word, so the nesting it makes is not read. A
+   all. A launcher that builds an inner `timeout` from its own arguments, as `env -S 'timeout 800'`
+   does, names no `timeout` in a word, so the nesting it makes is not read. A
    false deny on an ordinary loop costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
    states the prohibition for every agent whether or not a hook is installed.
 
