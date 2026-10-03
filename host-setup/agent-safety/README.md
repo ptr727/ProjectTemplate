@@ -215,40 +215,41 @@ text says, because the harm it covers was never in the text.
    `timeout -s KILL 10 $(true) timeout 800 bash -c '<the loop>'`, the run is no bound too, since the
    text cannot say where the run starts. That is a false deny for a redirection the run really
    holds, as in `>log timeout 900 bash -c '<the loop>'`, and for a case pattern's `)`, as in
-   `case $x in a) timeout 900 bash -c '<the loop>';; esac`, or a subshell's or arithmetic compound's
-   `)` that a reserved word follows with no separator, as in
-   `if (true) then timeout 900 bash -c '<the loop>'; fi`. A function definition's `()` is read the
-   same way, a false deny, where the name holds a `$` or an extglob operator, or neither opens the
-   command nor directly follows a separator other than `)` or a word such as `if`, `do`, or `time`,
-   as zsh's anonymous `() { ... }` and `time -p f() { ... }` show. Any other function definition's
-   `()` is no such group. Where a `timeout`'s command is another `timeout`, past any command prefix,
-   the run is bounded only when every outer one sends signal 0, which is inert, with no `-k` of any
-   value, and the innermost one is a bound, so `timeout -s 0 900 timeout 800 bash -c '<the loop>'`
-   is bounded. Every other such nesting is read as no bound, since an outer signal can end the inner
-   `timeout` before its deadline and leave the loop running. Past the command prefixes and
-   assignments directly after an outer duration, a word naming `timeout` anywhere before the wrapper
-   is read as that nesting. These readings are a false deny wherever the outer signal would have
-   stopped the loop too, as it does in `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, wherever
-   the inner deadline ends the loop before any outer signal is sent, as in
-   `timeout -s KILL 1000 timeout 800 bash -c '<the loop>'`, and wherever a prefix's argument merely
-   names `timeout`, as a path ending in `/timeout` does. Behind outer ones that each send signal 0
-   with no `-k`, the nesting is a false deny too wherever a prefix between two of them takes an
-   argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
-   argument changes nothing. The second is an arithmetic guard in the loop's own condition, either
-   the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form (`(( SECONDS < 600 ))`). A
-   nested loop is judged on its own terms, so an unbounded inner wait is denied inside a bounded
-   outer one, which is what it is. A heredoc body is data rather than a command line and is skipped,
-   except one fed to a shell, which is the script that shell runs, so a document quoting the
-   forbidden shape is written rather than denied. A line opening several heredocs is read as opening
-   its first alone and, where every body closes, as opening each in order through the last one that
-   is data, as bash reads them, keeping whole a body fed to a shell before it. The first reading
-   covers a quoted `<<` word or one inside a substitution, which the rule tokenizes as an opener
-   although bash queues no body for it. A line holding `((` or `$[` beside a `<<` is read as opening
-   nothing, and as opening each `<<` whose tag the rule accepts alone and together with every later
-   one whose body closes, wherever that reading closes its first body, ends on a body that is data,
-   and removes at least one line, since an arithmetic shift tokenizes as a redirection does. Any
-   reading holding an unbounded wait denies the command. A command with more readings than the rule
-   builds is denied when it names both `sleep` and a loop keyword, since a wait needs both.
+   `case $x in a) timeout 900 bash -c '<the loop>';; esac`, or the `)` of a subshell, an arithmetic
+   compound, or an arithmetic `for` header that a reserved word or `{` follows with no separator, as
+   in `if (true) then timeout 900 bash -c '<the loop>'; fi`. A function definition's `()` is read
+   the same way, a false deny, where the name holds a `$` or an extglob operator, or neither opens
+   the command nor directly follows a word such as `if`, `do`, or `time`, or a separator other than
+   `)`, as zsh's anonymous `() { ... }` and `time -p f() { ... }` show. Any other function
+   definition's `()` is no such group. Where a `timeout`'s command is another `timeout`, past any
+   command prefix, the run is bounded only when every outer one sends signal 0, which is inert, with
+   no `-k` of any value, and the innermost one is a bound, so
+   `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read
+   as no bound, since an outer signal can end the inner `timeout` before its deadline and leave the
+   loop running. Past the command prefixes and assignments directly after an outer duration, a word
+   naming `timeout` anywhere before the wrapper is read as that nesting. These readings are a false
+   deny wherever the outer signal would have stopped the loop too, as it does in
+   `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, wherever the inner deadline ends the loop
+   before any outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<the loop>'`,
+   and wherever a prefix's argument merely names `timeout`, as a path ending in `/timeout` does.
+   Behind outer ones that each send signal 0 with no `-k`, the nesting is a false deny too wherever
+   a prefix between two of them takes an argument, as `nice -n 5` does. Behind any other outer one
+   the nesting is denied anyway, so the argument changes nothing. The second is an arithmetic guard
+   in the loop's own condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic
+   form (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner
+   wait is denied inside a bounded outer one, which is what it is. A heredoc body is data rather
+   than a command line and is skipped, except one fed to a shell, which is the script that shell
+   runs, so a document quoting the forbidden shape is written rather than denied. A line opening
+   several heredocs is read as opening its first alone and, where every body closes, as opening each
+   in order through the last one that is data, as bash reads them, keeping whole a body fed to a
+   shell before it. The first reading covers a quoted `<<` word or one inside a substitution, which
+   the rule tokenizes as an opener although bash queues no body for it. A line holding `((` or `$[`
+   beside a `<<` is read as opening nothing, and as opening each `<<` whose tag the rule accepts
+   alone and together with every later one whose body closes, wherever that reading closes its first
+   body, ends on a body that is data, and removes at least one line, since an arithmetic shift
+   tokenizes as a redirection does. Any reading holding an unbounded wait denies the command. A
+   command with more readings than the rule builds is denied when it names both `sleep` and a loop
+   keyword, since a wait needs both.
 
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a `while` loop whose condition is a
