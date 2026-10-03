@@ -212,8 +212,8 @@ text says, because the harm it covers was never in the text.
    loop>'`, the run is no bound too, since the text cannot say where the run starts. That is a false
    deny for a redirection the run really holds, as in `>log timeout 900 bash -c '<the loop>'`, and
    for a case pattern's `)`, as in `case $x in a) timeout 900 bash -c '<the loop>';; esac`. A
-   function definition's `()` is no such group, where its name opens a command and holds no `$` and
-   no extglob operator. Where a `timeout`'s command is another `timeout`, past any command prefix,
+   function definition's `()` is no such group, where its name opens a command, follows no `)`, and
+   holds no `$` and no extglob operator. Where a `timeout`'s command is another `timeout`, past any command prefix,
    the run is bounded only when every outer one
    sends signal 0, which is inert, with no `-k` of any value, and the innermost one is a bound, so
    `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read
@@ -302,8 +302,8 @@ text says, because the harm it covers was never in the text.
    `nohup`, which ignores it, and one the payload handles and ignores. An inline `trap` in the
    wrapper's payload shows that, as in `timeout 900 bash -c 'trap "" TERM; <the loop>'`, but no
    trap is read, and a trap set inside a script the payload runs is not in the command text at
-   all. A launcher that builds an inner `timeout` from its own arguments, as `env -S 'timeout 800'`
-   and `xargs -I% % 800` do, names no `timeout` in a word, so the nesting it makes is not read. A
+   all. A launcher that builds an inner `timeout` from its arguments or its input, as
+   `env -S 'timeout 800'` and `xargs -I% % 800` do, names no `timeout` in a word, so the nesting it makes is not read. A
    false deny on an ordinary loop costs more work than those leaks do, and each still falls under `AGENTS.md` "Delegation", which
    states the prohibition for every agent whether or not a hook is installed.
 

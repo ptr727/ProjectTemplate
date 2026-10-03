@@ -2536,9 +2536,18 @@ def _is_timeout_signal_zero(val):
     return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
 
 
-_BRACE_EXPANSION = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
-
 _TILDE_EXPANSION = re.compile(r"(?:^|[=:])~")
+
+
+def _may_brace_expand(val):
+    """True if a `,` or `..` sits between the first `{` and the last `}` of the word.
+
+    Read across the whole span rather than per pair, since bash expands `{Y={},ti}meout` although
+    its comma lies outside the inner `{}`, and a quoted `}` is a token character here too.
+    """
+    i = val.find("{")
+    j = val.rfind("}")
+    return 0 <= i < j and ("," in val[i + 1 : j] or ".." in val[i + 1 : j])
 
 
 def _is_shell_rewritable(val):
@@ -2548,14 +2557,14 @@ def _is_shell_rewritable(val):
     `[0]`, and `~` do, and so can zsh's expansion of a leading `=`, as `=timeout` names a path. The
     rewrite can also split one word into several, so `-k $K` becomes `-k 0 -s 0` where `K` holds
     `0 -s 0`. The test reads the characters rather than the quoting, so a quoted word holding one,
-    as `'a*b'` does, is read as rewritable too. A brace pair counts only where it holds a comma or
-    `..`, the forms a brace expansion takes, so `{` alone and the `{}` of `xargs -I{}` do not, and a
-    tilde counts only where it opens the word or follows a `=` or `:`, the places bash expands one.
+    as `'a*b'` does, is read as rewritable too. A brace counts only where a comma or `..`, the forms
+    a brace expansion takes, sits between the word's first `{` and its last `}`, so `{` alone and the
+    `{}` of `xargs -I{}` do not, and a tilde counts only where it opens the word or follows a `=` or `:`, the places bash expands one.
     """
     return (
         val.startswith("=")
         or any(ch in val for ch in "$`[*?")
-        or bool(_BRACE_EXPANSION.search(val))
+        or _may_brace_expand(val)
         or bool(_TILDE_EXPANSION.search(val))
     )
 
@@ -5832,6 +5841,11 @@ _WAIT_CASES = [
         "timeout 900 xargs -I{} bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "a brace pair with no comma or .. is no brace expansion",
+    ),
+    (
+        "timeout -s KILL 10 env {Y={},ti}meout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while a comma between the outer braces is one, whatever pair sits inside",
     ),
     (
         "timeout 900 env A=x~y bash -c 'until [ -f x ]; do sleep 60; done'",
