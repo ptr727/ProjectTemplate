@@ -318,7 +318,7 @@ jobs:
           fi
           stray=$(find "$ASSET_DIR" -mindepth 1 -maxdepth 1 \( ! -type f -o -name '.*' \) -print)
           if [[ -n "$stray" ]]; then
-            echo "::error::The build-release-asset hook wrote entries the release would drop, anything not a regular file or a dot-prefixed name: $stray"
+            echo "::error::The build-release-asset hook wrote entries other than top-level regular files without a dot-prefixed name: $stray"
             exit 1
           fi
           ls -l "$ASSET_DIR"
