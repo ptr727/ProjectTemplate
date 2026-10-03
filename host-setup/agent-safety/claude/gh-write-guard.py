@@ -2660,35 +2660,37 @@ def _runs_as_command(toks, w):
 def _run_start(toks, w, quoted=None):
     """The index of the first token in the command run holding index w, or None where it is unknown.
 
-    The run reaches back to the previous unquoted shell operator other than a redirection, whose
-    target is a word of the run, as `quoted` says per token where it is known. A leading redirection
-    and its target are not the run's command, as `_runs_as_command` reads them. Where that operator
-    ends in a `)` other than a function definition's, a group closes directly before the run, and
-    None says the text cannot place the run's start. The group may be a `$(...)` or a `<(...)`
-    whose output is a word of the run, as in `timeout -s KILL 10 $(true) timeout 800`, or a glob
-    group such as `/usr/bin/@(nice)`. Starting the run after it hides an outer `timeout`, and its
-    `(` cannot be found on the tokens, since a `$` fused into a word, as `nice$(true)` holds, is no
-    token of its own.
+    The run reaches back to the previous unquoted shell operator, as `quoted` says per token where
+    it is known. Where that operator holds a redirection, or ends in a `)` other than a function
+    definition's, None says the text cannot place the run's start. A redirection's target is a word
+    of the run, and the lexer fuses a separator into the redirection after it, as `;>` is one
+    token, so neither stopping nor walking on is right for both. A `)` closes a group whose output
+    may be a word of the run, a `$(...)` or a `<(...)` as in `timeout -s KILL 10 $(true) timeout
+    800`, or a glob group such as `/usr/bin/@(nice)`. Starting the run after it hides an outer
+    `timeout`, and its `(` cannot be found on the tokens, since a `$` fused into a word, as
+    `nice$(true)` holds, is no token of its own.
     """
     start = w
     while start > 0:
         k = start - 1
         tok = toks[k]
-        if not _is_shell_op(tok) or (quoted is not None and quoted[k]) or _is_redir_op(tok):
+        if not _is_shell_op(tok) or (quoted is not None and quoted[k]):
             start = k
             continue
-        if tok.endswith(")") and not _closes_function_name(toks, k):
+        if ">" in tok or "<" in tok or (tok.endswith(")") and not _closes_function_name(toks, k)):
             return None
         break
-    while start < w and _is_redir_op(toks[start]):
-        start += 2
     return start
+
+
+_FUNCTION_DEFINITION_OPENERS = {"function", "{", "do", "then", "else"}
 
 
 def _closes_function_name(toks, k):
     """True if the `)` token at index k ends the `()` of a function definition, as in `f() {`.
 
-    The name has to open a command, so the `$()` in `timeout -s KILL 10 $() timeout 800` is none.
+    The name has to open a command and hold no `$`, so the `$()` in `timeout -s KILL 10 $() timeout
+    800` and in `nice $() timeout 800` is none.
     """
     if toks[k] == "()":
         n = k - 1
@@ -2696,9 +2698,9 @@ def _closes_function_name(toks, k):
         n = k - 2
     else:
         return False
-    if n < 0 or _is_shell_op(toks[n]):
+    if n < 0 or _is_shell_op(toks[n]) or "$" in toks[n] or "`" in toks[n]:
         return False
-    return n == 0 or toks[n - 1] == "function" or _opens_command(toks, n)
+    return n == 0 or toks[n - 1] in _FUNCTION_DEFINITION_OPENERS or _is_separator(toks[n - 1])
 
 
 def _timeout_bounds_wrapper(toks, w, quoted=None):
@@ -5744,12 +5746,37 @@ _WAIT_CASES = [
     (
         "timeout -s KILL 10 env >timeout -us0 -u 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "and a redirection's target is a word of the run too",
+        "a redirection in the run leaves its start unknown",
     ),
     (
         ">log timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and any redirection in the run is a declared false deny",
+    ),
+    (
+        "timeout 900 true;>f bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as one fused with a separator does",
+    ),
+    (
+        "timeout 5>f 0 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "so a descriptor number is never read as the duration",
+    ),
+    (
+        "timeout -s KILL 10 nice $() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a $ never names a function, behind a prefix either",
+    ),
+    (
+        "timeout -s KILL 10 env -u function $() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "or after the word function",
+    ),
+    (
+        "if true; then f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; fi",
         "allow",
-        "a leading redirection is not the run's command",
+        "while a function defined after then is one",
     ),
     (
         "timeout 900 xargs -I{} bash -c 'until [ -f x ]; do sleep 60; done'",

@@ -206,11 +206,11 @@ text says, because the harm it covers was never in the text.
    not split, and wherever quoting keeps a word holding one of those characters literal, as it does
    for `'a*b'`, since the characters are read rather than the quoting. zsh's `EXTENDED_GLOB`
    operators, such as `#` and `^`, are not read, since that option is off by default. The run
-   reaches back to the previous unquoted shell operator, a redirection's being no end of it, since
-   its target is a word of the run. A group's `)` ending that operator, closing a command
-   substitution, a process substitution, or a glob group, as in `timeout -s KILL 10 $(true) timeout
-   800 bash -c '<the loop>'`, makes the run no bound too, since the text cannot say where the run
-   starts. That is a false deny for a case pattern's `)`, as in
+   reaches back to the previous unquoted shell operator. Where that operator holds a redirection,
+   or a group's `)` closing a command substitution, a process substitution, or a glob group, as in
+   `timeout -s KILL 10 $(true) timeout 800 bash -c '<the loop>'`, the run is no bound too, since
+   the text cannot say where the run starts. That is a false deny for a redirection the run really
+   holds, as in `>log timeout 900 bash -c '<the loop>'`, and for a case pattern's `)`, as in
    `case $x in a) timeout 900 bash -c '<the loop>';; esac`. A function definition's `()` is no such
    group. Where a `timeout`'s command
    is another `timeout`, past any command prefix, the run is bounded only when every outer one
