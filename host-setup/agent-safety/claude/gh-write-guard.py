@@ -2648,28 +2648,39 @@ def _runs_as_command(toks, w):
 def _run_start(toks, w):
     """The index of the first token in the command run holding index w, back to its shell operator.
 
-    A parenthesized group closing before w, as `$(true)` does, is skipped whole as a word of the run.
-    Stopping at its `)` hid an outer `timeout` before it, and its `$` from the rewrite scan.
-    A `(` with no `)` before w opens the group w sits in, and a `)` with no `(` ends a `case` pattern.
+    A `$(...)` closing before w, as `$(true)` does, is skipped whole as a word of the run, since
+    stopping at its `)` hid an outer `timeout` before it, and its `$` from the rewrite scan. The
+    lexer can fuse the closing `)` with an operator before it, as in `$(true;)` and `$(echo
+    $(true))`, so the parentheses are counted inside each operator token. Any other `)` ends the
+    walk, since a case pattern, a glob group such as `@(time)out`, and a quoted `(` read as a token
+    are not a substitution, and pairing one of them with an earlier `(` would start the run at text
+    that belongs to another command.
     """
     start = w
     while start > 0:
         tok = toks[start - 1]
-        if tok == ")":
-            depth, k = 0, start - 1
-            while k >= 0:
-                depth += (toks[k] == ")") - (toks[k] == "(")
-                if depth == 0:
-                    break
-                k -= 1
-            if k < 0:
-                return start
-            start = k
+        if not _is_shell_op(tok):
+            start -= 1
             continue
-        if _is_shell_op(tok):
+        opened = _substitution_open(toks, start - 1) if tok.endswith(")") else None
+        if opened is None:
             return start
-        start -= 1
+        start = opened - 1
     return start
+
+
+def _substitution_open(toks, close):
+    """The index of the `(` a `$` opens to match the last `)` of the token at index close, or None."""
+    depth = 0
+    for k in range(close, -1, -1):
+        tok = toks[k]
+        if not _is_shell_op(tok):
+            continue
+        for pos in range(len(tok) - 1, -1, -1):
+            depth += (tok[pos] == ")") - (tok[pos] == "(")
+            if depth == 0:
+                return k if pos == 0 and tok[0] == "(" and k > 0 and toks[k - 1] == "$" else None
+    return None
 
 
 def _timeout_bounds_wrapper(toks, w):
@@ -5635,6 +5646,31 @@ _WAIT_CASES = [
         "case $x in a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
         "allow",
         "a case pattern's ) with no ( before it ends the run",
+    ),
+    (
+        "timeout -s KILL 10 $(true;) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is one whose closing parenthesis the lexer fuses with an operator",
+    ),
+    (
+        "timeout -s KILL 10 $(echo $(true)) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as a nested substitution's is",
+    ),
+    (
+        "timeout -s KILL 10 /usr/bin/@(time)out 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a glob group is no substitution, so the run starts after its )",
+    ),
+    (
+        "timeout 900 grep -c \"(\" f; case a in a) bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "deny",
+        "and a quoted ( never pairs with a case pattern's ) across a separator",
+    ),
+    (
+        "case foo in (a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "allow",
+        "a case pattern's optional ( is no substitution either",
     ),
     (
         "timeout -s KILL 10 =timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
