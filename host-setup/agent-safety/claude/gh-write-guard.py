@@ -2646,51 +2646,33 @@ def _runs_as_command(toks, w):
 
 
 def _run_start(toks, w):
-    """The index of the first token in the command run holding index w, back to its shell operator.
+    """The index of the first token in the command run holding index w, or None where it is unknown.
 
-    A `$(...)` closing before w, as `$(true)` does, is skipped whole as a word of the run, since
-    stopping at its `)` hid an outer `timeout` before it, and its `$` from the rewrite scan. The
-    lexer can fuse the closing `)` with an operator before it, as in `$(true;)` and `$(echo
-    $(true))`, so the parentheses are counted inside each operator token. Any other `)` ends the
-    walk, since a case pattern, a glob group such as `@(time)out`, and a quoted `(` read as a token
-    are not a substitution, and pairing one of them with an earlier `(` would start the run at text
-    that belongs to another command.
+    The run reaches back to the previous shell operator. Where that operator ends in a `)` other
+    than a function definition's `()`, a group closes directly before the run, and None says the
+    text cannot place the run's start. The group may be a `$(...)` or a `<(...)` whose output is a
+    word of the run, as in `timeout -s KILL 10 $(true) timeout 800`, or a glob group such as
+    `/usr/bin/@(nice)`. Pairing it with its `(` cannot be done on the tokens, since a quoted or
+    escaped parenthesis is a token here too, and starting the run after it hides an outer `timeout`.
     """
     start = w
     while start > 0:
         tok = toks[start - 1]
-        if not _is_shell_op(tok):
-            start -= 1
-            continue
-        opened = _substitution_open(toks, start - 1) if tok.endswith(")") else None
-        if opened is None:
-            return start
-        start = opened - 1
+        if _is_shell_op(tok):
+            return None if tok.endswith(")") and tok != "()" else start
+        start -= 1
     return start
-
-
-def _substitution_open(toks, close):
-    """The index of the `(` a `$` opens to match the last `)` of the token at index close, or None."""
-    depth = 0
-    for k in range(close, -1, -1):
-        tok = toks[k]
-        if not _is_shell_op(tok):
-            continue
-        for pos in range(len(tok) - 1, -1, -1):
-            depth += (tok[pos] == ")") - (tok[pos] == "(")
-            if depth == 0:
-                return k if pos == 0 and tok[0] == "(" and k > 0 and toks[k - 1] == "$" else None
-    return None
 
 
 def _timeout_bounds_wrapper(toks, w):
     """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
 
     The test is on the command run the wrapper sits in, the tokens back to the previous shell
-    operator, a parenthesized group such as `$(true)` counting as a word of that run, rather than on
-    the tokens immediately before it. That run is bounded when it begins with `timeout` and carries
-    a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as bounded while `timeout 5 echo
-    hi && bash -c '<loop>'` does not, the `timeout` there running `echo` in a run of its own.
+    operator, rather than on the tokens immediately before it. That run is bounded when it begins
+    with `timeout` and carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as
+    bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
+    `echo` in a run of its own. Where that operator ends in a group's `)`, the run is no bound, per
+    `_run_start`.
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
@@ -2727,6 +2709,8 @@ def _timeout_bounds_wrapper(toks, w):
     follows it.
     """
     start = _run_start(toks, w)
+    if start is None:
+        return False
     run = start
     # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
     while start < w and _is_command_prefix(toks[start]):
@@ -5625,12 +5609,12 @@ _WAIT_CASES = [
     (
         "timeout -s KILL 10 $(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "a command substitution before the timeout is a word of its run, so the outer timeout is read",
+        "a command substitution closing before the run leaves its start unknown",
     ),
     (
         "$(echo timeout -s KILL 10) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "and one that may print an outer timeout is rewritable",
+        "and so does one that may print an outer timeout",
     ),
     (
         "{ timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
@@ -5644,8 +5628,8 @@ _WAIT_CASES = [
     ),
     (
         "case $x in a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
-        "allow",
-        "a case pattern's ) with no ( before it ends the run",
+        "deny",
+        "a case pattern's ) before the run is a declared false deny",
     ),
     (
         "timeout -s KILL 10 $(true;) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
@@ -5660,17 +5644,47 @@ _WAIT_CASES = [
     (
         "timeout -s KILL 10 /usr/bin/@(time)out 800 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
-        "a glob group is no substitution, so the run starts after its )",
+        "a glob group closing before the run leaves its start unknown",
     ),
     (
         "timeout 900 grep -c \"(\" f; case a in a) bash -c 'until [ -f x ]; do sleep 60; done';; esac",
         "deny",
-        "and a quoted ( never pairs with a case pattern's ) across a separator",
+        "and a quoted ( never reaches across a separator to an earlier timeout",
     ),
     (
         "case foo in (a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "deny",
+        "with or without its optional (",
+    ),
+    (
+        "timeout -s KILL 10 nice$(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a substitution fused into a word is read the same way",
+    ),
+    (
+        "timeout -s KILL 10 $(echo \")\") timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as is one holding a quoted parenthesis",
+    ),
+    (
+        "timeout -s KILL 10 flock <(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a process substitution",
+    ),
+    (
+        "timeout -s KILL 10 /usr/bin/@(nice) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a glob group that may name a prefix",
+    ),
+    (
+        "x=$(date); timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
-        "a case pattern's optional ( is no substitution either",
+        "a ) fused with a separator ends the earlier run instead",
+    ),
+    (
+        "f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
+        "allow",
+        "and a function definition's () opens no group before the run",
     ),
     (
         "timeout -s KILL 10 =timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",

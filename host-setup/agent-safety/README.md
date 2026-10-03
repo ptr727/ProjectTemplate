@@ -196,16 +196,19 @@ text says, because the harm it covers was never in the text.
    reads as that signal (`-s 0`, `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as
    `128`) is no bound. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a
    child that keeps running, unless a `-k`/`--kill-after` follows it with a SIGKILL, which counts
-   where its value takes the form a duration takes here. A word in the run, before the `timeout`, a
-   command substitution such as `$(true)` included, or between it and the wrapper, that the shell
-   may rewrite at run time, by a substitution such as `"$SIG"`, a brace expansion, a glob, a tilde
-   expansion, or zsh's expansion of a leading `=`,
+   where its value takes the form a duration takes here. A word in the run, before the `timeout` or
+   between it and the wrapper, that the shell may rewrite at run time, by a substitution such as
+   `"$SIG"`, a brace expansion, a glob, a tilde expansion, or zsh's expansion of a leading `=`,
    makes the run no bound, whatever follows it, since the text cannot say what the word becomes and
    the rewrite may split it into words that end option parsing early. That is a false deny wherever
    the rewrite yields a bound, as it does in `timeout 900 env PATH=$HOME/bin bash -c '<the loop>'`
    and in an assignment prefix such as `X=$T timeout 900 bash -c '<the loop>'`, which the shell does
    not split, and wherever quoting keeps a word holding one of those characters literal, as it does
-   for `'a*b'`, since the characters are read rather than the quoting. Where a `timeout`'s command
+   for `'a*b'`, since the characters are read rather than the quoting. A group's `)` directly
+   before the run, closing a command substitution, a process substitution, or a glob group, as in
+   `timeout -s KILL 10 $(true) timeout 800 bash -c '<the loop>'`, makes the run no bound too, since
+   the text cannot say where the run starts. That is a false deny for a case pattern's `)`, as in
+   `case $x in a) timeout 900 bash -c '<the loop>';; esac`. Where a `timeout`'s command
    is another `timeout`, past any command prefix, the run is bounded only when every outer one sends
    signal 0 with no `-k` of any value, which is inert, and the innermost one is a bound, so `timeout
    -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read as no
@@ -219,8 +222,8 @@ text says, because the harm it covers was never in the text.
    send signal 0 with no `-k`, the nesting is a false deny too wherever a prefix between two of
    them takes an argument, as `nice -n 5` does. Behind any other outer one the nesting is denied
    anyway, so the argument changes nothing. The second is an arithmetic guard in the loop's own
-   condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form (`(( SECONDS < 600 ))`). A
-   nested loop is judged on its own terms, so an unbounded inner
+   condition, either the test-builtin form (`[ "$i" -lt 120 ]`) or the arithmetic form
+   (`(( SECONDS < 600 ))`). A nested loop is judged on its own terms, so an unbounded inner
    wait is denied inside a bounded outer one, which is what it is. A heredoc body is data rather than a
    command line and is skipped, except one fed to a shell, which is the script that shell runs, so a
    document quoting the forbidden shape is written rather than denied. A line opening several
