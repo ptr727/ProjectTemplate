@@ -36,14 +36,17 @@ one alone, per `Vantage-Config`'s own `*.dc` pin below and
 renormalization from any content edit in its own commit, verified with
 `git diff --ignore-cr-at-eol`, per [`references/line-endings.md`][line-endings] "Editing
 discipline". A `develop` ruleset that allows only squash merges collapses a pull request to one
-commit, so the conversion pull request carries the renormalization and its config changes and
-nothing else, which keeps the squashed commit isolated. Land it before any carried file, since
-the carried files are LF and fail the old CRLF default.
+commit, so the conversion pull request carries the renormalization and its `.editorconfig` and
+`.gitattributes` changes and nothing else, which keeps the squashed commit isolated. Land it
+before any other carried file, since the carried files are LF and fail the old CRLF default.
 
 Before renormalizing, look for vendor files Git's heuristic reads as text, such as STEP models
-and DXF or SVG artwork. Under `* text=auto eol=lf` the next add normalizes their line endings,
-so pin each such type `-text` in `.gitattributes`, and pin `binary` where a type must also skip
-diffs. After merge, check the box below and reconcile the repo's `registry/repos.json`
+and DXF or SVG artwork. Under `* text=auto eol=lf`, `git add --renormalize` and any later add of
+a new such file normalize their line endings. Pin each such type `-text` in `.gitattributes`, or
+`binary` where a type must also skip diffs, and give the same types an `.editorconfig` section
+setting `charset`, `end_of_line`, and `insert_final_newline` to `unset`, since a file kept CRLF
+otherwise fails the new LF default. Write each glob to match both letter cases, such as
+`*.[sS][tT][pP]`, since Git matches attribute patterns case-sensitively on a Linux clone. After merge, check the box below and reconcile the repo's `registry/repos.json`
 entry per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] if the
 conversion surfaced anything the registry didn't already record.
 
@@ -75,7 +78,8 @@ registry as of this doc's authorship, except where an entry records a later recl
       convert, since its own `.editorconfig`/`.gitattributes` may still carry the old redundant
       per-type LF pins the hub dropped.
 - [x] **KiCadLibrary** (`release`): converted in ptr727/KiCadLibrary#57, with its vendor STEP,
-      DXF, and SVG files pinned `-text` and PDF and PNG pinned `binary`
+      DXF, and SVG files pinned `-text` beside a matching `.editorconfig` `unset` section, and PDF
+      and PNG pinned `binary`
 - [ ] **EspDinIoT** (`release`)
 - [ ] **ESPHome-Config** (`operational`, `lineEndings: lf`): verify, same reasoning as
       HomeAutomation-Config
