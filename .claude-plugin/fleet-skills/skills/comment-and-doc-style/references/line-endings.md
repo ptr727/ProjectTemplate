@@ -14,8 +14,9 @@ summary, preserve the existing ending and verify with a byte scan, covers that c
   gives shell scripts, Dockerfiles, workflow YAML, `uv.lock`, and every shebang-executed `.py`
   the ending they need without a path-specific pin.
 - **`.gitattributes` mirrors the repository-wide defaults**: `* text=auto eol=lf` normalizes every
-  detected text file to LF while leaving binary files byte-preserved. `*.bat` and `*.cmd` override
-  that default to CRLF. Do not add per-language or per-file LF pins where the global LF default
+  detected text file to LF, and leaves byte-preserved only what Git's heuristic detects as binary,
+  so a text-shaped file whose bytes have to be kept takes a `-text` or `binary` pin of its own.
+  `*.bat` and `*.cmd` override that default to CRLF. Do not add per-language or per-file LF pins where the global LF default
   already applies. The CRLF-native exception for POSIX-executed paths is defined below.
 - **Both files are required together.** `.editorconfig` governs the editor, `.gitattributes`
   governs git (checkout, commit, `--renormalize`). A repo missing either file, or whose
@@ -72,7 +73,7 @@ consumer may depend on), still pair a `.gitattributes` pin with a matching `.edi
 override, since the git pin alone is not enough there, `.gitattributes` governs git while the
 editor follows `.editorconfig`. For a byte-preserve directory, disable all editor normalization,
 not just EOL: `[<dir>/**]` with `charset = unset`, `end_of_line = unset`, `insert_final_newline =
-false`, `trim_trailing_whitespace = false` (`unset` is EditorConfig's spec-defined special value
+unset`, `trim_trailing_whitespace = false` (`unset` is EditorConfig's spec-defined special value
 that removes an inherited property, and `**` is needed rather than `*` so a nested file under the
 directory is covered too, since `*` excludes `/` and only matches one path component).
 
