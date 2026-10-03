@@ -215,13 +215,13 @@ text says, because the harm it covers was never in the text.
    substitution, or a glob group, as in `timeout -s KILL 10 $(true) timeout 800 bash -c '<the
    loop>'`, the run is no bound too, since the text cannot say where the run starts. That is a false
    deny for a redirection the run really holds, as in `>log timeout 900 bash -c '<the loop>'`, and
-   for a case pattern's `)`, as in `case $x in a) timeout 900 bash -c '<the loop>';; esac`, and
-   for a `()` that no plain function name opens, as zsh's anonymous `() { ... }` and
-   `time -p f() { ... }` hold. A
-   function definition's `()` is no such group, where its name opens a command, follows no `)`, and
-   holds no `$` and no extglob operator. Where a `timeout`'s command is another `timeout`, past any command prefix,
-   the run is bounded only when every outer one
-   sends signal 0, which is inert, with no `-k` of any value, and the innermost one is a bound, so
+   for a case pattern's `)`, as in `case $x in a) timeout 900 bash -c '<the loop>';; esac`. A
+   function definition's `()` is read the same way, a false deny, where the name holds a `$` or an
+   extglob operator, or does not directly follow a separator other than `)` or a word such as `if`,
+   `do`, or `time`, as zsh's anonymous `() { ... }` and `time -p f() { ... }` show. Any other
+   function definition's `()` is no such group. Where a `timeout`'s command is another `timeout`,
+   past any command prefix, the run is bounded only when every outer one sends signal 0, which is
+   inert, with no `-k` of any value, and the innermost one is a bound, so
    `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read
    as no bound, since an outer signal can end the inner `timeout` before its deadline and leave the
    loop running. Past the command prefixes and assignments directly after an outer duration, a word
