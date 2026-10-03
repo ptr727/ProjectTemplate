@@ -206,14 +206,18 @@ text says, because the harm it covers was never in the text.
    not split, and wherever quoting keeps a word holding one of those characters literal, as it does
    for `'a*b'`, since the characters are read rather than the quoting. A brace expansion is read
    wherever a comma or `..` sits between a word's first `{` and its last `}`, which is a false deny
-   where bash leaves the word alone, as it does `{a},{b}`. zsh's `EXTENDED_GLOB`
+   where bash leaves the word alone, as it does `{a},{b}`. A tilde is read wherever it opens a word
+   or follows a `=` or `:`, a false deny where bash leaves it alone, as it does in `--chdir=~`.
+   zsh's `EXTENDED_GLOB`
    operators, such as `#` and `^`, are not read, since that option is off by default. The run
    reaches back to the previous unquoted shell operator, an opening `(` or `<(` included. Where that
    operator holds a redirection, or a group's `)` closing a command substitution, a process
    substitution, or a glob group, as in `timeout -s KILL 10 $(true) timeout 800 bash -c '<the
    loop>'`, the run is no bound too, since the text cannot say where the run starts. That is a false
    deny for a redirection the run really holds, as in `>log timeout 900 bash -c '<the loop>'`, and
-   for a case pattern's `)`, as in `case $x in a) timeout 900 bash -c '<the loop>';; esac`. A
+   for a case pattern's `)`, as in `case $x in a) timeout 900 bash -c '<the loop>';; esac`, and
+   for a `()` that no plain function name opens, as zsh's anonymous `() { ... }` and
+   `time -p f() { ... }` hold. A
    function definition's `()` is no such group, where its name opens a command, follows no `)`, and
    holds no `$` and no extglob operator. Where a `timeout`'s command is another `timeout`, past any command prefix,
    the run is bounded only when every outer one
@@ -221,9 +225,9 @@ text says, because the harm it covers was never in the text.
    `timeout -s 0 900 timeout 800 bash -c '<the loop>'` is bounded. Every other such nesting is read
    as no bound, since an outer signal can end the inner `timeout` before its deadline and leave the
    loop running. Past the command prefixes and assignments directly after an outer duration, a word
-   naming `timeout` anywhere before the wrapper is read as that nesting. That is a false deny
-   wherever the outer signal would have stopped the loop too, as it does in `timeout 900 timeout -s
-   0 800 bash -c '<the loop>'`, wherever the inner deadline ends the loop before any outer signal is
+   naming `timeout` anywhere before the wrapper is read as that nesting. These readings are a false
+   deny wherever the outer signal would have stopped the loop too, as it does in
+   `timeout 900 timeout -s 0 800 bash -c '<the loop>'`, wherever the inner deadline ends the loop before any outer signal is
    sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<the loop>'`, and wherever a prefix's
    argument merely names `timeout`, as a path ending in `/timeout` does. Behind outer ones that each
    send signal 0 with no `-k`, the nesting is a false deny too wherever a prefix between two of

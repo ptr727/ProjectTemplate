@@ -2558,8 +2558,9 @@ def _is_shell_rewritable(val):
     rewrite can also split one word into several, so `-k $K` becomes `-k 0 -s 0` where `K` holds
     `0 -s 0`. The test reads the characters rather than the quoting, so a quoted word holding one,
     as `'a*b'` does, is read as rewritable too. A brace counts only where a comma or `..`, the forms
-    a brace expansion takes, sits between the word's first `{` and its last `}`, so `{` alone and the
-    `{}` of `xargs -I{}` do not, and a tilde counts only where it opens the word or follows a `=` or `:`, the places bash expands one.
+    a brace expansion takes, sits between the word's first `{` and its last `}`, so `{` alone and
+    the `{}` of `xargs -I{}` do not, and a tilde counts only where it opens the word or follows a
+    `=` or `:`, which holds every place bash expands one and some it does not, as `--chdir=~`.
     """
     return (
         val.startswith("=")
@@ -2759,15 +2760,15 @@ def _timeout_bounds_wrapper(toks, w, quoted=None):
     innermost one is a bound. Any other such nesting is read as no bound, since an outer signal can
     end the inner `timeout` before its deadline and leave the loop under it running. Past the
     command prefixes and assignments directly after an outer duration, a word naming `timeout`
-    anywhere before the wrapper is read as that nesting. That is a false deny wherever the outer
-    signal would have stopped the loop too, wherever the inner deadline ends the loop before any
-    outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<loop>'`, and wherever a
-    prefix's argument merely names `timeout`, as a path ending in `/timeout` does. A launcher
-    building the inner `timeout` from its own arguments, as `env -S 'timeout 800'` does, names no
-    `timeout` in a word and is not reached. Behind outer ones that each send signal 0 with no `-k`,
-    the nesting is a false deny too wherever a prefix between two of them takes an argument, as
-    `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the argument
-    changes nothing.
+    anywhere before the wrapper is read as that nesting. These readings are a false deny wherever
+    the outer signal would have stopped the loop too, wherever the inner deadline ends the loop
+    before any outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<loop>'`, and
+    wherever a prefix's argument merely names `timeout`, as a path ending in `/timeout` does. A
+    launcher building the inner `timeout` from its own arguments, as `env -S 'timeout 800'` does,
+    names no `timeout` in a word and is not reached. Behind outer ones that each send signal 0 with
+    no `-k`, the nesting is a false deny too wherever a prefix between two of them takes an
+    argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
+    argument changes nothing.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
