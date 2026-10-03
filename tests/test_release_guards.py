@@ -711,6 +711,10 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertIn("name: release-asset-${{ inputs.branch }}-build-release-asset", upload)
         self.assertNotIn("upload-artifact", "".join(s for s in steps if s is not upload))
         self.assertIn("uses: ./.github/actions/build-release-asset", job)
+        self.assertRegex(job, r"(?m)^    if: \$\{\{ inputs\.enable_release_asset \}\}$")
+        check = next(step for step in steps if step.startswith("Check release asset output step"))
+        self.assertIn("-type f -print -quit", check)
+        self.assertIn("\\( ! -type f -o -name '.*' \\)", check)
 
         for consumer in ("github-release", "build-docker"):
             with self.subTest(consumer=consumer):
