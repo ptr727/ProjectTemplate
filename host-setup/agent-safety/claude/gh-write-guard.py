@@ -2645,14 +2645,41 @@ def _runs_as_command(toks, w):
     return head not in _NAMES_ITS_ARGUMENTS
 
 
+def _run_start(toks, w):
+    """The index of the first token in the command run holding index w, back to its shell operator.
+
+    A parenthesized group closing before w, as `$(true)` does, is skipped whole as a word of the run.
+    Stopping at its `)` hid an outer `timeout` before it, and its `$` from the rewrite scan.
+    A `(` with no `)` before w opens the group w sits in, and a `)` with no `(` ends a `case` pattern.
+    """
+    start = w
+    while start > 0:
+        tok = toks[start - 1]
+        if tok == ")":
+            depth, k = 0, start - 1
+            while k >= 0:
+                depth += (toks[k] == ")") - (toks[k] == "(")
+                if depth == 0:
+                    break
+                k -= 1
+            if k < 0:
+                return start
+            start = k
+            continue
+        if _is_shell_op(tok):
+            return start
+        start -= 1
+    return start
+
+
 def _timeout_bounds_wrapper(toks, w):
     """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
 
     The test is on the command run the wrapper sits in, the tokens back to the previous shell
-    operator, rather than on the tokens immediately before it. That run is bounded when it begins
-    with `timeout` and carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as
-    bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
-    `echo` in a run of its own.
+    operator, a parenthesized group such as `$(true)` counting as a word of that run, rather than on
+    the tokens immediately before it. That run is bounded when it begins with `timeout` and carries
+    a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as bounded while `timeout 5 echo
+    hi && bash -c '<loop>'` does not, the `timeout` there running `echo` in a run of its own.
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
     unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
@@ -2661,10 +2688,12 @@ def _timeout_bounds_wrapper(toks, w):
     A word in the run, before the `timeout` or between it and the wrapper, that the shell may
     rewrite at run time, such as `-${F}0`, `"$SIG"`, `{0..0}`, or `X=$T` after `env`, makes the run
     no bound, whatever follows it. The rewrite may name signal 0, a kill-after, or another
-    `timeout`, or split into words that end option parsing early. That is a false deny wherever the rewrite yields a bound, as it does
-    in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'` and in an assignment prefix such as
-    `X=$T timeout 900 bash -c '<loop>'`, which the shell does not split, and wherever quoting keeps
-    the word literal, as it does in `timeout 900 env MSG='a*b' bash -c '<loop>'`.
+    `timeout`, or split into words that end option parsing early. That is a false deny wherever the
+    rewrite yields a bound, as it does in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'` and in
+    an assignment prefix such as `X=$T timeout 900 bash -c '<loop>'`, which the shell does not
+    split, and wherever quoting keeps the word literal, as it does in `timeout 900 env MSG='a*b'
+    bash -c '<loop>'`. A bare `{` is the brace-group reserved word, which the shell does not
+    rewrite, so the scan skips it.
 
     Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
     only when every outer one sends signal 0 with no `-k` of any value, which is inert, and the
@@ -2674,20 +2703,19 @@ def _timeout_bounds_wrapper(toks, w):
     anywhere before the wrapper is read as that nesting. That is a false deny wherever the outer
     signal would have stopped the loop too, wherever the inner deadline ends the loop before any
     outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<loop>'`, and wherever a
-    prefix's argument merely names `timeout`, as a path ending in `/timeout` does. A launcher building the inner `timeout` from its own
-    arguments, as `env -S 'timeout 800'` does, names no `timeout` in a word and is not reached.
-    Behind outer ones that each send signal 0 with no `-k`, it is a false deny too wherever a prefix
-    between two of them takes an argument, as `nice -n 5` does. Behind any other outer one the
-    nesting is denied anyway, so the argument changes nothing.
+    prefix's argument merely names `timeout`, as a path ending in `/timeout` does. A launcher
+    building the inner `timeout` from its own arguments, as `env -S 'timeout 800'` does, names no
+    `timeout` in a word and is not reached. Behind outer ones that each send signal 0 with no `-k`,
+    the nesting is a false deny too wherever a prefix between two of them takes an argument, as
+    `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the argument
+    changes nothing.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
     syntax error rather than a bounded loop, so a `timeout` earlier on the line bounds nothing that
     follows it.
     """
-    start = w
-    while start > 0 and not _is_shell_op(toks[start - 1]):
-        start -= 1
+    start = _run_start(toks, w)
     run = start
     # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
     while start < w and _is_command_prefix(toks[start]):
@@ -2698,7 +2726,7 @@ def _timeout_bounds_wrapper(toks, w):
     # One written inside the payload is caught where that payload is read, on its own terms.
     if _forks_out_of_reach(toks[start:w]):
         return False
-    if any(_is_shell_rewritable(t) for t in toks[run:w]):
+    if any(t != "{" and _is_shell_rewritable(t) for t in toks[run:w]):
         return False
     i = start + 1
     signal = kill_after = ""
@@ -5582,6 +5610,31 @@ _WAIT_CASES = [
         "X=$T timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
         "deny",
         "and an assignment prefix the shell does not split, a declared false deny",
+    ),
+    (
+        "timeout -s KILL 10 $(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a command substitution before the timeout is a word of its run, so the outer timeout is read",
+    ),
+    (
+        "$(echo timeout -s KILL 10) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and one that may print an outer timeout is rewritable",
+    ),
+    (
+        "{ timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
+        "allow",
+        "a bare { is the brace-group reserved word rather than a rewrite",
+    ),
+    (
+        "x=$(timeout 900 bash -c 'until [ -f x ]; do sleep 60; done')",
+        "allow",
+        "a wrapper inside a substitution starts its run at the group it sits in",
+    ),
+    (
+        "case $x in a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "allow",
+        "a case pattern's ) with no ( before it ends the run",
     ),
     (
         "timeout -s KILL 10 =timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
