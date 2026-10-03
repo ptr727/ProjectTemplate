@@ -125,8 +125,6 @@ Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rule
 
 This is the same shape as step 0. Signing has to be live before the first commit rather than retrofitted, and governance has to be loaded before the first authored file for the same reason: the window closes quietly, and the repair is expensive out of proportion to the prevention.
 
-**An existing repository still on the old CRLF fleet default converts first, in a pull request of its own, the one change made ahead of this carry.** Where its `.editorconfig` still sets `end_of_line = crlf` under `[*]` and its registry entry does not record `lineEndings: crlf`, the files this section and section 2 carry are LF and fail its editorconfig-checker run. The conversion in [`docs/eol-lf-rollout.md`][eol-lf-rollout] "Per-Repo Conversion", which itself carries `.editorconfig` and `.gitattributes`, therefore merges before anything else here is carried.
-
 Carry these before writing any repo content of your own:
 
 - [`CLAUDE.md`][claude-md], [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
@@ -247,7 +245,6 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [divergences]: ./spec/divergences.json
-[eol-lf-rollout]: ./docs/eol-lf-rollout.md
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
 [git-commit-conventions]: ./.agents/skills/git-commit-conventions/SKILL.md
