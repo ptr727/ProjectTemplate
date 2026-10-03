@@ -20,15 +20,17 @@ itself requires it for. `.gitattributes` keeps its existing execution-sensitive 
 Dockerfiles, `uv.lock`, the shebang-executed `.py` by-path list) unchanged, now redundant with the
 new default but retained as git-level enforcement independent of the editor. The hub
 (`ProjectTemplate`) carried this change, including a one-time renormalization of every tracked
-file the new default touches, in the pull request that added this doc.
+file the new default touches, in the pull request that added this doc. The hub's `.gitattributes`
+has since moved to `* text=auto eol=lf`, keeping only the `*.bat` / `*.cmd` CRLF pins, and that
+is the file a conversion now takes.
 
 ## Per-Repo Conversion
 
 For a `release` repo, or an operational repo whose `lineEndings` is already `lf`: pull the hub's
-new `.editorconfig`, confirm `.gitattributes` needs no change for the fleet default itself (it
-doesn't, per the policy above), renormalize every tracked file the new default now covers from
-CRLF to LF (skip anything with a genuine reason to stay CRLF, and give each file type that
-genuinely needs a CRLF pin a matching entry in both `.editorconfig` and `.gitattributes`, never
+new `.editorconfig` and `.gitattributes`, the second because its `* text=auto eol=lf` is what
+lets a renormalization convert anything, renormalize every tracked file the new default now
+covers from CRLF to LF (skip anything with a genuine reason to stay CRLF, and give each file type
+that genuinely needs a CRLF pin a matching entry in both `.editorconfig` and `.gitattributes`, never
 one alone, per `Vantage-Config`'s own `*.dc` pin below and
 [`references/line-endings.md`][line-endings] "Scripts and extensionless executables"), run
 `editorconfig-checker` clean, and open the PR through the repo's normal branching model
@@ -39,16 +41,19 @@ discipline". A `develop` ruleset that allows only squash merges collapses a pull
 commit, so the conversion pull request carries the renormalization and its `.editorconfig` and
 `.gitattributes` changes and nothing else, which keeps the squashed commit isolated. Land it
 before any other carried file, since the carried files are LF and fail the old CRLF default.
+After merge, check the box below and reconcile the repo's `registry/repos.json` entry per
+[GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] if the conversion
+surfaced anything the registry didn't already record.
 
 Before renormalizing, look for vendor files Git's heuristic reads as text, such as STEP models
 and DXF or SVG artwork. Under `* text=auto eol=lf`, `git add --renormalize` and any later add of
 a new such file normalize their line endings. Pin each such type `-text` in `.gitattributes`, or
 `binary` where a type must also skip diffs, and give the same types an `.editorconfig` section
-setting `charset`, `end_of_line`, and `insert_final_newline` to `unset`, since a file kept CRLF
-otherwise fails the new LF default. Write each glob to match both letter cases, such as
-`*.[sS][tT][pP]`, since Git matches attribute patterns case-sensitively on a Linux clone. After merge, check the box below and reconcile the repo's `registry/repos.json`
-entry per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] if the
-conversion surfaced anything the registry didn't already record.
+setting `charset`, `end_of_line`, and `insert_final_newline` to `unset` and
+`trim_trailing_whitespace` to `false`, since a file kept CRLF otherwise fails the new LF default
+and an editor would strip its trailing whitespace on save. Write each glob to match both letter
+cases, such as `*.[sS][tT][pP]`, since Git matches attribute patterns case-sensitively on a Linux
+clone.
 
 For an operational repo whose `lineEndings` is `crlf`: no conversion, since its global default
 follows its consuming Windows-native app rather than the fleet default, per
