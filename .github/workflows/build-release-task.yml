@@ -316,6 +316,11 @@ jobs:
             echo "::error::The build-release-asset hook wrote no file to the top level of $ASSET_DIR."
             exit 1
           fi
+          stray=$(find "$ASSET_DIR" -mindepth 1 -maxdepth 1 \( ! -type f -o -name '.*' \) -print)
+          if [[ -n "$stray" ]]; then
+            echo "::error::The build-release-asset hook wrote entries the release would drop, a subdirectory or a dot-prefixed name: $stray"
+            exit 1
+          fi
           ls -l "$ASSET_DIR"
 
       - name: Upload release asset step
