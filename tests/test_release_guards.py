@@ -353,7 +353,9 @@ class ReleaseGuardCase(unittest.TestCase):
 
         # Both hook steps receive SemVer2, the caller hook as the dotnet-publish and build-nuget hooks already do.
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
-        job = workflow.split("\n  build-pypi:\n", 1)[1].split("\n  build-docker:\n", 1)[0]
+        job = re.split(
+            r"\n(?=  [a-z][a-z-]*:\n)", workflow.split("\n  build-pypi:\n", 1)[1], maxsplit=1
+        )[0]
         self.assertEqual(
             2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
         )
@@ -695,6 +697,33 @@ class ReleaseGuardCase(unittest.TestCase):
         for marker in ("NuGet/login", "nuget push", "gh-action-pypi-publish"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
+
+    def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        jobs = re.split(r"(?m)^  (?=[a-z][a-z-]*:\n)", workflow.split("\njobs:\n", 1)[1])
+        by_name = {block.split(":", 1)[0]: block for block in jobs if block.strip()}
+        job = by_name["build-release-asset"]
+        steps = re.split(r"(?m)^      - name: ", job)
+        upload = next(step for step in steps if step.startswith("Upload release asset step"))
+
+        self.assertIn("if: ${{ !inputs.smoke }}", upload)
+        self.assertIn("retention-days: 1", upload)
+        self.assertIn("name: release-asset-${{ inputs.branch }}-build-release-asset", upload)
+        self.assertNotIn("upload-artifact", "".join(s for s in steps if s is not upload))
+        self.assertIn("uses: ./.github/actions/build-release-asset", job)
+
+        for consumer in ("github-release", "build-docker"):
+            with self.subTest(consumer=consumer):
+                needs = re.search(r"(?m)^    needs: \[(.*)\]$", by_name[consumer])
+                self.assertIsNotNone(needs)
+                assert needs is not None
+                self.assertIn("build-release-asset", [n.strip() for n in needs[1].split(",")])
+
+        self.assertRegex(
+            workflow,
+            r"(?m)^      enable_release_asset:\n        required: false\n"
+            r"        type: boolean\n        default: false$",
+        )
 
     def test_publish_requires_successful_validation(self) -> None:
         workflow = (REPO / ".github/workflows/publish-release.yml").read_text(encoding="utf-8")
