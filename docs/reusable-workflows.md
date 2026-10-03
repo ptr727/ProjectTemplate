@@ -56,7 +56,7 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### The Hook Contract
 
-A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`, and a PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook.
+A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. The `build-release-asset` hook is the exception, writing its files into the `output-directory` it receives, on a smoke run too, and leaving the upload to the task. The task accepts only regular files at that directory's top level and refuses a subdirectory, a symlink, or a dot-prefixed name. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`, and a PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook.
 
 ### Pinning
 
@@ -85,7 +85,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
 | `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job) | no-op |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
-| `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi` | `dotnet-publish-default`, `nuget-build-default`, `pypi-build-default` |
+| `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi`, `build-release-asset` | `dotnet-publish-default`, `nuget-build-default`, `pypi-build-default`, none for `build-release-asset`, which is required where `enable_release_asset` is set |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
 | `publish-docker-readme-task.yml` | `docker-readme-transform` | publish `Docker/README.md` or `README.md` as-is |
 | `check-upstream-version-task.yml` | `resolve-upstream` | none, required |
@@ -201,7 +201,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs. The `release-assets` hook for extra files stays unshipped because no cataloged repo needs it.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks, and the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs.
 
 `build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-build-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
@@ -212,6 +212,8 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
+- [ ] KiCadLibrary (`build-release-asset` hook for its library zip, the hook's first caller)
+- [ ] homeassistant-purpleair (`build-release-asset` hook for its integration zip)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
