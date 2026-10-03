@@ -2629,7 +2629,7 @@ _NAMES_ITS_ARGUMENTS = {
 }
 
 
-def _runs_as_command(toks, w):
+def _runs_as_command(toks, w, quoted=None):
     """True if the token at index w is the command its run executes, past any prefix or `timeout`.
 
     Whether a wrapper runs is a different question from whether it is bounded, and conflating them
@@ -2640,7 +2640,9 @@ def _runs_as_command(toks, w):
     if _opens_command(toks, w):
         return True
     start = w
-    while start > 0 and not _is_separator(toks[start - 1]):
+    while start > 0 and not (
+        _is_separator(toks[start - 1]) and not (quoted is not None and quoted[start - 1])
+    ):
         start -= 1
     # A leading redirection and its target are not the run's command.
     # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
@@ -2661,7 +2663,7 @@ def _run_start(toks, w, quoted=None):
     """The index of the first token in the command run holding index w, or None where it is unknown.
 
     The run reaches back to the previous unquoted shell operator, as `quoted` says per token where
-    it is known. Where that operator holds a redirection, or ends in a `)` other than a function
+    it is known, an opening `(` or `<(` included. Where that operator holds a redirection, or ends in a `)` other than a function
     definition's, None says the text cannot place the run's start. A redirection's target is a word
     of the run, and the lexer fuses a separator into the redirection after it, as `;>` is one
     token, so neither stopping nor walking on is right for both. A `)` closes a group whose output
@@ -2677,20 +2679,36 @@ def _run_start(toks, w, quoted=None):
         if not _is_shell_op(tok) or (quoted is not None and quoted[k]):
             start = k
             continue
+        if tok.endswith("("):
+            break
         if ">" in tok or "<" in tok or (tok.endswith(")") and not _closes_function_name(toks, k)):
             return None
         break
     return start
 
 
-_FUNCTION_DEFINITION_OPENERS = {"function", "{", "do", "then", "else"}
+_FUNCTION_DEFINITION_OPENERS = {
+    "function",
+    "{",
+    "!",
+    "time",
+    "if",
+    "then",
+    "elif",
+    "else",
+    "while",
+    "until",
+    "do",
+}
 
 
 def _closes_function_name(toks, k):
     """True if the `)` token at index k ends the `()` of a function definition, as in `f() {`.
 
-    The name has to open a command and hold no `$`, so the `$()` in `timeout -s KILL 10 $() timeout
-    800` and in `nice $() timeout 800` is none.
+    The name has to open a command and hold no `$` and no extglob operator, so the `$()` in
+    `timeout -s KILL 10 $() timeout 800` and in `nice $() timeout 800` is none, and so is an `@()`,
+    which expands to nothing under bash's `extglob` and `nullglob`. A `)` before the name ends a
+    group rather than a command.
     """
     if toks[k] == "()":
         n = k - 1
@@ -2698,9 +2716,11 @@ def _closes_function_name(toks, k):
         n = k - 2
     else:
         return False
-    if n < 0 or _is_shell_op(toks[n]) or "$" in toks[n] or "`" in toks[n]:
+    if n < 0 or _is_shell_op(toks[n]) or any(ch in toks[n] for ch in "$`@*?+!"):
         return False
-    return n == 0 or toks[n - 1] in _FUNCTION_DEFINITION_OPENERS or _is_separator(toks[n - 1])
+    if n == 0 or toks[n - 1] in _FUNCTION_DEFINITION_OPENERS:
+        return True
+    return _is_separator(toks[n - 1]) and not toks[n - 1].endswith(")")
 
 
 def _timeout_bounds_wrapper(toks, w, quoted=None):
@@ -2930,7 +2950,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
         # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
-        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
+        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i, mask):
             args, _ = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
             ci = next(
@@ -5777,6 +5797,36 @@ _WAIT_CASES = [
         "if true; then f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; fi",
         "allow",
         "while a function defined after then is one",
+    ),
+    (
+        "mapfile -t lines < <(timeout 900 bash -c 'until [ -f x ]; do sleep 60; done')",
+        "allow",
+        "a run opening a process substitution starts after its <(",
+    ),
+    (
+        "timeout -s KILL 10 $(true) @() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an extglob group is no function name",
+    ),
+    (
+        "timeout -s KILL 10 env -u do @() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "even after a word that may open a definition",
+    ),
+    (
+        "timeout -s KILL 10 $(true) f() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a name after a group's ) opens none",
+    ),
+    (
+        "if f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; then f; fi",
+        "allow",
+        "a function defined after if is one",
+    ),
+    (
+        "echo ';' timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a quoted separator after a command naming its arguments runs no shell",
     ),
     (
         "timeout 900 xargs -I{} bash -c 'until [ -f x ]; do sleep 60; done'",
