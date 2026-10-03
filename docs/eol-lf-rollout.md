@@ -66,7 +66,9 @@ registry as of this doc's authorship, except where an entry records a later recl
       `operational`, `lineEndings: lf`): already on the new default's value. Verify rather than
       convert, since its own `.editorconfig`/`.gitattributes` may still carry the old redundant
       per-type LF pins the hub dropped.
-- [ ] **KiCadLibrary** (`release`)
+- [x] **KiCadLibrary** (`release`): converted in ptr727/KiCadLibrary#57, with its vendor STEP,
+      DXF, and SVG files pinned `-text` beside a matching `.editorconfig` `unset` section, and PDF
+      and PNG pinned `binary`
 - [ ] **EspDinIoT** (`release`)
 - [ ] **ESPHome-Config** (`operational`, `lineEndings: lf`): verify, same reasoning as
       HomeAutomation-Config

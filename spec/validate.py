@@ -209,13 +209,15 @@ def escapes_repo_root(value):
     """Whether `ROOT / value` could resolve outside ROOT on some host.
 
     `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename) and a Windows drive letter such as `C:`.
+    A drive is refused in any component rather than only the first, since joining one Windows reads as a drive, such as `C:x` or `1:x`, onto a Windows path discards everything joined before it.
     """
+    parts = pathlib.PurePosixPath(value).parts
     return (
         not value
         or value.startswith("/")
         or "\\" in value
-        or re.match(r"^[A-Za-z]:", value) is not None
-        or ".." in pathlib.PurePosixPath(value).parts
+        or any(pathlib.PureWindowsPath(part).drive for part in parts)
+        or ".." in parts
     )
 
 
@@ -225,6 +227,19 @@ def reduces_to_repo_root(value):
     A raw-string compare against "." accepts "./" and ".///.", which the schema also allows and which `scripts/carry.py` then refuses, so a manifest author gets a green validator and a failing carrier. Backslash and drive-letter spellings are `escapes_repo_root`'s subject and are not read here.
     """
     return pathlib.PurePosixPath(value) == pathlib.PurePosixPath(".")
+
+
+def symlinked_component(root, value):
+    """The first component of `root / value`, as a path relative to `root`, that is a symlink, or None.
+
+    `scripts/carry.py` refuses a tree path with any symlinked component, while `is_dir()` follows one, so without this the validator accepts a source the carrier refuses on every host.
+    """
+    current = root
+    for part in pathlib.PurePosixPath(value).parts:
+        current /= part
+        if current.is_symlink():
+            return current.relative_to(root).as_posix()
+    return None
 
 
 def canonical_file_in_root(rel_path):
@@ -1188,10 +1203,15 @@ def main():
             errors.append(f"files.json: tree declaration has an invalid target: {tree!r}")
             continue
         for field, value in (("source", source), ("target", target)):
-            parts = pathlib.PurePosixPath(value).parts
-            if reduces_to_repo_root(value) or value.startswith("/") or ".." in parts:
+            if reduces_to_repo_root(value) or escapes_repo_root(value):
                 errors.append(
                     f"files.json: tree {source} {field} '{value}' must be a path below the repository root"
+                )
+                continue
+            link = symlinked_component(ROOT, value)
+            if link is not None:
+                errors.append(
+                    f"files.json: tree {source} {field} '{value}' has a symlinked component {link}, which scripts/carry.py refuses"
                 )
         if tree.get("fidelity") != "verbatim-tree":
             errors.append(f"files.json: tree {source} fidelity must be 'verbatim-tree'")

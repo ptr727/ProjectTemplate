@@ -5,9 +5,9 @@
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it, and project access on the token, because the fleet project link is read and written through GraphQL.
-# The command defaults to apply, the repo to the current gh repo, and the model to the registry lookup.
+# The command is required, so a write is never the default, and an argument the usage does not name is refused before any read.
+# The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
-# The command may be omitted for the apply default, so `configure.sh owner/repo` still applies.
 #
 # The apply mode writes five groups, in order.
 # First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
@@ -39,19 +39,66 @@
 set -Eeuo pipefail
 
 # ----- Command + target + model -----
-cmd=apply
-case "${1:-}" in apply | check)
+usage() {
+    cat <<'USAGE'
+Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
+       repo-config/configure.sh apply|check release|operational
+       repo-config/configure.sh --help
+
+  apply   create or update the fleet configuration on the repo (writes)
+  check   validate the repo against the fleet configuration, non-zero on drift (reads)
+
+The repo defaults to the current gh repo, and the model to the registry lookup.
+USAGE
+}
+refuse() {
+    echo "$1. Run repo-config/configure.sh --help for the usage." >&2
+    exit 1
+}
+case "${1:-}" in
+-h | --help)
+    usage
+    exit 0
+    ;;
+apply | check)
     cmd="$1"
     shift
     ;;
+"") refuse "No command given (expected apply or check)" ;;
+*) refuse "Unknown command '$1' (expected apply or check)" ;;
 esac
+for arg in "$@"; do
+    case "$arg" in
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -*) refuse "Unknown option '$arg'" ;;
+    esac
+done
+if [ "$#" -gt 2 ]; then
+    refuse "Too many arguments (expected at most a repo and a model)"
+fi
 repo_arg="${1:-}"
 model="${2:-}"
 # Allow the model as the sole positional (`configure.sh check operational`): a model name is not a repo.
 case "$repo_arg" in release | operational)
+    if [ -n "$model" ]; then
+        refuse "The model '$repo_arg' comes before the repo (expected the repo, then the model)"
+    fi
     model="$repo_arg"
     repo_arg=""
     ;;
+esac
+# A name of only dots is refused too, since the API resolves `.` and `..` as path segments rather than as a repo.
+if [ -n "$repo_arg" ]; then
+    if ! [[ "$repo_arg" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo_arg#*/}" =~ ^\.+$ ]]; then
+        refuse "Repo '$repo_arg' is not shaped owner/name"
+    fi
+fi
+case "$model" in
+"" | release | operational) ;;
+*) refuse "Unknown workflow model '$model' (expected release or operational)" ;;
 esac
 repo="${repo_arg:-$(gh repo view --json nameWithOwner --jq '.nameWithOwner')}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -263,11 +310,38 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
-# Test with `labels_payload_ok`, which is true only when labels.json parses to a non-empty array whose every label meets the API's field contract.
-# That is a non-empty name, a six-digit hex color, and a description of at most 100 characters, each a string holding no tab or line break.
-# The type test keeps a missing description from rendering as the literal string null, the contract tests keep a label from failing at the API partway through the loop, and the character test keeps a value from splitting the tab-joined rows the two label loops read.
+# Test with `labels_payload_ok`, which succeeds only when labels.json parses to a non-empty array of labels, unique by name ignoring case, that each meet the API's field contract.
+# That is a non-empty name, a six-digit lowercase hex color, which is how GitHub stores it, and a description of at most 100 characters, each a string holding no tab or line break.
+# Each step runs its own jq and prints its own reason on a failure, so a payload that is malformed, empty, out of contract, or repeats a name is told apart from a jq that failed.
 labels_payload_ok() {
-    jq -e 'type=="array" and length > 0 and all(.[]; (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-fA-F]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))' "$labels_file" >/dev/null 2>&1
+    local err status step
+    local -a steps=(
+        'length == 1@@does not hold exactly one JSON document'
+        '.[0] | type=="array"@@is not an array'
+        '.[0] | length > 0@@is empty'
+        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
+        '.[0] | (map(.name | ascii_downcase) | unique | length) == length@@names a label more than once, ignoring case'
+    )
+    status=0
+    err="$(jq empty "$labels_file" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
+        echo "did not parse (${err//$'\n'/ })"
+        return 1
+    elif [ "$status" -ne 0 ]; then
+        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+        return 1
+    fi
+    for step in "${steps[@]}"; do
+        status=0
+        err="$(jq -s -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
+        if [ "$status" -eq 1 ]; then
+            echo "${step#*@@}"
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+            return 1
+        fi
+    done
 }
 
 apply_labels() { # create-or-update every label labels.json declares, by name
@@ -315,7 +389,7 @@ apply_project() { # project-node-id
 }
 
 cmd_apply() {
-    local f private disc payload project_id
+    local f private disc payload project_id why
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -324,8 +398,8 @@ cmd_apply() {
         fi
     done
     # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
-    if ! labels_payload_ok; then
-        echo "Label payload $labels_file did not parse, is empty, or holds a label outside the field contract (non-empty name, six-digit hex color, description of at most 100 characters, no tab or line break). Aborting before any write." >&2
+    if ! why="$(labels_payload_ok)"; then
+        echo "Label payload $labels_file $why. Aborting before any write." >&2
         exit 1
     fi
     # The project payload is validated here for the same reason, since apply_project runs last of all and an abort inside it would leave every write before it applied.
@@ -553,7 +627,7 @@ check_security() {
 }
 
 check_labels() {
-    local live rows lname color desc got extra
+    local live rows lname color desc got extra why
     if [ ! -e "$labels_file" ]; then
         fail "label payload $labels_file missing"
         return
@@ -563,8 +637,8 @@ check_labels() {
         fail "could not read repository labels"
         return
     fi
-    if ! labels_payload_ok; then
-        fail "label payload $labels_file did not parse, is empty, or holds a label outside the field contract"
+    if ! why="$(labels_payload_ok)"; then
+        fail "label payload $labels_file $why"
         return
     fi
     rows="$(jqr '.[] | "\(.name)\t\(.color)\t\(.description)"' "$labels_file")"

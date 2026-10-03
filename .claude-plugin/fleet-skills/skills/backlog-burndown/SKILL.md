@@ -412,10 +412,11 @@ has carried.
 1. **Open it whenever develop is ahead of main**, which `git fetch origin` and then
    `git rev-list --count origin/main..origin/develop` answers, and this round's own outcome does
    not. Fetch first every time: a stale remote-tracking ref reports zero and the round would report
-   nothing to promote while develop carries work. A round in which every group deferred or parked
-   can still owe a promotion pull request, for work an earlier round landed and no promotion has
-   yet carried. A count of zero is the only case with nothing to promote, and the round reports
-   that instead of attempting one.
+   nothing to promote while develop carries work. Stop and report a failed fetch rather than
+   running `git rev-list` anyway. A round in which every group deferred or parked can still owe a
+   promotion pull request, for work an earlier round landed and no promotion has yet carried. A
+   count of zero is the only case with nothing to promote, and the round reports that instead of
+   attempting one.
 2. Drive its review loop per the promotion half of `drive-pr` "The Drive Loop", **with a
    review-round budget set before the first round**. That loop repeats until the promotion pull
    request meets every `pr-review-conduct` Merge Gate item except the maintainer's explicit
