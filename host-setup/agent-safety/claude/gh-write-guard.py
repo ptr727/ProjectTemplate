@@ -2560,11 +2560,13 @@ def _is_shell_rewritable(val):
     as `'a*b'` does, is read as rewritable too. A brace counts only where a comma or `..`, the forms
     a brace expansion takes, sits between the word's first `{` and its last `}`, so `{` alone and
     the `{}` of `xargs -I{}` do not, and a tilde counts only where it opens the word or follows a
-    `=` or `:`, which holds every place bash expands one and some it does not, as `--chdir=~`.
+    `=` or `:`, which holds every place bash expands one and some it does not, as `--chdir=~`. A
+    `(` inside a word counts too, since the fallback lexer keeps an extglob group such as
+    `/usr/bin/@(timeout)` in one word, with no `)` token for `_run_start` to stop at.
     """
     return (
         val.startswith("=")
-        or any(ch in val for ch in "$`[*?")
+        or any(ch in val for ch in "$`[*?(")
         or _may_brace_expand(val)
         or bool(_TILDE_EXPANSION.search(val))
     )
@@ -2575,8 +2577,8 @@ def _timeout_option(tok):
 
     `option` is `s` for the signal, `k` for the kill-after, or empty for any other flag. `value` is
     the value the token carries itself, or None where the option takes the next token instead. A
-    long option matches by any prefix, as getopt_long does, so `--sig=0` is `--signal=0`, and a short
-    cluster such as `-vs0` ends at its first value-taking option, the rest being that value.
+    long option matches by any prefix, as getopt_long does, so `--sig=0` is `--signal=0`, and a
+    short cluster such as `-vs0` ends at its first value-taking option, the rest being that value.
     """
     if tok.startswith("--"):
         name, eq, val = tok[2:].partition("=")
@@ -5809,6 +5811,11 @@ _WAIT_CASES = [
         "if true; then f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; fi",
         "allow",
         "while a function defined after then is one",
+    ),
+    (
+        "shopt -s extglob\ntimeout -s KILL 10 /usr/bin/@(timeout) 800 bash -c 'until false; do sleep 1; done' # it's",
+        "deny",
+        "an extglob group the fallback lexer keeps in one word is read as a rewrite",
     ),
     (
         "mapfile -t lines < <(timeout 900 bash -c 'until [ -f x ]; do sleep 60; done')",
