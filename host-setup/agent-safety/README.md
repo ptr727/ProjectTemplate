@@ -195,12 +195,13 @@ text says, because the harm it covers was never in the text.
    `-s`/`--signal` naming signal 0 in any spelling GNU `timeout` reads as that signal (`-s 0`,
    `--signal=0`, `-s0`, `EXIT`, and a number it masks to 0, such as `128`) is no bound. Signal 0 is
    delivered to no process, so the `timeout` goes on waiting for a child that keeps running, unless
-   a `-k`/`--kill-after` follows it with a SIGKILL, which counts where its value takes the form a
-   duration takes here. A word in the run, before the `timeout` or between it and the wrapper, that
-   the shell may rewrite at run time, by a substitution such as `"$SIG"`, a brace expansion, a glob,
-   a tilde expansion, or zsh's expansion of a leading `=`, makes the run no bound, whatever follows
-   it, since the text cannot say what the word becomes and the rewrite may split it into words that
-   end option parsing early. That is a false deny wherever the rewrite yields a bound, as it does in
+   a `-k`/`--kill-after`, given before or after the `-s`, sends a SIGKILL after the signal 0, which
+   counts where its value takes the form a duration takes here. A word in the run, before the
+   `timeout` or between it and the wrapper, that the shell may rewrite at run time, by a
+   substitution such as `"$SIG"`, a brace expansion, a glob, a tilde expansion, or zsh's expansion
+   of a leading `=`, makes the run no bound, whatever follows it, since the text cannot say what the
+   word becomes and the rewrite may split it into words that end option parsing early. That is a
+   false deny wherever the rewrite yields a bound, as it does in
    `timeout 900 env PATH=$HOME/bin bash -c '<the loop>'` and in an assignment prefix such as
    `X=$T timeout 900 bash -c '<the loop>'`, which the shell does not split, and wherever quoting
    keeps a word holding one of those characters literal, as it does for `'a*b'`, since the

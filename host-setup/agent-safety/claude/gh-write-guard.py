@@ -2673,14 +2673,14 @@ def _run_start(toks, w, quoted=None):
     """The index of the first token in the command run holding index w, or None where it is unknown.
 
     The run reaches back to the previous unquoted shell operator, as `quoted` says per token where
-    it is known, an opening `(` or `<(` included. Where that operator holds a redirection, or ends in a `)` other than a function
-    definition's, None says the text cannot place the run's start. A redirection's target is a word
-    of the run, and the lexer fuses a separator into the redirection after it, as `;>` is one
-    token, so neither stopping nor walking on is right for both. A `)` closes a group whose output
-    may be a word of the run, a `$(...)` or a `<(...)` as in `timeout -s KILL 10 $(true) timeout
-    800`, or a glob group such as `/usr/bin/@(nice)`. Starting the run after it hides an outer
-    `timeout`, and its `(` cannot be found on the tokens, since a `$` fused into a word, as
-    `nice$(true)` holds, is no token of its own.
+    it is known, an opening `(` or `<(` included. Where that operator holds a redirection, or ends
+    in a `)` other than a function definition's, None says the text cannot place the run's start. A
+    redirection's target is a word of the run, and the lexer fuses a separator into the redirection
+    after it, as `;>` is one token, so neither stopping nor walking on is right for both. A `)`
+    closes a group whose output may be a word of the run, a `$(...)` or a `<(...)` as in `timeout -s
+    KILL 10 $(true) timeout 800`, or a glob group such as `/usr/bin/@(nice)`. Starting the run after
+    it hides an outer `timeout`, and its `(` cannot be found on the tokens, since a `$` fused into a
+    word, as `nice$(true)` holds, is no token of its own.
     """
     start = w
     while start > 0:
@@ -2744,8 +2744,9 @@ def _timeout_bounds_wrapper(toks, w, quoted=None):
     Where it cannot place them, the run is no bound.
 
     A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
-    unless a `-k` in the duration form follows it with a SIGKILL, since signal 0 is delivered to no
-    process and the `timeout` goes on waiting for a child that keeps running.
+    unless a `-k` in the duration form, given before or after the `-s`, sends a SIGKILL after the
+    signal 0. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a child that
+    keeps running.
 
     A word in the run, before the `timeout` or between it and the wrapper, that the shell may
     rewrite at run time, such as `-${F}0`, `"$SIG"`, `{0..0}`, or `X=$T` after `env`, makes the run
