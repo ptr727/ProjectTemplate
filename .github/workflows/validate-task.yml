@@ -1,14 +1,8 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# The jobs are test-matrix-check, lint, unit-test, and validate.
-# The test-matrix-check job checks the test-matrix input before the unit-test matrix expands.
-# The lint job is the fleet doc-lint block plus language lint, by tree detection.
-# For Python it lints the declared directories, and it also runs the prose gate and the repo gate.
-# The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
-# It runs once per interpreter the python-versions input names, or once per test-matrix leg when that is set.
-# The validate job is the validate hook, a repo's own domain checks.
-# Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
+# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# The unit-test job runs once per python-versions entry, or once per test-matrix leg when that is set.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -33,8 +27,7 @@ on:
         required: false
         type: string
         default: ''
-      # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, when test-matrix is unset.
-      # Either way the entry check in the unit-test job reads the raw input, and it is that job's only guard when test-matrix is set.
+      # Built into the unit-test job's matrix by the test-matrix-check job, and read raw by the entry check in the unit-test job.
       python-versions:
         description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
@@ -56,6 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
     steps:
 
       - name: Validate test-matrix input step
@@ -78,6 +73,20 @@ jobs:
             echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and a python-version, when present, that is a string with a non-whitespace character, got: $escaped"
             exit 1
           fi
+
+      - name: Build unit-test matrix step
+        id: build
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -n "$TEST_MATRIX" ]]; then
+            matrix=$(jq -c -s '{include: .[0]}' <<<"$TEST_MATRIX")
+          else
+            matrix=$(jq -c --argjson versions "$PYTHON_VERSIONS" -n '{"python-version": $versions}')
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   lint:
     name: Lint sources job
@@ -461,7 +470,7 @@ jobs:
     strategy:
       # A failing interpreter must not cancel its siblings, since which of them fail is the whole point of running more than one.
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.test-matrix == '' && format('{{"python-version":{0}}}', inputs.python-versions) || format('{{"include":{0}}}', inputs.test-matrix)) }}
+      matrix: ${{ fromJSON(needs.test-matrix-check.outputs.matrix) }}
 
     steps:
 

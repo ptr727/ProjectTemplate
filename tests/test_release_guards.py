@@ -1597,14 +1597,11 @@ gh() {
 
         # The matrix reads the input and the uv setup reads the matrix, so no literal survives between them.
         self.assertIn(
-            "inputs.test-matrix == '' && format('{{\"python-version\":{0}}}', inputs.python-versions)",
-            job,
+            "      matrix: ${{ fromJSON(needs.test-matrix-check.outputs.matrix) }}\n", job
         )
-        self.assertIn(
-            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
-            job,
-        )
-        self.assertNotIn('python-version: "', job)
+        workflow_text = workflow
+        self.assertIn("matrix=$(jq -c -s '{include: .[0]}' <<<\"$TEST_MATRIX\")", workflow_text)
+        self.assertIn("'{\"python-version\": $versions}'", workflow_text)
 
         # One interpreter failing must not cancel the others, which is what a second leg is run to learn.
         self.assertIn("      fail-fast: false\n", job)
