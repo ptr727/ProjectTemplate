@@ -477,7 +477,7 @@ def step_dialect(shell: object) -> str | None:
 def expression_end(body: str, start: int) -> int:
     """The index just past the `}}` closing the expression at `start`, quoted strings skipped.
 
-    An unterminated expression runs to the end of the body.
+    An unterminated expression returns -1, so the caller leaves it as raw text for shellcheck.
     """
     at = start + len(EXPRESSION_START)
     quoted = False
@@ -488,7 +488,7 @@ def expression_end(body: str, start: int) -> int:
         elif not quoted and body.startswith("}}", at):
             return at + 2
         at += 1
-    return len(body)
+    return -1
 
 
 def mark_expressions(body: str) -> str:
@@ -501,6 +501,10 @@ def mark_expressions(body: str) -> str:
             out.append(body[at:])
             return "".join(out)
         end = expression_end(body, start)
+        if end < 0:
+            out.append(body[at : start + len(EXPRESSION_START)])
+            at = start + len(EXPRESSION_START)
+            continue
         out.append(body[at:start] + "${GHA_EXPR}" + "\0" * body[start:end].count("\n"))
         at = end
 
@@ -555,7 +559,7 @@ def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
 def docker_unreachable() -> str | None:
     """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
 
-    The pull is the one networked step, so the lint container itself runs with no network.
+    The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
     """
     try:
         result = subprocess.run(
@@ -568,6 +572,14 @@ def docker_unreachable() -> str | None:
     if result.returncode != 0:
         return f"docker info exited {result.returncode}"
     try:
+        present = subprocess.run(
+            ["docker", "image", "inspect", SHELLCHECK_IMAGE],
+            capture_output=True,
+            check=False,
+            timeout=DOCKER_TIMEOUT,
+        )
+        if present.returncode == 0:
+            return None
         pull = subprocess.run(
             ["docker", "pull", "--quiet", SHELLCHECK_IMAGE],
             capture_output=True,
@@ -579,7 +591,8 @@ def docker_unreachable() -> str | None:
     except OSError as error:
         return f"docker pull could not start: {error}"
     if pull.returncode != 0:
-        return f"docker pull of {SHELLCHECK_IMAGE} exited {pull.returncode}"
+        detail = pull.stderr.decode("utf-8", errors="replace").strip()
+        return f"docker pull of {SHELLCHECK_IMAGE} exited {pull.returncode}: {detail}"
     return None
 
 

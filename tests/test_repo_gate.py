@@ -662,16 +662,8 @@ class TestCoverageFloors(unittest.TestCase):
 
 
 def docker_ready() -> bool:
-    """Whether a docker daemon answers, which the shellcheck half of composite-actions needs."""
-    if shutil.which("docker") is None:
-        return False
-    try:
-        return (
-            real_run(["docker", "info"], capture_output=True, timeout=30, check=False).returncode
-            == 0
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
+    """Whether the daemon answers and the image is present or pullable, as the check itself reads it."""
+    return shutil.which("docker") is not None and repo_gate.docker_unreachable() is None
 
 
 def schema_ready() -> bool:
@@ -787,6 +779,14 @@ class TestCompositeActions(TreeCase):
         text = repo_gate.substitute_expressions("echo ${{ format('a }} b') }} done\ncd")
         self.assertEqual("echo ${GHA_EXPR} done\ncd", text)
 
+    @NEEDS_DOCKER
+    def test_an_unclosed_expression_does_not_hide_a_later_finding(self) -> None:
+        hits = self.body_hits("echo ${{ inputs.x }\ncd /tmp")
+        self.assertTrue(any("run line 2:" in h for h in hits), hits)
+
+    def test_an_unclosed_expression_is_left_as_raw_text(self) -> None:
+        self.assertEqual("echo ${{ x }\nrm", repo_gate.substitute_expressions("echo ${{ x }\nrm"))
+
     def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
         self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))
 
@@ -880,9 +880,13 @@ class TestCompositeActions(TreeCase):
         proc = subprocess.CompletedProcess([], 1, b"", b"")
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
             self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
-        ok, bad = subprocess.CompletedProcess([], 0, b"", b""), proc
-        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad]):
-            self.assertIn("docker pull of", repo_gate.docker_unreachable() or "")
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        bad = subprocess.CompletedProcess([], 1, b"", b"no route")
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad]):
+            self.assertIn("exited 1: no route", repo_gate.docker_unreachable() or "")
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, ok]) as run:
+            self.assertIsNone(repo_gate.docker_unreachable())
+        self.assertEqual(2, run.call_count)
         with mock.patch.object(
             repo_gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
         ):
