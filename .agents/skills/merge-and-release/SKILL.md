@@ -136,8 +136,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    that bootstrap fetched, the commit `live.commit` names where it is not null, until
    `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again, which this step does not do.
    Then remove the worktree with
-   `git worktree remove <worktree>`, whatever the report said, and report a snapshot that does not
-   read current. `--report` exits on the snapshot alone. This step runs whether step 5
+   `git worktree remove <worktree>`, whatever the report said. Removing it leaves the snapshot and
+   its stamp unchanged, and a result that does not read current is reported to the maintainer.
+   `--report` exits on the snapshot alone. This step runs whether step 5
    or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
    never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
