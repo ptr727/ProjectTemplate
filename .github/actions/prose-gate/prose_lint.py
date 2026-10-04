@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tokenize
 import unicodedata
+from bisect import bisect_right
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
@@ -1701,6 +1702,212 @@ def sentences(span: str) -> list[str]:
     return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
+LIST_MARKER = re.compile(r"^\s*(?:[-*+]|([0-9]+)[.)])\s")
+SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
+THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
+TABLE_DELIMITER = re.compile(
+    r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$|^\s*\|\s*:?-+:?\s*\|?\s*$"
+)
+HTML_COMMENT = re.compile(r"^\s*<!--")
+INTERRUPTING_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
+    "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head"
+    "|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
+    "|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+RAW_TEXT_TAGS = "pre|script|style|textarea"
+STANDALONE_TAGS = "br|img|picture|source"
+TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
+OPENING_TAG = re.compile(
+    rf"^\s*(?:</?({INTERRUPTING_TAGS})|<({RAW_TEXT_TAGS})|</?(?:{STANDALONE_TAGS}))\b",
+    re.IGNORECASE,
+)
+YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
+TAG = re.compile(r"<[^<>]*>")
+
+
+def front_matter_end(lines: list[str]) -> int:
+    """The index after a leading `---` block closed by `---` or `...`, or 0 when there is none."""
+    if not lines or lines[0].rstrip("\r") != "---":
+        return 0
+    for j in range(1, len(lines)):
+        if lines[j].rstrip("\r") in ("---", "..."):
+            return j + 1
+        if not YAML_LINE.match(lines[j].rstrip("\r")):
+            return 0
+    return 0
+
+
+def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
+    """The text with each code span and quotation blanked to one token of the same length.
+
+    A code span may wrap across lines, so backticks pair over the joined block.
+    A quotation pairs within one line, so a stray inch mark never blanks prose on later lines.
+    The length is kept so an offset in the result is still an offset in the original.
+    A terminator ending a quotation survives, as `strip_quoted` keeps it.
+    """
+
+    def code(m: re.Match[str]) -> str:
+        return "`" * len(m.group())
+
+    def quote(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if inner and inner[-1] in ".!?":
+            return '"' * (len(inner) + 1) + inner[-1]
+        return '"' * len(m.group())
+
+    text = re.sub(r"`[^`]*`", code, text)
+    out = list(text)
+    for start, length in zip(starts, lengths, strict=True):
+        masked = re.sub(r'"([^"]*)"', quote, text[start : start + length])
+        out[start : start + length] = masked
+    return "".join(out)
+
+
+def sentence_length_findings(
+    lines: list[str], allowed: set[int] | None = None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in Markdown prose, each judged whole.
+
+    A paragraph, or a list item with its continuation lines, is one block joined before the split.
+    Block detection is a heuristic approximation of CommonMark, fit for an opt-in check.
+    Parser edge cases beyond the covered ones are accepted rather than chased.
+    A sentence is reported on its first line, so the finding sits where the sentence starts.
+    Given the changed lines, it is reported on its first changed line, or dropped when none changed.
+    That keeps an edit to a continuation line from hiding the sentence it pushed over the cap.
+    """
+    out: list[tuple[int, str, str]] = []
+    block: list[tuple[int, str]] = []
+    block_is_item = False
+
+    def flush() -> None:
+        nonlocal block_is_item
+        block_is_item = False
+        if not block:
+            return
+        raw = ""
+        starts: list[int] = []
+        for _, span in block:
+            if raw:
+                raw += " "
+            starts.append(len(raw))
+            raw += span
+        numbers = [n for n, _ in block]
+        lengths = [len(span) for _, span in block]
+        block.clear()
+        text = mask_code_and_quotes(raw, starts, lengths)
+        pos = 0
+        for m in [*SENTENCE_BREAK.finditer(text), None]:
+            end = m.start() if m else len(text)
+            piece = text[pos:end]
+            words = len(piece.split())
+            if words > SENTENCE_WORD_CAP:
+                first = bisect_right(starts, pos) - 1
+                last = bisect_right(starts, max(end - 1, pos)) - 1
+                rows = numbers[first : last + 1]
+                hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
+                if hit:
+                    msg = (
+                        f"{words} words in one sentence -> "
+                        f"sentences of {SENTENCE_WORD_CAP} words or fewer"
+                    )
+                    out.append((hit, "sentence-length", msg))
+            if m:
+                pos = m.end()
+
+    start = front_matter_end(lines)
+    for i, line in enumerate(lines[:start], 1):
+        span = line.rstrip("\r").strip()
+        if span and not span.startswith("#"):
+            block.append((i, span))
+            flush()
+    in_fence = in_comment = in_table = in_code = in_list = False
+    item_offset = 0
+    code_indent = 4
+    prev_blank = True
+    for i, line in enumerate(lines[start:], start + 1):
+        line = line.rstrip("\r")
+        blank = not line.strip()
+        was_blank, prev_blank = prev_blank, blank
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if CODE_FENCE.match(line):
+            in_fence = not in_fence
+            flush()
+            if not line.startswith((" ", "\t")):
+                in_list = False
+            continue
+        if in_fence:
+            continue
+        if blank:
+            flush()
+            in_table = False
+            continue
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+        if in_code:
+            if indent >= code_indent:
+                continue
+            in_code = False
+        if in_table:
+            continue
+        marker = LIST_MARKER.match(line)
+        number = marker.group(1) if marker else None
+        is_item = bool(
+            marker and (number is None or in_list or not block or number.lstrip("0") == "1")
+        )
+        if not block and was_blank:
+            code_indent = 4 + (item_offset if in_list else 0)
+            if indent >= code_indent and not is_item:
+                in_code = True
+                continue
+        if indent == 0 and not is_item:
+            in_list = False
+        if HTML_COMMENT.match(line):
+            flush()
+            in_comment = "-->" not in line
+            continue
+        tag = OPENING_TAG.match(line)
+        if tag and TAGS_ONLY.match(line):
+            if tag.group(1) or tag.group(2):
+                flush()
+                continue
+            if not block:
+                continue
+        elif tag and (tag.group(1) or tag.group(2)):
+            flush()
+            text = TAG.sub(lambda m: " " * len(m.group()), line).strip()
+            if text:
+                block.append((i, text))
+                flush()
+            continue
+        if TABLE_DELIMITER.match(line) and "|" in line:
+            if block and block[-1][0] == i - 1:
+                block.pop()
+            flush()
+            in_table = True
+            continue
+        if len(block) == 1 and not block_is_item and SETEXT_UNDERLINE.match(line):
+            block.clear()
+            continue
+        if THEMATIC_BREAK.match(line) or SETEXT_UNDERLINE.match(line):
+            flush()
+            continue
+        span = line.strip()
+        if span.startswith(("|", ">", "#")) or re.match(r"^\[[^\]]+\]:", span):
+            flush()
+            continue
+        if is_item:
+            flush()
+            in_list = True
+            item_offset = marker.end() if marker else 0
+            block_is_item = True
+        block.append((i, span))
+    flush()
+    return out
+
+
 def list_spans(s: str) -> list[str]:
     """Split a line into the spans that each hold their own list.
 
@@ -2342,7 +2549,12 @@ def issue_ref_findings(
     return out
 
 
-def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
+def check_file(
+    path: Path,
+    rules: set[str],
+    root: Path | None = None,
+    allowed: set[int] | None = None,
+) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode("utf-8")
@@ -2370,6 +2582,8 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
+    if "sentence-length" in rules and path.suffix == ".md":
+        out.extend(sentence_length_findings(lines, allowed))
     in_fence = False
     prev_txt = ""
     prev_no = 0
@@ -2443,24 +2657,6 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
             for m in BRITISH_RE.finditer(strip_inline_code(" ".join(texts))):
                 found = m.group(0)
                 out.append((i, "spelling", f"British spelling '{found}' -> '{us_form(found)}'"))
-
-        if "sentence-length" in rules and path.suffix == ".md":
-            span = prose.strip()
-            # A table row, a heading, a link definition, and a blockquote are not prose sentences.
-            structural = (
-                not span or span.startswith(("|", ">", "#")) or re.match(r"^\s*\[[^\]]+\]:", span)
-            )
-            if not structural:
-                # Counted per line, so a wrapped sentence is fragments the split rule owns.
-                # A code span and a quotation each collapse to one token above, deliberately.
-                for sentence in sentences(span):
-                    words = len(sentence.split())
-                    if words > SENTENCE_WORD_CAP:
-                        msg = (
-                            f"{words} words in one sentence -> "
-                            f"sentences of {SENTENCE_WORD_CAP} words or fewer"
-                        )
-                        out.append((i, "sentence-length", msg))
 
         if "sentence-split" in rules and path.suffix == ".md":
             stripped = txt.strip()
@@ -2683,7 +2879,7 @@ def main(argv: list[str] | None = None) -> int:
     byfile: dict[str, int] = {}
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1

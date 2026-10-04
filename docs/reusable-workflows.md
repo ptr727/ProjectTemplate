@@ -56,7 +56,7 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### The Hook Contract
 
-A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. The `build-release-asset` hook is the exception, writing its files into the `output-directory` it receives, on a smoke run too, and leaving the upload to the task. The task accepts only regular files at that directory's top level and refuses a subdirectory, a symlink, or a dot-prefixed name. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`, and a PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook.
+A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. The `install-test-deps` hook is an exception, taking `leg` and `directories` inputs and reporting nothing back. The `build-release-asset` hook is another, writing its files into the `output-directory` it receives, on a smoke run too, and leaving the upload to the task. The task accepts only regular files at that directory's top level and refuses a subdirectory, a symlink, or a dot-prefixed name. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`, and a PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook.
 
 ### Pinning
 
@@ -83,7 +83,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | Hub task | Hooks, at `.github/actions/<hook>` in the caller | Hub default |
 | --- | --- | --- |
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
-| `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job) | no-op |
+| `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job), `install-test-deps` (a `test-matrix` leg's dependency install) | no-op for `validate`, none for `install-test-deps`, which is required where `test-matrix` is set |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
 | `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi`, `build-release-asset` | `dotnet-publish-default`, `nuget-build-default`, `pypi-build-default`, none for `build-release-asset`, which is required where `enable_release_asset` is set |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
@@ -107,7 +107,7 @@ Docker Hub README publishing is a hub task of its own, `publish-docker-readme-ta
 
 This section is the tracker a session resumes from, and git is its only persistence. Every item is a checkbox with the evidence that closed it, a pull request, a commit, or a release tag, written into the item by the change that closed it. A session picking this work up reads this section first, takes the first unchecked item whose stage is open, verifies its claim against the current tree before acting on it, does the work in its own worktree, and ticks the item in the same pull request. Nothing here is ticked by intention: an item is ticked when the thing it names is on `develop`, or, for an adoption, on the named repo's ground-truth branch. [`TODO.md`][todo] "Hub-Hosted Reusable Workflows" carries the reasoning behind each stage, the open questions and what is settled, and this section carries the state.
 
-A stage carries three kinds of item, plus a proof item where a claim needs a live run. **Hub** is the hub pull request that ships the task and its stub, and the catalog snippet that follows the release. **Release** is the promotion and release that gives the task a pinnable `main` commit, since a downstream stub pins a released tag and nothing can adopt before one exists. **Adoption** is one checkbox per repo, ticked when that repo's ground-truth branch carries the stub and the audit reports no `interface` finding on the file. **Proof** is a checkbox for a behavior only a live run demonstrates, ticked with the run URL. Stage 0 is the merge-bot's hub and release items plus its two proofs, and stage 1 is its adoption, split so the adoption list is a stage of its own. The exit metric per stage comes from [reports/workflow-reuse.md][workflow-reuse-report]: every downstream copy of the stage's files becomes a caller, so the callers column equals the copies column, and the report's downstream line total, 10,964 on the first run, falls toward the stubs plus the genuinely repo-specific hooks. Regenerate that report in the pull request that ticks a stage's last adoption, so the number and the tick land together.
+A stage carries three kinds of item, plus a proof item where a claim needs a live run. **Hub** is the hub pull request that ships the task and its stub, and the catalog snippet that follows the release. **Release** is the promotion and release that gives the task a pinnable `main` commit, since a downstream stub pins a released tag and nothing can adopt before one exists. **Adoption** is one checkbox per repo, ticked when that repo's ground-truth branch carries the stub and the audit reports no `interface` finding on the file. **Proof** is a checkbox for a behavior only a live run demonstrates, ticked with the run URL. Stage 0 is the merge-bot's hub and release items plus its proofs, and stage 1 is its adoption, split so the adoption list is a stage of its own. The exit metric per stage comes from [reports/workflow-reuse.md][workflow-reuse-report]: every downstream copy of the stage's files becomes a caller, so the callers column equals the copies column, and the report's downstream line total, 10,964 on the first run, falls toward the stubs plus the genuinely repo-specific hooks. Regenerate that report in the pull request that ticks a stage's last adoption, so the number and the tick land together.
 
 ### Stage 0: Design, Measurement, and the Merge-Bot Task
 
@@ -116,6 +116,8 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 - [x] The catalog caller snippet `catalog/snippets/workflows/merge-bot-pull-request.yml`, pinned to `20616e0a70613ad8727d567990f5d0e082f5275c # 2.0.338`, in #748, the pull request that added this section.
 - [x] The first Dependabot pull request against hub `develop` after `f33fa7e` merges through `merge-bot-task.yml`, proving the callee reads the caller's `pull_request_target` payload, the explicit `secrets:` map, App-token minting in a callee, and `permissions: {}` at the caller. If it fails on the token grant, the fallback is at the caller, since a callee cannot widen what its caller grants: replace `permissions: {}` with `contents: read`, the least scope, and widen only to what the failing run names. Dependabot PR #771 merged to `develop` with `--squash` in [run-771][run-771]. The callee job `Merge dependabot pull request job` succeeded, so `permissions: {}` held and the fallback was not needed.
 - [x] The first Dependabot pull request against hub `main` after `20616e0` merges with `--merge`. Dependabot PR #770 merged to `main` with `--merge` in [run-770][run-770]. Both pull requests were merged by `app/ptr727-codegen`.
+- [ ] Release: the hub release carrying the `delete-merged-bot-branch` job. Adopters setting `delete-branch: true` add `closed` to their stub `types` per [#2336][issue-2336].
+- [ ] Proof: the first Dependabot pull request merged into hub `develop` once the delete job is on `develop` has its head branch deleted. Tick with the run URL.
 
 ### Stage 1: Merge-Bot Adoption
 
@@ -128,7 +130,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding. Its Dependabot merges fail at the app-token step until the maintainer adds the `CODEGEN_APP_CLIENT_ID` and `CODEGEN_APP_PRIVATE_KEY` secrets the audit reports missing.
+- [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
 - [x] LanguageTags (`delete-branch: true`): adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] aiopurpleair (`delete-branch: true`): adopted on `develop` in ptr727/aiopurpleair#103 at `3b69dc3`, merged 2026-09-09 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] MediaTools (`delete-branch: true`): adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
@@ -148,7 +150,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 
 ### Stage 2: The Gates
 
-Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language lint by tree detection, the prose gate, and the repo gate), a generic `unit-test` job (a `dotnet test`, and a `pytest` or `unittest` suite under coverage in each Python directory, skipped cleanly where the caller carries no test project and failing a declared Python directory that has none), and a `validate` job resolving the `validate` hook for a repo's own domain checks, which decides #729 in the one place the `uvx` tools are pinned or floated. There is no `test-pull-request-task.yml`: the ruleset-bound aggregator stays in the caller stub by design, and a task wrapping one line that calls `validate-task.yml` hosts nothing generic, so the stub shapes live in [Adopting the Gates][adopting-the-gates] instead, with the trigger shape, operational or release, settling #585. This stage is where the hook fallback is first proven live: the hub carries its own `validate` hook (its registry and spec check, its script self-tests, its fleet-skills check, and its unclassified-character report), so a hub pull request exercises the override path, and a repo with no hook of its own exercises the default.
+Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language lint by tree detection, the prose gate, and the repo gate), a generic `unit-test` job (a `dotnet test`, and a `pytest` or `unittest` suite under coverage in each Python directory, skipped cleanly where the caller carries no test project and failing a declared Python directory that has none), and a `validate` job resolving the `validate` hook for a repo's own domain checks. The `lint` and `unit-test` jobs decide #729 in their `uvx` tool steps. There is no `test-pull-request-task.yml`: the ruleset-bound aggregator stays in the caller stub by design, and a task wrapping one line that calls `validate-task.yml` hosts nothing generic, so the stub shapes live in [Adopting the Gates][adopting-the-gates] instead, with the trigger shape, operational or release, settling #585. This stage is where the hook fallback is first proven live: the hub carries its own `validate` hook (its registry and spec check, its script self-tests, its fleet-skills check, and its unclassified-character report), so a hub pull request exercises the override path, and a repo with no hook of its own exercises the default. The repo gate also shellchecks and schema-checks every composite action under `.github/actions/`, so a downstream repo gets that check at its next pin bump.
 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
@@ -162,7 +164,7 @@ The remaining repos are one checkbox each below, the sweep list being every cata
 - [x] Utilities: adopted on `develop` in ptr727/Utilities#451 at `78c081b`, merged 2026-08-30 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] LanguageTags: adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] aiopurpleair: adopted on `develop` in ptr727/aiopurpleair#109 at `c9d889e`, merged 2026-09-10 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
-- [ ] homeassistant-purpleair: Its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14. The `python-versions` input settles the interpreter half, a caller naming `["3.14"]` moving the leg there, and leaves the dependency-version axis open, which is a dimension the hub task does not express. It owes the Python precondition above, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`.
+- [ ] homeassistant-purpleair: Its adoption is a design question rather than a bump, its pytest run being a matrix over several Home Assistant versions on Python 3.14. The `python-versions` input settles the interpreter half, a caller naming `["3.14"]` moving the leg there. The `test-matrix` input settles the dependency-version half, per "Adopting the Gates" below. It owes the Python precondition above, its `requirements*.txt` and `tests/` reaching the leg though it carries no `uv.lock`.
 - [x] Financial-Modeling: adopted on `develop` in ptr727/Financial-Modeling#115 at `f6882cf`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [ ] PlexCleaner: Its `test-pull-request.yml` still calls its own `validate-task.yml` rather than the hub's. Its Python is a stdlib-only tooling subtree with no tests yet, which it owes before it names that subtree in `python-directories`.
 - [ ] ESPHome-NonRoot: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
@@ -201,7 +203,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks, and the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. It also provides the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's trigger shapes, so another reusable workflow would become caller-owned inputs.
 
 `build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-build-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
@@ -246,7 +248,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 
 ## Adopting the Merge-Bot
 
-A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below, which is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte, and deletes nothing else. The pin is the release that first carried the task, and Dependabot bumps it from there. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair, and a repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`.
+A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below and deletes nothing else. The stub is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte. The pin is the release that first carried the task, and Dependabot bumps it from there. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair. A repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`. That input deletes the head of a merged in-repo Dependabot or App pull request from the `closed` event. The delete is a lease-guarded push, so it removes the branch only while its tip still equals the merged head. It never deletes a head named `main` or `develop`. It takes effect once the stub's pin reaches a release carrying the delete job, because an older pin ignores `closed`.
 
 ```yaml
 name: Merge bot pull request action
@@ -255,9 +257,10 @@ name: Merge bot pull request action
 # The trigger is pull_request_target so the called workflow resolves from the trusted base rather than the PR head, and no job checks out PR code.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, closed]
 
-# Concurrency keys on the PR number rather than on github.ref, which under pull_request_target is the base branch and would serialize every bot PR against it, so each PR queues independently.
+# Concurrency keys on the PR number rather than on github.ref, which under pull_request_target is the base branch and would serialize every bot PR against it.
+# Each PR therefore queues independently.
 # The cancel-in-progress setting is false so a follow-up synchronize does not cancel an in-flight opened run before it enables auto-merge.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -286,9 +289,9 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
       delete-branch: true
 ```
 
-The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules` (a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`), and `delete-branch` (default `false`). The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
+The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`), which when `true` deletes the bot head once the merge lands. The `rules` input is a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`. The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
-Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate, so those two repos drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
+Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate. Those two repos therefore drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
 
 ## Adopting the Gates
 
@@ -459,9 +462,20 @@ A repo whose package claims more than one interpreter names them all in `python-
 
 The default is `["3.13"]`, so a caller naming nothing runs the single leg this job has always run. Each leg uploads under a `python-<version>` Codecov flag of its own, which keeps the legs apart in the dashboard rather than merging them into one number, and `fail-fast: false` reports a failing interpreter beside a passing one rather than cancelling the run at the first. Two things move on adoption. The nested check reads `Unit test job (Python 3.13)` rather than `Unit test job`, which binds no ruleset, only the caller's own aggregator being bound, and it reads that way whether or not a Python step ran, so a .NET-only caller reports a version it never used. And a repo that already uploaded Python coverage here uploaded it unflagged, so its series stops there and a `python-3.13` one starts beside it.
 
-Quote each entry, and give each one a version. The `unit-test` job's entry step refuses an array holding an entry with no non-whitespace character, which is the value that would otherwise run green on an interpreter nobody chose: `setup-uv` trims what it reads and then reads an empty input as an absent one, and a caller reaches that by interpolating an unset value of its own, or by leaving a stray space beside it. It refuses an unquoted entry too, since `fromJSON` admits a JSON array of numbers, and what that costs depends on the number. Some of them uv resolves to a real interpreter rather than refusing, `'[3]'` among them, so an unquoted entry is a second silent pass the check prevents. The rest fail in the `Run Python tests step` rather than in `setup-uv`, which exports the version rather than resolving it, and there the check names a cause instead. An empty array, and anything that is not a JSON array at all, never reach the step: they fail while the matrix is expanded, loudly and with an unnamed cause.
+Quote each entry, and give each one a version. The `Build test matrix job` runs first on every call and refuses an array holding an entry with no non-whitespace character. Such a value would otherwise run green on an interpreter nobody chose. That is because `setup-uv` trims what it reads and then reads an empty input as an absent one. A caller reaches that by interpolating an unset value of its own, or by leaving a stray space beside it. The job also refuses an unquoted entry, since `fromJSON` admits a JSON array of numbers. Some of those numbers `uv` resolves to a real interpreter, `'[3]'` among them, so an unquoted entry is a second silent pass. The job refuses an empty array, a non-array, and concatenated JSON values, each with a named cause. The `unit-test` job and its `Run Python tests step` never see a bad `python-versions`.
 
-Two things are deliberately outside the input. A caller carrying a .NET test project as well repeats that half of the job once per leg, the matrix being on the job rather than on its Python steps, so naming a second version there buys runner minutes rather than a second measurement. And the `lint` job stays on the one interpreter the task pins, which costs a repo two different things. Its type check is performed at that interpreter, `mypy` and `pyright` each defaulting their target to the one they run under where the repo's own `[tool.mypy]` or `[tool.pyright]` section does not name a version, while `ruff` takes its target from `requires-python` where the `pyproject.toml` declares a `[project]` table and from its own default where it does not. That much a repo settles in its own configuration. What it cannot settle there is a lockfile: a repo carrying a `uv.lock` whose `requires-python` floor is above the pinned interpreter fails the `Sync Python dependencies step` outright, and no value of `python-versions` moves that job. A declared pip directory is the one exception, its requirements installing there under the first interpreter `python-versions` names, since a type check against them has to resolve them first.
+Two things are deliberately outside the `python-versions` input. A caller carrying a .NET test project as well repeats that half of the job once per leg, the matrix being on the job rather than on its Python steps, so naming a second version there buys runner minutes rather than a second measurement. And the `lint` job stays on the one interpreter the task pins, which costs a repo two different things. Its type check is performed at that interpreter, `mypy` and `pyright` each defaulting their target to the one they run under where the repo's own `[tool.mypy]` or `[tool.pyright]` section does not name a version, while `ruff` takes its target from `requires-python` where the `pyproject.toml` declares a `[project]` table and from its own default where it does not. That much a repo settles in its own configuration. What it cannot settle there is a lockfile: a repo carrying a `uv.lock` whose `requires-python` floor is above the pinned interpreter fails the `Sync Python dependencies step` outright, and no value of `python-versions` moves that job. A declared pip directory is the one exception, its requirements installing there under the first interpreter `python-versions` names, since a type check against them has to resolve them first.
+
+A repo whose pytest legs differ by dependency versions names them in `test-matrix`, a JSON array of objects, one leg per entry. It replaces the `python-versions` legs. Each entry needs a string `label` naming the leg and its Codecov flag. It may carry a `python-version`, defaulting to the first `python-versions` entry. Any other key is the repo's own, passed through to its hook.
+
+```yaml
+    with:
+      test-matrix: '[{"label": "minimum", "lib": "minimum"}, {"label": "latest", "lib": "pin"}]'
+```
+
+Each label is unique, 1 to 38 characters from letters, digits, underscore, dot, and hyphen, so `python-<label>` stays a valid Codecov flag. A `python-version`, when present, is a string with a non-whitespace character. The `test-matrix` job checks all of this and builds the matrix, so a malformed value fails there with a named cause.
+
+The task installs the directory's base dependencies and calls the caller's `.github/actions/install-test-deps/action.yml`. Then it runs pytest without re-syncing, so the hook's overrides survive. The hook receives a `leg` input holding the whole matrix entry as a JSON string. It also receives a `directories` input holding the resolved Python projects, one `<kind><TAB><directory>` line each. It runs at the repository root, so a repo's hook enters each directory itself. A pip directory's environment is its `.venv`. A set `test-matrix` with no hook fails the leg with an error, and an empty one runs the `python-versions` legs with no hook. The nested check then reads `Unit test job (<label>)`, which binds no ruleset.
 
 ## Adopting the Pure Functions
 
@@ -471,8 +485,6 @@ Neither `get-version-task.yml` nor `publish-plan-task.yml` has a caller-stub sni
   get-version:
     name: Get version information job
     uses: ptr727/ProjectTemplate/.github/workflows/get-version-task.yml@<hub-main-commit-sha> # <release-tag>
-    with:
-      ref: ${{ github.ref }}
     # Outputs: SemVer2, AssemblyVersion, AssemblyFileVersion, AssemblyInformationalVersion, GitCommitId, Prerelease.
 ```
 
@@ -491,6 +503,8 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 `build-release-task.yml` also calls `get-version-task.yml` through `$/`, so the sibling resolves at the release task's pinned hub commit. A caller that needs the version outputs without the rest of the release orchestrator reaches `get-version-task.yml` directly, using the pinned owner-scoped form shown above.
 
+The `get-version` example passes no `ref`, so the task versions the triggering commit. A caller passing `ref` passes a commit on the triggering branch, usually `${{ github.sha }}`, because classification follows the trigger ref per WORKFLOW.md D3.1.
+
 ## Adopting the Release Chain
 
 A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The full shape below is the catalog snippet [`publish-release.yml`][release-caller-snippet] byte for byte, pinned to a release carrying the current task interface, and Dependabot bumps it from there ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload, the artifact cleanup, and the [`WORKFLOW.md`][workflow] D4.7 publisher dispatch and self-cancel), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
@@ -499,13 +513,13 @@ Neither package push runs inside the hub task, and that is a constraint rather t
 
 The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
-The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, for a NuGet-library repo:
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. The concurrency group is ref-scoped, and a `push` by an identity outside the plan's allowlist gets a per-run group, per [`WORKFLOW.md`][workflow] D7.1. The concurrency block is part of the stub the adopter carries. This is the full shape, for a NuGet-library repo:
 
 ```yaml
 name: Publish project release action
 
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
-# This is the NuGet-library shape, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
+# This is the NuGet-library shape, and a Docker, PyPI, or file-target repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 
 on:
   push:
@@ -518,8 +532,10 @@ on:
       - 'global.json'
   workflow_dispatch:
 
+# A push the plan cannot publish gets a per-run group, so it never replaces a pending publish.
+# The expression must track publish-plan-task.yml's push rule and actor allowlist.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && (github.ref != 'refs/heads/main' || (github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]')) && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 # GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
@@ -670,7 +686,9 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
           done
 ```
 
-No `publish-release-task.yml` ships alongside `build-release-task.yml`: the jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
+A file-target repo, whose release carries a file its own `build-release-asset` hook writes, varies the stub another way. It sets `enable_release_asset: true` and every other `enable_*` input to `false`. It drops `nuget_project` and the `publish-nuget` job, and keeps `expect_release_assets: true`. The hook has no hub default, so the repo carries `.github/actions/build-release-asset/action.yml`, and the task fails without it.
+
+No `publish-release-task.yml` ships alongside `build-release-task.yml`. The jobs above are each a thin call to one hub task or a verbatim OIDC upload. The trigger policy that ties them together differs across the fleet's shapes (scheduled-plus-dispatch Docker, push-gated NuGet, PyPI, or file target). Hosting it would just move the same `with:` block one file over rather than removing it.
 
 ## Adopting the Type-Specific Tasks
 
@@ -687,6 +705,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
       contents: read
     uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
     with:
+      ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
     secrets:
       DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -746,13 +765,13 @@ The task is .NET-specific orchestration. It installs the .NET SDK, runs the call
 
 ## What a Pilot Proves
 
-The hub's own stub proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
+The hub's own stub, which sets `delete-branch: true`, proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. The first Dependabot pull request merged into `develop` once the delete job is there proves it, by the branch being gone afterwards. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
 
 Four things the hub cannot prove fall to the first downstream adopter. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. A pilot records each of those as observed in its own audit report rather than assumed here.
 
 ## Open Decisions
 
-- **`delete-branch` default.** `false` matches the hub's behavior, and seven repos opt in today. A fleet default of `true` is one edit to the task and removes seven `with:` blocks. The repository setting that protects `develop` from a promotion is unaffected either way, since a bot branch is never `develop`.
+- **`delete-branch` default.** `false` is the task default, and the hub's own stub and several adopters opt in. A fleet default of `true` is one edit to the task and removes those `with:` blocks. The repository setting that protects `develop` from a promotion is unaffected either way, since a bot branch is never `develop`. A fleet default also needs `closed` in each adopter's stub types.
 - **The Dependabot semver-major filter.** Two repos skip a nuget semver-major bump. Either it drops on adoption per D8.1, or the task grows a `skip-semver-major-ecosystems` input with a `dependabot/fetch-metadata` step run under the App token. Decide before those two repos adopt, everything else adopts unaffected.
 - **A `requiredHubUses` audit contract.** The interface check today asserts the task filename token in the caller job. A field asserting the full owner-scoped form on a downstream copy and the `./` form on the hub is a small schema extension. It waits for the first adoption to show whether the token check misses anything.
 
@@ -776,6 +795,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [issue-929]: https://github.com/ptr727/ProjectTemplate/issues/929
 [issue-942]: https://github.com/ptr727/ProjectTemplate/issues/942
 [issue-2031]: https://github.com/ptr727/ProjectTemplate/issues/2031
+[issue-2336]: https://github.com/ptr727/ProjectTemplate/issues/2336
 [no-build-caller-snippet]: ../catalog/snippets/workflows/test-pull-request.yml
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102

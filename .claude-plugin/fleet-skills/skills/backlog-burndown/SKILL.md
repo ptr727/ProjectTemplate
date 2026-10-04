@@ -37,8 +37,8 @@ Everything below turns on which seat is acting, so both are named once here.
 - **The orchestrator** is the session this skill runs in. It ranks, groups, dispatches, and drives
   the promotion pull request. It opens no feature branch and fixes no issue itself, which is what
   keeps it out of every worker's files. It does write: it comments on issues, it drives and
-  amends the promotion pull request, and it owns worktree and branch cleanup, which "Dispatching a
-  Worker" states in full.
+  amends the promotion pull request, and it records the review receipt in a worker's worktree.
+  It also owns worktree and branch cleanup, which "Dispatching a Worker" states in full.
 - **A worker** is one dispatched subagent holding one group, one worktree, and one feature branch,
   the dispatched task `AGENTS.md` "Session Scope" describes. It drives its own pull request into
   develop and ends there.
@@ -74,10 +74,10 @@ A round is the unit. Each one runs these steps in order.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    anything. A group whose files are already claimed waits for the next round.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
-5. **Collect** each worker's outcome: merged to develop, stopped on a question only the
-   maintainer can answer, parked behind another group's file claim, or abandoned, which is what
-   the adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce. Bound
-   this wait per "Bounding the Wait on a Worker".
+5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
+   parked behind another group's file claim, handed back for review, or abandoned.
+   The adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
+   The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
 7. **Promote**, per "The Promotion Boundary".
@@ -241,23 +241,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   procedure and the verify-then-delete of the merged remote branch, **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
-- **The worker runs `local-strict-review` before every push**, per `GOVERNANCE.md` "Verification
-  Discipline". That pass dispatches a reviewer of its own, so a harness where a subagent cannot
-  dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
-  pushing, and its worktree is then retired, since git refuses to attach that branch anywhere else
-  while the reporting tree holds it. The branch is left standing for its own reason, that the
-  commits it already carries are what the re-dispatched worker continues from. This is the
-  worktree-only disposition "Cleanup Is the Orchestrator's" separates out, so a clean tree is the
-  whole test. A clean
-  tree is retired and the group re-dispatched to a seat that can dispatch. A dirty one is left
-  exactly as it stands and the group stopped for the maintainer, as is a group for which no seat
-  that can dispatch exists. That retire-and-re-dispatch case presumes the branch is reachable from
-  this repository, which the standalone clone `repo-worktree` allows as a fallback breaks: a worker that never
-  pushed holds its commits only in that clone, where this repository has no ref to hand a
-  replacement and nothing to retire, so re-dispatching loses the work rather than continuing it.
-  That group stops for the maintainer with the clone named, and no seat this skill defines resumes
-  it, since a worker never inherits another's checkout and the orchestrator opens no branch and
-  edits nothing. Neither the worker nor the orchestrator pushes around the missing pass.
+- **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
+  The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
@@ -333,8 +318,8 @@ State the chosen tier and its reason in the round's report.
 
 `AGENTS.md` "Delegation" binds this wait as it binds any other, and this section is how the bound
 is met here. A worker
-reports merged, parked, or stopped. A worker that reports nothing at all is the case needing a
-bound, since it is indistinguishable from a slow one and dying mid-drive is ordinary here.
+reports merged, parked, stopped, or handed back for review. A worker that reports nothing at all needs a bound.
+Its silence looks exactly like slowness, and dying mid-drive is ordinary here.
 
 The bound is a state read rather than a clock: when the other workers in the round have reported,
 read the silent worker's branch and pull request directly, `git log` on that branch and
@@ -364,6 +349,7 @@ Where no other worker remains to bound the wait, the same liveness answer bounds
 ## Raising a Blocked Question
 
 A group reaching a question only the maintainer can answer stops that group and nothing else.
+A review handback is not a blocked question.
 `pr-review-conduct`'s "Escalate to the maintainer when" list is what makes a finding a question
 rather than a decision.
 
