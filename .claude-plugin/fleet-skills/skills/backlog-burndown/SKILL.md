@@ -76,8 +76,10 @@ A round is the unit. Each one runs these steps in order.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a question only the
    maintainer can answer, parked behind another group's file claim, or abandoned, which is what
-   the adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce. Bound
-   this wait per "Bounding the Wait on a Worker".
+   the adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce, or a
+   digest handback. Bound this wait per "Bounding the Wait on a Worker".
+   A digest handback is no stop. The orchestrator records the pass, then continues the same worker,
+   whose worktree holds the receipt, and never retires it for this case.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
 7. **Promote**, per "The Promotion Boundary".

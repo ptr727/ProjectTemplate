@@ -42,6 +42,8 @@ Follow `AGENTS.md` "Context and Delegation Discipline"'s subagent briefing shape
 ```text
 Task: adversarial review of this branch's diff against its merge-base with its target branch,
   read full surrounding files where the diff hunks alone do not give enough context.
+  Run `<hub-checkout>/scripts/prose_lint.py --diff "$(git merge-base refs/remotes/origin/<target> HEAD)"`,
+  then the same with `--check sentence-length`, and report each output as findings.
 Paths: the files `git diff --name-only "$(git merge-base refs/remotes/origin/<target> HEAD)"` and
   `git ls-files --others --exclude-standard` list, mandatory floor. Reading a specific
   unchanged caller or consumer beyond that list is in bounds only where a candidate finding's
@@ -51,11 +53,9 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   plus flag unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior
   differences explicitly. Do not quote "Publish Every Finding", this task's report contract is
   the Return line below, not a PR comment or a coverage marker.
-  Run `scripts/prose_lint.py --diff "$(git merge-base refs/remotes/origin/<target> HEAD)"` with
-  its default checks plus `--check sentence-length --check comment-wrap` over the changed files,
-  and report its output as findings. Also flag what a linter cannot judge: more than one sentence
-  per comment line, sentences over 25 words, a why that is not non-obvious or narrates history,
-  a count in a living document, and a demonstrative pronoun that binds to the wrong noun.
+  quote `comment-and-doc-style`'s rules a linter cannot judge: the non-obvious why with no
+  historical narration, no count in a living document, and no demonstrative pronoun binding to
+  the wrong noun.
 Return: one finding per line, file:line, the concrete failure scenario, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
@@ -65,7 +65,7 @@ Before dispatching, grep the tree for other statements of each rule the diff add
 
 **Model tier:** the strongest tier this session can reach, per `AGENTS.md` "Match the model tier to the judgment" and "Never tier down the seat holding the judgment", applied here to the reviewer rather than the author. Run the pass on the same tier that authored the change when only one tier is reachable, a second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
-"This session can reach" means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A session deliberately tiered down for execution work, a worker dispatched by an orchestrator being the ordinary case, names a stronger tier for the reviewer where its harness lets it, since tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch reaches several tiers but exposes no way to name one, take what it gives and run the pass, on the same reasoning as the single-reachable-tier sentence above. A seat that cannot dispatch a subagent at all does not run this pass, its dispatcher does. That seat commits, reads its digest with `status --target <target>`, stops, and hands the digest back. The dispatcher runs the reviewer and records the pass with `record --expect-digest`. It returns the findings, and the seat pushes only after the record. Where nobody dispatched the seat, it reports that it could not run the pass to the maintainer instead of pushing. Either way the push waits rather than the pass being quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute: it runs a vendor CLI against its own review, which never carries the brief above, so it satisfies the rule this section states only where that separate route is what a capture point asked for.
+"This session can reach" means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A session deliberately tiered down for execution work, a worker dispatched by an orchestrator being the ordinary case, names a stronger tier for the reviewer where its harness lets it, since tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch reaches several tiers but exposes no way to name one, take what it gives and run the pass, on the same reasoning as the single-reachable-tier sentence above. Where an attended dispatcher dispatched a seat that cannot dispatch a subagent, the dispatcher runs this pass. That dispatcher is `drive-pr`, `backlog-burndown`, or a maintainer-driven orchestrator. The seat commits, reads its digest with `status --target <target>`, stops, and hands back its worktree path, the resolved target, and the digest. The dispatcher runs the reviewer from that worktree, since the receipt lives in its git directory. It records the pass with `record --target <target> --expect-digest` and returns the findings. Each fix commit repeats this cycle, and the seat pushes only when a record matches its current content. Under `unattended-handoff` such a worker parks per that skill. Where nobody dispatched the seat, it reports to the maintainer that it could not run the pass, and does not push. Either way the push waits rather than the pass being quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute: it runs a vendor CLI against its own review, which never carries the brief above, so it satisfies the rule this section states only where that separate route is what a capture point asked for.
 
 ## Recording the Pass
 
