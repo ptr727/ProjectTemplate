@@ -272,6 +272,7 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import functools
 import html
 import io
@@ -522,6 +523,8 @@ TABLE_HEADER = re.compile(r"\s*\|\s*File\s*\|", re.IGNORECASE)
 # The alignment row under the header, which is punctuation rather than a file.
 TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
 TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
+TABLE_GLOB = frozenset("*?")
+TABLE_GAP = " ... "
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -2015,6 +2018,87 @@ def bare_path(path: str) -> str:
     return "".join(c for c in path if unicodedata.category(c) != "Cf")
 
 
+def gap_fits(path: str, parts: list[str]) -> bool:
+    """Whether `path` holds `parts` in order, the first opening it, the last closing it.
+
+    At least one character stands between each part and the next. Each middle part is taken at
+    its leftmost place, which leaves the most room for the parts after it, so one pass decides it.
+    """
+    head, *middle, tail = parts
+    if not path.startswith(head) or not path.endswith(tail):
+        return False
+    at, end = len(head), len(path) - len(tail)
+    for part in middle:
+        found = path.find(part, at + 1, end - 1)
+        if found < 0:
+            return False
+        at = found + len(part)
+    return end - at >= 1
+
+
+def segment_fits(segment: str, pattern: str) -> bool:
+    """Whether one path segment matches one row segment, a `[` in either being a literal.
+
+    A segment holding a wildcard must also hold a letter or a digit, so a row of bare wildcards
+    such as `*/*` or `*.*` names nothing rather than every path at that depth.
+    """
+    if not TABLE_GLOB & set(pattern):
+        return segment == pattern
+    if not any(c.isalnum() for c in pattern):
+        return False
+    return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
+
+
+def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
+    """The changed paths one table row names, out of `diff`, and whether it names one at most.
+
+    A row names a path in one of three ways, and every claim here and in the digest that a table
+    names a set of paths counts all three. A row the diff carries names that path, whatever
+    characters it holds. Otherwise a row holding `TABLE_GAP` names every path `gap_fits`, its
+    other characters read literally, and since it shortens one path it names one at most.
+    Its text outside the gaps must hold a letter or a digit, so a gap between bare punctuation
+    names nothing rather than whichever path happens to fit.
+    Otherwise a row holding a wildcard names every path it matches one segment at a time, so a
+    `*` never crosses a `/`, per `segment_fits`.
+    """
+    if row in diff:
+        return [row], True
+    if TABLE_GAP in row:
+        parts = row.split(TABLE_GAP)
+        if not any(c.isalnum() for c in "".join(parts)):
+            return [], True
+        return sorted(p for p in diff if gap_fits(p, parts)), True
+    if TABLE_GLOB & set(row):
+        parts = row.split("/")
+        return sorted(
+            p
+            for p in diff
+            if len(segments := p.split("/")) == len(parts)
+            and all(map(segment_fits, segments, parts))
+        ), False
+    return [], True
+
+
+def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str], list[str]]:
+    """The changed paths no row names, the rows naming none, and the rows naming too many.
+
+    A row naming one path at most that matches several names none of them, since which one it
+    shortened is unknown. Each list is sorted, and the table stands in for coverage only where
+    all three are empty.
+    """
+    covered: set[str] = set()
+    invented, ambiguous = [], []
+    for row in dict.fromkeys(named):
+        paths, single = row_paths(row, diff)
+        if not paths:
+            invented.append(row)
+        elif single and len(paths) > 1:
+            ambiguous.append(row)
+        else:
+            covered.update(paths)
+    return sorted(diff - covered), sorted(invented), sorted(ambiguous)
+
+
 def file_table(body: str) -> list[str]:
     """The paths the round's own file summary table names, in the order it names them.
 
@@ -2098,6 +2182,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
     A path named that the diff does not carry is what disqualifies the naming arm, that typo
     being enough to drop a real file into the omissions and read it as the one nobody reviewed.
+    A shortened path matching several changed files disqualifies it for the same reason.
     """
     named = head_table(pr)
     if not named:
@@ -2105,12 +2190,12 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
         return (
-            f"the reviewer names {len(named)} files in its own table and the diff could not "
+            f"the reviewer names {len(named)} rows in its own table and the diff could not "
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    omitted = [p for p in changed if bare_path(p) not in named]
-    invented = [p for p in named if p not in {bare_path(c) for c in changed}]
+    left, invented, ambiguous = table_match(named, {bare_path(c) for c in changed})
+    omitted = [p for p in changed if bare_path(p) in left]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
         return (
@@ -2118,7 +2203,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"also does on rounds stating full coverage, so it corroborates nothing and "
             f"names no unread file"
         )
-    if len(omitted) == short and not invented:
+    if len(omitted) == short and not invented and not ambiguous:
         return (
             f"the reviewer's own file table omits exactly the {short} file"
             f"{'' if short == 1 else 's'} the counts leave unread, naming "
@@ -2126,9 +2211,11 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"list from the API, so that is a lead to check rather than a verdict"
         )
     return (
-        f"the reviewer's own file table names {len(named)} of the {len(changed)} changed "
+        f"the reviewer's own file table names {len(changed) - len(omitted)} of the "
+        f"{len(changed)} changed "
         f"files, omitting {len(omitted)} where the counts leave {short} unread"
         + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
+        + (f" and shortening {', '.join(ambiguous)} to fit several" if ambiguous else "")
         + ", so it tracks the counts nowhere and names no unread file"
     )
 
@@ -2265,15 +2352,17 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             "two changed paths differ only by a format character, so the table cannot tell "
             "them apart"
         )
-    omitted = sorted(diff - set(named))
-    invented = sorted(set(named) - diff)
-    if not omitted and not invented:
+    omitted, invented, ambiguous = table_match(named, diff)
+    if not omitted and not invented and not ambiguous:
         return ""
     return "the table " + ", and ".join(
         part
         for part in (
             f"leaves out {', '.join(omitted)}" if omitted else "",
             f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
+            f"shortens {', '.join(ambiguous)}, which matches more than one changed file"
+            if ambiguous
+            else "",
         )
         if part
     )
@@ -2316,8 +2405,8 @@ def table_reading(owner: str, repo: str, pr: dict) -> tuple[str, str]:
     or not, and the whole review history is in view. A pull request that ever had a partial
     round goes to the maintainer, since whether that partial still describes this diff is what
     a carry bound refusing, failing, or never reaching it cannot settle. A table naming a file
-    the diff does not carry, or leaving one out, is not this reading either, and neither is a
-    changed-file list the query cut short or returned malformed.
+    the diff does not carry, leaving one out, or shortening a path to fit several is not this
+    reading either, and neither is a changed-file list the query cut short or returned malformed.
 
     A table carries under the bound a statement does, the pull request changing exactly the same
     set of files at both commits, which `carry_holds` reads. Three pull requests in one session
