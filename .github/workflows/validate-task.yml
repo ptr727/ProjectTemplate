@@ -3,10 +3,12 @@ name: Validate task
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
 # The jobs are test-matrix-check, lint, unit-test, and validate.
 # The test-matrix-check job checks the test-matrix input before the unit-test matrix expands.
-# The lint job is the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate.
+# The lint job is the fleet doc-lint block plus language lint, by tree detection.
+# For Python it lints the declared directories, and it also runs the prose gate and the repo gate.
 # The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
 # It runs once per interpreter the python-versions input names, or once per test-matrix leg when that is set.
-# The validate job is the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
+# The validate job is the validate hook, a repo's own domain checks.
+# Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -38,7 +40,7 @@ on:
         type: string
         default: '["3.13"]'
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry, each with a non-empty string label and an optional python-version defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and an optional python-version defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
         required: false
         type: string
         default: ''
@@ -467,7 +469,8 @@ jobs:
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
       # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
       # The rest fail in the Run Python tests step below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
-      # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
+      # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20.
+      # With test-matrix set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
       - name: Validate python-versions input step
         env:
           PYTHON_VERSIONS: ${{ inputs.python-versions }}
@@ -558,9 +561,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           install_requirements() {
-            if [ -n "${PIP_PYTHON:-}" ]; then
-              export UV_PYTHON="$PIP_PYTHON"
-            fi
             uv venv
             local requirement_args=()
             local file

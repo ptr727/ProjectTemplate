@@ -1504,6 +1504,11 @@ gh() {
         self.assertIn("              uv) uv sync --all-groups --frozen ;;\n", install)
         self.assertIn("              pip) install_requirements ;;\n", install)
         self.assertIn("          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}\n", install)
+        self.assertIn("uv pip install -e .", install)
+        self.assertIn('requirement_args+=(-r "$file")', install)
+        self.assertIn('uv pip install "${requirement_args[@]}"', install)
+        self.assertIn('if [ "$DECLARED" != "true" ] && [ ! -d "$dir/tests" ]; then', install)
+        self.assertNotIn("PIP_PYTHON", install)
         hook = job.split("- name: Run caller install-test-deps hook step\n", 1)[1].split("\n\n", 1)[
             0
         ]
@@ -1538,6 +1543,7 @@ gh() {
                 ["jq", "-e", "-s", program],
                 input=value,
                 text=True,
+                encoding="utf-8",
                 capture_output=True,
                 check=False,
             )
@@ -1732,8 +1738,9 @@ gh() {
             "[3.13, 3.14]": 1,
             # The integer form of it, which uv resolves rather than refuses.
             "[3]": 1,
-            # Unreachable today: each of these fails while the matrix is expanded, before the step runs.
-            # They pin the rest of the filter's contract, which moving the check into a job of its own would ask for.
+            # Unreachable while python-versions expands into the matrix, since each of these fails there first.
+            # With test-matrix set nothing expands it, so this step alone must reject them.
+            '["3.13"] ["3.14"]': 1,
             "[]": 1,
             '"3.13"': 1,
             "{}": 1,
