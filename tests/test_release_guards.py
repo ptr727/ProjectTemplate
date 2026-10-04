@@ -1500,9 +1500,16 @@ gh() {
                 else f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n",
                 step,
             )
+        install = job.split("- name: Install Python dependencies step\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("              uv) uv sync --all-groups --frozen ;;\n", install)
+        self.assertIn("              pip) install_requirements ;;\n", install)
+        self.assertIn("          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}\n", install)
         hook = job.split("- name: Run caller install-test-deps hook step\n", 1)[1].split("\n\n", 1)[
             0
         ]
+        self.assertTrue(
+            hook.endswith("          directories: ${{ steps.python.outputs.projects }}")
+        )
         self.assertIn(
             f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n", hook
         )
@@ -1521,19 +1528,25 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         self.assertIn("    needs: test-matrix-check\n", workflow.split("\n  unit-test:\n", 1)[1])
         check = workflow.split("\n  test-matrix-check:\n", 1)[1].split("\n  lint:\n", 1)[0]
-        match = re.search(r"jq -e '\n(.*?)\n +' <<<", check, re.DOTALL)
+        self.assertIn("        if: ${{ inputs.test-matrix != '' }}\n", check)
+        match = re.search(r"jq -e -s '\n(.*?)\n +' <<<", check, re.DOTALL)
         assert match is not None
         program = match.group(1)
 
         def accepted(value: str) -> bool:
             result = run(
-                ["jq", "-e", program], input=value, text=True, capture_output=True, check=False
+                ["jq", "-e", "-s", program],
+                input=value,
+                text=True,
+                capture_output=True,
+                check=False,
             )
             return result.returncode == 0
 
         self.assertTrue(accepted('[{"label": "a", "python-version": "3.14"}, {"label": "b"}]'))
         self.assertTrue(accepted(json.dumps([{"label": "x" * 38}])))
         rejected = {
+            "two concatenated values": '[{"label": "a"}] [{"label": "b"}]',
             "empty array": "[]",
             "not an array": "{}",
             "non-object entry": "[1]",
