@@ -4661,6 +4661,40 @@ def _selftest():
             "  ok   branch-drift: behind (modify/delete develop still at base) vs diverged (both moved), develop-only excluded"
         )
 
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_path = pathlib.Path(tmp_root)
+        full = tmp_path / "full"
+        full.mkdir()
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+            ["git", "config", "commit.gpgsign", "false"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "one"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "two"],
+        ):
+            subprocess.run(cmd, cwd=full, check=True, capture_output=True)
+        shallow = tmp_path / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", full.as_uri(), str(shallow)],
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        try:
+            for label, root, want_refuse in (("shallow", shallow, True), ("full", full, False)):
+                ROOT = root
+                msg = shallow_refusal(root)
+                code = main(["Utilities"]) if want_refuse else None
+                good = (msg is not None) == want_refuse
+                if want_refuse:
+                    good = good and bool(msg) and "fetch --unshallow origin" in msg and code == 2
+                if not good:
+                    ok = False
+                print(f"  {'ok  ' if good else 'FAIL'} shallow-clone refusal: {label} clone")
+        finally:
+            ROOT = saved_root
+
     # CLI parsing, where a repo name and a flag value must not be confused for one another.
     # The previous hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have audited a repo called "develop" rather than overriding the branch.
     cli_cases = [
@@ -6688,10 +6722,32 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
+def shallow_refusal(root):
+    """Return the refusal message when `root` is a shallow git clone, else None."""
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=root,
+        check=False,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        return None
+    return (
+        "The hub checkout is a shallow clone, so the stale-vs-modified classification and the intent "
+        f"staleness advisory would be wrong. Run: git -C {root} fetch --unshallow origin"
+    )
+
+
 def main(argv=None):
     a = parse_args(argv)
     if a.selftest:
         return _selftest()
+    refusal = shallow_refusal(ROOT)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
     # The override reaches the same path segment and the same `?ref=` value the registry's own groundTruthBranch does,
     # so it is held to the same grammar. Validating only the declared value would leave `--branch 'main?per_page=1'`
     # retargeting every read, which is the request-goes-elsewhere shape rather than a request that fails.
