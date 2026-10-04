@@ -391,6 +391,10 @@ class ReleaseGuardCase(unittest.TestCase):
         stub = (REPO / "catalog/snippets/workflows/publish-release.yml").read_text(encoding="utf-8")
         group = next(line for line in stub.splitlines() if line.startswith("  group:"))
         self.assertEqual(allowed, set(re.findall(r"github\.actor != '([^']+)'", group)))
+        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        stub_name = stub.splitlines()[0]
+        self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
         bot = {"login": "ptr727-codegen[bot]"}
         middle = "e" * 40
