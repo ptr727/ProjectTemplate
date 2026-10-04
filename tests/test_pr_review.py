@@ -342,6 +342,10 @@ def check(
     status: str = "COMPLETED",
     conclusion: str = "SUCCESS",
     started: str | None = None,
+    suite: int = 1,
+    run: int = 1,
+    workflow: int | None = None,
+    slug: str = "github-actions",
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
 
@@ -356,6 +360,12 @@ def check(
         "status": status,
         "conclusion": conclusion,
         "startedAt": ago(60) if started is None else started,
+        "databaseId": run,
+        "checkSuite": {
+            "databaseId": suite,
+            "app": {"slug": slug},
+            "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
+        },
     }
 
 
@@ -4754,33 +4764,83 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="PENDING", conclusion="", started=ago(900)))
         )
 
-    def test_only_the_newest_run_of_a_check_counts(self) -> None:
-        """A rerun on one head leaves the superseded run in the rollup, and it must not gate."""
-        failed = check(name="lint", conclusion="FAILURE", started=ago(600))
-        passed = check(name="lint", conclusion="SUCCESS", started=ago(60))
-        for runs in ([failed, passed], [passed, failed]):
-            nodes = pr_review.check_nodes(payload([review()], checks=runs))
-            self.assertEqual([("lint", "SUCCESS")], [(n["name"], n["conclusion"]) for n in nodes])
-            self.assertEqual((1, 1), pr_review.checks_tally(nodes))
-        rerun = check(name="lint", status="IN_PROGRESS", conclusion="", started=ago(30))
-        (nodes_one,) = pr_review.check_nodes(payload([review()], checks=[failed, rerun]))
-        self.assertEqual("IN_PROGRESS", nodes_one["state"])
+    def conclusions(self, *runs: dict) -> list[str]:
+        """The conclusions the normalizer keeps for one head's runs, in kept order."""
+        nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+        return [n["conclusion"] for n in nodes]
 
-    def test_the_newest_run_failing_reads_failed(self) -> None:
+    def test_a_newer_suite_supersedes_an_older_one_in_either_order(self) -> None:
+        """A close and reopen makes a new suite, and its run is the one that gates."""
+        failed = check(name="lint", conclusion="FAILURE", suite=10, run=100, workflow=7)
+        passed = check(name="lint", conclusion="SUCCESS", suite=20, run=200, workflow=7)
+        self.assertEqual(["SUCCESS"], self.conclusions(failed, passed))
+        self.assertEqual(["SUCCESS"], self.conclusions(passed, failed))
+
+    def test_the_newest_suite_failing_reads_failed(self) -> None:
         """The older green run is the superseded one here, so the newest failure stands."""
-        passed = check(name="lint", conclusion="SUCCESS", started=ago(600))
-        failed = check(name="lint", conclusion="FAILURE", started=ago(60))
-        (node,) = pr_review.check_nodes(payload([review()], checks=[failed, passed]))
-        self.assertEqual("FAILURE", node["conclusion"])
+        passed = check(name="lint", conclusion="SUCCESS", suite=10, workflow=7)
+        failed = check(name="lint", conclusion="FAILURE", suite=20, workflow=7)
+        self.assertEqual(["FAILURE"], self.conclusions(failed, passed))
+        self.assertEqual(["FAILURE"], self.conclusions(passed, failed))
 
-    def test_different_checks_are_each_counted(self) -> None:
-        """Dedup keys on the check name, so two names are two checks."""
+    def test_start_time_does_not_decide_which_overlapping_run_is_newer(self) -> None:
+        """The superseded suite's job can start later and carry the higher check run id."""
+        old = check(
+            name="lint", conclusion="FAILURE", suite=10, run=900, workflow=7, started=ago(58)
+        )
+        new = check(
+            name="lint", conclusion="SUCCESS", suite=20, run=800, workflow=7, started=ago(60)
+        )
+        self.assertEqual(["SUCCESS"], self.conclusions(old, new))
+        self.assertEqual(["SUCCESS"], self.conclusions(new, old))
+
+    def test_a_rerun_inside_one_suite_is_decided_by_the_check_run_id(self) -> None:
+        """A rerun keeps its suite, so only the check run id orders the two."""
+        first = check(name="lint", conclusion="FAILURE", suite=10, run=100, workflow=7)
+        rerun = check(name="lint", conclusion="SUCCESS", suite=10, run=150, workflow=7)
+        self.assertEqual(["SUCCESS"], self.conclusions(first, rerun))
+        self.assertEqual(["SUCCESS"], self.conclusions(rerun, first))
+
+    def test_ids_compare_as_integers_not_as_strings(self) -> None:
+        """Nine sorts after ten as text, which would keep the older of the two."""
+        old = check(name="lint", conclusion="FAILURE", suite=9, workflow=7)
+        new = check(name="lint", conclusion="SUCCESS", suite=10, workflow=7)
+        self.assertEqual(["SUCCESS"], self.conclusions(old, new))
+
+    def test_the_same_name_in_two_workflows_is_two_checks(self) -> None:
+        """Two workflows can each have a `build` job under one app, and neither hides the other."""
         nodes = pr_review.check_nodes(
             payload(
                 [review()],
                 checks=[
-                    check(name="lint", conclusion="FAILURE", started=ago(600)),
-                    check(name="build", conclusion="SUCCESS", started=ago(60)),
+                    check(name="build", conclusion="FAILURE", suite=10, workflow=7),
+                    check(name="build", conclusion="SUCCESS", suite=20, workflow=8),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
+    def test_the_same_name_under_two_apps_without_a_workflow_is_two_checks(self) -> None:
+        """A suite with no workflow run falls back to its app slug."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="cov", conclusion="FAILURE", suite=10, slug="codecov"),
+                    check(name="cov", conclusion="SUCCESS", suite=20, slug="other-app"),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
+    def test_different_names_are_each_counted(self) -> None:
+        """Two names are two checks whatever their suites."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="lint", conclusion="FAILURE", suite=10, workflow=7),
+                    check(name="build", conclusion="SUCCESS", suite=20, workflow=7),
                 ],
             )
         )

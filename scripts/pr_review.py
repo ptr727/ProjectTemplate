@@ -803,7 +803,8 @@ query($o:String!,$r:String!,$n:Int!){
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ name status conclusion startedAt checkSuite{ app{ slug } } }
+        ... on CheckRun{ databaseId name status conclusion startedAt
+          checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt }
       }}}}}}
   }}}
@@ -2612,15 +2613,16 @@ def check_nodes(pr: dict) -> list[dict]:
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
 
-    Only the newest run of a check name and app counts, since a rerun on one head leaves the
-    superseded run in the rollup. An unstarted rerun has no start stamp and outranks a stamped run.
+    Only the newest run of a check counts, keyed by name and workflow, or by app where the suite has
+    no workflow run. Newest is the integer pair of suite id and check run id, never `startedAt`,
+    because overlapping runs can start in the opposite order to the one that superseded the other.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
     rollup = head_commit(pr).get("statusCheckRollup") or {}
     out: list[dict] = []
-    newest: dict[tuple[str, str], int] = {}
+    newest: dict[tuple, tuple[tuple[int, int], int]] = {}
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
             node = {
@@ -2629,14 +2631,22 @@ def check_nodes(pr: dict) -> list[dict]:
                 "conclusion": n.get("conclusion") or "",
                 "since": n.get("startedAt") or "",
             }
-            app = ((n.get("checkSuite") or {}).get("app") or {}).get("slug") or ""
-            key = (node["name"], app)
+            suite = n.get("checkSuite") or {}
+            workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
+            origin = (
+                ("workflow", workflow)
+                if workflow
+                else ("app", (suite.get("app") or {}).get("slug"))
+            )
+            key = (node["name"], origin)
+            order = (int(suite.get("databaseId") or 0), int(n.get("databaseId") or 0))
             seen = newest.get(key)
             if seen is None:
-                newest[key] = len(out)
+                newest[key] = (order, len(out))
                 out.append(node)
-            elif not node["since"] or (out[seen]["since"] and node["since"] >= out[seen]["since"]):
-                out[seen] = node
+            elif order >= seen[0]:
+                out[seen[1]] = node
+                newest[key] = (order, seen[1])
         elif n.get("__typename") == "StatusContext":
             # A StatusContext reports one field for both, so its state doubles as its conclusion.
             # Its PENDING means the posting system reported the run as under way.
