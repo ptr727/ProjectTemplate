@@ -775,9 +775,24 @@ class TestCompositeActions(TreeCase):
             with self.subTest(guard=guard):
                 self.assertEqual([], self.body_hits(f"if {guard}; then echo ok; fi"))
 
-    def test_the_placeholder_is_a_variable_with_each_newline_continued(self) -> None:
-        text = repo_gate.EXPRESSION.sub(repo_gate.placeholder, "a ${{ x\ny }} b")
-        self.assertEqual("a ${GHA_EXPR}\\\n b", text)
+    def test_a_multiline_expression_collapses_and_returns_its_newlines_after_the_line(self) -> None:
+        text = repo_gate.substitute_expressions("a ${{ x\ny }} b\nnext\n")
+        self.assertEqual("a ${GHA_EXPR} b\n\nnext\n", text)
+
+    def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
+        self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_in_a_comment_does_not_make_code(self) -> None:
+        hits = self.body_hits("# ${{ format(\n  inputs.a) }} trailing text\ncd /tmp")
+        self.assertTrue(hits)
+        self.assertTrue(all("run line 3:" in h for h in hits), hits)
+
+    @NEEDS_DOCKER
+    def test_a_multiline_argument_keeps_a_later_error_on_its_line(self) -> None:
+        hits = self.body_hits("echo ${{ format(\n  inputs.a) }} | cat\ncd /tmp")
+        self.assertTrue(hits)
+        self.assertTrue(all("run line 3:" in h for h in hits), hits)
 
     def test_the_body_goes_to_shellcheck_as_utf8_bytes_at_warning_severity(self) -> None:
         proc = subprocess.CompletedProcess([], 0, b"", b"")

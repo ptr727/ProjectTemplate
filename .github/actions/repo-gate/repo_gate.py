@@ -474,9 +474,32 @@ def step_dialect(shell: object) -> str | None:
     return name if name in {"bash", "sh"} else None
 
 
-def placeholder(match: re.Match[str]) -> str:
-    """A variable standing in for an expression, its newlines continued so line numbers hold."""
-    return "${GHA_EXPR}" + "\\\n" * match.group().count("\n")
+def substitute_expressions(body: str) -> str:
+    """Replace each expression with `${GHA_EXPR}`, keeping every later line at its own number.
+
+    A multi-line expression collapses onto its first line.
+    Its extra newlines return as empty lines after the end of that physical line.
+    A backslash continuation would not hold inside a comment.
+    """
+    out: list[str] = []
+    pending = 0
+    last = 0
+
+    def add(segment: str) -> None:
+        nonlocal pending
+        if pending and "\n" in segment:
+            cut = segment.index("\n")
+            segment = segment[:cut] + "\n" * pending + segment[cut:]
+            pending = 0
+        out.append(segment)
+
+    for match in EXPRESSION.finditer(body):
+        add(body[last : match.start()])
+        out.append("${GHA_EXPR}")
+        pending += match.group().count("\n")
+        last = match.end()
+    add(body[last:])
+    return "".join(out) + "\n" * pending
 
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
@@ -542,7 +565,7 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         label = f"{path} step {index}"
         if step.get("name"):
             label += f" ({step['name']})"
-        hits.extend(shellcheck_body(label, dialect, EXPRESSION.sub(placeholder, body)))
+        hits.extend(shellcheck_body(label, dialect, substitute_expressions(body)))
     return hits
 
 
@@ -583,8 +606,9 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     """Shellcheck every bash or sh `run:` body of a composite action and schema-check the file.
 
     actionlint reads workflows only, so a shell body moved into an action loses both checks.
-    Each `${{ }}` expression becomes `${GHA_EXPR}` and bodies run at warning severity, so substitution noise is not reported.
-    The schema half floats `check-jsonschema@latest` itself, so a stale cached schema is never reused.
+    Each `${{ }}` expression becomes `${GHA_EXPR}`, which makes info and style findings unreliable.
+    Bodies therefore run at warning severity, which is weaker than shellcheck over a `.sh` file.
+    The uvx path of the schema half follows the uvx float policy that validate-task.yml states.
     Each half reports its own missing tool, and the other half still runs.
     """
     actions = action_files(files)
