@@ -1,7 +1,8 @@
 name: Merge bot task
 
 # The fleet merge-bot, hosted here once and reached by every repo through a thin pull_request_target caller pinned to a hub commit.
-# Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push, delete the head on closed when delete-branch is true.
+# Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push.
+# Deletes the head on closed when the caller sets delete-branch to true.
 # - Merge method by base: develop = squash, main = merge, since each base's ruleset allows only that form.
 # - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
 #   Every write uses the App token, so no job here declares a GITHUB_TOKEN scope and the caller grants none.
