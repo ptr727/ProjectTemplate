@@ -2082,7 +2082,20 @@ class TestSentenceLength(BaitCase):
     def test_front_matter_needs_a_closing_line(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         self.assertEqual([(2, "sentence-length")], self.found(f"---\nname: x\n{self.over()}.\n"))
-        self.assertEqual([], self.found(f"---\n{half} here\n{half}\n---\n"))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\n{half} here\n{half}\n---\n"))
+
+    def test_a_thematic_break_with_fences_or_tables_is_not_front_matter(self) -> None:
+        a = " ".join(["word"] * 15)
+        fenced = f"---\n```\n{self.over()}\n```\n---\nShort.\n"
+        table = f"---\n| {a} | x |\n| --- | --- |\n---\nShort.\n"
+        self.assertEqual([], self.found(fenced))
+        self.assertEqual([], self.found(table))
+
+    def test_source_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        for tag in ("<source>", "</style>", "</pre>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
 
     def test_front_matter_has_no_line_reach(self) -> None:
         keys = "".join(f"key{n}: value\n" for n in range(55))
@@ -2091,7 +2104,7 @@ class TestSentenceLength(BaitCase):
 
     def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
         a = " ".join(["word"] * 15)
-        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<source>"):
+        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<search>", "</div>"):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 

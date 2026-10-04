@@ -1713,12 +1713,16 @@ INTERRUPTING_TAGS = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
     "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head"
     "|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
-    "|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul|source"
-    "|pre|script|style|textarea"
+    "|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
-STANDALONE_TAGS = "br|img|picture"
+RAW_TEXT_TAGS = "pre|script|style|textarea"
+STANDALONE_TAGS = "br|img|picture|source"
 TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
-OPENING_TAG = re.compile(rf"^\s*</?(?:({INTERRUPTING_TAGS})|{STANDALONE_TAGS})\b", re.IGNORECASE)
+OPENING_TAG = re.compile(
+    rf"^\s*(?:</?({INTERRUPTING_TAGS})|<({RAW_TEXT_TAGS})|</?(?:{STANDALONE_TAGS}))\b",
+    re.IGNORECASE,
+)
+YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
 TAG = re.compile(r"<[^<>]*>")
 
 
@@ -1729,6 +1733,8 @@ def front_matter_end(lines: list[str]) -> int:
     for j in range(1, len(lines)):
         if lines[j].rstrip("\r") in ("---", "..."):
             return j + 1
+        if not YAML_LINE.match(lines[j].rstrip("\r")):
+            return 0
     return 0
 
 
@@ -1864,12 +1870,12 @@ def sentence_length_findings(
             continue
         tag = OPENING_TAG.match(line)
         if tag and TAGS_ONLY.match(line):
-            if tag.group(1):
+            if tag.group(1) or tag.group(2):
                 flush()
                 continue
             if not block:
                 continue
-        elif tag and tag.group(1):
+        elif tag and (tag.group(1) or tag.group(2)):
             flush()
             text = TAG.sub(lambda m: " " * len(m.group()), line).strip()
             if text:
