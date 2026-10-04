@@ -431,7 +431,9 @@ def single_document(documents: list[object]) -> object:
 
 
 UVX_READER = (
-    "import json, sys, yaml\n"
+    "import sys\n"
+    "sys.path[:] = [p for p in sys.path if p]\n"
+    "import json, yaml\n"
     "def step(item):\n"
     "    if not isinstance(item, dict):\n"
     "        return None\n"
@@ -468,7 +470,6 @@ class UvxUnavailable(Exception):
 
 
 def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run a uvx Python child from this directory, so no module in the checkout shadows its imports."""
     return subprocess.run(
         command,
         capture_output=True,
@@ -476,7 +477,6 @@ def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-        cwd=Path(__file__).resolve().parent,
         check=False,
         timeout=YAML_TIMEOUT,
     )
@@ -489,7 +489,9 @@ def pyyaml_python() -> str:
     uvx = shutil.which("uvx")
     if uvx is None:
         raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
-    probe = "import sys, yaml; print(sys.executable)"
+    probe = (
+        "import sys; sys.path[:] = [p for p in sys.path if p]; import yaml; print(sys.executable)"
+    )
     try:
         result = run_utf8([uvx, "--with", "pyyaml", "python", "-c", probe])
     except subprocess.TimeoutExpired:
@@ -508,7 +510,7 @@ def load_through_uvx(path: Path) -> list[object]:
     """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
     python = pyyaml_python()
     try:
-        result = run_utf8([python, "-c", UVX_READER, str(path.resolve())])
+        result = run_utf8([python, "-c", UVX_READER, str(path)])
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:
