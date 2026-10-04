@@ -23,9 +23,11 @@ Copy `../hub-fetch-run.py` alongside `.pre-commit-config.yaml` (repo root) for t
 to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main` branch and
 runs them, rather than vendoring or pinning a copy. A pin that no tool keeps current goes
 stale by construction, and CI (this repo's own, and the hub's) is the backstop for a change
-that lands broken on `main` before it does real damage locally. These are two more network
-fetches alongside the Docker pulls the VS Code Lint tasks already do. A fetch failure fails
-the commit rather than silently skipping the gate.
+that lands broken on `main` before it does real damage locally. The prose gate adds one
+`api.github.com` commit lookup to its fetch, and an allow-list permitting only
+`raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
+alongside the Docker pulls the VS Code Lint tasks already do. A fetch failure fails the commit
+rather than silently skipping the gate.
 
 Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
 `pre-commit` itself is never added as a project dependency: the lint-only profile has no
