@@ -82,7 +82,7 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **AudioCleaner** (`csharp`, `dotnet-publish`): Husky.Net + doc gates.
 - [ ] **Vantage-Config** (`source-only`): doc-gate half only, no declared language.
 - [ ] **HolidayLights** (`source-only`): doc-gate half only, no declared language.
-- [ ] **Blog** (`hugo`, `source-only`): doc-gate half only, no declared language.
+- [ ] **Blog** (`hugo`, `source-only`, `python`): `pre-commit` framework + doc gates.
 
 <!-- Repo -->
 
