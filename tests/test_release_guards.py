@@ -388,6 +388,32 @@ class ReleaseGuardCase(unittest.TestCase):
         allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
         self.assertTrue(allowed)
         self.assertEqual(allowed, set(re.findall(r'"\$actor" == "([^"]+)"', script)))
+        stub = (REPO / "catalog/snippets/workflows/publish-release.yml").read_text(encoding="utf-8")
+        group = next(line for line in stub.splitlines() if line.startswith("  group:"))
+        self.assertEqual(allowed, set(re.findall(r"github\.actor != '([^']+)'", group)))
+        suffix = re.findall(r"\$\{\{(.*?)\}\}", group)[2]
+        py = (
+            suffix.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("format('-{0}', github.run_id)", "'-' + str(run_id)")
+            .replace("github.event_name", "event")
+            .replace("github.ref", "ref")
+            .replace("github.actor", "actor")
+        )
+
+        def suffix_for(event: str, ref: str, actor: str) -> str:
+            return str(eval(py, {}, {"event": event, "ref": ref, "actor": actor, "run_id": 7}))
+
+        main = "refs/heads/main"
+        self.assertEqual("", suffix_for("workflow_dispatch", "refs/heads/develop", "someone"))
+        self.assertEqual("", suffix_for("schedule", main, "someone"))
+        self.assertEqual("", suffix_for("push", main, "ptr727-codegen[bot]"))
+        self.assertEqual("-7", suffix_for("push", main, "someone"))
+        self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
+        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        stub_name = stub.splitlines()[0]
+        self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
         bot = {"login": "ptr727-codegen[bot]"}
         middle = "e" * 40

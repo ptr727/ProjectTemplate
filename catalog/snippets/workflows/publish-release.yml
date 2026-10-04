@@ -14,8 +14,10 @@ on:
       - 'global.json'
   workflow_dispatch:
 
+# A push the plan cannot publish gets a per-run group, so it never replaces a pending publish.
+# The expression must track publish-plan-task.yml's push rule and actor allowlist.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && (github.ref != 'refs/heads/main' || (github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]')) && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 # GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
