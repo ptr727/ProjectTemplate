@@ -207,7 +207,7 @@ jobs:
           report-uncovered: 'true'
 
       # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
-      # This is the one place the fleet's uvx tools are pinned or floated, decided here, and the repo gate's schema check follows it.
+      # This is the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

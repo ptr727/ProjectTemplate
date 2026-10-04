@@ -416,6 +416,7 @@ SHELLCHECK_IMAGE = "koalaman/shellcheck:stable"
 SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
+DOCKER_TIMEOUT = 30
 
 
 def action_files(files: list[str]) -> list[str]:
@@ -474,21 +475,19 @@ def step_dialect(shell: object) -> str | None:
 
 
 def placeholder(match: re.Match[str]) -> str:
-    """A plain word standing in for an expression, with its newlines kept so line numbers hold."""
-    return "GHA_EXPR" + "\n" * match.group().count("\n")
+    """A variable standing in for an expression, its newlines continued so line numbers hold."""
+    return "${GHA_EXPR}" + "\\\n" * match.group().count("\n")
 
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
     command = ["docker", "run", "--rm", "-i", SHELLCHECK_IMAGE]
-    command += ["-s", dialect, "-e", "SC2154", "-f", "gcc", "-"]
+    command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
     try:
         result = subprocess.run(
             command,
-            input=text,
+            input=text.encode("utf-8"),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
             check=False,
             timeout=SHELLCHECK_TIMEOUT,
         )
@@ -498,10 +497,27 @@ def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
         return [f"{label}: could not start docker for shellcheck: {error}"]
     if result.returncode == 0:
         return []
-    lines = [line.removeprefix("-:") for line in result.stdout.splitlines() if line]
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+    lines = [line.removeprefix("-:") for line in stdout.splitlines() if line]
     if result.returncode == 1 and lines:
-        return [f"{label}: line {line}" for line in lines]
-    return [f"{label}: shellcheck exited {result.returncode}: {result.stderr.strip()}"]
+        return [f"{label}: run line {line}" for line in lines]
+    return [f"{label}: shellcheck exited {result.returncode}: {stderr}"]
+
+
+def docker_unreachable() -> str | None:
+    """The reason no docker daemon answers, or None where one does."""
+    try:
+        result = subprocess.run(
+            ["docker", "info"], capture_output=True, check=False, timeout=DOCKER_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        return f"docker did not answer within {DOCKER_TIMEOUT}s"
+    except OSError as error:
+        return f"docker could not start: {error}"
+    if result.returncode != 0:
+        return f"docker info exited {result.returncode}"
+    return None
 
 
 def check_composite_shell(root: Path, path: str) -> list[str]:
@@ -509,7 +525,9 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         action = load_action(root / path)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         return [f"{path}: could not read the action: {error}"]
-    runs = action.get("runs") if isinstance(action, dict) else None
+    if not isinstance(action, dict):
+        return [f"{path}: could not read the action: the document is not a mapping"]
+    runs = action.get("runs")
     steps = runs.get("steps") if isinstance(runs, dict) else None
     if not isinstance(steps, list):
         return []
@@ -565,7 +583,8 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     """Shellcheck every bash or sh `run:` body of a composite action and schema-check the file.
 
     actionlint reads workflows only, so a shell body moved into an action loses both checks.
-    Each `${{ }}` expression is replaced by a plain word first, so only the surrounding shell is judged.
+    Each `${{ }}` expression becomes `${GHA_EXPR}` and bodies run at warning severity, so substitution noise is not reported.
+    The schema half floats `check-jsonschema@latest` itself, so a stale cached schema is never reused.
     Each half reports its own missing tool, and the other half still runs.
     """
     actions = action_files(files)
@@ -573,8 +592,11 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
         NOTES.append("no composite action file is tracked, so nothing was checked.")
         return []
     hits: list[str] = []
-    if shutil.which("docker") is None:
-        hits.append("docker is not installed, so no run body was shellchecked")
+    unreachable = (
+        "docker is not installed" if shutil.which("docker") is None else docker_unreachable()
+    )
+    if unreachable is not None:
+        hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
         for path in actions:
             hits.extend(check_composite_shell(root, path))
