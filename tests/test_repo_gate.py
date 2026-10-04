@@ -690,6 +690,7 @@ def NEEDS_DOCKER(test: Callable[..., None]) -> Callable[..., None]:
 
 
 NEEDS_SCHEMA = unittest.skipUnless(schema_ready(), "neither uvx nor pipx present")
+NEEDS_UVX = unittest.skipUnless(shutil.which("uvx"), "uvx not present")
 
 
 class TestCompositeActions(TreeCase):
@@ -1009,48 +1010,66 @@ class TestCompositeActions(TreeCase):
         hits = self.shell_hits(self.raw("name: a\n---\nname: b\n"))
         self.assertIn("expected one YAML document, found 2", hits[0])
 
-    def yq_run(self, stdout: str, code: int = 0) -> mock._patch:  # type: ignore[type-arg]
+    def uvx_run(self, stdout: str, code: int = 0) -> mock._patch:  # type: ignore[type-arg]
         proc = self.completed(code, stdout, "bad")
         return mock.patch.object(repo_gate.subprocess, "run", return_value=proc)
 
-    def test_yq_reads_the_action_where_pyyaml_is_absent(self) -> None:
-        payload = '{"runs": {"steps": [{"shell": "bash", "run": "echo $x"}]}}'
+    def test_uvx_reads_the_action_where_pyyaml_is_absent(self) -> None:
+        payload = '[{"runs": {"steps": [{"shell": "bash", "run": "echo $x"}]}}]'
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
-            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
-            self.yq_run(payload),
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
+            self.uvx_run(payload) as run,
             mock.patch.object(repo_gate, "shellcheck_body", return_value=["seen"]) as body,
         ):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertEqual(["seen"], hits)
         self.assertEqual("echo $x", body.call_args.args[2])
+        self.assertEqual(["/u", "--with", "pyyaml", "python"], run.call_args.args[0][:4])
 
-    def test_yq_and_pyyaml_agree_on_a_multi_document_file(self) -> None:
+    def test_the_uvx_reader_counts_documents_like_pyyaml(self) -> None:
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
-            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
-            self.yq_run('{"a": 1}\n{"b": 2}\n'),
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
+            self.uvx_run('[{"a": 1}, {"b": 2}]'),
         ):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertIn("expected one YAML document, found 2", hits[0])
 
-    def test_a_yq_failure_is_a_finding(self) -> None:
+    def test_a_uvx_failure_is_a_finding(self) -> None:
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
-            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
-            self.yq_run("", 1),
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
+            self.uvx_run("", 1),
         ):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
-        self.assertIn("yq could not read the action: bad", hits[0])
+        self.assertEqual(["a/action.yml: could not read the action: bad"], hits)
 
-    def test_no_pyyaml_and_no_yq_is_a_finding(self) -> None:
+    def test_no_pyyaml_and_no_uvx_is_a_finding(self) -> None:
         files = self.action("    - shell: bash\n      run: echo ok\n")
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
             mock.patch.object(repo_gate.shutil, "which", return_value=None),
         ):
             hits = self.shell_hits(files)
-        self.assertIn("neither PyYAML nor yq", hits[0])
+        self.assertIn("neither PyYAML nor uvx", hits[0])
+
+    @NEEDS_UVX
+    def test_uvx_provisions_pyyaml_for_a_real_action(self) -> None:
+        files = self.action("    - name: Greet\n      shell: bash\n      run: echo $x\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        self.assertEqual("echo $x", body.call_args.args[2])
+
+    @NEEDS_UVX
+    def test_uvx_reports_invalid_yaml_for_a_real_action(self) -> None:
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            hits = self.shell_hits(self.raw("runs: [unclosed\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn("could not read the action: invalid YAML:", hits[0])
 
     @NEEDS_SCHEMA
     def test_a_valid_action_passes_the_schema(self) -> None:

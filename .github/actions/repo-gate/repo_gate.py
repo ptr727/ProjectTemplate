@@ -429,35 +429,45 @@ def single_document(documents: list[object]) -> object:
     return documents[0]
 
 
+UVX_READER = (
+    "import json, sys, yaml\n"
+    "try:\n"
+    "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
+    "        documents = list(yaml.safe_load_all(handle))\n"
+    "except yaml.YAMLError as error:\n"
+    "    sys.exit(f'invalid YAML: {error}')\n"
+    "json.dump(documents, sys.stdout, default=str)\n"
+)
+
+
+def load_through_uvx(path: Path) -> list[object]:
+    """Every document of a YAML file, parsed by PyYAML in an interpreter uvx provisions."""
+    uvx = shutil.which("uvx")
+    if uvx is None:
+        raise RuntimeError("neither PyYAML nor uvx is available to read the action")
+    result = subprocess.run(
+        [uvx, "--with", "pyyaml", "python", "-c", UVX_READER, str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=YAML_TIMEOUT,
+    )
+    if result.returncode != 0:
+        raise ValueError(result.stderr.strip() or f"uvx exited {result.returncode}")
+    documents: list[object] = json.loads(result.stdout)
+    return documents
+
+
 def load_action(path: Path) -> object:
-    """The one parsed document of an action file, through PyYAML where importable, else yq."""
+    """The one parsed document of an action file, through PyYAML on every host.
+
+    PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
+    """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
-        yq = shutil.which("yq")
-        if yq is None:
-            raise RuntimeError("neither PyYAML nor yq is available to read the action") from None
-        result = subprocess.run(
-            [yq, "-o=json", ".", str(path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=YAML_TIMEOUT,
-        )
-        if result.returncode != 0:
-            raise ValueError(f"yq could not read the action: {result.stderr.strip()}")
-        decoder = json.JSONDecoder()
-        documents: list[object] = []
-        text, at = result.stdout, 0
-        while True:
-            while at < len(text) and text[at].isspace():
-                at += 1
-            if at >= len(text):
-                break
-            document, at = decoder.raw_decode(text, at)
-            documents.append(document)
-        return single_document(documents)
+        return single_document(load_through_uvx(path))
     try:
         with path.open(encoding="utf-8") as handle:
             return single_document(list(yaml.safe_load_all(handle)))
