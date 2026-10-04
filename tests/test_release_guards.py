@@ -1595,7 +1595,7 @@ gh() {
             job,
         )
 
-        # The matrix comes from the check job's output and the uv setup reads the matrix, so no literal survives between them.
+        # The matrix comes from the test-matrix job's output and the uv setup reads the matrix, so no literal survives between them.
         self.assertIn("      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}\n", job)
         self.assertIn(
             "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
@@ -1705,14 +1705,16 @@ gh() {
         the step admitted everything.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        unit_test = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
 
-        # The guard has to precede the steps it guards, so its position is asserted, not just its presence.
+        # The guard has to precede the build it guards, and the unit-test job runs only after this job.
         # Matched on the dash rather than on a name: key, or a step leading with uses: would slip in ahead unseen.
-        first_step = re.search(r"(?m)^      - (.*)$", job)
-        self.assertIsNotNone(first_step)
-        assert first_step is not None
-        self.assertEqual("name: Validate python-versions input step", first_step.group(1))
+        steps = re.findall(r"(?m)^      - (.*)$", job)
+        guard = steps.index("name: Validate python-versions input step")
+        self.assertLess(guard, steps.index("name: Build unit-test matrix step"))
+        self.assertNotIn("Validate python-versions input step", unit_test)
+        self.assertIn("    needs: test-matrix\n", unit_test)
 
         marker = "      - name: Validate python-versions input step\n"
         self.assertIn(marker, job)
@@ -1728,6 +1730,7 @@ gh() {
             lines.append(line[10:])
         script = "\n".join(lines)
         self.assertIn("jq -e", script)
+        self.assertIn("::error::The python-versions input must be", script)
 
         cases = {
             # Reachable: a non-empty JSON array expands into legs whatever its entries hold.
@@ -1741,8 +1744,6 @@ gh() {
             "[3.13, 3.14]": 1,
             # The integer form of it, which uv resolves rather than refuses.
             "[3]": 1,
-            # Unreachable while python-versions expands into the matrix, since each of these fails there first.
-            # With test-matrix set nothing expands it, so this step alone must reject them.
             '["3.13"] ["3.14"]': 1,
             "[]": 1,
             '"3.13"': 1,
