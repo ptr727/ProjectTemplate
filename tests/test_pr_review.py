@@ -4770,7 +4770,7 @@ class TestCheckShapes(unittest.TestCase):
         return [n["conclusion"] for n in nodes]
 
     def test_a_newer_suite_supersedes_an_older_one_in_either_order(self) -> None:
-        """A close and reopen makes a new suite, and its run is the one that gates."""
+        """A close and reopen makes a new suite, and its runs are the ones that gate."""
         failed = check(name="lint", conclusion="FAILURE", suite=10, run=100, workflow=7)
         passed = check(name="lint", conclusion="SUCCESS", suite=20, run=200, workflow=7)
         self.assertEqual(["SUCCESS"], self.conclusions(failed, passed))
@@ -4794,18 +4794,24 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(["SUCCESS"], self.conclusions(old, new))
         self.assertEqual(["SUCCESS"], self.conclusions(new, old))
 
-    def test_a_rerun_inside_one_suite_is_decided_by_the_check_run_id(self) -> None:
-        """A rerun keeps its suite, so only the check run id orders the two."""
-        first = check(name="lint", conclusion="FAILURE", suite=10, run=100, workflow=7)
-        rerun = check(name="lint", conclusion="SUCCESS", suite=10, run=150, workflow=7)
-        self.assertEqual(["SUCCESS"], self.conclusions(first, rerun))
-        self.assertEqual(["SUCCESS"], self.conclusions(rerun, first))
+    def test_same_named_jobs_inside_one_suite_are_all_counted(self) -> None:
+        """Two jobs can share a display name, and collapsing them could hide the failing one."""
+        ok = check(name="build", conclusion="SUCCESS", suite=10, run=100, workflow=7)
+        bad = check(name="build", conclusion="FAILURE", suite=10, run=101, workflow=7)
+        self.assertEqual(["SUCCESS", "FAILURE"], self.conclusions(ok, bad))
+        self.assertEqual(["FAILURE", "SUCCESS"], self.conclusions(bad, ok))
 
-    def test_ids_compare_as_integers_not_as_strings(self) -> None:
-        """Nine sorts after ten as text, which would keep the older of the two."""
-        old = check(name="lint", conclusion="FAILURE", suite=9, workflow=7)
-        new = check(name="lint", conclusion="SUCCESS", suite=10, workflow=7)
+    def test_a_nine_digit_suite_id_is_older_than_a_ten_digit_one(self) -> None:
+        """Suite ids order as integers, so a longer id wins even where text order says otherwise."""
+        old = check(name="lint", conclusion="FAILURE", suite=999999999, workflow=7)
+        new = check(name="lint", conclusion="SUCCESS", suite=1000000000, workflow=7)
         self.assertEqual(["SUCCESS"], self.conclusions(old, new))
+
+    def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
+        """A node missing its suite reads as suite zero under no workflow and no app."""
+        bare = check(name="lint")
+        bare.pop("checkSuite")
+        self.assertEqual(["SUCCESS"], self.conclusions(bare))
 
     def test_the_same_name_in_two_workflows_is_two_checks(self) -> None:
         """Two workflows can each have a `build` job under one app, and neither hides the other."""
@@ -4834,13 +4840,13 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual((1, 2), pr_review.checks_tally(nodes))
 
     def test_different_names_are_each_counted(self) -> None:
-        """Two names are two checks whatever their suites."""
+        """Two names in one suite are two checks."""
         nodes = pr_review.check_nodes(
             payload(
                 [review()],
                 checks=[
                     check(name="lint", conclusion="FAILURE", suite=10, workflow=7),
-                    check(name="build", conclusion="SUCCESS", suite=20, workflow=7),
+                    check(name="build", conclusion="SUCCESS", suite=10, workflow=7),
                 ],
             )
         )

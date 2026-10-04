@@ -2613,24 +2613,20 @@ def check_nodes(pr: dict) -> list[dict]:
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
 
-    Only the newest run of a check counts, keyed by name and workflow, or by app where the suite has
-    no workflow run. Newest is the integer pair of suite id and check run id, never `startedAt`,
-    because overlapping runs can start in the opposite order to the one that superseded the other.
+    Per origin, only the newest check suite counts, and every check run inside it is kept.
+    An origin is the workflow, or the app where the suite has no workflow run.
+    Newest is the highest suite id, since `startedAt` misorders overlapping runs.
+    A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
     rollup = head_commit(pr).get("statusCheckRollup") or {}
     out: list[dict] = []
-    newest: dict[tuple, tuple[tuple[int, int], int]] = {}
+    newest_suite: dict[tuple, int] = {}
+    suites: dict[int, tuple[tuple, int]] = {}
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
-            node = {
-                "name": n.get("name") or "",
-                "state": n.get("status") or "",
-                "conclusion": n.get("conclusion") or "",
-                "since": n.get("startedAt") or "",
-            }
             suite = n.get("checkSuite") or {}
             workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
             origin = (
@@ -2638,15 +2634,17 @@ def check_nodes(pr: dict) -> list[dict]:
                 if workflow
                 else ("app", (suite.get("app") or {}).get("slug"))
             )
-            key = (node["name"], origin)
-            order = (int(suite.get("databaseId") or 0), int(n.get("databaseId") or 0))
-            seen = newest.get(key)
-            if seen is None:
-                newest[key] = (order, len(out))
-                out.append(node)
-            elif order >= seen[0]:
-                out[seen[1]] = node
-                newest[key] = (order, seen[1])
+            suite_id = int(suite.get("databaseId") or 0)
+            newest_suite[origin] = max(newest_suite.get(origin, 0), suite_id)
+            suites[len(out)] = (origin, suite_id)
+            out.append(
+                {
+                    "name": n.get("name") or "",
+                    "state": n.get("status") or "",
+                    "conclusion": n.get("conclusion") or "",
+                    "since": n.get("startedAt") or "",
+                }
+            )
         elif n.get("__typename") == "StatusContext":
             # A StatusContext reports one field for both, so its state doubles as its conclusion.
             # Its PENDING means the posting system reported the run as under way.
@@ -2679,7 +2677,8 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
-    return out
+    stale = {i for i, (origin, sid) in suites.items() if sid < newest_suite[origin]}
+    return [node for i, node in enumerate(out) if i not in stale]
 
 
 def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
