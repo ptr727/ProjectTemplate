@@ -148,6 +148,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 - **The fix stays inside this repository's tree.** It changes no repository setting, ruleset,
   visibility, secret, or release condition, and needs no credential, account, or host the session
   lacks.
+- **The fix edits nothing under the hub's `host-setup/agent-safety/`.** That tree is the agent's
+  own guard, and it is worked only in an attended session, so a human approves every change to it.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
   which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
