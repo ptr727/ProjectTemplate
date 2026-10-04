@@ -343,7 +343,6 @@ def check(
     conclusion: str = "SUCCESS",
     started: str | None = None,
     suite: int = 1,
-    run: int = 1,
     workflow: int | None = None,
     slug: str = "github-actions",
 ) -> dict:
@@ -360,7 +359,6 @@ def check(
         "status": status,
         "conclusion": conclusion,
         "startedAt": ago(60) if started is None else started,
-        "databaseId": run,
         "checkSuite": {
             "databaseId": suite,
             "app": {"slug": slug},
@@ -4771,8 +4769,8 @@ class TestCheckShapes(unittest.TestCase):
 
     def test_a_newer_suite_supersedes_an_older_one_in_either_order(self) -> None:
         """A close and reopen makes a new suite, and its runs are the ones that gate."""
-        failed = check(name="lint", conclusion="FAILURE", suite=10, run=100, workflow=7)
-        passed = check(name="lint", conclusion="SUCCESS", suite=20, run=200, workflow=7)
+        failed = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
+        passed = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
         self.assertEqual(["SUCCESS"], self.conclusions(failed, passed))
         self.assertEqual(["SUCCESS"], self.conclusions(passed, failed))
 
@@ -4784,27 +4782,33 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(["FAILURE"], self.conclusions(passed, failed))
 
     def test_start_time_does_not_decide_which_overlapping_run_is_newer(self) -> None:
-        """The superseded suite's job can start later and carry the higher check run id."""
-        old = check(
-            name="lint", conclusion="FAILURE", suite=10, run=900, workflow=7, started=ago(58)
-        )
-        new = check(
-            name="lint", conclusion="SUCCESS", suite=20, run=800, workflow=7, started=ago(60)
-        )
+        """The superseded suite's job can start later and start later."""
+        old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7, started=ago(58))
+        new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7, started=ago(60))
         self.assertEqual(["SUCCESS"], self.conclusions(old, new))
         self.assertEqual(["SUCCESS"], self.conclusions(new, old))
 
     def test_same_named_jobs_inside_one_suite_are_all_counted(self) -> None:
         """Two jobs can share a display name, and collapsing them could hide the failing one."""
-        ok = check(name="build", conclusion="SUCCESS", suite=10, run=100, workflow=7)
-        bad = check(name="build", conclusion="FAILURE", suite=10, run=101, workflow=7)
+        ok = check(name="build", conclusion="SUCCESS", suite=10, workflow=7)
+        bad = check(name="build", conclusion="FAILURE", suite=10, workflow=7)
         self.assertEqual(["SUCCESS", "FAILURE"], self.conclusions(ok, bad))
         self.assertEqual(["FAILURE", "SUCCESS"], self.conclusions(bad, ok))
 
-    def test_a_nine_digit_suite_id_is_older_than_a_ten_digit_one(self) -> None:
-        """Suite ids order as integers, so a longer id wins even where text order says otherwise."""
-        old = check(name="lint", conclusion="FAILURE", suite=999999999, workflow=7)
-        new = check(name="lint", conclusion="SUCCESS", suite=1000000000, workflow=7)
+    def test_a_name_only_the_older_suite_carries_is_kept(self) -> None:
+        """The merge gate still reads a name the newer suite no longer produces."""
+        old_only = check(name="leg", conclusion="FAILURE", suite=10, workflow=7)
+        shared_old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
+        shared_new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
+        self.assertEqual(["FAILURE", "SUCCESS"], self.conclusions(old_only, shared_old, shared_new))
+        self.assertEqual(
+            ["FAILURE", "SUCCESS"], self.conclusions(shared_new, shared_old, old_only)[::-1]
+        )
+
+    def test_a_name_in_both_suites_resolves_to_the_newer_suite(self) -> None:
+        """Only the newer suite's run of a shared name is read."""
+        old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
+        new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
         self.assertEqual(["SUCCESS"], self.conclusions(old, new))
 
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:

@@ -803,7 +803,7 @@ query($o:String!,$r:String!,$n:Int!){
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ databaseId name status conclusion startedAt
+        ... on CheckRun{ name status conclusion startedAt
           checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt }
       }}}}}}
@@ -2613,9 +2613,10 @@ def check_nodes(pr: dict) -> list[dict]:
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
 
-    Per origin, only the newest check suite counts, and every check run inside it is kept.
-    An origin is the workflow, or the app where the suite has no workflow run.
-    Newest is the highest suite id, since `startedAt` misorders overlapping runs.
+    Runs group by workflow and name, or by app and name where the suite has no workflow run.
+    Each group keeps every run of its highest suite id and drops its runs from older suites.
+    A name only an older suite carries stays, since the merge gate still reads it.
+    The highest suite id decides, since `startedAt` misorders overlapping runs.
     A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
@@ -2634,9 +2635,11 @@ def check_nodes(pr: dict) -> list[dict]:
                 if workflow
                 else ("app", (suite.get("app") or {}).get("slug"))
             )
-            suite_id = int(suite.get("databaseId") or 0)
-            newest_suite[origin] = max(newest_suite.get(origin, 0), suite_id)
-            suites[len(out)] = (origin, suite_id)
+            suite_id = suite.get("databaseId") or 0
+            name = n.get("name") or ""
+            group = (origin, name)
+            newest_suite[group] = max(newest_suite.get(group, 0), suite_id)
+            suites[len(out)] = (group, suite_id)
             out.append(
                 {
                     "name": n.get("name") or "",
@@ -2677,7 +2680,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
-    stale = {i for i, (origin, sid) in suites.items() if sid < newest_suite[origin]}
+    stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
     return [node for i, node in enumerate(out) if i not in stale]
 
 
