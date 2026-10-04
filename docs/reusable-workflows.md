@@ -128,7 +128,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
+- [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding. Its runs fail at the app-token step until the maintainer adds the `CODEGEN_APP_CLIENT_ID` and `CODEGEN_APP_PRIVATE_KEY` secrets the audit reports missing.
 - [x] LanguageTags (`delete-branch: true`): adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] aiopurpleair (`delete-branch: true`): adopted on `develop` in ptr727/aiopurpleair#103 at `3b69dc3`, merged 2026-09-09 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] MediaTools (`delete-branch: true`): adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
@@ -193,7 +193,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
   - [ ] PhotoCleaner (`get-version-task.yml`)
   - [ ] PlexCleaner (`get-version-task.yml`, and gains the `plan` job D4.1 requires by adopting `publish-plan-task.yml` rather than by a copy)
   - [ ] VSCode-Server-DotNetCore (`get-version-task.yml`)
-  - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `publish-plan-task.yml`, in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
+  - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `build-release-task.yml`, which calls `get-version-task.yml`, in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
   - [ ] aiopurpleair (`get-version-task.yml`)
   - [ ] homeassistant-purpleair (`get-version-task.yml`)
   - [ ] Utilities (`publish-plan-task.yml`)
