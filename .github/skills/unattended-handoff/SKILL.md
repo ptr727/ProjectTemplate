@@ -152,11 +152,16 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
   which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
   refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes.
-  No open pull request names it, and no pull request whose squash commit is in
-  `origin/main..origin/develop` names it anywhere in its body, since a fix merged to develop leaves
-  its issue open until it is promoted, whoever merged it. No open handoff on any track names it in
-  its next steps, and no comment on it claims it for a `backlog-burndown` group, since both mark
-  work that has no pull request yet.
+  No open pull request body names it in a fix-intent reference, and no body of a pull request whose
+  squash commit is in `origin/main..origin/develop` does, since a fix merged to develop leaves its
+  issue open until it is promoted, whoever merged it. A fix-intent reference is
+  `Closes on promotion:`, `Addresses`, or `Closes`, `Fixes`, or `Resolves` in any of GitHub's
+  closing-keyword forms, and it names every issue listed after it. Any other mention, such as an
+  issue the pull request filed along the way, does not exclude the issue. The set is wider than the
+  `Closes on promotion:` line a promotion closes from, because excluding a fixed issue only delays
+  it until the next promotion, while taking one redoes finished work. No open handoff on any track
+  names it in its next steps, and no comment on it claims it for a `backlog-burndown` group, since
+  both mark work that has no pull request yet.
 
 ## The Picker
 
