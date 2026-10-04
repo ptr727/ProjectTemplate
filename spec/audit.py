@@ -23,13 +23,19 @@ LETTER, or ERROR finding.
 Usage: python3 spec/audit.py [RepoName ...] [--branch REF]   (default: every cataloged repo,
 each read at its registry groundTruthBranch). --branch overrides that branch for the run, so a
 convergence can be verified before it is promoted, without editing the registry.
+
+A shallow hub clone cannot answer the stale-vs-modified classification or the intent staleness
+advisory. A sweep then reports one ERROR per repo and exits non-zero.
+`--issue` exits 2 with the error on stderr. The error says: Run `git fetch --unshallow origin` in that checkout.
 """
 
 import argparse
 import base64
+import contextlib
 import fnmatch
 import functools
 import hashlib
+import io
 import itertools
 import json
 import locale
@@ -2268,6 +2274,35 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
+class ShallowCloneError(RuntimeError):
+    """The hub checkout is a shallow clone, a hub-local condition rather than a repo finding."""
+
+
+@functools.cache
+def _require_full_history(root):
+    """Raise when `root` is a shallow clone, since every history read there is silently wrong.
+
+    The probe is the git-path `shallow` file, which every git version writes for a shallow clone.
+    Git before 2.15 echoes an unknown `--is-shallow-repository` flag, so that flag proves nothing.
+    """
+    probe = subprocess.run(
+        ["git", "rev-parse", "--git-path", "shallow"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=root,
+        check=False,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        return
+    if (pathlib.Path(root) / probe.stdout.strip()).exists():
+        raise ShallowCloneError(
+            f"the hub checkout at {root} is a shallow clone, so the stale-vs-modified "
+            "classification and the intent staleness advisory would be wrong. "
+            "Run `git fetch --unshallow origin` in that checkout."
+        )
+
+
 @functools.cache
 def _hub_main_rev():
     """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA.
@@ -2323,6 +2358,7 @@ def _git_revisions(rel_path, rev=None):
     plain local branch in a throwaway repo with no `origin` to fetch, keeping the offline engine
     self-test offline.
     """
+    _require_full_history(ROOT)
     walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
         ["git", "log", "--format=%cI %H", walk_rev, "--", rel_path],
@@ -2436,6 +2472,7 @@ def git_blob_in_file_history(rel_path, blob_sha, rev=None):
     `main`, and a develop-only revision matching `blob_sha` must not read as "stale" against a
     hub history `main` doesn't actually contain.
     """
+    _require_full_history(ROOT)
     walk_rev = _hub_main_rev() if rev is None else rev
     result = subprocess.run(
         ["git", "log", "--format=%H", f"--find-object={blob_sha}", walk_rev, "--", rel_path],
@@ -4661,6 +4698,136 @@ def _selftest():
             "  ok   branch-drift: behind (modify/delete develop still at base) vs diverged (both moved), develop-only excluded"
         )
 
+    with tempfile.TemporaryDirectory() as tmp_root:
+        tmp_path = pathlib.Path(tmp_root)
+        full = tmp_path / "full"
+        full.mkdir()
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+            ["git", "config", "commit.gpgsign", "false"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "one"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "two"],
+        ):
+            subprocess.run(cmd, cwd=full, check=True, capture_output=True)
+        shallow = tmp_path / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", full.as_uri(), str(shallow)],
+            check=True,
+            capture_output=True,
+        )
+        saved_root = ROOT
+        try:
+            for label, root, want_refuse in (("shallow", shallow, True), ("full", full, False)):
+                ROOT = root
+                _require_full_history.cache_clear()
+                _git_revisions.cache_clear()
+                git_blob_in_file_history.cache_clear()
+                reads = (
+                    ("revisions", lambda: _git_revisions("absent.txt", rev="HEAD")),
+                    ("blob", lambda: git_blob_in_file_history("absent.txt", "0" * 40, rev="HEAD")),
+                )
+                for read, call in reads:
+                    try:
+                        call()
+                        msg = None
+                    except ShallowCloneError as e:
+                        msg = str(e)
+                    good = (msg is not None) == want_refuse
+                    if want_refuse:
+                        good = (
+                            good and "Run `git fetch --unshallow origin` in that checkout." in msg
+                        )
+                    if not good:
+                        ok = False
+                    print(
+                        f"  {'ok  ' if good else 'FAIL'} shallow-clone guard: {label} clone, {read}"
+                    )
+        finally:
+            ROOT = saved_root
+            _require_full_history.cache_clear()
+            _git_revisions.cache_clear()
+            git_blob_in_file_history.cache_clear()
+
+    with tempfile.TemporaryDirectory() as tmp_root:
+        hub_dir = pathlib.Path(tmp_root) / "hub"
+        hub_dir.mkdir()
+        rels = (
+            "registry/repos.json",
+            "repo-config/settings.json",
+            "spec/secrets.json",
+            "spec/files.json",
+            "spec/project-types.json",
+            "spec/readme-sections.json",
+            "spec/third-party-tools.json",
+            "spec/divergences.json",
+        )
+        for rel in rels:
+            (hub_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub_dir / rel).write_bytes((ROOT / rel).read_bytes())
+        for cmd in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@test.invalid"],
+            ["git", "config", "user.name", "test"],
+            ["git", "config", "commit.gpgsign", "false"],
+            ["git", "add", "."],
+            ["git", "commit", "-q", "-m", "one"],
+            ["git", "commit", "-q", "--allow-empty", "-m", "two"],
+        ):
+            subprocess.run(cmd, cwd=hub_dir, check=True, capture_output=True)
+        shallow_hub = pathlib.Path(tmp_root) / "shallow-hub"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", hub_dir.as_uri(), str(shallow_hub)],
+            check=True,
+            capture_output=True,
+        )
+        name = next(
+            r["name"]
+            for r in load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        )
+        saved_root = ROOT
+        saved_audit_repo = audit_repo
+
+        def history_read_only(entry, spec, branch=None):
+            _git_revisions("absent.txt", rev="HEAD")
+            return [], ""
+
+        try:
+            ROOT = shallow_hub
+            globals()["audit_repo"] = history_read_only
+            for flag_argv, label, want_code in (
+                ([name], "sweep", 1),
+                (["--issue", name], "issue", 2),
+            ):
+                _require_full_history.cache_clear()
+                _git_revisions.cache_clear()
+                out, err = io.StringIO(), io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        code = main(flag_argv)
+                except Exception as e:  # noqa: BLE001
+                    code = f"raised {type(e).__name__}"
+                text = out.getvalue() if label == "sweep" else err.getvalue()
+                good = (
+                    code == want_code
+                    and "Run `git fetch --unshallow origin` in that checkout." in text
+                    and (label == "sweep" or not out.getvalue())
+                )
+                if label == "sweep":
+                    good = good and "ERROR" in text
+                if not good:
+                    ok = False
+                print(
+                    f"  {'ok  ' if good else 'FAIL'} shallow-clone refusal, public {label} path (code {code})"
+                )
+        finally:
+            ROOT = saved_root
+            globals()["audit_repo"] = saved_audit_repo
+            _require_full_history.cache_clear()
+            _git_revisions.cache_clear()
+
     # CLI parsing, where a repo name and a flag value must not be confused for one another.
     # The previous hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have audited a repo called "develop" rather than overriding the branch.
     cli_cases = [
@@ -6745,6 +6912,9 @@ def main(argv=None):
         entry = repos[0]
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
+        except ShallowCloneError as e:
+            print(e, file=sys.stderr)
+            return 2
         # An unverifiable audit still produces an honest issue.
         except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
