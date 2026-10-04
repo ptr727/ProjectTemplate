@@ -7,6 +7,8 @@ Usage: hub-fetch-run.py <hub-relative-path> [script-args...]
 Example: hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
 """
 
+import os
+import re
 import runpy
 import subprocess
 import sys
@@ -15,8 +17,24 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-HUB_RAW_BASE = "https://raw.githubusercontent.com/ptr727/ProjectTemplate/main"
+HUB_REPO = "ptr727/ProjectTemplate"
+HUB_RAW_BASE = f"https://raw.githubusercontent.com/{HUB_REPO}"
+HUB_MAIN_SHA_URL = f"https://api.github.com/repos/{HUB_REPO}/commits/main"
+PROVENANCE_VAR = "PROSE_GATE_PROVENANCE"
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def resolve_main_commit() -> str | None:
+    """Return the full commit hash `main` points at now, or None when it cannot be resolved."""
+    request = urllib.request.Request(
+        HUB_MAIN_SHA_URL, headers={"Accept": "application/vnd.github.sha"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            sha = response.read().decode().strip()
+    except (urllib.error.URLError, OSError):
+        return None
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
 def head_is_unborn() -> bool:
@@ -72,7 +90,9 @@ def main(argv: list[str]) -> int:
         )
         return 2
     hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
-    url = f"{HUB_RAW_BASE}/{hub_path}"
+    commit = resolve_main_commit()
+    ref = commit or "main"
+    url = f"{HUB_RAW_BASE}/{ref}/{hub_path}"
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
             content = response.read()
@@ -84,6 +104,10 @@ def main(argv: list[str]) -> int:
         handle.write(content)
         tmp_path = Path(handle.name)
     old_argv = sys.argv
+    old_provenance = os.environ.get(PROVENANCE_VAR)
+    if not (old_provenance or "").strip():
+        suffix = "" if commit else " (commit unresolved)"
+        os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{ref}{suffix}"
     try:
         sys.argv = [str(tmp_path), *script_args]
         try:
@@ -95,6 +119,10 @@ def main(argv: list[str]) -> int:
         return 0
     finally:
         sys.argv = old_argv
+        if old_provenance is None:
+            os.environ.pop(PROVENANCE_VAR, None)
+        else:
+            os.environ[PROVENANCE_VAR] = old_provenance
         tmp_path.unlink(missing_ok=True)
 
 
