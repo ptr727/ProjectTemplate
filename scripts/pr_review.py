@@ -2186,7 +2186,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
         return (
-            f"the reviewer names {len(named)} files in its own table and the diff could not "
+            f"the reviewer names {len(named)} rows in its own table and the diff could not "
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )

@@ -3983,6 +3983,8 @@ class TestCoverageExitCodes(GqlCase):
         self.assertEqual("", pr_review.table_shortfall(pr))
         pr = payload([review(body=self.balanced(["app/[id]/*.tsx"]))], files=["app/i/page.tsx"])
         self.assertIn("names app/[id]/*.tsx, which the diff", pr_review.table_shortfall(pr))
+        pr = payload([review(body=self.balanced(["app/[id]*.tsx"]))], files=["app/i.tsx"])
+        self.assertIn("names app/[id]*.tsx, which the diff", pr_review.table_shortfall(pr))
 
     def test_a_shortened_row_reads_a_wildcard_in_its_text_literally(self) -> None:
         """A long title can carry a `?`, and the gap is what shortened it."""
