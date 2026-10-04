@@ -4754,6 +4754,38 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="PENDING", conclusion="", started=ago(900)))
         )
 
+    def test_only_the_newest_run_of_a_check_counts(self) -> None:
+        """A rerun on one head leaves the superseded run in the rollup, and it must not gate."""
+        failed = check(name="lint", conclusion="FAILURE", started=ago(600))
+        passed = check(name="lint", conclusion="SUCCESS", started=ago(60))
+        for runs in ([failed, passed], [passed, failed]):
+            nodes = pr_review.check_nodes(payload([review()], checks=runs))
+            self.assertEqual([("lint", "SUCCESS")], [(n["name"], n["conclusion"]) for n in nodes])
+            self.assertEqual((1, 1), pr_review.checks_tally(nodes))
+        rerun = check(name="lint", status="IN_PROGRESS", conclusion="", started=ago(30))
+        (nodes_one,) = pr_review.check_nodes(payload([review()], checks=[failed, rerun]))
+        self.assertEqual("IN_PROGRESS", nodes_one["state"])
+
+    def test_the_newest_run_failing_reads_failed(self) -> None:
+        """The older green run is the superseded one here, so the newest failure stands."""
+        passed = check(name="lint", conclusion="SUCCESS", started=ago(600))
+        failed = check(name="lint", conclusion="FAILURE", started=ago(60))
+        (node,) = pr_review.check_nodes(payload([review()], checks=[failed, passed]))
+        self.assertEqual("FAILURE", node["conclusion"])
+
+    def test_different_checks_are_each_counted(self) -> None:
+        """Dedup keys on the check name, so two names are two checks."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="lint", conclusion="FAILURE", started=ago(600)),
+                    check(name="build", conclusion="SUCCESS", started=ago(60)),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
     def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
         """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
         self.assertEqual([], pr_review.check_nodes(payload([review()])))
@@ -4820,7 +4852,9 @@ class TestDigestReportsChecks(GqlCase):
 
     def test_a_green_pull_request_carries_no_stuck_field_at_all(self) -> None:
         """A field reading `none` on every green run is one a reader skips on the run it matters."""
-        out = self.digest(payload([review()], checks=[check(), check(conclusion="SKIPPED")]))
+        out = self.digest(
+            payload([review()], checks=[check(), check(name="other", conclusion="SKIPPED")])
+        )
         self.assertIn("checks=2/2", out)
         self.assertNotIn("stuck=", out)
 
