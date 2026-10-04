@@ -1444,6 +1444,24 @@ gh() {
         self.assertIn("uv pip install -e .", job)
         self.assertIn('"project" not in tomllib.load', job)
 
+    def test_validator_test_matrix_hook_runs_between_install_and_pytest(self) -> None:
+        """A dependency-version leg overrides installed versions after the base install and before pytest."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+
+        order = [
+            job.index("name: Check caller install-test-deps hook step"),
+            job.index("name: Install Python dependencies step"),
+            job.index("uses: ./.github/actions/install-test-deps"),
+            job.index("name: Run Python tests step"),
+        ]
+        self.assertEqual(sorted(order), order)
+
+        self.assertIn("is set but .github/actions/install-test-deps/action.yml is missing", job)
+        self.assertIn("leg: ${{ toJSON(matrix) }}", job)
+
+        self.assertIn("uv run --no-sync pytest --cov-report=xml", job)
+
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
 
@@ -1465,18 +1483,27 @@ gh() {
 
         # An explicit name: is used verbatim rather than falling back to a matrix-suffixed default.
         # Without the interpolation every leg renders one indistinguishable check name.
-        self.assertIn("    name: Unit test job (Python ${{ matrix.python-version }})\n", job)
+        self.assertIn(
+            "    name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})\n",
+            job,
+        )
 
         # The matrix reads the input and the uv setup reads the matrix, so no literal survives between them.
-        self.assertIn("        python-version: ${{ fromJSON(inputs.python-versions) }}\n", job)
-        self.assertIn("          python-version: ${{ matrix.python-version }}\n", job)
+        self.assertIn(
+            "inputs.test-matrix == '' && format('{{\"python-version\":{0}}}', inputs.python-versions)",
+            job,
+        )
+        self.assertIn(
+            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
+            job,
+        )
         self.assertNotIn('python-version: "', job)
 
         # One interpreter failing must not cancel the others, which is what a second leg is run to learn.
         self.assertIn("      fail-fast: false\n", job)
 
         # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
-        self.assertIn("          flags: python-${{ matrix.python-version }}\n", job)
+        self.assertIn("          flags: python-${{ matrix.label || matrix.python-version }}\n", job)
 
     def test_validator_checks_out_the_triggering_commit(self) -> None:
         """A ref: on any checkout moves the gate off the commit a publisher releases.

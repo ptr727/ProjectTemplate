@@ -3,7 +3,7 @@ name: Validate task
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
 # Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories and python-versions are the four optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: '["3.13"]'
+      test-matrix:
+        description: JSON array of objects, one pytest leg per entry, each with a non-empty string label and an optional python-version defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        required: false
+        type: string
+        default: ''
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -410,15 +415,14 @@ jobs:
   # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
   unit-test:
-    name: Unit test job (Python ${{ matrix.python-version }})
+    name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       # A failing interpreter must not cancel its siblings, since which of them fail is the whole point of running more than one.
       fail-fast: false
-      matrix:
-        python-version: ${{ fromJSON(inputs.python-versions) }}
+      matrix: ${{ fromJSON(inputs.test-matrix == '' && format('{{"python-version":{0}}}', inputs.python-versions) || format('{{"include":{0}}}', inputs.test-matrix)) }}
 
     steps:
 
@@ -444,8 +448,33 @@ jobs:
             exit 1
           fi
 
+      - name: Validate test-matrix input step
+        if: ${{ inputs.test-matrix != '' }}
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.label | type == "string" and test("\\S")))' <<<"$TEST_MATRIX" >/dev/null 2>&1; then
+            escaped=${TEST_MATRIX//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a non-empty string label, got: $escaped"
+            exit 1
+          fi
+
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check caller install-test-deps hook step
+        if: ${{ inputs.test-matrix != '' }}
+        env:
+          HOOK_FOUND: ${{ hashFiles('.github/actions/install-test-deps/action.yml') != '' }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$HOOK_FOUND" != "true" ]]; then
+            echo "::error::The test-matrix input is set but .github/actions/install-test-deps/action.yml is missing."
+            exit 1
+          fi
 
       - name: Setup .NET SDK step
         if: hashFiles('**/*Tests*.csproj') != ''
@@ -496,8 +525,51 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}
           ignore-nothing-to-cache: true
+
+      - name: Install Python dependencies step
+        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
+        run: |
+          set -Eeuo pipefail
+          install_requirements() {
+            if [ -n "${PIP_PYTHON:-}" ]; then
+              export UV_PYTHON="$PIP_PYTHON"
+            fi
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            if [ "$DECLARED" != "true" ] && [ ! -d "$dir/tests" ]; then
+              continue
+            fi
+            (
+              cd "$dir"
+              case "$kind" in
+              uv) uv sync --all-groups --frozen ;;
+              pip) install_requirements ;;
+              esac
+            ) < /dev/null
+          done <<< "$PYTHON_PROJECTS"
+
+      - name: Run caller install-test-deps hook step
+        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        uses: ./.github/actions/install-test-deps
+        with:
+          leg: ${{ toJSON(matrix) }}
+          directories: ${{ steps.python.outputs.projects }}
 
       # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
       # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
@@ -510,6 +582,7 @@ jobs:
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
+          HOOK_LEG: ${{ inputs.test-matrix != '' }}
         run: |
           set -Eeuo pipefail
           # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
@@ -553,11 +626,17 @@ jobs:
               cd "$dir"
               case "$kind" in
               uv)
-                uv sync --all-groups --frozen
-                uv run pytest --cov-report=xml
+                if [ "${HOOK_LEG:-false}" = "true" ]; then
+                  uv run --no-sync pytest --cov-report=xml
+                else
+                  uv sync --all-groups --frozen
+                  uv run pytest --cov-report=xml
+                fi
                 ;;
               pip)
-                install_requirements
+                if [ "${HOOK_LEG:-false}" != "true" ]; then
+                  install_requirements
+                fi
                 .venv/bin/python -m pytest --cov-report=xml
                 ;;
               lint-only)
@@ -589,7 +668,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ steps.python-tests.outputs.files }}
-          flags: python-${{ matrix.python-version }}
+          flags: python-${{ matrix.label || matrix.python-version }}
           fail_ci_if_error: false
 
   validate:
