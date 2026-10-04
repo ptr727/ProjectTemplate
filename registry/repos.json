@@ -179,7 +179,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["."],
-            "driftNotes": ["EDA/KiCad part library that delivers a github-release data zip, built by its build-release-asset hook.", "main trails develop until the standup promotes it: the fleet instruction set, the hub reusable workflows, and the Python config live only on develop.", "Python tooling installs from requirements-dev.txt with a config-only pyproject.toml."]
+            "driftNotes": ["EDA/KiCad part library that delivers a github-release data zip, built by its build-release-asset hook.", "Python tooling installs from requirements-dev.txt with a config-only pyproject.toml."]
         },
         {
             "name": "EspDinIoT",
