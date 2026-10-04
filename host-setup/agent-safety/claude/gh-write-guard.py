@@ -2647,9 +2647,10 @@ def _runs_as_command(toks, w, quoted=None):
     Whether a wrapper runs is a different question from whether it is bounded, and conflating them
     let `timeout 0 bash -c '<loop>'` skip its payload entirely: the zero is no bound, so a
     bound-shaped test refused to look inside a shell that really does run the loop.
+    A separator `quoted` marks is an argument, so `echo ";" bash -c '<loop>'` runs no shell.
     """
 
-    if _opens_command(toks, w):
+    if _opens_command(toks, w) and not (quoted is not None and w > 0 and quoted[w - 1]):
         return True
     start = w
     while start > 0 and not (
@@ -2846,12 +2847,15 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
-def _sleeps(toks, _depth=0, quoted=None):
+def _sleeps(toks, _depth=0, quoted=None, _budget=None):
     """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` or `eval` payload it
     carries. `quoted` is the quote mask of `toks` where known, which `_eval_payload` reads.
+    `_budget` is the `_EVAL_READS` count left to the command being judged.
     """
     if _depth > 4:
         return False
+    if _budget is None:
+        _budget = [_EVAL_READS]
     args_end = 0
     for k, tok in enumerate(toks):
         # `_runs_as_command` rather than `_opens_command`, since a launcher's options sit between it and what it runs.
@@ -2859,10 +2863,11 @@ def _sleeps(toks, _depth=0, quoted=None):
         # `grep -i sleep f` does not, its run's first command being no launcher.
         if _is_sleep_exe(tok) and _runs_as_command(toks, k):
             return True
-        if tok == "eval" and k >= args_end and _runs_as_command(toks, k):
+        if tok == "eval" and k >= args_end and _budget[0] > 0 and _runs_as_command(toks, k, quoted):
+            _budget[0] -= 1
             payload, args_end = _eval_payload(toks, k, quoted)
             ptoks = _shell_tokens(payload)
-            if _sleeps(ptoks, _depth + 1, _quote_kept_mask(payload, ptoks)):
+            if _sleeps(ptoks, _depth + 1, _quote_kept_mask(payload, ptoks), _budget):
                 return True
         if not _is_shell_wrapper_exe(tok):
             continue
@@ -2882,7 +2887,7 @@ def _sleeps(toks, _depth=0, quoted=None):
         if (
             ci is not None
             and ci + 1 < len(args)
-            and _sleeps(_shell_tokens(args[ci + 1]), _depth + 1)
+            and _sleeps(_shell_tokens(args[ci + 1]), _depth + 1, _budget=_budget)
         ):
             return True
     return False
@@ -2954,6 +2959,9 @@ def _forks_out_of_reach(toks):
                 return True
             i += 1
     return False
+
+
+_EVAL_READS = 256
 
 
 def _eval_payload(toks, i, quoted=None):
@@ -3028,7 +3036,7 @@ def _opens_with_separator(tok):
     return tok[0] in ";|()\n" or tok.startswith("&&") or (tok[0] == "&" and tok[1:2] != ">")
 
 
-def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
+def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
     """The first unbounded wait loop in `cmd`, as `<keyword> <condition>` text, or None when none.
 
     A wait loop is a `while`/`until` compound whose body calls `sleep`. It passes when its own
@@ -3039,9 +3047,16 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     An `eval`'s arguments are a payload the same way, read by `_eval_payload`. They run in this same
     shell, so only a bound on this shell reaches them, `timeout` being unable to run a builtin.
     A payload was unescaped by the outer lex rather than by bash, so it takes the quote-keeping mask.
+    `_budget` is the count of eval payloads still to be read for the command being judged, across
+    every depth and shared with `_sleeps`, starting at `_EVAL_READS`. Where the quoting is unknown
+    each payload runs to the end of its line, so a later eval on that line is read both inside it
+    and on its own, and a line of sixty evals took most of a minute. An eval past the budget goes
+    unread, which is what the guard did with every eval before it read any.
     """
     if _depth > 4:
         return None
+    if _budget is None:
+        _budget = [_EVAL_READS]
     toks = _shell_tokens(cmd)
     mask = _quote_kept_mask(cmd, toks) if _depth else _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
@@ -3066,13 +3081,14 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
                 backgrounded = forks_away
                 bounded = (inherited_timeout and not backgrounded) or local
-                inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1)
+                inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1, _budget)
                 if inner is not None:
                     return inner
-        elif tok == "eval" and i >= args_end and _runs_as_command(toks, i):
+        elif tok == "eval" and i >= args_end and _budget[0] > 0 and _runs_as_command(toks, i, mask):
+            _budget[0] -= 1
             payload, args_end = _eval_payload(toks, i, mask)
             bounded = inherited_timeout and not forks_away
-            inner = _unbounded_wait_loop(payload, bounded, _depth + 1)
+            inner = _unbounded_wait_loop(payload, bounded, _depth + 1, _budget)
             if inner is not None:
                 return inner
         elif _opens_loop(toks, i):
@@ -3083,9 +3099,9 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # `while sleep 30; do ...; done` is the standard poll-forever idiom.
             # Its condition sleeps as surely as a body does, and a sleep handed to `sh -c` is still one.
             do_at = i + 1 + len(cond)
-            sleeps = _sleeps(body, quoted=mask[do_at + 1 : done_at] if mask else None) or _sleeps(
-                cond, quoted=mask[i + 1 : do_at] if mask else None
-            )
+            sleeps = _sleeps(
+                body, quoted=mask[do_at + 1 : done_at] if mask else None, _budget=_budget
+            ) or _sleeps(cond, quoted=mask[i + 1 : do_at] if mask else None, _budget=_budget)
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
@@ -5299,6 +5315,41 @@ _WAIT_CASES = [
         "an eval's payload ends at its own separator, so a sleep quoted in a later command stays text",
     ),
     (
+        "echo ';' x eval 'until false; do sleep 1; done'",
+        "allow",
+        "a quoted separator before an argument named eval opens no command",
+    ),
+    (
+        "echo ';>' eval 'until false; do sleep 1; done'",
+        "allow",
+        "and neither does a quoted separator fused to a redirection",
+    ),
+    (
+        "while [ -f x ]; do echo ';>' eval 'sleep 1'; done",
+        "allow",
+        "and an eval named that way in a loop body runs no sleep",
+    ),
+    (
+        "echo \";\" eval 'until false; do sleep 1; done'",
+        "allow",
+        "a quoted separator just before eval leaves it an argument",
+    ),
+    (
+        "echo \";\" bash -c 'until false; do sleep 1; done'",
+        "allow",
+        "and leaves a shell wrapper an argument the same way",
+    ),
+    (
+        "'sudo' bash -c 'until false; do sleep 1; done'",
+        "deny",
+        "a quoted launcher still runs the shell after it",
+    ),
+    (
+        'eval "a\'b"; ' * 20 + 'eval \'until false; do sleep 1; done\'\necho "$(echo "it\'s")"',
+        "deny",
+        "where the quoting is unknown a loop after twenty evals is still read",
+    ),
+    (
         'eval "$(ssh-agent -s)";\ntimeout 60 bash -c \'cd /w; until [ -f x ]; do sleep 5; done\'\necho "$(echo "it\'s")"',
         "allow",
         "where the quoting is unknown an eval's line still ends where the lexer fuses its newline into a `;`",
@@ -7088,6 +7139,16 @@ def _selftest():
         (
             "an unknown-quoting wait-loop scan of 200 chained evals",
             lambda: _unbounded_wait_loop("eval " * 200 + 'x\necho "$(echo "it\'s")"'),
+        ),
+        (
+            "an unknown-quoting wait-loop scan of 200 evals whose payloads stay unknown",
+            lambda: _unbounded_wait_loop('eval "a\'b"; ' * 200 + '\necho "$(echo "it\'s")"'),
+        ),
+        (
+            "an unknown-quoting sleep scan of a loop body of 200 evals whose payloads stay unknown",
+            lambda: _unbounded_wait_loop(
+                "while [ -f x ]; do " + 'eval "a\'b"; ' * 200 + 'done\necho "$(echo "it\'s")"'
+            ),
         ),
         (
             "an unknown-quoting sleep scan of a loop body of 30 evals that never sleeps",
