@@ -5105,6 +5105,7 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
                 self.assertIn("Read the pull request's labels live", log)
                 self.assertIn("repos/example/widget/issues/7/labels", called)
                 self.assertIn("--paginate", called)
+                self.assertIn(".[].name", called)
 
     def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
         """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
