@@ -429,35 +429,103 @@ def single_document(documents: list[object]) -> object:
     return documents[0]
 
 
+UVX_READER = (
+    "import json, sys, yaml\n"
+    "def step(item):\n"
+    "    if not isinstance(item, dict):\n"
+    "        return None\n"
+    "    out = {'run': item['run']} if isinstance(item.get('run'), str) else {}\n"
+    "    if item.get('name') and not isinstance(item['name'], (dict, list)):\n"
+    "        out['name'] = str(item['name'])\n"
+    "    if item.get('shell') is not None:\n"
+    "        out['shell'] = item['shell'] if isinstance(item['shell'], str) else ''\n"
+    "    return out\n"
+    "def project(document):\n"
+    "    if not isinstance(document, dict):\n"
+    "        return None\n"
+    "    runs = document.get('runs')\n"
+    "    steps = runs.get('steps') if isinstance(runs, dict) else None\n"
+    "    if not isinstance(steps, list):\n"
+    "        return {}\n"
+    "    return {'runs': {'steps': [step(item) for item in steps]}}\n"
+    "try:\n"
+    "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
+    "        text = json.dumps([project(document) for document in yaml.safe_load_all(handle)])\n"
+    "except Exception as error:\n"
+    "    if isinstance(error, yaml.YAMLError):\n"
+    "        line = f'invalid YAML: {error}'\n"
+    "    else:\n"
+    "        line = f'unreadable: {type(error).__name__}: {error}'\n"
+    "    sys.exit(' '.join(line.split()))\n"
+    "sys.stdout.write(text)\n"
+)
+PYYAML_PYTHON: list[str] = []
+ISOLATED = ("-I", "-X", "utf8")
+
+
+class UvxUnavailable(Exception):
+    """uvx could not provide an interpreter with PyYAML, so no action can be read through it."""
+
+
+def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=YAML_TIMEOUT,
+    )
+
+
+def pyyaml_python() -> str:
+    """An interpreter that imports PyYAML, resolved through uvx once per run."""
+    if PYYAML_PYTHON:
+        return PYYAML_PYTHON[0]
+    uvx = shutil.which("uvx")
+    if uvx is None:
+        raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
+    probe = "import sys, yaml; print(sys.executable)"
+    try:
+        result = run_utf8([uvx, "--with", "pyyaml", "python", *ISOLATED, "-c", probe])
+    except subprocess.TimeoutExpired:
+        raise UvxUnavailable(f"uvx timed out after {YAML_TIMEOUT}s providing PyYAML") from None
+    except OSError as error:
+        raise UvxUnavailable(f"uvx could not start: {error}") from None
+    if result.returncode != 0 or not result.stdout.strip():
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        first = f": {lines[0]}" if lines else ""
+        raise UvxUnavailable(f"uvx exited {result.returncode} providing PyYAML{first}")
+    PYYAML_PYTHON.append(result.stdout.strip())
+    return PYYAML_PYTHON[0]
+
+
+def load_through_uvx(path: Path) -> list[object]:
+    """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
+    python = pyyaml_python()
+    try:
+        result = run_utf8([python, *ISOLATED, "-c", UVX_READER, str(path)])
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
+    except OSError as error:
+        raise UvxUnavailable(f"the interpreter uvx provided could not start: {error}") from None
+    if result.returncode != 0:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        raise ValueError(lines[-1] if lines else f"the reader exited {result.returncode}")
+    documents: list[object] = json.loads(result.stdout)
+    return documents
+
+
 def load_action(path: Path) -> object:
-    """The one parsed document of an action file, through PyYAML where importable, else yq."""
+    """The one parsed document of an action file, through PyYAML on every host.
+
+    PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
+    """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
-        yq = shutil.which("yq")
-        if yq is None:
-            raise RuntimeError("neither PyYAML nor yq is available to read the action") from None
-        result = subprocess.run(
-            [yq, "-o=json", ".", str(path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=YAML_TIMEOUT,
-        )
-        if result.returncode != 0:
-            raise ValueError(f"yq could not read the action: {result.stderr.strip()}")
-        decoder = json.JSONDecoder()
-        documents: list[object] = []
-        text, at = result.stdout, 0
-        while True:
-            while at < len(text) and text[at].isspace():
-                at += 1
-            if at >= len(text):
-                break
-            document, at = decoder.raw_decode(text, at)
-            documents.append(document)
-        return single_document(documents)
+        return single_document(load_through_uvx(path))
     try:
         with path.open(encoding="utf-8") as handle:
             return single_document(list(yaml.safe_load_all(handle)))
@@ -684,8 +752,13 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     if unreachable is not None:
         hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
+        PYYAML_PYTHON.clear()
         for path in actions:
-            hits.extend(check_composite_shell(root, path))
+            try:
+                hits.extend(check_composite_shell(root, path))
+            except UvxUnavailable as error:
+                hits.append(f"{error}, so no run body was shellchecked")
+                break
     hits.extend(check_composite_schema(root, actions))
     NOTES.append(f"checked {len(actions)} action file(s).")
     return hits
