@@ -2079,11 +2079,21 @@ class TestSentenceLength(BaitCase):
     def test_code_indented_past_a_list_item_is_code(self) -> None:
         self.assertEqual([], self.found(f"- item\n\n      {self.over()}.\n"))
 
-    def test_front_matter_must_look_like_yaml_and_close(self) -> None:
+    def test_front_matter_needs_a_closing_line(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        flagged = [(2, "sentence-length")]
-        self.assertEqual(flagged, self.found(f"---\n{half} here\n{half}\n---\n"))
-        self.assertEqual(flagged, self.found(f"---\nname: x\n{self.over()}.\n"))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\nname: x\n{self.over()}.\n"))
+        self.assertEqual([], self.found(f"---\n{half} here\n{half}\n---\n"))
+
+    def test_front_matter_has_no_line_reach(self) -> None:
+        keys = "".join(f"key{n}: value\n" for n in range(55))
+        text = f"---\n{keys}description: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(57, "sentence-length")], self.found(text))
+
+    def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<source>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 
     def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))

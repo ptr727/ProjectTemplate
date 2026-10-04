@@ -1710,27 +1710,25 @@ TABLE_DELIMITER = re.compile(
 )
 HTML_COMMENT = re.compile(r"^\s*<!--")
 INTERRUPTING_TAGS = (
-    "details|summary|div|p|hr|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|section|pre"
-    "|blockquote|center"
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
+    "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head"
+    "|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
+    "|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul|source"
+    "|pre|script|style|textarea"
 )
-STANDALONE_TAGS = "br|img|picture|source"
+STANDALONE_TAGS = "br|img|picture"
 TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
 OPENING_TAG = re.compile(rf"^\s*</?(?:({INTERRUPTING_TAGS})|{STANDALONE_TAGS})\b", re.IGNORECASE)
 TAG = re.compile(r"<[^<>]*>")
-YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
-FRONT_MATTER_REACH = 50
 
 
 def front_matter_end(lines: list[str]) -> int:
-    """The index after a leading YAML block, or 0 when the file opens with none."""
-    if not lines or lines[0].rstrip("\r").strip() != "---":
+    """The index after a leading `---` block closed by `---` or `...`, or 0 when there is none."""
+    if not lines or lines[0].rstrip("\r") != "---":
         return 0
-    for j in range(1, min(len(lines), FRONT_MATTER_REACH)):
-        line = lines[j].rstrip("\r")
-        if line.strip() in ("---", "..."):
+    for j in range(1, len(lines)):
+        if lines[j].rstrip("\r") in ("---", "..."):
             return j + 1
-        if not YAML_LINE.match(line):
-            return 0
     return 0
 
 
