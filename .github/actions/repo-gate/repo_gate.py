@@ -563,6 +563,7 @@ def docker_unreachable() -> str | None:
     """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
+    A locally cached image is reused, so a local run may lag CI, which always pulls fresh.
     """
     try:
         result = subprocess.run(
@@ -672,7 +673,7 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     The uvx path of the schema half follows the uvx float policy that validate-task.yml states.
     Each half reports its own missing tool, and the other half still runs.
     """
-    actions = action_files(files)
+    actions = [path for path in action_files(files) if (root / path).is_file()]
     if not actions:
         NOTES.append("no composite action file is tracked, so nothing was checked.")
         return []

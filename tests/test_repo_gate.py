@@ -981,6 +981,17 @@ class TestCompositeActions(TreeCase):
             hits = repo_gate.check_composite_schema(self.tmp, ["a/action.yml"])
         self.assertIn("timed out", hits[0])
 
+    def test_a_tracked_but_deleted_action_is_skipped_by_both_halves(self) -> None:
+        files = [".github/actions/gone/action.yml"]
+        with (
+            mock.patch.object(repo_gate, "check_composite_shell") as shell,
+            mock.patch.object(repo_gate, "check_composite_schema") as schema,
+        ):
+            self.assertEqual([], repo_gate.check_composite_actions(self.tmp, files))
+        shell.assert_not_called()
+        schema.assert_not_called()
+        self.assertIn("nothing was checked", repo_gate.NOTES[0])
+
     def test_a_nested_action_file_is_found(self) -> None:
         files = [".github/actions/group/inner/action.yaml", ".github/actions/a/other.yml"]
         self.assertEqual([files[0]], repo_gate.action_files(files))
