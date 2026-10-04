@@ -1,12 +1,12 @@
 name: Merge bot task
 
 # The fleet merge-bot, hosted here once and reached by every repo through a thin pull_request_target caller pinned to a hub commit.
-# Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push.
+# Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push, delete the head on closed.
 # - Merge method by base: develop = squash, main = merge, since each base's ruleset allows only that form.
 # - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
 #   Every write uses the App token, so no job here declares a GITHUB_TOKEN scope and the caller grants none.
 # - The caller triggers on pull_request_target, so the workflow and action SHAs resolve from the trusted base rather than the PR head.
-#   This is safe because no job checks out PR code, each one running gh pr merge by URL.
+#   This is safe because no job checks out PR code, and each one calls gh or pushes from an empty scratch repo.
 # - The github context in a called workflow is the caller's, so github.event.pull_request is the caller's pull_request_target payload.
 # - Concurrency lives in the caller, keyed on the PR number with cancel-in-progress false, so no group is declared here.
 on:
@@ -216,8 +216,8 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
           if out=$(git push --force-with-lease="refs/heads/$HEAD_REF:$MERGED_SHA" "https://github.com/$REPO.git" ":refs/heads/$HEAD_REF" 2>&1); then
             echo "Deleted branch $HEAD_REF at $MERGED_SHA"
-          elif grep -Eq 'stale info|remote ref does not exist' <<<"$out"; then
-            echo "::notice::Branch $HEAD_REF is gone or no longer at the merged $MERGED_SHA, not deleting"
+          elif grep -Fq 'stale info' <<<"$out"; then
+            echo "::notice::Branch $HEAD_REF moved or is already gone, not deleting"
           else
             echo "::error::Deleting branch $HEAD_REF failed: $out"
             exit 1
