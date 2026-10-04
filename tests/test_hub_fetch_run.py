@@ -282,10 +282,12 @@ class ProvenanceTests(unittest.TestCase):
             with self.subTest(cause=cause):
                 self.stderr.seek(0)
                 self.stderr.truncate()
+                self.requests.clear()
                 self.assertEqual(self.run_main(lookup), UNRESOLVED)
                 line = self.stderr.getvalue()
                 self.assertIn(cause, line)
                 self.assertEqual(line.count("\n"), 1, line)
+                self.assertTrue(self.urls()[-1].endswith(f"/main/{PROSE_PATH}"), self.urls())
 
     def test_token_header_sent_only_when_set(self) -> None:
         self.run_main()
