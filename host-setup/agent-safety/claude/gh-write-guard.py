@@ -2656,7 +2656,7 @@ def _runs_as_command(toks, w, quoted=None):
         _is_separator(toks[start - 1]) and not (quoted is not None and quoted[start - 1])
     ):
         start -= 1
-        if _opens_with_separator(toks[start]):
+        if _opens_with_separator(toks[start]) and not (quoted is not None and quoted[start]):
             break
     # A leading redirection and its target are not the run's command.
     # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
@@ -2861,7 +2861,8 @@ def _sleeps(toks, _depth=0, quoted=None):
             return True
         if tok == "eval" and k >= args_end and _runs_as_command(toks, k):
             payload, args_end = _eval_payload(toks, k, quoted)
-            if _sleeps(_shell_tokens(payload), _depth + 1):
+            ptoks = _shell_tokens(payload)
+            if _sleeps(ptoks, _depth + 1, _quote_kept_mask(payload, ptoks)):
                 return True
         if not _is_shell_wrapper_exe(tok):
             continue
@@ -2967,9 +2968,11 @@ def _eval_payload(toks, i, quoted=None):
     among the arguments is one of them, and becomes a separator only once bash rereads the payload.
     Where the quoting is unknown the payload runs to the end of the eval's line, since any separator
     on it may be a quoted one. A newline token is a real line break, since a quoted newline stays
-    inside its word, so no later line is read as the payload. The index returned there is that of
-    the first separator-shaped token, since one may be real, and then a later eval is a command whose
-    own words the joined payload would no longer keep apart, so a reader reads that eval itself.
+    inside its word, so no later line is read as the payload. The tokenizer fuses a newline into an
+    operator beside it, as a line ending in `;` gives, and that token ends the line as well. The
+    index returned there is that of the first separator-shaped token, since one may be real, and
+    then a later eval is a command whose own words the joined payload would no longer keep apart,
+    so a reader reads that eval itself.
     The tokenizer fuses a separator and a redirection that touch, as in `;>`, and that token ends the
     arguments, since what follows its separator is another command.
 
@@ -2984,6 +2987,8 @@ def _eval_payload(toks, i, quoted=None):
     while k < n:
         t = toks[k]
         if t == "\n" or (known and not mask[k] and _opens_with_separator(t)):
+            break
+        if not known and "\n" in t and _is_shell_op(t):
             break
         if not mask[k] and _is_redir_op(t) and not _opens_with_separator(t):
             if words and words[-1].isdigit() and not mask[k - 1]:
@@ -5294,6 +5299,16 @@ _WAIT_CASES = [
         "an eval's payload ends at its own separator, so a sleep quoted in a later command stays text",
     ),
     (
+        'eval "$(ssh-agent -s)";\ntimeout 60 bash -c \'cd /w; until [ -f x ]; do sleep 5; done\'\necho "$(echo "it\'s")"',
+        "allow",
+        "where the quoting is unknown an eval's line still ends where the lexer fuses its newline into a `;`",
+    ),
+    (
+        'eval "$(ssh-agent -s)" &&\ntimeout 60 bash -c \'cd /w; until [ -f x ]; do sleep 5; done\'\necho "$(echo "it\'s")"',
+        "allow",
+        "and where it fuses the newline into a `&&`",
+    ),
+    (
         """eval until [ '"$i"' 2> ";" -lt 5 ]\\; do sleep 1\\; done""",
         "allow",
         "a quoted redirection target names a file rather than joining the payload as a separator",
@@ -7058,15 +7073,27 @@ def _selftest():
             ok = False
         print(f"  {mark} [lex  ] {label} is scanned in linear time ({elapsed:.2f}s)")
     for label, read in (
-        ("a wait-loop scan", lambda: _unbounded_wait_loop("eval " * 200 + "echo sleep")),
         (
-            "a redirected wait-loop scan",
+            "a wait-loop scan of 200 chained evals",
+            lambda: _unbounded_wait_loop("eval " * 200 + "echo sleep"),
+        ),
+        (
+            "a redirected wait-loop scan of 200 chained evals",
             lambda: _unbounded_wait_loop("eval " * 200 + "echo sleep > f"),
         ),
-        ("a sleep scan", lambda: _sleeps(_shell_tokens("eval " * 200 + "echo x > f"))),
         (
-            "an unknown-quoting wait-loop scan",
+            "a sleep scan of 200 chained evals",
+            lambda: _sleeps(_shell_tokens("eval " * 200 + "echo x > f")),
+        ),
+        (
+            "an unknown-quoting wait-loop scan of 200 chained evals",
             lambda: _unbounded_wait_loop("eval " * 200 + 'x\necho "$(echo "it\'s")"'),
+        ),
+        (
+            "an unknown-quoting sleep scan of a loop body of 30 evals that never sleeps",
+            lambda: _unbounded_wait_loop(
+                "while [ -f x ]; do " + "eval x; " * 30 + 'done\necho "$(echo "it\'s")"'
+            ),
         ),
     ):
         start = time.monotonic()
@@ -7075,7 +7102,7 @@ def _selftest():
         mark = "ok  " if elapsed < 5 else "FAIL"
         if elapsed >= 5:
             ok = False
-        print(f"  {mark} [wait ] {label} of 200 chained evals is fast ({elapsed:.2f}s)")
+        print(f"  {mark} [wait ] {label} is fast ({elapsed:.2f}s)")
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
