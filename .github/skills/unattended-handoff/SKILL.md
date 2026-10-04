@@ -217,7 +217,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    monitor or a background task never wakes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
-   retry, which is parked as ready to merge rather than routed around.
+   retry, which is parked as ready to merge rather than routed around. It also includes a fix that
+   turns out to need an edit under the hub's `host-setup/agent-safety/`. "Auto-Resolvable" keeps
+   that tree out of an unattended run, so the worker parks before making the edit.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options in
