@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -431,9 +430,7 @@ def single_document(documents: list[object]) -> object:
 
 
 UVX_READER = (
-    "import sys\n"
-    "sys.path[:] = [p for p in sys.path if p]\n"
-    "import json, yaml\n"
+    "import json, sys, yaml\n"
     "def step(item):\n"
     "    if not isinstance(item, dict):\n"
     "        return None\n"
@@ -463,6 +460,7 @@ UVX_READER = (
     "sys.stdout.write(text)\n"
 )
 PYYAML_PYTHON: list[str] = []
+ISOLATED = ("-I", "-X", "utf8")
 
 
 class UvxUnavailable(Exception):
@@ -476,7 +474,6 @@ def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
         text=True,
         encoding="utf-8",
         errors="replace",
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
         timeout=YAML_TIMEOUT,
     )
@@ -489,11 +486,9 @@ def pyyaml_python() -> str:
     uvx = shutil.which("uvx")
     if uvx is None:
         raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
-    probe = (
-        "import sys; sys.path[:] = [p for p in sys.path if p]; import yaml; print(sys.executable)"
-    )
+    probe = "import sys, yaml; print(sys.executable)"
     try:
-        result = run_utf8([uvx, "--with", "pyyaml", "python", "-c", probe])
+        result = run_utf8([uvx, "--with", "pyyaml", "python", *ISOLATED, "-c", probe])
     except subprocess.TimeoutExpired:
         raise UvxUnavailable(f"uvx timed out after {YAML_TIMEOUT}s providing PyYAML") from None
     except OSError as error:
@@ -510,7 +505,7 @@ def load_through_uvx(path: Path) -> list[object]:
     """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
     python = pyyaml_python()
     try:
-        result = run_utf8([python, "-c", UVX_READER, str(path)])
+        result = run_utf8([python, *ISOLATED, "-c", UVX_READER, str(path)])
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:

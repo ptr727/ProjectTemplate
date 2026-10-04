@@ -1029,7 +1029,7 @@ class TestCompositeActions(TreeCase):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertEqual(["seen"], hits)
         self.assertEqual("echo $x", body.call_args.args[2])
-        self.assertEqual(["/py", "-c", repo_gate.UVX_READER], run.call_args.args[0][:3])
+        self.assertEqual(["/py", "-I", "-X", "utf8", "-c"], run.call_args.args[0][:5])
 
     def test_a_reader_failure_is_a_finding_for_that_file(self) -> None:
         with (
@@ -1101,7 +1101,7 @@ class TestCompositeActions(TreeCase):
     @unittest.skipUnless(os.name == "posix", "the stub interpreter is a shell script")
     def test_child_stderr_is_utf8_and_decoded_leniently(self) -> None:
         stub = self.stub_python(
-            "printf 'invalid YAML: %s \\377\\n' \"$PYTHONIOENCODING\" >&2\nexit 1"
+            'printf \'invalid YAML: %s %s %s \\377\\n\' "$1" "$2" "$3" >&2\nexit 1'
         )
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
@@ -1109,7 +1109,7 @@ class TestCompositeActions(TreeCase):
         ):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertEqual(
-            ["a/action.yml: could not read the action: invalid YAML: utf-8 \ufffd"], hits
+            ["a/action.yml: could not read the action: invalid YAML: -I -X utf8 \ufffd"], hits
         )
 
     @unittest.skipUnless(os.name == "posix", "the stub interpreter is a shell script")
@@ -1130,7 +1130,7 @@ class TestCompositeActions(TreeCase):
 
     def read_from(self, cwd: Path) -> None:
         cwd.mkdir(exist_ok=True)
-        for module in ("yaml", "json"):
+        for module in ("yaml", "json", "linecache"):
             (cwd / f"{module}.py").write_text("raise SystemExit('shadowed')\n", encoding="utf-8")
         files = self.action("    - shell: bash\n      run: echo $x\n")
         self.addCleanup(os.chdir, os.getcwd())
@@ -1149,6 +1149,13 @@ class TestCompositeActions(TreeCase):
     @NEEDS_UVX
     def test_a_module_in_a_shared_working_directory_cannot_shadow_the_reader(self) -> None:
         self.read_from(self.tmp / "shared")
+
+    @NEEDS_UVX
+    def test_a_pythonpath_naming_the_working_directory_cannot_shadow_the_reader(self) -> None:
+        cwd = self.tmp / "shared"
+        pythonpath = os.pathsep.join(["", ".", str(cwd)])
+        with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}):
+            self.read_from(cwd)
 
     @NEEDS_UVX
     def test_the_real_reader_skips_a_non_string_shell(self) -> None:
