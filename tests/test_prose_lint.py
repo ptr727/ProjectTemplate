@@ -5040,7 +5040,7 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         self.assertIn("tool.py:1: comment-added", result.stdout)
 
     def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
-        """Three surfaces name this label, and a rename that misses one silently disarms it."""
+        """Four surfaces name this label, and a rename that misses one silently disarms it."""
         declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
         self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
@@ -5089,10 +5089,12 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         """The payload is a snapshot from the event, which a label applied after it never reaches.
 
         The live answer wins in both directions, so a payload that predates the label, or one
-        that predates its removal, decides nothing while the read succeeds.
+        that predates its removal, decides nothing while the read succeeds. It ignores case, as
+        the payload's contains() does. The log line is the one the skills tell a driver to look for.
         """
         for live, payload, expected in (
             ("bug\ncomments\n", "false", "true"),
+            ("Comments\n", "false", "true"),
             ("bug\n", "true", "false"),
             ("", "true", "false"),
             ("comments-wanted\n", "false", "false"),
@@ -5100,7 +5102,7 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             with self.subTest(live=live, payload=payload):
                 code, output, log, called = run_comments_label_step(live, payload)
                 self.assertEqual(("0", f"labeled={expected}"), (code, output), log)
-                self.assertIn("read the pull request's labels live", log.lower())
+                self.assertIn("Read the pull request's labels live", log)
                 self.assertIn("repos/example/widget/issues/7/labels", called)
                 self.assertIn("--paginate", called)
 

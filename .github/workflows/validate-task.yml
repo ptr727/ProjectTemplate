@@ -463,7 +463,7 @@ jobs:
           set -Eeuo pipefail
           if names=$(gh api --paginate --jq '.[].name' "$LABELS_PATH"); then
             labeled=false
-            if grep -qxF comments <<< "$names"; then
+            if grep -qxiF comments <<< "$names"; then
               labeled=true
             fi
             echo "Read the pull request's labels live, comments label present: $labeled."

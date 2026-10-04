@@ -84,9 +84,9 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    A driver that cannot dispatch a subagent follows that skill's "Running It".
    Then push the branch and open the feature -> develop PR if it does not exist yet. Open it
    carrying the `comments` label where the change adds or edits a comment line in code or config,
-   since the prose gate refuses one otherwise. The gate reads the label live when its lint job
-   runs, so a label added after a check fails applies when that job reruns. Where the log says the
-   read fell back to the event's labels, it applies to the next push instead.
+   which the prose gate otherwise refuses. Where the lint job's log says "Read the pull request's
+   labels live", a label added after a check fails applies when that job reruns. Otherwise it
+   applies to the next push.
    A push refused by a `.husky/pre-push` hook, which the hub carries and a
    repository has only if it adds one, is that gate working rather than an
    obstacle to route around, and that
