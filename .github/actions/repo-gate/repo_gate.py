@@ -411,7 +411,7 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
-EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
+EXPRESSION_START = "${{"
 SHELLCHECK_IMAGE = "koalaman/shellcheck:stable"
 SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
@@ -474,6 +474,37 @@ def step_dialect(shell: object) -> str | None:
     return name if name in {"bash", "sh"} else None
 
 
+def expression_end(body: str, start: int) -> int:
+    """The index just past the `}}` closing the expression at `start`, quoted strings skipped.
+
+    An unterminated expression runs to the end of the body.
+    """
+    at = start + len(EXPRESSION_START)
+    quoted = False
+    while at < len(body):
+        char = body[at]
+        if char == "'":
+            quoted = not quoted
+        elif not quoted and body.startswith("}}", at):
+            return at + 2
+        at += 1
+    return len(body)
+
+
+def mark_expressions(body: str) -> str:
+    """Swap each expression for `${GHA_EXPR}` plus one NUL per newline it held."""
+    out: list[str] = []
+    at = 0
+    while True:
+        start = body.find(EXPRESSION_START, at)
+        if start < 0:
+            out.append(body[at:])
+            return "".join(out)
+        end = expression_end(body, start)
+        out.append(body[at:start] + "${GHA_EXPR}" + "\0" * body[start:end].count("\n"))
+        at = end
+
+
 def substitute_expressions(body: str) -> str:
     """Replace each expression with `${GHA_EXPR}`, keeping every later line at its own number.
 
@@ -481,7 +512,7 @@ def substitute_expressions(body: str) -> str:
     Its extra newlines return as empty lines after the end of that logical line.
     A backslash continuation would not hold inside a comment, and a physical line end would split a command.
     """
-    marked = EXPRESSION.sub(lambda m: "${GHA_EXPR}" + "\0" * m.group().count("\n"), body)
+    marked = mark_expressions(body)
     out: list[str] = []
     pending = 0
     for line in marked.split("\n"):
@@ -497,7 +528,7 @@ def substitute_expressions(body: str) -> str:
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
-    command = ["docker", "run", "--rm", "-i", SHELLCHECK_IMAGE]
+    command = ["docker", "run", "--rm", "-i", "--network=none", SHELLCHECK_IMAGE]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
     try:
         result = subprocess.run(
@@ -522,7 +553,10 @@ def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
 
 
 def docker_unreachable() -> str | None:
-    """The reason no docker daemon answers, or None where one does."""
+    """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
+
+    The pull is the one networked step, so the lint container itself runs with no network.
+    """
     try:
         result = subprocess.run(
             ["docker", "info"], capture_output=True, check=False, timeout=DOCKER_TIMEOUT
@@ -533,6 +567,19 @@ def docker_unreachable() -> str | None:
         return f"docker could not start: {error}"
     if result.returncode != 0:
         return f"docker info exited {result.returncode}"
+    try:
+        pull = subprocess.run(
+            ["docker", "pull", "--quiet", SHELLCHECK_IMAGE],
+            capture_output=True,
+            check=False,
+            timeout=SHELLCHECK_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return f"docker pull did not finish within {SHELLCHECK_TIMEOUT}s"
+    except OSError as error:
+        return f"docker pull could not start: {error}"
+    if pull.returncode != 0:
+        return f"docker pull of {SHELLCHECK_IMAGE} exited {pull.returncode}"
     return None
 
 

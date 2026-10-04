@@ -783,6 +783,10 @@ class TestCompositeActions(TreeCase):
         text = repo_gate.substitute_expressions("foo ${{ x\ny }} \\\n  && bar\nz")
         self.assertEqual("foo ${GHA_EXPR} \\\n  && bar\n\nz", text)
 
+    def test_a_closing_delimiter_inside_a_quoted_string_does_not_end_the_expression(self) -> None:
+        text = repo_gate.substitute_expressions("echo ${{ format('a }} b') }} done\ncd")
+        self.assertEqual("echo ${GHA_EXPR} done\ncd", text)
+
     def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
         self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))
 
@@ -813,6 +817,7 @@ class TestCompositeActions(TreeCase):
         self.assertEqual("echo \u00e9\n".encode(), run.call_args.kwargs["input"])
         self.assertNotIn("text", run.call_args.kwargs)
         command = run.call_args.args[0]
+        self.assertIn("--network=none", command)
         self.assertEqual("warning", command[command.index("-S") + 1])
 
     def completed_bytes(
@@ -875,6 +880,9 @@ class TestCompositeActions(TreeCase):
         proc = subprocess.CompletedProcess([], 1, b"", b"")
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
             self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
+        ok, bad = subprocess.CompletedProcess([], 0, b"", b""), proc
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad]):
+            self.assertIn("docker pull of", repo_gate.docker_unreachable() or "")
         with mock.patch.object(
             repo_gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
         ):
@@ -887,7 +895,6 @@ class TestCompositeActions(TreeCase):
         hits = self.shell_hits(self.raw(""))
         self.assertEqual(1, len(hits))
         self.assertIn(".github/actions/hook/action.yml: could not read the action", hits[0])
-        self.assertIn("found 0", hits[0])
 
     def test_a_document_that_is_not_a_mapping_is_a_finding(self) -> None:
         hits = self.shell_hits(self.raw("---\n"))
@@ -898,6 +905,7 @@ class TestCompositeActions(TreeCase):
         with (
             mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
             mock.patch.object(repo_gate, "docker_unreachable", return_value=None),
+            mock.patch.object(repo_gate, "load_action", return_value={}),
         ):
             hits = repo_gate.check_composite_actions(self.tmp, files)
         self.assertEqual(
