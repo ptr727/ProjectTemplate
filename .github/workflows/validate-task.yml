@@ -1,9 +1,16 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# The jobs are test-matrix, lint, unit-test, and validate.
+# The test-matrix job checks the python-versions and test-matrix inputs and builds the unit-test matrix.
+# The lint job is the fleet doc-lint block plus language lint, by tree detection.
+# For Python it lints the declared directories, and it also runs the prose gate and the repo gate.
+# The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
+# It runs once per interpreter the python-versions input names, or once per test-matrix leg.
+# The validate job is the validate hook, a repo's own domain checks.
+# Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories and python-versions are the four optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -26,17 +33,93 @@ on:
         required: false
         type: string
         default: ''
-      # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, so the check below reaches only the values that expand at all.
+      # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Sync Python dependencies step.
       python-versions:
-        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. Quote each entry, since an unquoted one is a JSON number rather than a version string.
+        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
         type: string
         default: '["3.13"]'
+      test-matrix:
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        required: false
+        type: string
+        default: ''
     secrets:
       CODECOV_TOKEN:
         required: false
 
 jobs:
+
+  test-matrix:
+    name: Build test matrix job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+
+      - name: Validate test-matrix input step
+        if: ${{ inputs.test-matrix != '' }}
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e -s '
+            length == 1 and (.[0] |
+              type == "array" and length > 0
+              and all(.[]; type == "object"
+                and (.label | type == "string" and test("\\A[A-Za-z0-9_.-]{1,38}\\z"))
+                and ((has("python-version") | not) or (.["python-version"] | type == "string" and test("\\S"))))
+              and ((map(.label) | unique | length) == length))
+          ' <<<"$TEST_MATRIX" >/dev/null 2>&1; then
+            escaped=${TEST_MATRIX//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and a python-version, when present, that is a string with a non-whitespace character, got: $escaped"
+            exit 1
+          fi
+
+      # An entry holding no non-whitespace character would otherwise run green on an interpreter nobody chose.
+      # That is because setup-uv trims what it reads and then reads an empty input as an absent one.
+      # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well.
+      # That is why the entry test is for content rather than for length.
+      # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
+      # Some of those numbers uv resolves to a real interpreter rather than refusing.
+      # So that shape is a second silent pass, which this check prevents rather than names as a cause.
+      # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20.
+      # With test-matrix set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
+      - name: Validate python-versions input step
+        env:
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e -s 'length == 1 and (.[0] | type == "array" and length > 0 and all(.[]; type == "string" and test("\\S")))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
+            # The annotation carries the rejected value, so it is escaped per the workflow command encoding rules first.
+            # A raw newline would end the annotation and let whatever follows it start a command of its own.
+            # The runner reads a command off stderr as readily as stdout, so redirecting rather than escaping would close nothing.
+            # The percent substitution runs first, since running it after the others would re-encode the percent each of them just introduced.
+            escaped=${PYTHON_VERSIONS//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
+            exit 1
+          fi
+
+      # A matrix built inline from inputs expands at planning time, before needs: runs, so a malformed value could not be named.
+      - name: Build unit-test matrix step
+        id: build
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -n "$TEST_MATRIX" ]]; then
+            matrix=$(jq -c -s '{include: .[0]}' <<<"$TEST_MATRIX")
+          else
+            matrix=$(jq -c --argjson versions "$PYTHON_VERSIONS" -n '{"python-version": $versions}')
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   lint:
     name: Lint sources job
@@ -246,7 +329,7 @@ jobs:
               (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
               # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
-              if ! PIP_PYTHON=$(jq -er 'if type == "array" and length > 0 and (.[0] | type == "string" and test("\\S")) then .[0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
+              if ! PIP_PYTHON=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
                 echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry installs the declared pip directory $dir."
                 exit 1
               fi
@@ -395,46 +478,37 @@ jobs:
   # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # A declared Python directory owes a tests/ suite under coverage, per D1.6, so one without tests/ fails here rather than skipping.
   # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation.
-  # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
-  # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
+  # The matrix dimension is the interpreter, or the test-matrix leg when that is set.
+  # A caller naming neither runs the single leg this job ran before the input existed.
+  # A python-versions leg names an interpreter whether or not one ran.
+  # So a .NET-only caller reports a Python version its Python steps never used.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
   unit-test:
-    name: Unit test job (Python ${{ matrix.python-version }})
+    name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})
+    needs: test-matrix
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       # A failing interpreter must not cancel its siblings, since which of them fail is the whole point of running more than one.
       fail-fast: false
-      matrix:
-        python-version: ${{ fromJSON(inputs.python-versions) }}
+      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}
 
     steps:
 
-      # An entry holding no non-whitespace character is the value that would otherwise run green on an interpreter nobody chose, since setup-uv trims what it reads and then reads an empty input as an absent one.
-      # A caller reaches it by interpolating an unset value of its own, and a stray space in that template reaches it just as well, which is why the entry test is for content rather than for length.
-      # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
-      # Some of those numbers uv resolves to a real interpreter rather than refusing, so that shape is a second silent pass this check prevents rather than a cause it names.
-      # The rest fail in the Run Python tests step below rather than in setup-uv, which exports the version rather than resolving it, and there the check names a cause instead.
-      # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20, and it reaches only a value that expanded into a leg at all.
-      - name: Validate python-versions input step
-        env:
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
-        run: |
-          set -Eeuo pipefail
-          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
-            # The annotation carries the rejected value, so it is escaped per the workflow command encoding rules first.
-            # A raw newline would end the annotation and let whatever follows it start a command of its own, and the runner reads a command off stderr as readily as stdout, so redirecting rather than escaping would close nothing.
-            # The percent substitution runs first, since running it after the others would re-encode the percent each of them just introduced.
-            escaped=${PYTHON_VERSIONS//'%'/%25}
-            escaped=${escaped//$'\r'/%0D}
-            escaped=${escaped//$'\n'/%0A}
-            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
-            exit 1
-          fi
-
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check caller install-test-deps hook step
+        if: ${{ inputs.test-matrix != '' }}
+        env:
+          HOOK_FOUND: ${{ hashFiles('.github/actions/install-test-deps/action.yml') != '' }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$HOOK_FOUND" != "true" ]]; then
+            echo "::error::The test-matrix input is set but .github/actions/install-test-deps/action.yml is missing."
+            exit 1
+          fi
 
       - name: Setup .NET SDK step
         if: hashFiles('**/*Tests*.csproj') != ''
@@ -485,8 +559,48 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}
           ignore-nothing-to-cache: true
+
+      - name: Install Python dependencies step
+        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        env:
+          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
+        run: |
+          set -Eeuo pipefail
+          install_requirements() {
+            uv venv
+            local requirement_args=()
+            local file
+            for file in requirements*.txt; do
+              requirement_args+=(-r "$file")
+            done
+            uv pip install "${requirement_args[@]}"
+            if python3 -c 'import sys, tomllib; sys.exit("project" not in tomllib.load(open("pyproject.toml", "rb")))'; then
+              uv pip install -e .
+            fi
+          }
+          while IFS=$'\t' read -r kind dir; do
+            [ -n "$dir" ] || continue
+            if [ "$DECLARED" != "true" ] && [ ! -d "$dir/tests" ]; then
+              continue
+            fi
+            (
+              cd "$dir"
+              case "$kind" in
+              uv) uv sync --all-groups --frozen ;;
+              pip) install_requirements ;;
+              esac
+            ) < /dev/null
+          done <<< "$PYTHON_PROJECTS"
+
+      - name: Run caller install-test-deps hook step
+        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        uses: ./.github/actions/install-test-deps
+        with:
+          leg: ${{ toJSON(matrix) }}
+          directories: ${{ steps.python.outputs.projects }}
 
       # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
       # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
@@ -499,6 +613,7 @@ jobs:
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
+          HOOK_LEG: ${{ inputs.test-matrix != '' }}
         run: |
           set -Eeuo pipefail
           # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
@@ -542,11 +657,17 @@ jobs:
               cd "$dir"
               case "$kind" in
               uv)
-                uv sync --all-groups --frozen
-                uv run pytest --cov-report=xml
+                if [ "${HOOK_LEG:-false}" = "true" ]; then
+                  uv run --no-sync pytest --cov-report=xml
+                else
+                  uv sync --all-groups --frozen
+                  uv run pytest --cov-report=xml
+                fi
                 ;;
               pip)
-                install_requirements
+                if [ "${HOOK_LEG:-false}" != "true" ]; then
+                  install_requirements
+                fi
                 .venv/bin/python -m pytest --cov-report=xml
                 ;;
               lint-only)
@@ -578,7 +699,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ steps.python-tests.outputs.files }}
-          flags: python-${{ matrix.python-version }}
+          flags: python-${{ matrix.label || matrix.python-version }}
           fail_ci_if_error: false
 
   validate:
