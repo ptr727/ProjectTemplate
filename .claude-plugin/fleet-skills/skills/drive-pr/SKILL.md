@@ -81,6 +81,8 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 2. Commit the work, then run `local-strict-review` and record its pass in the order that skill
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
+   A driver that cannot dispatch a subagent hands its digest to its dispatcher and pushes only after
+   the dispatcher records the pass, per that skill's "Running It".
    Then push the branch and open the feature -> develop PR if it does not exist yet. Open it
    carrying the `comments` label where the change adds or edits a comment line in code or config,
    since the prose gate refuses one otherwise and reads the label off the event that started the

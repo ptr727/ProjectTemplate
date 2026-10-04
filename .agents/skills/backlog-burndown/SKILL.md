@@ -241,23 +241,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   procedure and the verify-then-delete of the merged remote branch, **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
-- **The worker runs `local-strict-review` before every push**, per `GOVERNANCE.md` "Verification
-  Discipline". That pass dispatches a reviewer of its own, so a harness where a subagent cannot
-  dispatch one leaves the worker unable to run it and unable to push. It reports that rather than
-  pushing, and its worktree is then retired, since git refuses to attach that branch anywhere else
-  while the reporting tree holds it. The branch is left standing for its own reason, that the
-  commits it already carries are what the re-dispatched worker continues from. This is the
-  worktree-only disposition "Cleanup Is the Orchestrator's" separates out, so a clean tree is the
-  whole test. A clean
-  tree is retired and the group re-dispatched to a seat that can dispatch. A dirty one is left
-  exactly as it stands and the group stopped for the maintainer, as is a group for which no seat
-  that can dispatch exists. That retire-and-re-dispatch case presumes the branch is reachable from
-  this repository, which the standalone clone `repo-worktree` allows as a fallback breaks: a worker that never
-  pushed holds its commits only in that clone, where this repository has no ref to hand a
-  replacement and nothing to retire, so re-dispatching loses the work rather than continuing it.
-  That group stops for the maintainer with the clone named, and no seat this skill defines resumes
-  it, since a worker never inherits another's checkout and the orchestrator opens no branch and
-  edits nothing. Neither the worker nor the orchestrator pushes around the missing pass.
+- **The worker's strict-review pass is the orchestrator's where the worker cannot dispatch a subagent.**
+  The brief tells the worker to commit, hand back its digest and push only after the orchestrator records the pass, per `local-strict-review` "Running It".
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.

@@ -204,7 +204,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
-3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
+3. **Fix and drive.** Run `local-strict-review` before every push, the orchestrator running the pass for a worker that cannot dispatch a subagent, and drive the pull request with
    `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Under `main` or
    `release`, continue to the promotion pull request, its body carrying a `Fixes` line for every
    issue develop fixes, assembled per `backlog-burndown` "Assembling the Promotion Body", and hand
