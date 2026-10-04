@@ -203,7 +203,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks, and the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's five trigger shapes, so another reusable workflow would become caller-owned inputs.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. It also provides the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's trigger shapes, so another reusable workflow would become caller-owned inputs.
 
 `build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-build-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
@@ -485,8 +485,6 @@ Neither `get-version-task.yml` nor `publish-plan-task.yml` has a caller-stub sni
   get-version:
     name: Get version information job
     uses: ptr727/ProjectTemplate/.github/workflows/get-version-task.yml@<hub-main-commit-sha> # <release-tag>
-    with:
-      ref: ${{ github.ref }}
     # Outputs: SemVer2, AssemblyVersion, AssemblyFileVersion, AssemblyInformationalVersion, GitCommitId, Prerelease.
 ```
 
@@ -505,6 +503,8 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 `build-release-task.yml` also calls `get-version-task.yml` through `$/`, so the sibling resolves at the release task's pinned hub commit. A caller that needs the version outputs without the rest of the release orchestrator reaches `get-version-task.yml` directly, using the pinned owner-scoped form shown above.
 
+The `get-version` example passes no `ref`, so the task versions the triggering commit. A caller passing `ref` passes a commit on the triggering branch, usually `${{ github.sha }}`, because classification follows the trigger ref per WORKFLOW.md D3.1.
+
 ## Adopting the Release Chain
 
 A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml` reaching the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and the paths-filter's `enable_*` outputs. The full shape below is the catalog snippet [`publish-release.yml`][release-caller-snippet] byte for byte, pinned to a release carrying the current task interface, and Dependabot bumps it from there ([Pinning][pinning]). The task declares no job-level `permissions:` of its own, because a called job's block is validated against the caller's grant before its `if:` runs and would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with: `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run (the release upload, the artifact cleanup, and the [`WORKFLOW.md`][workflow] D4.7 publisher dispatch and self-cancel), and nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
@@ -519,7 +519,7 @@ The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus
 name: Publish project release action
 
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
-# This is the NuGet-library shape, and a Docker or PyPI repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
+# This is the NuGet-library shape, and a Docker, PyPI, or file-target repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 
 on:
   push:
@@ -686,7 +686,9 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
           done
 ```
 
-No `publish-release-task.yml` ships alongside `build-release-task.yml`: the jobs above are each a thin call to one hub task or a verbatim OIDC upload, and the trigger policy that ties them together genuinely differs enough across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet or PyPI, KiCadLibrary's branch-matrix dispatch) that hosting it would just move the same `with:` block one file over rather than removing it.
+A file-target repo, whose release carries a file its own `build-release-asset` hook writes, varies the stub another way. It sets `enable_release_asset: true` and every other `enable_*` input to `false`. It drops `nuget_project` and the `publish-nuget` job, and keeps `expect_release_assets: true`. The hook has no hub default, so the repo carries `.github/actions/build-release-asset/action.yml`, and the task fails without it.
+
+No `publish-release-task.yml` ships alongside `build-release-task.yml`. The jobs above are each a thin call to one hub task or a verbatim OIDC upload. The trigger policy that ties them together differs across the fleet's shapes (scheduled-plus-dispatch Docker, push-gated NuGet, PyPI, or file target). Hosting it would just move the same `with:` block one file over rather than removing it.
 
 ## Adopting the Type-Specific Tasks
 
@@ -703,6 +705,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
       contents: read
     uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
     with:
+      ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
     secrets:
       DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
