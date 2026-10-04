@@ -4806,7 +4806,7 @@ class TestCheckShapes(unittest.TestCase):
             self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
     def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
-        """A misspelled field would give every run the fallback identity and disable the dedup."""
+        """A field dropped from the selection gives every run the fallback identity and disables the dedupe."""
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
             "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
