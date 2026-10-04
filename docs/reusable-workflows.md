@@ -116,6 +116,8 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 - [x] The catalog caller snippet `catalog/snippets/workflows/merge-bot-pull-request.yml`, pinned to `20616e0a70613ad8727d567990f5d0e082f5275c # 2.0.338`, in #748, the pull request that added this section.
 - [x] The first Dependabot pull request against hub `develop` after `f33fa7e` merges through `merge-bot-task.yml`, proving the callee reads the caller's `pull_request_target` payload, the explicit `secrets:` map, App-token minting in a callee, and `permissions: {}` at the caller. If it fails on the token grant, the fallback is at the caller, since a callee cannot widen what its caller grants: replace `permissions: {}` with `contents: read`, the least scope, and widen only to what the failing run names. Dependabot PR #771 merged to `develop` with `--squash` in [run-771][run-771]. The callee job `Merge dependabot pull request job` succeeded, so `permissions: {}` held and the fallback was not needed.
 - [x] The first Dependabot pull request against hub `main` after `20616e0` merges with `--merge`. Dependabot PR #770 merged to `main` with `--merge` in [run-770][run-770]. Both pull requests were merged by `app/ptr727-codegen`.
+- [ ] Release: the hub release carrying the `delete-merged-bot-branch` job. NxWitness, LanguageTags, aiopurpleair, MediaTools, and VSCode-Server-DotNetCore need `closed` in their stub `types` once their pin reaches it.
+- [ ] Proof: the first Dependabot pull request merged into hub `develop` once the delete job is on `develop` has its head branch deleted. Tick with the run URL.
 
 ### Stage 1: Merge-Bot Adoption
 
@@ -128,16 +130,11 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] NxWitness follow-up: add `closed` to the stub `types` once its pin reaches the release carrying the delete job.
 - [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
 - [x] LanguageTags (`delete-branch: true`): adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] LanguageTags follow-up: add `closed` to the stub `types` once its pin reaches the release carrying the delete job.
 - [x] aiopurpleair (`delete-branch: true`): adopted on `develop` in ptr727/aiopurpleair#103 at `3b69dc3`, merged 2026-09-09 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] aiopurpleair follow-up: add `closed` to the stub `types` once its pin reaches the release carrying the delete job.
 - [x] MediaTools (`delete-branch: true`): adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] MediaTools follow-up: add `closed` to the stub `types` once its pin reaches the release carrying the delete job.
 - [x] VSCode-Server-DotNetCore (`delete-branch: true`): adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 at `ca46db7`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] VSCode-Server-DotNetCore follow-up: add `closed` to the stub `types` once its pin reaches the release carrying the delete job.
 - [x] Blog: adopted on `develop` in ptr727/Blog#97 at `71bcb64`, merged 2026-08-23 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] ESPHome-Config: adopted on `develop` in ptr727/ESPHome-Config#100 at `a21dfd7`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] HomeAssistant-Config: adopted on `develop` in ptr727/HomeAssistant-Config#33 at `f980637`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
@@ -300,7 +297,7 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
       delete-branch: true
 ```
 
-The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`, deleting the bot head once the merge lands).
+The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`), which when `true` deletes the bot head once the merge lands.
 The `rules` input is a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`. The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
 Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate.
@@ -762,7 +759,7 @@ The task is .NET-specific orchestration. It installs the .NET SDK, runs the call
 
 ## What a Pilot Proves
 
-The hub's own stub, which sets `delete-branch: true`, proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. The first Dependabot pull request merged into `develop` after this lands proves the delete job, by the branch being gone afterwards. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
+The hub's own stub, which sets `delete-branch: true`, proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. The first Dependabot pull request merged into `develop` once the delete job is there proves it, by the branch being gone afterwards. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
 
 Four things the hub cannot prove fall to the first downstream adopter. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. A pilot records each of those as observed in its own audit report rather than assumed here.
 
