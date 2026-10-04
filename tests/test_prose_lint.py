@@ -1992,7 +1992,7 @@ class TestSentenceLength(BaitCase):
             "setext dashes": f"{half}\n---\n{half}\n",
             "thematic": f"{half}\n***\n{half}\n",
             "thematic underscores": f"{half}\n___\n{half}\n",
-            "html": f"{half}\n<br>\n{half}\n",
+            "html block": f"<details>\n<summary>{half}</summary>\n{half}\n</details>\n",
             "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
             "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
             "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
@@ -2011,11 +2011,62 @@ class TestSentenceLength(BaitCase):
         text = f"{lead} `one\ntwo three four` end.\n"
         self.assertEqual([], self.found(text))
 
-    def test_a_wrapped_quotation_is_one_word(self) -> None:
-        cap = prose_lint.SENTENCE_WORD_CAP
-        lead = " ".join(["word"] * (cap - 3))
-        text = f'{lead} "one two\nthree four five" end.\n'
+    def test_a_quote_mark_pairs_within_its_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f'Cut 5" pipe {half}\n{half} and 6" pipe end.\n'
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_inline_html_and_a_tag_inside_a_paragraph_stay_prose(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        for mid in ("<br>", "<number>", "<https://example.test>", "<kbd>x</kbd>"):
+            with self.subTest(mid=mid):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n{mid} {half}\n"))
+        for lead in ("<kbd>x</kbd>", "<number>", "<https://example.test>"):
+            self.assertEqual([(1, "sentence-length")], self.found(f"{lead} {self.over()}.\n"))
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n<br>\n{c}\n"))
+
+    def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"<!--\n```\n-->\n{half}\n{half}\n"
+        self.assertEqual([(4, "sentence-length")], self.found(text))
+
+    def test_a_setext_underline_discards_the_heading_only(self) -> None:
+        over = self.over()
+        self.assertEqual([], self.found(f"{over}\n===\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n---\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n-\nShort.\n"))
+
+    def test_a_thematic_break_flushes_the_paragraph(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f"{over}.\n- - -\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}.\n***\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"- {over}.\n---\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}\nmore words.\n---\nShort.\n"))
+
+    def test_only_the_line_above_a_table_delimiter_is_the_header(self) -> None:
+        text = f"{self.over()}.\nhead | x\n--- | ---\nrow | y\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_a_column_zero_fence_ends_a_list(self) -> None:
+        text = f"- item\n\n```\ncode\n```\n\n    {self.over()}.\n"
         self.assertEqual([], self.found(text))
+
+    def test_code_indented_past_a_list_item_is_code(self) -> None:
+        self.assertEqual([], self.found(f"- item\n\n      {self.over()}.\n"))
+
+    def test_front_matter_must_look_like_yaml_and_close(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        flagged = [(2, "sentence-length")]
+        self.assertEqual(flagged, self.found(f"---\n{half} here\n{half}\n---\n"))
+        self.assertEqual(flagged, self.found(f"---\nname: x\n{self.over()}.\n"))
+
+    def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))
+        self.assertEqual([], self.found(f"{half}\n1) {half}\n"))
+        self.assertEqual([], self.found(f"- a\n  {half}\n2) {half}\n"))
 
     def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
         tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"

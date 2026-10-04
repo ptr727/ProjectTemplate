@@ -1702,18 +1702,42 @@ def sentences(span: str) -> list[str]:
     return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
-LIST_MARKER = re.compile(r"^\s*(?:[-*+]|[0-9]+[.)])\s")
-SETEXT_EQUALS = re.compile(r"^ {0,3}=+\s*$")
+LIST_MARKER = re.compile(r"^\s*(?:[-*+]|([0-9]+)[.)])\s")
+SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
 THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
 TABLE_DELIMITER = re.compile(
     r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$|^\s*\|\s*:?-+:?\s*\|?\s*$"
 )
-HTML_LINE = re.compile(r"^\s*<(?:[A-Za-z/!?]|!--)")
+HTML_COMMENT = re.compile(r"^\s*<!--")
+BLOCK_TAGS = (
+    "details|summary|div|p|br|hr|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|section|pre"
+    "|blockquote|center|img|picture|source"
+)
+HTML_TAG_LINE = re.compile(
+    rf"^\s*(?:</?(?:{BLOCK_TAGS})\b[^>]*>|<({BLOCK_TAGS})\b[^>]*>.*</\1>)\s*$", re.IGNORECASE
+)
+YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
+FRONT_MATTER_REACH = 50
 
 
-def mask_code_and_quotes(text: str) -> str:
+def front_matter_end(lines: list[str]) -> int:
+    """The index after a leading YAML block, or 0 when the file opens with none."""
+    if not lines or lines[0].rstrip("\r").strip() != "---":
+        return 0
+    for j in range(1, min(len(lines), FRONT_MATTER_REACH)):
+        line = lines[j].rstrip("\r")
+        if line.strip() in ("---", "..."):
+            return j + 1
+        if not YAML_LINE.match(line):
+            return 0
+    return 0
+
+
+def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
     """The text with each code span and quotation blanked to one token of the same length.
 
+    A code span may wrap across lines, so backticks pair over the joined block.
+    A quotation pairs within one line, so a stray inch mark never blanks prose on later lines.
     The length is kept so an offset in the result is still an offset in the original.
     A terminator ending a quotation survives, as `strip_quoted` keeps it.
     """
@@ -1727,7 +1751,12 @@ def mask_code_and_quotes(text: str) -> str:
             return '"' * (len(inner) + 1) + inner[-1]
         return '"' * len(m.group())
 
-    return re.sub(r'"([^"]*)"', quote, re.sub(r"`[^`]*`", code, text))
+    text = re.sub(r"`[^`]*`", code, text)
+    out = list(text)
+    for start, length in zip(starts, lengths, strict=True):
+        masked = re.sub(r'"([^"]*)"', quote, text[start : start + length])
+        out[start : start + length] = masked
+    return "".join(out)
 
 
 def sentence_length_findings(
@@ -1736,17 +1765,19 @@ def sentence_length_findings(
     """Over-cap sentences in Markdown prose, each judged whole.
 
     A paragraph, or a list item with its continuation lines, is one block joined before the split.
-    Front matter, headings, table rows, blockquotes, link definitions, HTML, fences, and code end a block.
-    A blank line, a thematic break, and the next list item end it too.
-    A code span and a quotation each collapse to one token, judged on the joined block.
+    Block detection is a heuristic approximation of CommonMark, fit for an opt-in check.
+    Parser edge cases beyond the covered ones are accepted rather than chased.
     A sentence is reported on its first line, so the finding sits where the sentence starts.
     Given the changed lines, it is reported on its first changed line, or dropped when none changed.
     That keeps an edit to a continuation line from hiding the sentence it pushed over the cap.
     """
     out: list[tuple[int, str, str]] = []
     block: list[tuple[int, str]] = []
+    block_is_item = False
 
     def flush() -> None:
+        nonlocal block_is_item
+        block_is_item = False
         if not block:
             return
         raw = ""
@@ -1757,8 +1788,9 @@ def sentence_length_findings(
             starts.append(len(raw))
             raw += span
         numbers = [n for n, _ in block]
+        lengths = [len(span) for _, span in block]
         block.clear()
-        text = mask_code_and_quotes(raw)
+        text = mask_code_and_quotes(raw, starts, lengths)
         pos = 0
         for m in [*SENTENCE_BREAK.finditer(text), None]:
             end = m.start() if m else len(text)
@@ -1778,64 +1810,75 @@ def sentence_length_findings(
             if m:
                 pos = m.end()
 
-    start = 0
-    if lines and lines[0].rstrip("\r").strip() == "---":
-        for j in range(1, len(lines)):
-            if lines[j].rstrip("\r").strip() in ("---", "..."):
-                start = j + 1
-                break
+    start = front_matter_end(lines)
     in_fence = in_comment = in_table = in_code = in_list = False
+    item_offset = 0
+    code_indent = 4
     prev_blank = True
     for i, line in enumerate(lines[start:], start + 1):
         line = line.rstrip("\r")
         blank = not line.strip()
         was_blank, prev_blank = prev_blank, blank
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
         if CODE_FENCE.match(line):
             in_fence = not in_fence
             flush()
+            if not line.startswith((" ", "\t")):
+                in_list = False
             continue
         if in_fence:
-            continue
-        if in_comment:
-            in_comment = "-->" not in line
             continue
         if blank:
             flush()
             in_table = False
             continue
-        indented = line.startswith(("    ", "\t"))
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
         if in_code:
-            if indented:
+            if indent >= code_indent:
                 continue
             in_code = False
         if in_table:
             continue
-        if not block and was_blank and indented and not in_list:
-            in_code = True
-            continue
-        if not indented and not LIST_MARKER.match(line):
+        marker = LIST_MARKER.match(line)
+        number = marker.group(1) if marker else None
+        is_item = bool(marker and (number is None or in_list or not block or int(number) == 1))
+        if not block and was_blank:
+            code_indent = 4 + (item_offset if in_list else 0)
+            if indent >= code_indent and not is_item:
+                in_code = True
+                continue
+        if indent == 0 and not is_item:
             in_list = False
-        if HTML_LINE.match(line):
+        if HTML_COMMENT.match(line):
             flush()
-            in_comment = line.lstrip().startswith("<!--") and "-->" not in line
+            in_comment = "-->" not in line
+            continue
+        if not block and HTML_TAG_LINE.match(line):
             continue
         if TABLE_DELIMITER.match(line) and "|" in line:
-            block.clear()
+            if block and block[-1][0] == i - 1:
+                block.pop()
+            flush()
             in_table = True
             continue
-        if SETEXT_EQUALS.match(line) or (block and THEMATIC_BREAK.match(line) and "-" in line):
+        if len(block) == 1 and not block_is_item and SETEXT_UNDERLINE.match(line):
             block.clear()
             continue
-        if THEMATIC_BREAK.match(line):
+        if THEMATIC_BREAK.match(line) or SETEXT_UNDERLINE.match(line):
             flush()
             continue
         span = line.strip()
         if span.startswith(("|", ">", "#")) or re.match(r"^\[[^\]]+\]:", span):
             flush()
             continue
-        if LIST_MARKER.match(line):
+        if is_item:
             flush()
             in_list = True
+            item_offset = marker.end() if marker else 0
+            block_is_item = True
         block.append((i, span))
     flush()
     return out
