@@ -4782,7 +4782,7 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(["FAILURE"], self.conclusions(passed, failed))
 
     def test_start_time_does_not_decide_which_overlapping_run_is_newer(self) -> None:
-        """The superseded suite's job can start later and start later."""
+        """A job in the older suite that starts later still does not win."""
         old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7, started=ago(58))
         new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7, started=ago(60))
         self.assertEqual(["SUCCESS"], self.conclusions(old, new))
@@ -4800,16 +4800,10 @@ class TestCheckShapes(unittest.TestCase):
         old_only = check(name="leg", conclusion="FAILURE", suite=10, workflow=7)
         shared_old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
         shared_new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
-        self.assertEqual(["FAILURE", "SUCCESS"], self.conclusions(old_only, shared_old, shared_new))
-        self.assertEqual(
-            ["FAILURE", "SUCCESS"], self.conclusions(shared_new, shared_old, old_only)[::-1]
-        )
-
-    def test_a_name_in_both_suites_resolves_to_the_newer_suite(self) -> None:
-        """Only the newer suite's run of a shared name is read."""
-        old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
-        new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
-        self.assertEqual(["SUCCESS"], self.conclusions(old, new))
+        for runs in ((old_only, shared_old, shared_new), (shared_new, shared_old, old_only)):
+            nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+            kept = sorted((n["name"], n["conclusion"]) for n in nodes)
+            self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
         """A node missing its suite reads as suite zero under no workflow and no app."""
