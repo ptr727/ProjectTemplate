@@ -200,6 +200,7 @@ class ProvenanceTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.out = Path(self._tmp.name) / "seen.txt"
         self.requests: list[urllib.request.Request | str] = []
+        self.timeouts: list[float | None] = []
         self.stderr = io.StringIO()
 
     def urls(self) -> list[str]:
@@ -215,6 +216,7 @@ class ProvenanceTests(unittest.TestCase):
     def opener(self, lookup: bytes | Exception, script: bytes):
         def urlopen(target, timeout=None):
             self.requests.append(target)
+            self.timeouts.append(timeout)
             url = target if isinstance(target, str) else target.full_url
             if url != hub.HUB_MAIN_SHA_URL:
                 return FakeResponse(script)
@@ -273,7 +275,10 @@ class ProvenanceTests(unittest.TestCase):
             "UnicodeDecodeError": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"),
             "unexpected response body": b"\xff not a hash",
         }
-        for cause, lookup in cases.items():
+        pairs = list(cases.items())
+        for bad in (SHA[:8], SHA + SHA[:24], SHA + "a", SHA.upper(), f"{SHA}\n{SHA}"):
+            pairs.append(("unexpected response body", bad.encode()))
+        for cause, lookup in pairs:
             with self.subTest(cause=cause):
                 self.stderr.seek(0)
                 self.stderr.truncate()
@@ -297,32 +302,37 @@ class ProvenanceTests(unittest.TestCase):
         self.run_main(urllib.error.URLError("offline"), env={"GH_TOKEN": "tok-secret"})
         self.assertNotIn("tok-secret", self.stderr.getvalue())
 
-    def test_caller_value_survives_and_is_restored(self) -> None:
+    def test_caller_value_survives(self) -> None:
         seen = self.run_main(env={"PROSE_GATE_PROVENANCE": "reproducing x@y"})
         self.assertEqual(seen, "reproducing x@y")
 
-    def test_whitespace_only_caller_value_is_overwritten_then_restored(self) -> None:
+    def test_whitespace_only_caller_value_is_overwritten(self) -> None:
         self.assertEqual(self.run_main(env={"PROSE_GATE_PROVENANCE": "  "}), RESOLVED)
 
     def test_environment_is_restored_when_the_script_raises(self) -> None:
-        with (
-            self.environment({"PROSE_GATE_PROVENANCE": "keep me"}),
-            mock.patch.object(urllib.request, "urlopen", self.opener(SHA.encode(), RAISE)),
-            self.assertRaises(RuntimeError),
-        ):
-            try:
-                hub.main([PROSE_PATH])
-            finally:
-                self.assertEqual(os.environ["PROSE_GATE_PROVENANCE"], "keep me")
-        with (
-            self.environment(),
-            mock.patch.object(urllib.request, "urlopen", self.opener(SHA.encode(), RAISE)),
-            self.assertRaises(RuntimeError),
-        ):
-            try:
-                hub.main([PROSE_PATH])
-            finally:
-                self.assertNotIn("PROSE_GATE_PROVENANCE", os.environ)
+        for caller, expected in (("  ", "  "), (None, None)):
+            with self.subTest(caller=caller):
+                env = {} if caller is None else {"PROSE_GATE_PROVENANCE": caller}
+                with (
+                    self.environment(env),
+                    mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RAISE)),
+                    self.assertRaises(RuntimeError),
+                ):
+                    try:
+                        hub.main([PROSE_PATH])
+                    finally:
+                        self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), expected)
+
+    def test_lookup_and_fetch_use_separate_timeouts(self) -> None:
+        self.run_main()
+        self.assertEqual(self.timeouts[0], hub.LOOKUP_TIMEOUT)
+        self.assertLess(hub.LOOKUP_TIMEOUT, self.timeouts[1])
+
+    def test_token_header_is_unredirected(self) -> None:
+        self.run_main(env={"GH_TOKEN": "tok-one"})
+        request = self.lookup_requests()[-1]
+        self.assertNotIn("Authorization", request.headers)
+        self.assertEqual(request.unredirected_hdrs.get("Authorization"), "Bearer tok-one")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ HUB_MAIN_SHA_URL = f"https://api.github.com/repos/{HUB_REPO}/commits/main"
 PROVENANCE_VAR = "PROSE_GATE_PROVENANCE"
 PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
 PROBE_TIMEOUT = 30
+LOOKUP_TIMEOUT = 5
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
@@ -31,13 +32,14 @@ def resolve_main_commit() -> str | None:
 
     Any failure prints one line naming the cause and returns None, so the gate still runs.
     """
-    headers = {"Accept": "application/vnd.github.sha"}
     token = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    request = urllib.request.Request(
+        HUB_MAIN_SHA_URL, headers={"Accept": "application/vnd.github.sha"}
+    )
     if token:
-        headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(HUB_MAIN_SHA_URL, headers=headers)
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=LOOKUP_TIMEOUT) as response:
             sha = response.read().decode(errors="replace").strip()
     except urllib.error.HTTPError as exc:
         reason = f"HTTP {exc.code}"
