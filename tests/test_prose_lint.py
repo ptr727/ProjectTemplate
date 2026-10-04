@@ -1927,6 +1927,197 @@ class TestSentenceLength(BaitCase):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
+    def found(self, text: str) -> list[tuple[int, str]]:
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"})
+        return [(n, kind) for n, kind, _ in found]
+
+    def test_a_wrapped_sentence_over_the_cap_is_flagged_where_it_starts(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        one_line = " ".join(words) + "."
+        wrapped = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n"
+        wrapped += " ".join(words[20:]) + "."
+        expected = [(3, "sentence-length")]
+        self.assertEqual(expected, self.found(f"Intro.\n\n{one_line}\n"))
+        self.assertEqual(expected, self.found(f"Intro.\n\n{wrapped}\n"))
+
+    def test_a_wrapped_sentence_within_the_cap_passes(self) -> None:
+        words = ["word"] * 20
+        self.assertEqual([], self.found(" ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"))
+
+    def test_short_sentences_across_a_line_break_are_judged_alone(self) -> None:
+        lead = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([], self.found(f"{lead}.\n{lead}.\n"))
+
+    def test_a_list_item_is_measured_with_its_continuation_lines(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        item = "- " + " ".join(words[:15]) + "\n  " + " ".join(words[15:]) + ".\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro:\n" + item))
+
+    def test_separate_blocks_are_never_joined(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        fence = "```\ncode\n```\n"
+        for text in (
+            f"- {half}\n- {half}\n",
+            f"{half}\n\n{half}\n",
+            f"{half}\n# Head\n{half}\n",
+            f"{half}\n{fence}{half}\n",
+            f"{half}\n| a | b |\n{half}\n",
+        ):
+            with self.subTest(text=text[:30]):
+                self.assertEqual([], self.found(text))
+
+    def over(self, n: int = 6) -> str:
+        return " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + n))
+
+    def test_an_edit_to_a_continuation_line_flags_the_sentence(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        text = "Intro.\n\n" + " ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"}, allowed={4})
+        self.assertEqual([4], [n for n, _, _ in found])
+        self.assertEqual([], prose_lint.check_file(path, {"sentence-length"}, allowed={1}))
+
+    def test_front_matter_is_not_joined_into_the_body(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"---\nname: {half}\ndescription: {half}\n...\n{half}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_a_long_front_matter_line_is_still_flagged(self) -> None:
+        text = f"---\nname: x\ndescription: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_block_level_tag_line_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        self.assertEqual([], self.found(f"{a}\n<div>\n{a}.\n"))
+        text = f"<details>\n<summary>S</summary>\n\n- {a}\n</details>\n{a}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_prose_wrapped_in_tags_is_still_measured(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f'<p align="center">{over}.</p>\n'))
+        self.assertEqual(flagged, self.found(f"<summary>{over}.</summary>\n"))
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.found(f'<p align="center">{at_cap}</p>\n'))
+
+    def test_a_huge_digit_run_is_not_a_marker_and_does_not_crash(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"{half}\n{'1' * 5000}) {half}\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_other_block_boundaries_end_a_block(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        cases = {
+            "setext": f"{half}\n===\n{half}\n",
+            "setext dashes": f"{half}\n---\n{half}\n",
+            "thematic": f"{half}\n***\n{half}\n",
+            "thematic underscores": f"{half}\n___\n{half}\n",
+            "html block": f"<details>\n<summary>{half}</summary>\n{half}\n</details>\n",
+            "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
+            "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
+            "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(text))
+
+    def test_an_indented_list_continuation_is_not_code(self) -> None:
+        text = f"- Item.\n\n    {self.over()}.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_wrapped_code_span_is_one_word(self) -> None:
+        cap = prose_lint.SENTENCE_WORD_CAP
+        lead = " ".join(["word"] * (cap - 3))
+        text = f"{lead} `one\ntwo three four` end.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_a_quote_mark_pairs_within_its_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f'Cut 5" pipe {half}\n{half} and 6" pipe end.\n'
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_inline_html_and_a_tag_inside_a_paragraph_stay_prose(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        for mid in ("<br>", "<number>", "<https://example.test>", "<kbd>x</kbd>"):
+            with self.subTest(mid=mid):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n{mid} {half}\n"))
+        for lead in ("<kbd>x</kbd>", "<number>", "<https://example.test>"):
+            self.assertEqual([(1, "sentence-length")], self.found(f"{lead} {self.over()}.\n"))
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n<br>\n{c}\n"))
+
+    def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"<!--\n```\n-->\n{half}\n{half}\n"
+        self.assertEqual([(4, "sentence-length")], self.found(text))
+
+    def test_a_setext_underline_discards_the_heading_only(self) -> None:
+        over = self.over()
+        self.assertEqual([], self.found(f"{over}\n===\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n---\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n-\nShort.\n"))
+
+    def test_a_thematic_break_flushes_the_paragraph(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f"{over}.\n- - -\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}.\n***\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"- {over}.\n---\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}\nmore words.\n---\nShort.\n"))
+
+    def test_only_the_line_above_a_table_delimiter_is_the_header(self) -> None:
+        text = f"{self.over()}.\nhead | x\n--- | ---\nrow | y\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_a_column_zero_fence_ends_a_list(self) -> None:
+        text = f"- item\n\n```\ncode\n```\n\n    {self.over()}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_code_indented_past_a_list_item_is_code(self) -> None:
+        self.assertEqual([], self.found(f"- item\n\n      {self.over()}.\n"))
+
+    def test_front_matter_needs_a_closing_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\nname: x\n{self.over()}.\n"))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\n{half} here\n{half}\n---\n"))
+
+    def test_a_thematic_break_with_fences_or_tables_is_not_front_matter(self) -> None:
+        a = " ".join(["word"] * 15)
+        fenced = f"---\n```\n{self.over()}\n```\n---\nShort.\n"
+        table = f"---\n| {a} | x |\n| --- | --- |\n---\nShort.\n"
+        self.assertEqual([], self.found(fenced))
+        self.assertEqual([], self.found(table))
+
+    def test_source_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        for tag in ("<source>", "</style>", "</pre>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
+
+    def test_front_matter_has_no_line_reach(self) -> None:
+        keys = "".join(f"key{n}: value\n" for n in range(55))
+        text = f"---\n{keys}description: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(57, "sentence-length")], self.found(text))
+
+    def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<search>", "</div>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
+
+    def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))
+        self.assertEqual([], self.found(f"{half}\n1) {half}\n"))
+        self.assertEqual([], self.found(f"- a\n  {half}\n2) {half}\n"))
+
+    def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
+        tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro line.\n" + tail))
+
     def test_the_rule_is_markdown_only(self) -> None:
         """A source file's long lines are code, which no sentence rule judges."""
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
@@ -2399,6 +2590,26 @@ class TestCli(unittest.TestCase):
             mock.patch.object(prose_lint, "changed_lines", return_value={}),
         ):
             self.assertEqual(0, prose_lint.main(["--check", "dupword", "--diff", "HEAD"]))
+
+    def test_diff_scope_keeps_a_wrapped_sentence_edited_on_a_continuation_line(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        bait = self.tmp / "wrapped.md"
+        text = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n" + " ".join(words[20:])
+        bait.write_text(text + ".\n", encoding="utf-8")
+        argv = ["--check", "sentence-length", "--diff", "HEAD"]
+        for changed, code in (({2}, 1), ({9}, 0)):
+            with self.subTest(changed=changed):
+                out = io.StringIO()
+                with (
+                    mock.patch.object(prose_lint, "discover", return_value=[bait]),
+                    mock.patch.object(
+                        prose_lint, "changed_lines", return_value={prose_lint.rel(bait): changed}
+                    ),
+                    contextlib.redirect_stdout(out),
+                ):
+                    self.assertEqual(code, prose_lint.main(argv))
+                if code:
+                    self.assertIn(":2: sentence-length", out.getvalue())
 
     def test_diff_scope_reports_only_the_changed_lines(self) -> None:
         """A finding on an untouched line is the backlog, which the diff run must not attribute."""

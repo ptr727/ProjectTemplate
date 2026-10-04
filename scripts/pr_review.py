@@ -803,7 +803,8 @@ query($o:String!,$r:String!,$n:Int!){
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ name status conclusion startedAt }
+        ... on CheckRun{ name status conclusion startedAt
+          checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt }
       }}}}}}
   }}}
@@ -2611,14 +2612,34 @@ def check_nodes(pr: dict) -> list[dict]:
     `state` that folds both. Reading one shape's keys off the other yields None for all of them,
     which scores an external status as a check in no state at all, so neither pending nor failed.
     They are normalized here so one reading serves both.
+
+    Runs group by workflow and name, or by app and name where the suite has no workflow run.
+    Each group keeps every run of its highest suite id and drops its runs from older suites.
+    A name only an older suite carries stays, since the merge gate still reads it.
+    The highest suite id decides, since `startedAt` misorders overlapping runs.
+    A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
     rollup = head_commit(pr).get("statusCheckRollup") or {}
-    out = []
+    out: list[dict] = []
+    newest_suite: dict[tuple, int] = {}
+    suites: dict[int, tuple[tuple, int]] = {}
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
+            suite = n.get("checkSuite") or {}
+            workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
+            origin = (
+                ("workflow", workflow)
+                if workflow
+                else ("app", (suite.get("app") or {}).get("slug"))
+            )
+            suite_id = suite.get("databaseId") or 0
+            name = n.get("name") or ""
+            group = (origin, name)
+            newest_suite[group] = max(newest_suite.get(group, 0), suite_id)
+            suites[len(out)] = (group, suite_id)
             out.append(
                 {
                     "name": n.get("name") or "",
@@ -2659,7 +2680,8 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
-    return out
+    stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
+    return [node for i, node in enumerate(out) if i not in stale]
 
 
 def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
