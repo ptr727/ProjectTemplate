@@ -11,7 +11,7 @@ name: Publish Docker Hub readme task
 on:
   workflow_call:
     inputs:
-      # Ref whose readme, and any hook sources, to publish, where empty uses the caller's ref.
+      # Ref whose readme, and any hook sources, to publish, where empty uses the triggering commit.
       # The publisher passes the versioned commit so the overview tracks the exact release build.
       ref:
         required: false
@@ -87,7 +87,7 @@ jobs:
         if: ${{ inputs.repositories == '' && inputs.manifest != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref }}
 
       - name: Resolve repository list step
         id: list
@@ -131,7 +131,7 @@ jobs:
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref }}
 
       # A hook lets a repo render the readme first, an m4 template with version includes, for example.
       # It always resolves which file the push step ships.

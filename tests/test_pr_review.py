@@ -342,6 +342,9 @@ def check(
     status: str = "COMPLETED",
     conclusion: str = "SUCCESS",
     started: str | None = None,
+    suite: int = 1,
+    workflow: int | None = None,
+    slug: str = "github-actions",
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
 
@@ -356,6 +359,11 @@ def check(
         "status": status,
         "conclusion": conclusion,
         "startedAt": ago(60) if started is None else started,
+        "checkSuite": {
+            "databaseId": suite,
+            "app": {"slug": slug},
+            "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
+        },
     }
 
 
@@ -4754,6 +4762,101 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="PENDING", conclusion="", started=ago(900)))
         )
 
+    def conclusions(self, *runs: dict) -> list[str]:
+        """The conclusions the normalizer keeps for one head's runs, in kept order."""
+        nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+        return [n["conclusion"] for n in nodes]
+
+    def test_a_newer_suite_supersedes_an_older_one_in_either_order(self) -> None:
+        """A close and reopen makes a new suite, and its runs are the ones that gate."""
+        failed = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
+        passed = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
+        self.assertEqual(["SUCCESS"], self.conclusions(failed, passed))
+        self.assertEqual(["SUCCESS"], self.conclusions(passed, failed))
+
+    def test_the_newest_suite_failing_reads_failed(self) -> None:
+        """The older green run is the superseded one here, so the newest failure stands."""
+        passed = check(name="lint", conclusion="SUCCESS", suite=10, workflow=7)
+        failed = check(name="lint", conclusion="FAILURE", suite=20, workflow=7)
+        self.assertEqual(["FAILURE"], self.conclusions(failed, passed))
+        self.assertEqual(["FAILURE"], self.conclusions(passed, failed))
+
+    def test_start_time_does_not_decide_which_overlapping_run_is_newer(self) -> None:
+        """A job in the older suite that starts later still does not win."""
+        old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7, started=ago(58))
+        new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7, started=ago(60))
+        self.assertEqual(["SUCCESS"], self.conclusions(old, new))
+        self.assertEqual(["SUCCESS"], self.conclusions(new, old))
+
+    def test_same_named_jobs_inside_one_suite_are_all_counted(self) -> None:
+        """Two jobs can share a display name, and collapsing them could hide the failing one."""
+        ok = check(name="build", conclusion="SUCCESS", suite=10, workflow=7)
+        bad = check(name="build", conclusion="FAILURE", suite=10, workflow=7)
+        self.assertEqual(["SUCCESS", "FAILURE"], self.conclusions(ok, bad))
+        self.assertEqual(["FAILURE", "SUCCESS"], self.conclusions(bad, ok))
+
+    def test_a_name_only_the_older_suite_carries_is_kept(self) -> None:
+        """The merge gate still reads a name the newer suite no longer produces."""
+        old_only = check(name="leg", conclusion="FAILURE", suite=10, workflow=7)
+        shared_old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
+        shared_new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
+        for runs in ((old_only, shared_old, shared_new), (shared_new, shared_old, old_only)):
+            nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+            kept = sorted((n["name"], n["conclusion"]) for n in nodes)
+            self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
+
+    def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
+        """Q_FULL selects the suite and workflow fields the dedup keys on."""
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn(
+            "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
+        )
+
+    def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
+        """A node missing its suite reads as suite zero under no workflow and no app."""
+        bare = check(name="lint")
+        bare.pop("checkSuite")
+        self.assertEqual(["SUCCESS"], self.conclusions(bare))
+
+    def test_the_same_name_in_two_workflows_is_two_checks(self) -> None:
+        """Two workflows can each have a `build` job under one app, and neither hides the other."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="build", conclusion="FAILURE", suite=10, workflow=7),
+                    check(name="build", conclusion="SUCCESS", suite=20, workflow=8),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
+    def test_the_same_name_under_two_apps_without_a_workflow_is_two_checks(self) -> None:
+        """A suite with no workflow run falls back to its app slug."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="cov", conclusion="FAILURE", suite=10, slug="codecov"),
+                    check(name="cov", conclusion="SUCCESS", suite=20, slug="other-app"),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
+    def test_different_names_are_each_counted(self) -> None:
+        """Two names in one suite are two checks."""
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="lint", conclusion="FAILURE", suite=10, workflow=7),
+                    check(name="build", conclusion="SUCCESS", suite=10, workflow=7),
+                ],
+            )
+        )
+        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+
     def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
         """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
         self.assertEqual([], pr_review.check_nodes(payload([review()])))
@@ -4820,7 +4923,9 @@ class TestDigestReportsChecks(GqlCase):
 
     def test_a_green_pull_request_carries_no_stuck_field_at_all(self) -> None:
         """A field reading `none` on every green run is one a reader skips on the run it matters."""
-        out = self.digest(payload([review()], checks=[check(), check(conclusion="SKIPPED")]))
+        out = self.digest(
+            payload([review()], checks=[check(), check(name="other", conclusion="SKIPPED")])
+        )
         self.assertIn("checks=2/2", out)
         self.assertNotIn("stuck=", out)
 
