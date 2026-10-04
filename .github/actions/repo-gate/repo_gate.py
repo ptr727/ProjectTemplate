@@ -478,28 +478,21 @@ def substitute_expressions(body: str) -> str:
     """Replace each expression with `${GHA_EXPR}`, keeping every later line at its own number.
 
     A multi-line expression collapses onto its first line.
-    Its extra newlines return as empty lines after the end of that physical line.
-    A backslash continuation would not hold inside a comment.
+    Its extra newlines return as empty lines after the end of that logical line.
+    A backslash continuation would not hold inside a comment, and a physical line end would split a command.
     """
+    marked = EXPRESSION.sub(lambda m: "${GHA_EXPR}" + "\0" * m.group().count("\n"), body)
     out: list[str] = []
     pending = 0
-    last = 0
-
-    def add(segment: str) -> None:
-        nonlocal pending
-        if pending and "\n" in segment:
-            cut = segment.index("\n")
-            segment = segment[:cut] + "\n" * pending + segment[cut:]
+    for line in marked.split("\n"):
+        pending += line.count("\0")
+        line = line.replace("\0", "")
+        out.append(line)
+        slashes = len(line) - len(line.rstrip("\\"))
+        if pending and slashes % 2 == 0:
+            out.extend([""] * pending)
             pending = 0
-        out.append(segment)
-
-    for match in EXPRESSION.finditer(body):
-        add(body[last : match.start()])
-        out.append("${GHA_EXPR}")
-        pending += match.group().count("\n")
-        last = match.end()
-    add(body[last:])
-    return "".join(out) + "\n" * pending
+    return "\n".join(out)
 
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:

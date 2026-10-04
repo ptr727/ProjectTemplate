@@ -779,14 +779,26 @@ class TestCompositeActions(TreeCase):
         text = repo_gate.substitute_expressions("a ${{ x\ny }} b\nnext\n")
         self.assertEqual("a ${GHA_EXPR} b\n\nnext\n", text)
 
+    def test_the_newlines_return_after_the_logical_line(self) -> None:
+        text = repo_gate.substitute_expressions("foo ${{ x\ny }} \\\n  && bar\nz")
+        self.assertEqual("foo ${GHA_EXPR} \\\n  && bar\n\nz", text)
+
     def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
         self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))
 
     @NEEDS_DOCKER
     def test_a_multiline_expression_in_a_comment_does_not_make_code(self) -> None:
-        hits = self.body_hits("# ${{ format(\n  inputs.a) }} trailing text\ncd /tmp")
+        hits = self.body_hits("# note ${{ a ||\n b }} isn't set\ncd /tmp")
         self.assertTrue(hits)
         self.assertTrue(all("run line 3:" in h for h in hits), hits)
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_before_a_continuation_stays_clean(self) -> None:
+        for tail in ("&& bar", "--rm img", "| cat"):
+            with self.subTest(tail=tail):
+                hits = self.body_hits(f"foo ${{{{ x\n y }}}} \\\n  {tail}\ncd /tmp")
+                self.assertTrue(hits)
+                self.assertTrue(all("run line 4:" in h for h in hits), hits)
 
     @NEEDS_DOCKER
     def test_a_multiline_argument_keeps_a_later_error_on_its_line(self) -> None:
