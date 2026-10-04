@@ -2961,6 +2961,7 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
         if opening:
             if depth == 0:
                 leftover.append((cursor, m.start()))
+                cursor = m.start()
                 region_start = m.end()
             depth += 1
         elif depth > 0:

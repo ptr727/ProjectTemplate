@@ -897,6 +897,17 @@ class TestSuppressed(GqlCase):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(f"suppressed={want}", out)
 
+    def test_a_section_before_an_unclosed_details_block_comes_back_once(self) -> None:
+        """A truncated body leaves its last block open, and the text before it was emitted twice."""
+        body = (
+            "### Suppressed comments (1)\n\n"
+            "- `a.py` line 3: a constructed finding.\n\n"
+            "<details><summary>Review details</summary>\n\nTruncated here."
+        )
+        blocks = pr_review.suppressed_blocks(body)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].count("a constructed finding"), 1)
+
     def test_a_block_on_a_review_with_no_commit_names_that_rather_than_an_empty_sha(self) -> None:
         """GraphQL returns a null commit for a pending review, and the sha is what traces it.
 
