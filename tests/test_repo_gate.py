@@ -28,6 +28,8 @@ import repo_gate
 REPO = Path(__file__).resolve().parent.parent
 GOVERNANCE = REPO / "GOVERNANCE.md"
 
+real_run = subprocess.run
+
 PINNED = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 
 
@@ -654,6 +656,108 @@ class TestCoverageFloors(unittest.TestCase):
     def test_an_unreadable_workflow_is_skipped_rather_than_raising(self) -> None:
         """`git ls-files` lists a path a later commit deleted from the working tree."""
         self.assertEqual([], repo_gate.check_sha_pin(REPO, [".github/workflows/absent.yml"]))
+
+
+class TestCompositeActions(TreeCase):
+    def setUp(self) -> None:
+        super().setUp()
+        if shutil.which("shellcheck") is None:
+            self.skipTest("shellcheck absent")
+
+    def action(self, steps: str, name: str = "hook") -> list[str]:
+        folder = self.tmp / ".github" / "actions" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "action.yml").write_text(
+            f"name: Hook\ndescription: A hook.\nruns:\n  using: composite\n  steps:\n{steps}",
+            encoding="utf-8",
+        )
+        return [f".github/actions/{name}/action.yml"]
+
+    def shell_hits(self, files: list[str]) -> list[str]:
+        return [h for f in files for h in repo_gate.check_composite_shell(self.tmp, f)]
+
+    def test_a_clean_body_passes(self) -> None:
+        files = self.action('    - shell: bash\n      run: echo "ok"\n')
+        self.assertEqual([], self.shell_hits(files))
+
+    def test_a_bad_body_fails_naming_the_action_and_step(self) -> None:
+        files = self.action("    - name: Say\n      shell: bash\n      run: echo $x\n")
+        hits = self.shell_hits(files)
+        self.assertTrue(hits)
+        self.assertTrue(all(".github/actions/hook/action.yml step 1 (Say)" in h for h in hits))
+        self.assertTrue(any("SC2086" in h for h in hits))
+
+    def test_a_step_with_no_name_is_traced_by_index(self) -> None:
+        files = self.action(
+            "    - shell: bash\n      run: echo ok\n    - shell: sh\n      run: echo $x\n"
+        )
+        self.assertIn("action.yml step 2: ", self.shell_hits(files)[0])
+
+    def test_a_pwsh_step_is_skipped(self) -> None:
+        files = self.action("    - shell: pwsh\n      run: Write-Host $x (\n")
+        self.assertEqual([], self.shell_hits(files))
+
+    def test_an_expression_does_not_trip_shellcheck(self) -> None:
+        files = self.action('    - shell: bash\n      run: echo "${{ inputs.who }}"\n')
+        self.assertEqual([], self.shell_hits(files))
+
+    def test_an_empty_body_is_not_checked(self) -> None:
+        files = self.action("    - shell: bash\n      run: ' '\n")
+        self.assertEqual([], self.shell_hits(files))
+
+    def test_a_nested_action_file_is_found(self) -> None:
+        files = [".github/actions/group/inner/action.yaml", ".github/actions/a/other.yml"]
+        self.assertEqual([files[0]], repo_gate.action_files(files))
+
+    def test_a_missing_directory_is_skipped_with_a_note(self) -> None:
+        self.assertEqual([], repo_gate.check_composite_actions(self.tmp, [".github/x.yml"]))
+        self.assertIn("nothing was checked", repo_gate.NOTES[0])
+
+    def test_yq_reads_the_action_where_pyyaml_is_absent(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo $x\n")
+        proc = subprocess.CompletedProcess(
+            [], 0, '{"runs": {"steps": [{"shell": "bash", "run": "echo $x"}]}}', ""
+        )
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
+            mock.patch.object(
+                repo_gate.subprocess,
+                "run",
+                side_effect=lambda cmd, **kw: (
+                    proc if cmd[0] == "/usr/bin/yq" else real_run(cmd, **kw)
+                ),
+            ),
+        ):
+            self.assertTrue(self.shell_hits(files))
+
+    def test_no_pyyaml_and_no_yq_is_a_finding(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo ok\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value=None),
+        ):
+            hits = self.shell_hits(files)
+        self.assertIn("neither PyYAML nor yq", hits[0])
+
+    def test_a_valid_action_passes_the_schema(self) -> None:
+        if not (shutil.which("uvx") or shutil.which("pipx")):
+            self.skipTest("neither uvx nor pipx present")
+        files = self.action("    - shell: bash\n      run: echo ok\n")
+        self.assertEqual([], repo_gate.check_composite_actions(self.tmp, files))
+
+    def test_a_schema_violation_fails(self) -> None:
+        if not (shutil.which("uvx") or shutil.which("pipx")):
+            self.skipTest("neither uvx nor pipx present")
+        files = self.action("    - shell: bash\n      run: echo ok\n      bogus-key: 1\n")
+        hits = repo_gate.check_composite_actions(self.tmp, files)
+        self.assertTrue(any(h.startswith("schema:") for h in hits))
+
+    def test_a_shell_failure_surfaces_through_the_check(self) -> None:
+        if not (shutil.which("uvx") or shutil.which("pipx")):
+            self.skipTest("neither uvx nor pipx present")
+        files = self.action("    - shell: bash\n      run: echo $x\n")
+        self.assertTrue(repo_gate.check_composite_actions(self.tmp, files))
 
 
 class TestExcludeGlobs(unittest.TestCase):

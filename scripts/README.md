@@ -109,11 +109,12 @@ Every rule in the default set is clean tree-wide except `comment-added`, which r
 
 ## `repo_gate.py`
 
-Three deterministic checks:
+Deterministic checks:
 
 - `sha-pin`: every external action or reusable-workflow `uses:` reference is a 40-hex commit SHA, with the documented `dotnet/nbgv@master` exception. References under the scanned repository's owner are also resolved through GitHub. References under another owner are shape-checked only. Local (`./`) and self-repository (`$/`) references name no ref, so they take no pin, and a quoted one is recognized once its quotes are stripped. They resolve differently, though. A `$/` reference and a job-level `./` reusable-workflow call resolve at the calling workflow file's commit, while a `./` action reference resolves against whatever the job checked out, which is the caller's tree where a reusable workflow called from another repository checks out its caller. A reference starting with a bare `.github/` is reported, since GitHub reads it as `owner/repo` rather than as a path.
 - `eol`: every path pinned LF in [`.gitattributes`][gitattributes] has the matching [`.editorconfig`][editorconfig] override the line-ending rule requires, with EditorConfig brace syntax expanded. One direction only: an `.editorconfig` LF glob with no git pin is legitimate, since `.editorconfig` governs what the editor writes where git enforces a class it must not guess at.
 - `eol-coverage`: the same pins read against the tree instead. A tracked file opening `#!` that git does not resolve to `eol=lf` is an interpreter line a CRLF checkout breaks, and a pin matching no tracked file is dead unless its block is marked `forward-declared`.
+- `composite-actions`: every tracked `.github/actions/*/action.yml` is shellchecked and schema-checked, because actionlint reads workflows only. Each non-empty `run:` body of a bash, sh, or unset-shell step goes to shellcheck. Every `${{ }}` expression is replaced by a placeholder first. A finding names the action file and the step. A pwsh or python step is skipped. The file set goes to `check-jsonschema`'s `vendor.github-actions` builtin through `uvx`, or `pipx run` where `uvx` is absent. The check needs `shellcheck` on `PATH`, and it reads the action through PyYAML or `yq`. A tree with no action file is skipped with a note.
 
 ```sh
 python3 scripts/repo_gate.py

@@ -7,6 +7,7 @@ category's share of a 1,047-finding audit of this repo's Copilot reviews:
   sha-pin       Action SHA-pinning gaps                        25 findings  (GOVERNANCE.md rule)
   eol           .editorconfig <-> .gitattributes disagreement  40 findings
   eol-coverage  Git attribute resolution differs from policy   count not recorded
+  composite-actions  shellcheck and schema coverage of action.yml  count not recorded
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining
@@ -34,7 +35,9 @@ actionlint, editorconfig-checker, spec/validate.py).
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -406,7 +409,136 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
     return out
 
 
-CHECKS = {"sha-pin": check_sha_pin, "eol": check_eol, "eol-coverage": check_eol_coverage}
+ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
+# A GitHub expression is not shell, so shellcheck would read its braces as syntax.
+EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
+SHELLCHECK_TIMEOUT = 60
+SCHEMA_TIMEOUT = 300
+
+
+def action_files(files: list[str]) -> list[str]:
+    return [f for f in files if ACTION_FILE.match(f)]
+
+
+def load_action(path: Path) -> object:
+    """The parsed action file, through PyYAML where importable and the runner's yq otherwise."""
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:
+        yq = shutil.which("yq")
+        if yq is None:
+            raise RuntimeError("neither PyYAML nor yq is available to read the action") from None
+        result = subprocess.run(
+            [yq, "-o=json", ".", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SHELLCHECK_TIMEOUT,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"yq could not read the action: {result.stderr.strip()}")
+        return json.loads(result.stdout)
+    with path.open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def step_dialect(shell: object) -> str | None:
+    """The shellcheck dialect for a step's `shell`, or None where the step is not bash or sh."""
+    if shell is None:
+        return "bash"
+    words = str(shell).split()
+    name = words[0].rsplit("/", 1)[-1] if words else ""
+    return name if name in {"bash", "sh"} else None
+
+
+def check_composite_shell(root: Path, path: str) -> list[str]:
+    try:
+        action = load_action(root / path)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        return [f"{path}: could not read the action: {error}"]
+    runs = action.get("runs") if isinstance(action, dict) else None
+    steps = runs.get("steps") if isinstance(runs, dict) else None
+    if not isinstance(steps, list):
+        return []
+    hits: list[str] = []
+    for index, step in enumerate(steps, start=1):
+        body = step.get("run") if isinstance(step, dict) else None
+        if not isinstance(body, str) or not body.strip():
+            continue
+        dialect = step_dialect(step.get("shell"))
+        if dialect is None:
+            continue
+        label = f"{path} step {index}"
+        if step.get("name"):
+            label += f" ({step['name']})"
+        text = EXPRESSION.sub("${GHA_EXPR}", body)
+        result = subprocess.run(
+            ["shellcheck", "-s", dialect, "-f", "gcc", "-"],
+            input=text,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SHELLCHECK_TIMEOUT,
+        )
+        if result.returncode == 0:
+            continue
+        output = [line.removeprefix("-:") for line in result.stdout.splitlines() if line]
+        hits.extend(f"{label}: line {line}" for line in output or [result.stderr.strip()])
+    return hits
+
+
+def schema_command() -> list[str] | None:
+    args = ["check-jsonschema", "--builtin-schema", "vendor.github-actions", "--"]
+    if shutil.which("uvx"):
+        return ["uvx", *args]
+    if shutil.which("pipx"):
+        return ["pipx", "run", *args]
+    return None
+
+
+def check_composite_actions(root: Path, files: list[str]) -> list[str]:
+    """Shellcheck every bash or sh `run:` body of a composite action and schema-check the file.
+
+    actionlint reads workflows only, so a shell body moved into an action loses both checks.
+    Each `${{ }}` expression is replaced by `${GHA_EXPR}` first, so only the surrounding shell is judged.
+    """
+    actions = action_files(files)
+    if not actions:
+        NOTES.append("no .github/actions/*/action.yml is tracked, so nothing was checked.")
+        return []
+    if shutil.which("shellcheck") is None:
+        return ["shellcheck is not installed, so no run body was checked"]
+    hits: list[str] = []
+    for path in actions:
+        hits.extend(check_composite_shell(root, path))
+    command = schema_command()
+    if command is None:
+        hits.append("neither uvx nor pipx is installed, so no action was schema-checked")
+    else:
+        result = subprocess.run(
+            [*command, *actions],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SCHEMA_TIMEOUT,
+        )
+        if result.returncode != 0:
+            detail = (result.stdout + result.stderr).strip().splitlines()
+            hits.extend(f"schema: {line}" for line in detail if line.strip())
+    NOTES.append(f"checked {len(actions)} action file(s).")
+    return hits
+
+
+CHECKS = {
+    "sha-pin": check_sha_pin,
+    "eol": check_eol,
+    "eol-coverage": check_eol_coverage,
+    "composite-actions": check_composite_actions,
+}
 
 
 def printable(line: str) -> str:
