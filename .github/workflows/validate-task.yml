@@ -1,7 +1,7 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
+# Four jobs: test-matrix-check (the test-matrix input, checked before the unit-test matrix expands), lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names, or once per test-matrix leg when that is set), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -42,6 +42,33 @@ on:
         required: false
 
 jobs:
+
+  test-matrix-check:
+    name: Check test matrix job
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+
+      - name: Validate test-matrix input step
+        if: ${{ inputs.test-matrix != '' }}
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e '
+            type == "array" and length > 0
+            and all(.[]; type == "object"
+              and (.label | type == "string" and test("\\A[A-Za-z0-9_.-]{1,38}\\z"))
+              and ((has("python-version") | not) or (.["python-version"] | type == "string" and test("\\S"))))
+            and ((map(.label) | unique | length) == length)
+          ' <<<"$TEST_MATRIX" >/dev/null 2>&1; then
+            escaped=${TEST_MATRIX//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and a python-version, when present, that is a non-empty quoted string, got: $escaped"
+            exit 1
+          fi
 
   lint:
     name: Lint sources job
@@ -411,11 +438,12 @@ jobs:
   # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # A declared Python directory owes a tests/ suite under coverage, per D1.6, so one without tests/ fails here rather than skipping.
   # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing has not yet taken on that obligation.
-  # The matrix dimension is the interpreter, and a caller naming none runs the single leg this job ran before the input existed.
+  # The matrix dimension is the interpreter, or the test-matrix leg when that is set, and a caller naming neither runs the single leg this job ran before the input existed.
   # The leg names an interpreter whether or not one ran, so a .NET-only caller reports a Python version for a run whose Python steps were all guarded off.
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
   unit-test:
     name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})
+    needs: test-matrix-check
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -445,20 +473,6 @@ jobs:
             escaped=${escaped//$'\r'/%0D}
             escaped=${escaped//$'\n'/%0A}
             echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
-            exit 1
-          fi
-
-      - name: Validate test-matrix input step
-        if: ${{ inputs.test-matrix != '' }}
-        env:
-          TEST_MATRIX: ${{ inputs.test-matrix }}
-        run: |
-          set -Eeuo pipefail
-          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.label | type == "string" and test("\\S")))' <<<"$TEST_MATRIX" >/dev/null 2>&1; then
-            escaped=${TEST_MATRIX//'%'/%25}
-            escaped=${escaped//$'\r'/%0D}
-            escaped=${escaped//$'\n'/%0A}
-            echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a non-empty string label, got: $escaped"
             exit 1
           fi
 

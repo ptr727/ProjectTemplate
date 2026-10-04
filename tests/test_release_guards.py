@@ -1488,6 +1488,68 @@ gh() {
 
         self.assertIn("uv run --no-sync pytest --cov-report=xml", job)
 
+        gate = "inputs.test-matrix != ''"
+        for name in (
+            "Check caller install-test-deps hook step",
+            "Install Python dependencies step",
+        ):
+            step = job.split(f"- name: {name}\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn(
+                f"        if: ${{{{ {gate} }}}}\n"
+                if name.startswith("Check")
+                else f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n",
+                step,
+            )
+        hook = job.split("- name: Run caller install-test-deps hook step\n", 1)[1].split("\n\n", 1)[
+            0
+        ]
+        self.assertIn(
+            f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n", hook
+        )
+        self.assertIn(f"          HOOK_LEG: ${{{{ {gate} }}}}\n", job)
+        self.assertIn(
+            'if [ "${HOOK_LEG:-false}" = "true" ]; then\n                  uv run --no-sync', job
+        )
+        self.assertIn(
+            'if [ "${HOOK_LEG:-false}" != "true" ]; then\n                  install_requirements',
+            job,
+        )
+
+    @unittest.skipUnless(shutil.which("jq"), "runs the check's own jq program")
+    def test_validator_test_matrix_check_rejects_each_malformed_shape(self) -> None:
+        """The check runs before the matrix expands, so a bad value fails there with a named cause."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        self.assertIn("    needs: test-matrix-check\n", workflow.split("\n  unit-test:\n", 1)[1])
+        check = workflow.split("\n  test-matrix-check:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        match = re.search(r"jq -e '\n(.*?)\n +' <<<", check, re.DOTALL)
+        assert match is not None
+        program = match.group(1)
+
+        def accepted(value: str) -> bool:
+            result = run(
+                ["jq", "-e", program], input=value, text=True, capture_output=True, check=False
+            )
+            return result.returncode == 0
+
+        self.assertTrue(accepted('[{"label": "a", "python-version": "3.14"}, {"label": "b"}]'))
+        self.assertTrue(accepted(json.dumps([{"label": "x" * 38}])))
+        rejected = {
+            "empty array": "[]",
+            "not an array": "{}",
+            "non-object entry": "[1]",
+            "missing label": "[{}]",
+            "non-string label": '[{"label": 1}]',
+            "duplicate label": '[{"label": "a"}, {"label": "a"}]',
+            "label with a space": '[{"label": "a b"}]',
+            "label over the flag length": json.dumps([{"label": "x" * 39}]),
+            "label with a trailing newline": '[{"label": "a\\n"}]',
+            "unquoted python-version": '[{"label": "a", "python-version": 3.1}]',
+            "blank python-version": '[{"label": "a", "python-version": " "}]',
+        }
+        for label, value in rejected.items():
+            with self.subTest(label):
+                self.assertFalse(accepted(value))
+
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
 
