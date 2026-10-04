@@ -201,7 +201,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 
 ### Stage 4: The Release Chain and the Docker Core
 
-Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks, and the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's trigger shapes, so another reusable workflow would become caller-owned inputs.
+Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and `build-pypi` hooks. It also provides the `build-release-asset` hook for a file target it ships no leaf for, such as an `eda` data zip. `build-docker-task.yml` follows [The Docker Family][the-docker-family]. The three no-asset release shapes collapse into `expect_release_assets`. No `publish-release-task.yml` ships. A caller stub's `plan`, `validate`, `publish`, `publish-nuget`, and `publish-pypi` jobs each reach one hub task directly or push what the task built. That wiring varies across the fleet's trigger shapes, so another reusable workflow would become caller-owned inputs.
 
 `build-release-task.yml` reaches `get-version-task.yml` and `build-docker-task.yml` through `$/`, so both sibling tasks resolve at the same hub commit the downstream caller pins. It keeps `validate-release` inline because that gate belongs to the release orchestrator. `build-docker-task.yml` also ships as a task in its own right for a caller that wants only the Docker leg. The `dotnet-publish-default`, `nuget-build-default`, and `pypi-build-default` actions require explicit project paths. Each default action validates its required inputs when selected, while caller-provided hooks remain free to use different inputs.
 
@@ -674,7 +674,7 @@ A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block
 
 A file-target repo, whose release carries a file its own `build-release-asset` hook writes, varies the stub another way. It sets `enable_release_asset: true` and every other `enable_*` input to `false`. It drops `nuget_project` and the `publish-nuget` job, and keeps `expect_release_assets: true`. The hook has no hub default, so the repo carries `.github/actions/build-release-asset/action.yml`, and the task fails without it.
 
-No `publish-release-task.yml` ships alongside `build-release-task.yml`. The jobs above are each a thin call to one hub task or a verbatim OIDC upload. The trigger policy that ties them together differs across the fleet's shapes (dispatch-only Docker schedule, push-gated NuGet, PyPI, or file target). Hosting it would just move the same `with:` block one file over rather than removing it.
+No `publish-release-task.yml` ships alongside `build-release-task.yml`. The jobs above are each a thin call to one hub task or a verbatim OIDC upload. The trigger policy that ties them together differs across the fleet's shapes (scheduled-plus-dispatch Docker, push-gated NuGet, PyPI, or file target). Hosting it would just move the same `with:` block one file over rather than removing it.
 
 ## Adopting the Type-Specific Tasks
 

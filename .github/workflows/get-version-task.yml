@@ -16,7 +16,7 @@ on:
     inputs:
       # Git ref to check out and version.
       # Empty checks out the triggering commit (`github.sha`).
-      # The publisher passes `github.sha` too, so a rerun versions the same commit.
+      # The publisher passes `github.sha` too.
       ref:
         required: false
         type: string
