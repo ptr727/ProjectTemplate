@@ -45,14 +45,16 @@ reverts. `RESYNC.md` section 3 and `STANDUP.md` section 1A order it first for th
 
 The conversion pull request carries the renormalization, `.editorconfig`, and `.gitattributes`,
 and nothing else. A `develop` ruleset that allows only squash merges collapses the pull request to
-one commit, so keeping other content out of it is what keeps the renormalization isolated and
-reviewable with `git diff --ignore-cr-at-eol`. Open it through the repo's normal branching model,
+one commit, so the commit boundaries below are for review before it merges, and the isolation that
+survives the squash is the pull request's own file scope. Open it through the repo's normal branching model,
 per the [`branching-and-release-model`][branching-and-release-model] Skill, and work in this order:
 
 1. **Merge the hub's defaults into `.editorconfig` and `.gitattributes`, never overwrite either
-   file.** Take the hub's `[*]` defaults and its `*.bat` / `*.cmd` CRLF pins, and keep every
-   attribute and section that is the repo's own, such as LFS filters, `linguist-generated`,
-   `export-ignore`, and path pins.
+   file.** Replace the old fleet defaults, `[*] end_of_line = crlf` and `* -text`, with the hub's
+   `[*]` defaults and its `*.bat` / `*.cmd` CRLF pins, rather than adding the new defaults beside
+   them, since Git applies the last matching `.gitattributes` line and a surviving `* -text` leaves
+   `--renormalize` with nothing to do. Keep every attribute and section that is the repo's own,
+   such as LFS filters, `linguist-generated`, `export-ignore`, and path pins.
 2. **Pin every vendor file whose bytes the repo has to keep, before renormalizing.** `text=auto`
    leaves a file byte-preserved only where Git's heuristic detects it as binary, so a text-shaped
    vendor download, a STEP model or DXF and SVG artwork for example, is normalized unless pinned.
