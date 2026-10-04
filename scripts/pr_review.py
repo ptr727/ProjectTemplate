@@ -3555,7 +3555,7 @@ def digest(
         )
     if pr.get(WORKFLOW_KEYS_UNAVAILABLE):
         lines.append(
-            "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: the token could not read `workflowRun`, "
+            "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: `workflowRun` was unreadable, "
             "so each Actions run is kept per suite and a superseded failure may still "
             "show, which reads red rather than hiding a failing check"
         )
