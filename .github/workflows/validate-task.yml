@@ -33,14 +33,15 @@ on:
         required: false
         type: string
         default: ''
-      # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, so the check below reaches only the values that expand at all.
+      # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, when test-matrix is unset.
+      # Either way the entry check in the unit-test job reads the raw input, and it is the only guard when test-matrix is set.
       python-versions:
-        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. Quote each entry, since an unquoted one is a JSON number rather than a version string.
+        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
         type: string
         default: '["3.13"]'
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and an optional python-version defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
         required: false
         type: string
         default: ''
@@ -286,7 +287,7 @@ jobs:
               (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
               # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
-              if ! PIP_PYTHON=$(jq -er 'if type == "array" and length > 0 and (.[0] | type == "string" and test("\\S")) then .[0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
+              if ! PIP_PYTHON=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
                 echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry installs the declared pip directory $dir."
                 exit 1
               fi

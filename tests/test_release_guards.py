@@ -1231,7 +1231,7 @@ gh() {
             "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
         )
         self.assertEqual((0, ""), (code, written))
-        for versions in ("[3.14]", '[" "]', "[]", "not json"):
+        for versions in ("[3.14]", '[" "]', "[]", "not json", '["3.14"] ["3.13"]'):
             with self.subTest(versions=versions):
                 bad = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": versions}
                 code, stdout, _ = self.run_python_tests_step(
