@@ -87,7 +87,7 @@ jobs:
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
       # Some of those numbers uv resolves to a real interpreter rather than refusing.
       # So that shape is a second silent pass, which this check prevents rather than names as a cause.
-      # Without this check, the rest would fail later, wherever uv first meets that interpreter.
+      # Without this check, the rest would fail later, wherever uv first meets the version that entry names.
       # The failure there would name no cause.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20.
       # With test-matrix set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
