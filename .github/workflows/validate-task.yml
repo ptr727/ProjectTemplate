@@ -33,7 +33,7 @@ on:
         required: false
         type: string
         default: ''
-      # Built into the unit-test job's matrix by the test-matrix job, and read raw by the checks in the test-matrix job.
+      # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Sync Python dependencies step.
       python-versions:
         description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
@@ -87,7 +87,7 @@ jobs:
       # An unquoted entry is the other half of the same slip, and what it costs depends on the number fromJSON parsed it into.
       # Some of those numbers uv resolves to a real interpreter rather than refusing.
       # So that shape is a second silent pass, which this check prevents rather than names as a cause.
-      # Without this check, the rest would fail in the Install Python dependencies step, under an interpreter uv cannot resolve.
+      # Without this check, the rest would fail where uv first builds an environment: Run Python tests by default, Install Python dependencies with test-matrix set.
       # The failure there would name no cause.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20.
       # With test-matrix set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
