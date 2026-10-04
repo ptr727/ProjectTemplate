@@ -188,7 +188,7 @@ The hosted gates, release chain, Docker core, and type-specific tasks are implem
   - **Issue** - None filed.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, against the 16 downstream copies read for the design.
   - **Open** - All three, stated in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Open Decisions".
-  - **Settled** - Neither blocks adoption: `delete-branch: false` is the hub's behavior and seven repos opt in, and the semver filter is a D8.1 conformance question for the two repos that carry it.
+  - **Settled** - Neither blocks adoption: `delete-branch: false` is the task default and adopters opt in, and the semver filter is a D8.1 conformance question for the two repos that carry it.
 
 - **Bring the Docker repos onto one multi-stage Dockerfile shape.** The build stages are inconsistent across the five Docker repos, and that is Dockerfile content rather than workflow content, so it rides beside the workflow migration rather than inside it.
   - **Blocked by** - Nothing.
