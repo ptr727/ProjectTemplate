@@ -1129,6 +1129,22 @@ class TestCompositeActions(TreeCase):
             os.kill(int(pid_file.read_text(encoding="utf-8")), 0)
 
     @NEEDS_UVX
+    def test_a_module_in_the_working_directory_cannot_shadow_the_reader(self) -> None:
+        for module in ("yaml", "json"):
+            (self.tmp / f"{module}.py").write_text(
+                "raise SystemExit('shadowed')\n", encoding="utf-8"
+            )
+        files = self.action("    - shell: bash\n      run: echo $x\n")
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.tmp)
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        self.assertEqual("echo $x", body.call_args.args[2])
+
+    @NEEDS_UVX
     def test_the_real_reader_skips_a_non_string_shell(self) -> None:
         files = self.action("    - shell: 5\n      run: echo $x\n")
         with (

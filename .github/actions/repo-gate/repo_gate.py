@@ -468,6 +468,7 @@ class UvxUnavailable(Exception):
 
 
 def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a uvx Python child from this directory, so no module in the checkout shadows its imports."""
     return subprocess.run(
         command,
         capture_output=True,
@@ -475,6 +476,7 @@ def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        cwd=Path(__file__).resolve().parent,
         check=False,
         timeout=YAML_TIMEOUT,
     )
@@ -506,7 +508,7 @@ def load_through_uvx(path: Path) -> list[object]:
     """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
     python = pyyaml_python()
     try:
-        result = run_utf8([python, "-c", UVX_READER, str(path)])
+        result = run_utf8([python, "-c", UVX_READER, str(path.resolve())])
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:
