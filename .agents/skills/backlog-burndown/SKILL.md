@@ -242,7 +242,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   first. "Cleanup Is the Orchestrator's" below, in this
   same section, says why and what it covers.
 - **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
-  The brief says so per `local-strict-review` "Running It".
+  The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
