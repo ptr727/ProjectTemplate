@@ -148,7 +148,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 
 ### Stage 2: The Gates
 
-Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language lint by tree detection, the prose gate, and the repo gate), a generic `unit-test` job (a `dotnet test`, and a `pytest` or `unittest` suite under coverage in each Python directory, skipped cleanly where the caller carries no test project and failing a declared Python directory that has none), and a `validate` job resolving the `validate` hook for a repo's own domain checks, which decides #729 in the one place the `uvx` tools are pinned or floated. There is no `test-pull-request-task.yml`: the ruleset-bound aggregator stays in the caller stub by design, and a task wrapping one line that calls `validate-task.yml` hosts nothing generic, so the stub shapes live in [Adopting the Gates][adopting-the-gates] instead, with the trigger shape, operational or release, settling #585. This stage is where the hook fallback is first proven live: the hub carries its own `validate` hook (its registry and spec check, its script self-tests, its fleet-skills check, and its unclassified-character report), so a hub pull request exercises the override path, and a repo with no hook of its own exercises the default.
+Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language lint by tree detection, the prose gate, and the repo gate), a generic `unit-test` job (a `dotnet test`, and a `pytest` or `unittest` suite under coverage in each Python directory, skipped cleanly where the caller carries no test project and failing a declared Python directory that has none), and a `validate` job resolving the `validate` hook for a repo's own domain checks, which decides #729 in the one place the `uvx` tools are pinned or floated. There is no `test-pull-request-task.yml`: the ruleset-bound aggregator stays in the caller stub by design, and a task wrapping one line that calls `validate-task.yml` hosts nothing generic, so the stub shapes live in [Adopting the Gates][adopting-the-gates] instead, with the trigger shape, operational or release, settling #585. This stage is where the hook fallback is first proven live: the hub carries its own `validate` hook (its registry and spec check, its script self-tests, its fleet-skills check, and its unclassified-character report), so a hub pull request exercises the override path, and a repo with no hook of its own exercises the default. The repo gate also shellchecks and schema-checks every composite action under `.github/actions/`, so a downstream repo gets that check at its next pin bump.
 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
@@ -499,7 +499,7 @@ Neither package push runs inside the hub task, and that is a constraint rather t
 
 The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
-The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, for a NuGet-library repo:
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. The concurrency group is ref-scoped, and a `push` by an identity outside the plan's allowlist gets a per-run group, per [`WORKFLOW.md`][workflow] D7.1. The concurrency block is part of the stub the adopter carries. This is the full shape, for a NuGet-library repo:
 
 ```yaml
 name: Publish project release action
@@ -518,8 +518,10 @@ on:
       - 'global.json'
   workflow_dispatch:
 
+# A push the plan cannot publish gets a per-run group, so it never replaces a pending publish.
+# The expression must track publish-plan-task.yml's push rule and actor allowlist.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && (github.ref != 'refs/heads/main' || (github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]')) && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 # GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.

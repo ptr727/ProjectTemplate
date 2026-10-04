@@ -412,16 +412,24 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
-SHELLCHECK_TIMEOUT = 60
+SHELLCHECK_IMAGE = "koalaman/shellcheck:stable"
+SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
+YAML_TIMEOUT = 60
 
 
 def action_files(files: list[str]) -> list[str]:
     return [f for f in files if ACTION_FILE.match(f)]
 
 
+def single_document(documents: list[object]) -> object:
+    if len(documents) != 1:
+        raise ValueError(f"expected one YAML document, found {len(documents)}")
+    return documents[0]
+
+
 def load_action(path: Path) -> object:
-    """The parsed action file, through PyYAML where importable and the runner's yq otherwise."""
+    """The one parsed document of an action file, through PyYAML where importable, else yq."""
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
@@ -434,13 +442,26 @@ def load_action(path: Path) -> object:
             text=True,
             encoding="utf-8",
             check=False,
-            timeout=SHELLCHECK_TIMEOUT,
+            timeout=YAML_TIMEOUT,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"yq could not read the action: {result.stderr.strip()}")
-        return json.loads(result.stdout)
-    with path.open(encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
+            raise ValueError(f"yq could not read the action: {result.stderr.strip()}")
+        decoder = json.JSONDecoder()
+        documents: list[object] = []
+        text, at = result.stdout, 0
+        while True:
+            while at < len(text) and text[at].isspace():
+                at += 1
+            if at >= len(text):
+                break
+            document, at = decoder.raw_decode(text, at)
+            documents.append(document)
+        return single_document(documents)
+    try:
+        with path.open(encoding="utf-8") as handle:
+            return single_document(list(yaml.safe_load_all(handle)))
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid YAML: {error}") from error
 
 
 def step_dialect(shell: object) -> str | None:
@@ -450,6 +471,37 @@ def step_dialect(shell: object) -> str | None:
     words = str(shell).split()
     name = words[0].rsplit("/", 1)[-1] if words else ""
     return name if name in {"bash", "sh"} else None
+
+
+def placeholder(match: re.Match[str]) -> str:
+    """A plain word standing in for an expression, with its newlines kept so line numbers hold."""
+    return "GHA_EXPR" + "\n" * match.group().count("\n")
+
+
+def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
+    # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
+    command = ["docker", "run", "--rm", "-i", SHELLCHECK_IMAGE]
+    command += ["-s", dialect, "-e", "SC2154", "-f", "gcc", "-"]
+    try:
+        result = subprocess.run(
+            command,
+            input=text,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SHELLCHECK_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return [f"{label}: shellcheck timed out after {SHELLCHECK_TIMEOUT}s"]
+    except OSError as error:
+        return [f"{label}: could not start docker for shellcheck: {error}"]
+    if result.returncode == 0:
+        return []
+    lines = [line.removeprefix("-:") for line in result.stdout.splitlines() if line]
+    if result.returncode == 1 and lines:
+        return [f"{label}: line {line}" for line in lines]
+    return [f"{label}: shellcheck exited {result.returncode}: {result.stderr.strip()}"]
 
 
 def check_composite_shell(root: Path, path: str) -> list[str]:
@@ -472,51 +524,24 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         label = f"{path} step {index}"
         if step.get("name"):
             label += f" ({step['name']})"
-        text = EXPRESSION.sub("${GHA_EXPR}", body)
-        result = subprocess.run(
-            ["shellcheck", "-s", dialect, "-f", "gcc", "-"],
-            input=text,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SHELLCHECK_TIMEOUT,
-        )
-        if result.returncode == 0:
-            continue
-        output = [line.removeprefix("-:") for line in result.stdout.splitlines() if line]
-        hits.extend(f"{label}: line {line}" for line in output or [result.stderr.strip()])
+        hits.extend(shellcheck_body(label, dialect, EXPRESSION.sub(placeholder, body)))
     return hits
 
 
 def schema_command() -> list[str] | None:
     args = ["check-jsonschema", "--builtin-schema", "vendor.github-actions", "--"]
     if shutil.which("uvx"):
-        return ["uvx", *args]
+        return ["uvx", "check-jsonschema@latest", *args[1:]]
     if shutil.which("pipx"):
         return ["pipx", "run", *args]
     return None
 
 
-def check_composite_actions(root: Path, files: list[str]) -> list[str]:
-    """Shellcheck every bash or sh `run:` body of a composite action and schema-check the file.
-
-    actionlint reads workflows only, so a shell body moved into an action loses both checks.
-    Each `${{ }}` expression is replaced by `${GHA_EXPR}` first, so only the surrounding shell is judged.
-    """
-    actions = action_files(files)
-    if not actions:
-        NOTES.append("no .github/actions/*/action.yml is tracked, so nothing was checked.")
-        return []
-    if shutil.which("shellcheck") is None:
-        return ["shellcheck is not installed, so no run body was checked"]
-    hits: list[str] = []
-    for path in actions:
-        hits.extend(check_composite_shell(root, path))
+def check_composite_schema(root: Path, actions: list[str]) -> list[str]:
     command = schema_command()
     if command is None:
-        hits.append("neither uvx nor pipx is installed, so no action was schema-checked")
-    else:
+        return ["neither uvx nor pipx is installed, so no action was schema-checked"]
+    try:
         result = subprocess.run(
             [*command, *actions],
             cwd=root,
@@ -526,9 +551,34 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
             check=False,
             timeout=SCHEMA_TIMEOUT,
         )
-        if result.returncode != 0:
-            detail = (result.stdout + result.stderr).strip().splitlines()
-            hits.extend(f"schema: {line}" for line in detail if line.strip())
+    except subprocess.TimeoutExpired:
+        return [f"schema check timed out after {SCHEMA_TIMEOUT}s"]
+    except OSError as error:
+        return [f"schema check could not start: {error}"]
+    if result.returncode == 0:
+        return []
+    detail = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
+    return [f"schema: {line}" for line in detail] or [f"schema: exited {result.returncode}"]
+
+
+def check_composite_actions(root: Path, files: list[str]) -> list[str]:
+    """Shellcheck every bash or sh `run:` body of a composite action and schema-check the file.
+
+    actionlint reads workflows only, so a shell body moved into an action loses both checks.
+    Each `${{ }}` expression is replaced by a plain word first, so only the surrounding shell is judged.
+    Each half reports its own missing tool, and the other half still runs.
+    """
+    actions = action_files(files)
+    if not actions:
+        NOTES.append("no composite action file is tracked, so nothing was checked.")
+        return []
+    hits: list[str] = []
+    if shutil.which("docker") is None:
+        hits.append("docker is not installed, so no run body was shellchecked")
+    else:
+        for path in actions:
+            hits.extend(check_composite_shell(root, path))
+    hits.extend(check_composite_schema(root, actions))
     NOTES.append(f"checked {len(actions)} action file(s).")
     return hits
 
