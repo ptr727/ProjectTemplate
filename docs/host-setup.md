@@ -76,6 +76,8 @@ host-setup\windows\install-tools.ps1 -Install -Repo C:\path\to\repository
 
 The report, list, dry-run, install, and upgrade actions accept the same repository option. A platform with no matching metadata reports no constrained installer for that tool. The Linux reader needs `jq`, which the fleet tools provide. Install the fleet tools first when a minimal host does not carry it.
 
+**A report can be written for a program to read.** Both installers take a JSON flag beside their report action, `--report --json` on Linux and `-Report -Json` on Windows, and the flag applies to no other action. Each writes one object carrying a `schema` number, the `platform`, a `tools` list with one entry per tool, and a top-level `notes` list for what belongs to no tool. A change to what a field means raises `schema`, so a reader checks it before trusting any field. The [Linux README][host-setup-linux-readme] defines the fields every platform shares, and the [Windows README][host-setup-windows-readme] names the one field it adds and the values it reports differently.
+
 ## Git Identity
 
 Configure your name and email, used for commit authorship. **The email is the committing account's GitHub `noreply` address, never a private, personal, or invented one**, per [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules], which owns the rule and states the fleet's value. A private address trips GitHub's email-privacy push protection (GH007), and an invented one pollutes history.
@@ -374,7 +376,9 @@ A host that fails any row is not ready for the procedure that row names, and the
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/
+[host-setup-linux-readme]: ../host-setup/linux/README.md
 [host-setup-windows]: ../host-setup/windows/
+[host-setup-windows-readme]: ../host-setup/windows/README.md
 [host-tools]: ../spec/host-tools.json
 [install-tools-windows]: ../host-setup/windows/install-tools.ps1
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483

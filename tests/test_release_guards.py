@@ -353,7 +353,9 @@ class ReleaseGuardCase(unittest.TestCase):
 
         # Both hook steps receive SemVer2, the caller hook as the dotnet-publish and build-nuget hooks already do.
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
-        job = workflow.split("\n  build-pypi:\n", 1)[1].split("\n  build-docker:\n", 1)[0]
+        job = re.split(
+            r"\n(?=  [a-z][a-z-]*:\n)", workflow.split("\n  build-pypi:\n", 1)[1], maxsplit=1
+        )[0]
         self.assertEqual(
             2, job.count("          semver2: ${{ needs.get-version.outputs.SemVer2 }}\n")
         )
@@ -386,6 +388,32 @@ class ReleaseGuardCase(unittest.TestCase):
         allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
         self.assertTrue(allowed)
         self.assertEqual(allowed, set(re.findall(r'"\$actor" == "([^"]+)"', script)))
+        stub = (REPO / "catalog/snippets/workflows/publish-release.yml").read_text(encoding="utf-8")
+        group = next(line for line in stub.splitlines() if line.startswith("  group:"))
+        self.assertEqual(allowed, set(re.findall(r"github\.actor != '([^']+)'", group)))
+        suffix = re.findall(r"\$\{\{(.*?)\}\}", group)[2]
+        py = (
+            suffix.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("format('-{0}', github.run_id)", "'-' + str(run_id)")
+            .replace("github.event_name", "event")
+            .replace("github.ref", "ref")
+            .replace("github.actor", "actor")
+        )
+
+        def suffix_for(event: str, ref: str, actor: str) -> str:
+            return str(eval(py, {}, {"event": event, "ref": ref, "actor": actor, "run_id": 7}))
+
+        main = "refs/heads/main"
+        self.assertEqual("", suffix_for("workflow_dispatch", "refs/heads/develop", "someone"))
+        self.assertEqual("", suffix_for("schedule", main, "someone"))
+        self.assertEqual("", suffix_for("push", main, "ptr727-codegen[bot]"))
+        self.assertEqual("-7", suffix_for("push", main, "someone"))
+        self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
+        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        stub_name = stub.splitlines()[0]
+        self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
         bot = {"login": "ptr727-codegen[bot]"}
         middle = "e" * 40
@@ -695,6 +723,37 @@ class ReleaseGuardCase(unittest.TestCase):
         for marker in ("NuGet/login", "nuget push", "gh-action-pypi-publish"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
+
+    def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        jobs = re.split(r"(?m)^  (?=[a-z][a-z-]*:\n)", workflow.split("\njobs:\n", 1)[1])
+        by_name = {block.split(":", 1)[0]: block for block in jobs if block.strip()}
+        job = by_name["build-release-asset"]
+        steps = re.split(r"(?m)^      - name: ", job)
+        upload = next(step for step in steps if step.startswith("Upload release asset step"))
+
+        self.assertIn("if: ${{ !inputs.smoke }}", upload)
+        self.assertIn("retention-days: 1", upload)
+        self.assertIn("name: release-asset-${{ inputs.branch }}-build-release-asset", upload)
+        self.assertNotIn("upload-artifact", "".join(s for s in steps if s is not upload))
+        self.assertIn("uses: ./.github/actions/build-release-asset", job)
+        self.assertRegex(job, r"(?m)^    if: \$\{\{ inputs\.enable_release_asset \}\}$")
+        check = next(step for step in steps if step.startswith("Check release asset output step"))
+        self.assertIn("-type f -print -quit", check)
+        self.assertIn("\\( ! -type f -o -name '.*' \\)", check)
+
+        for consumer in ("github-release", "build-docker"):
+            with self.subTest(consumer=consumer):
+                needs = re.search(r"(?m)^    needs: \[(.*)\]$", by_name[consumer])
+                self.assertIsNotNone(needs)
+                assert needs is not None
+                self.assertIn("build-release-asset", [n.strip() for n in needs[1].split(",")])
+
+        self.assertRegex(
+            workflow,
+            r"(?m)^      enable_release_asset:\n        required: false\n"
+            r"        type: boolean\n        default: false$",
+        )
 
     def test_publish_requires_successful_validation(self) -> None:
         workflow = (REPO / ".github/workflows/publish-release.yml").read_text(encoding="utf-8")
@@ -1172,7 +1231,7 @@ gh() {
             "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
         )
         self.assertEqual((0, ""), (code, written))
-        for versions in ("[3.14]", '[" "]', "[]", "not json"):
+        for versions in ("[3.14]", '[" "]', "[]", "not json", '["3.14"] ["3.13"]'):
             with self.subTest(versions=versions):
                 bad = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": versions}
                 code, stdout, _ = self.run_python_tests_step(
@@ -1411,6 +1470,105 @@ gh() {
         self.assertIn("uv pip install -e .", job)
         self.assertIn('"project" not in tomllib.load', job)
 
+    def test_validator_test_matrix_hook_runs_between_install_and_pytest(self) -> None:
+        """A dependency-version leg overrides installed versions after the base install and before pytest."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+
+        order = [
+            job.index("name: Check caller install-test-deps hook step"),
+            job.index("name: Install Python dependencies step"),
+            job.index("uses: ./.github/actions/install-test-deps"),
+            job.index("name: Run Python tests step"),
+        ]
+        self.assertEqual(sorted(order), order)
+
+        self.assertIn("is set but .github/actions/install-test-deps/action.yml is missing", job)
+        self.assertIn("leg: ${{ toJSON(matrix) }}", job)
+
+        self.assertIn("uv run --no-sync pytest --cov-report=xml", job)
+
+        gate = "inputs.test-matrix != ''"
+        for name in (
+            "Check caller install-test-deps hook step",
+            "Install Python dependencies step",
+        ):
+            step = job.split(f"- name: {name}\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn(
+                f"        if: ${{{{ {gate} }}}}\n"
+                if name.startswith("Check")
+                else f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n",
+                step,
+            )
+        install = job.split("- name: Install Python dependencies step\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("              uv) uv sync --all-groups --frozen ;;\n", install)
+        self.assertIn("              pip) install_requirements ;;\n", install)
+        self.assertIn("          PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}\n", install)
+        self.assertIn("uv pip install -e .", install)
+        self.assertIn('requirement_args+=(-r "$file")', install)
+        self.assertIn('uv pip install "${requirement_args[@]}"', install)
+        self.assertIn('if [ "$DECLARED" != "true" ] && [ ! -d "$dir/tests" ]; then', install)
+        self.assertNotIn("PIP_PYTHON", install)
+        hook = job.split("- name: Run caller install-test-deps hook step\n", 1)[1].split("\n\n", 1)[
+            0
+        ]
+        self.assertTrue(
+            hook.endswith("          directories: ${{ steps.python.outputs.projects }}")
+        )
+        self.assertIn(
+            f"        if: ${{{{ steps.python.outputs.any == 'true' && {gate} }}}}\n", hook
+        )
+        self.assertIn(f"          HOOK_LEG: ${{{{ {gate} }}}}\n", job)
+        self.assertIn(
+            'if [ "${HOOK_LEG:-false}" = "true" ]; then\n                  uv run --no-sync', job
+        )
+        self.assertIn(
+            'if [ "${HOOK_LEG:-false}" != "true" ]; then\n                  install_requirements',
+            job,
+        )
+
+    @unittest.skipUnless(shutil.which("jq"), "runs the check's own jq program")
+    def test_validator_test_matrix_check_rejects_each_malformed_shape(self) -> None:
+        """The check runs before the matrix expands, so a bad value fails there with a named cause."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        self.assertIn("    needs: test-matrix\n", workflow.split("\n  unit-test:\n", 1)[1])
+        check = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        self.assertIn("        if: ${{ inputs.test-matrix != '' }}\n", check)
+        match = re.search(r"jq -e -s '\n(.*?)\n +' <<<", check, re.DOTALL)
+        assert match is not None
+        program = match.group(1)
+
+        def accepted(value: str) -> bool:
+            result = run(
+                ["jq", "-e", "-s", program],
+                input=value,
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+            )
+            return result.returncode == 0
+
+        self.assertTrue(accepted('[{"label": "a", "python-version": "3.14"}, {"label": "b"}]'))
+        self.assertTrue(accepted(json.dumps([{"label": "x" * 38}])))
+        rejected = {
+            "two concatenated values": '[{"label": "a"}] [{"label": "b"}]',
+            "empty array": "[]",
+            "not an array": "{}",
+            "non-object entry": "[1]",
+            "missing label": "[{}]",
+            "non-string label": '[{"label": 1}]',
+            "duplicate label": '[{"label": "a"}, {"label": "a"}]',
+            "label with a space": '[{"label": "a b"}]',
+            "label over the flag length": json.dumps([{"label": "x" * 39}]),
+            "label with a trailing newline": '[{"label": "a\\n"}]',
+            "unquoted python-version": '[{"label": "a", "python-version": 3.1}]',
+            "blank python-version": '[{"label": "a", "python-version": " "}]',
+        }
+        for label, value in rejected.items():
+            with self.subTest(label):
+                self.assertFalse(accepted(value))
+
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
 
@@ -1432,18 +1590,30 @@ gh() {
 
         # An explicit name: is used verbatim rather than falling back to a matrix-suffixed default.
         # Without the interpolation every leg renders one indistinguishable check name.
-        self.assertIn("    name: Unit test job (Python ${{ matrix.python-version }})\n", job)
+        self.assertIn(
+            "    name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})\n",
+            job,
+        )
 
-        # The matrix reads the input and the uv setup reads the matrix, so no literal survives between them.
-        self.assertIn("        python-version: ${{ fromJSON(inputs.python-versions) }}\n", job)
-        self.assertIn("          python-version: ${{ matrix.python-version }}\n", job)
+        # The matrix comes from the test-matrix job's output and the uv setup reads the matrix, so no literal survives between them.
+        self.assertIn("      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}\n", job)
+        self.assertIn(
+            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
+            job,
+        )
         self.assertNotIn('python-version: "', job)
+        builder = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        self.assertIn("    outputs:\n      matrix: ${{ steps.build.outputs.matrix }}\n", builder)
+        self.assertIn("        id: build\n", builder)
+        self.assertIn("matrix=$(jq -c -s '{include: .[0]}' <<<\"$TEST_MATRIX\")", builder)
+        self.assertIn("'{\"python-version\": $versions}'", builder)
+        self.assertIn('jq -e -s \'length == 1 and (.[0] | type == "array"', builder)
 
         # One interpreter failing must not cancel the others, which is what a second leg is run to learn.
         self.assertIn("      fail-fast: false\n", job)
 
         # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
-        self.assertIn("          flags: python-${{ matrix.python-version }}\n", job)
+        self.assertIn("          flags: python-${{ matrix.label || matrix.python-version }}\n", job)
 
     def test_validator_checks_out_the_triggering_commit(self) -> None:
         """A ref: on any checkout moves the gate off the commit a publisher releases.
@@ -1535,14 +1705,16 @@ gh() {
         the step admitted everything.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        unit_test = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
 
-        # The guard has to precede the steps it guards, so its position is asserted, not just its presence.
+        # The guard has to precede the build it guards, and the unit-test job runs only after this job.
         # Matched on the dash rather than on a name: key, or a step leading with uses: would slip in ahead unseen.
-        first_step = re.search(r"(?m)^      - (.*)$", job)
-        self.assertIsNotNone(first_step)
-        assert first_step is not None
-        self.assertEqual("name: Validate python-versions input step", first_step.group(1))
+        steps = re.findall(r"(?m)^      - (.*)$", job)
+        guard = steps.index("name: Validate python-versions input step")
+        self.assertLess(guard, steps.index("name: Build unit-test matrix step"))
+        self.assertNotIn("Validate python-versions input step", unit_test)
+        self.assertIn("    needs: test-matrix\n", unit_test)
 
         marker = "      - name: Validate python-versions input step\n"
         self.assertIn(marker, job)
@@ -1558,6 +1730,7 @@ gh() {
             lines.append(line[10:])
         script = "\n".join(lines)
         self.assertIn("jq -e", script)
+        self.assertIn("::error::The python-versions input must be", script)
 
         cases = {
             # Reachable: a non-empty JSON array expands into legs whatever its entries hold.
@@ -1571,8 +1744,7 @@ gh() {
             "[3.13, 3.14]": 1,
             # The integer form of it, which uv resolves rather than refuses.
             "[3]": 1,
-            # Unreachable today: each of these fails while the matrix is expanded, before the step runs.
-            # They pin the rest of the filter's contract, which moving the check into a job of its own would ask for.
+            '["3.13"] ["3.14"]': 1,
             "[]": 1,
             '"3.13"': 1,
             "{}": 1,

@@ -121,7 +121,7 @@ Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rule
 
 ## 1A. Carry the Instruction Set, Before Authoring Anything
 
-**Stop here until the instruction set is present and read.** The baseline in step 2 is one list, but it holds two kinds of file, and this kind is not a deliverable. `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md` and `WORKFLOW.md` are **the rules for producing every other file in the repo**, so carrying them late means everything authored beforehand was authored against unknown rules. The cost of that is rework rather than a warning, and it scales with how much got written first.
+**Stop here until the instruction set is present and read.** The one exception is a line-ending conversion, for an existing repository that [`docs/eol-lf-rollout.md`][eol-lf-rollout] "Per-Repo Conversion" says needs one. That conversion lands first, as its own merged pull request carrying only the renormalization, `.editorconfig`, and `.gitattributes`, and the branch for the rest of the standup is cut from `develop` after it merges. The baseline in step 2 is one list, but it holds two kinds of file, and this kind is not a deliverable. `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md` and `WORKFLOW.md` are **the rules for producing every other file in the repo**, so carrying them late means everything authored beforehand was authored against unknown rules. The cost of that is rework rather than a warning, and it scales with how much got written first.
 
 This is the same shape as step 0. Signing has to be live before the first commit rather than retrofitted, and governance has to be loaded before the first authored file for the same reason: the window closes quietly, and the repair is expensive out of proportion to the prevention.
 
@@ -245,6 +245,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [divergences]: ./spec/divergences.json
+[eol-lf-rollout]: ./docs/eol-lf-rollout.md
 [files]: ./spec/files.json
 [fleet-map]: ./docs/fleet-map.md
 [git-commit-conventions]: ./.agents/skills/git-commit-conventions/SKILL.md

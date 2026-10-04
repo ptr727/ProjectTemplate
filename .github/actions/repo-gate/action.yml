@@ -1,5 +1,5 @@
 name: Repository gate
-description: Check action pins and line-ending contracts.
+description: Check action pins, line-ending contracts, and composite action shell and schema.
 
 inputs:
   exclude-globs:

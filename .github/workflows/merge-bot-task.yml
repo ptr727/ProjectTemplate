@@ -2,11 +2,12 @@ name: Merge bot task
 
 # The fleet merge-bot, hosted here once and reached by every repo through a thin pull_request_target caller pinned to a hub commit.
 # Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push.
+# Deletes the head on closed when the caller sets delete-branch to true.
 # - Merge method by base: develop = squash, main = merge, since each base's ruleset allows only that form.
 # - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
 #   Every write uses the App token, so no job here declares a GITHUB_TOKEN scope and the caller grants none.
 # - The caller triggers on pull_request_target, so the workflow and action SHAs resolve from the trusted base rather than the PR head.
-#   This is safe because no job checks out PR code, each one running gh pr merge by URL.
+#   This is safe because no job checks out PR code, and each one calls gh or pushes from an empty scratch repo.
 # - The github context in a called workflow is the caller's, so github.event.pull_request is the caller's pull_request_target payload.
 # - Concurrency lives in the caller, keyed on the PR number with cancel-in-progress false, so no group is declared here.
 on:
@@ -26,7 +27,7 @@ on:
         type: string
         default: '[]'
       delete-branch:
-        description: Pass --delete-branch to gh pr merge, for a repo that keeps the repository-wide auto-delete off and still wants bot branches gone.
+        description: Delete the bot head branch after its pull request merges, for a repo that keeps the repository-wide auto-delete off and still wants bot branches gone.
         required: false
         type: boolean
         default: false
@@ -69,12 +70,9 @@ jobs:
               exit 1
               ;;
           esac
-          args=(--auto "$method")
-          if [[ "$DELETE_BRANCH" == "true" ]]; then args+=(--delete-branch); fi
-          gh pr merge "${args[@]}" "$PR_URL"
+          gh pr merge --auto "$method" "$PR_URL"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          DELETE_BRANCH: ${{ inputs.delete-branch }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -145,12 +143,9 @@ jobs:
               exit 1
               ;;
           esac
-          args=(--auto "$method")
-          if [[ "$DELETE_BRANCH" == "true" ]]; then args+=(--delete-branch); fi
-          gh pr merge "${args[@]}" "$PR_URL"
+          gh pr merge --auto "$method" "$PR_URL"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          DELETE_BRANCH: ${{ inputs.delete-branch }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -183,4 +178,55 @@ jobs:
         run: gh pr merge --disable-auto "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  delete-merged-bot-branch:
+    name: Delete merged bot branch job
+    runs-on: ubuntu-latest
+    # Fires on the closed event of a merged in-repo bot pull request, since --auto merges later on GitHub's side.
+    if: >-
+      inputs.delete-branch &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref != 'main' &&
+      github.event.pull_request.head.ref != 'develop' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        github.event.pull_request.user.login == inputs.app-login
+      )
+
+    steps:
+
+      - name: Generate GitHub App token step
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # A lease-guarded push deletes the branch only while its tip still equals the merged head, so a recreated or moved branch survives.
+      - name: Delete branch step
+        run: |
+          set -Eeuo pipefail
+          git init --quiet "$RUNNER_TEMP/delete-branch"
+          cd "$RUNNER_TEMP/delete-branch"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          if out=$(git push --force-with-lease="refs/heads/$HEAD_REF:$MERGED_SHA" "https://github.com/$REPO.git" ":refs/heads/$HEAD_REF" 2>&1); then
+            echo "Deleted branch $HEAD_REF at $MERGED_SHA"
+          elif grep -Fq 'stale info' <<<"$out"; then
+            echo "::notice::Branch $HEAD_REF moved or is already gone, not deleting"
+          else
+            echo "::error::Deleting branch $HEAD_REF failed: $out"
+            exit 1
+          fi
+        env:
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGED_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
