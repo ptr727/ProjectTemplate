@@ -24,8 +24,9 @@ Usage: python3 spec/audit.py [RepoName ...] [--branch REF]   (default: every cat
 each read at its registry groundTruthBranch). --branch overrides that branch for the run, so a
 convergence can be verified before it is promoted, without editing the registry.
 
-A shallow hub clone raises on the first history read, because the stale-vs-modified classification
-and the intent staleness advisory need full history. The error says to run `git fetch --unshallow origin` in that checkout.
+A shallow hub clone cannot answer the stale-vs-modified classification or the intent staleness
+advisory. A sweep then reports one ERROR per repo and exits non-zero.
+`--issue` exits 2 with the error on stderr. The error says: Run `git fetch --unshallow origin` in that checkout.
 """
 
 import argparse
