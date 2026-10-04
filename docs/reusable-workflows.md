@@ -248,15 +248,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 
 ## Adopting the Merge-Bot
 
-A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below and deletes nothing else.
-The stub is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte.
-The pin is the release that first carried the task, and Dependabot bumps it from there.
-Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`).
-A repo with a tracker outside those pairs adds one `rules` entry per pair.
-A repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`.
-That input deletes the head of a merged in-repo Dependabot or App pull request from the `closed` event.
-The delete is a lease-guarded push, so it removes the branch only while its tip still equals the merged head.
-It takes effect once the stub's pin reaches a release carrying the delete job, because an older pin ignores `closed`.
+A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below and deletes nothing else. The stub is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte. The pin is the release that first carried the task, and Dependabot bumps it from there. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair. A repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`. That input deletes the head of a merged in-repo Dependabot or App pull request from the `closed` event. The delete is a lease-guarded push, so it removes the branch only while its tip still equals the merged head. It never deletes a head named `main` or `develop`. It takes effect once the stub's pin reaches a release carrying the delete job, because an older pin ignores `closed`.
 
 ```yaml
 name: Merge bot pull request action
@@ -297,8 +289,7 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
       delete-branch: true
 ```
 
-The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`), which when `true` deletes the bot head once the merge lands.
-The `rules` input is a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`. The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
+The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`), which when `true` deletes the bot head once the merge lands. The `rules` input is a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`. The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
 Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate.
 Those two repos therefore drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
@@ -512,7 +503,7 @@ Neither package push runs inside the hub task, and that is a constraint rather t
 
 The trusted-publishing policy on NuGet.org and PyPI therefore names the publishing repository and its own `publish-release.yml`. Pointing a policy at the hub's workflow file instead would let any repository calling that task publish that package, so it is not the fix. Confirm the policy before the first release after adopting. A repository whose policy already names its own `publish-release.yml` needs no edit. A repository whose policy names `build-release-task.yml`, which is how the `HTTP 401` was worked around before the push moved, mismatches in the other direction, and its first release after adopting fails the token exchange with `expected 'build-release-task.yml', actual 'publish-release.yml'` until the policy is repointed back. Neither direction is catchable before that release, since a smoke build never reaches the token exchange.
 
-The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. This is the full shape, for a NuGet-library repo:
+The stub keeps its own trigger policy exactly as today: `workflow_dispatch` plus a main-only weekly `schedule` for a Docker repo, or `workflow_dispatch` plus a paths-filtered `push` to `main` for a NuGet or PyPI repo. That push trigger is not the release gate, `publish-plan-task.yml` is, and a human merge never auto-publishes, per [`WORKFLOW.md`][workflow] D4.1. What moves to the hub is the release-gate decision, the build/version/publish job graph, and the Docker core, never the trigger. The concurrency group is ref-scoped, and a `push` by an identity outside the plan's allowlist gets a per-run group, per [`WORKFLOW.md`][workflow] D7.1. The concurrency block is part of the stub the adopter carries. This is the full shape, for a NuGet-library repo:
 
 ```yaml
 name: Publish project release action
@@ -531,8 +522,10 @@ on:
       - 'global.json'
   workflow_dispatch:
 
+# A push the plan cannot publish gets a per-run group, so it never replaces a pending publish.
+# The expression must track publish-plan-task.yml's push rule and actor allowlist.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && (github.ref != 'refs/heads/main' || (github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]')) && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 # GITHUB_TOKEN gets no scope by default, and each job below grants only what its hub task writes with.
