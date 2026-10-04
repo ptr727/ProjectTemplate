@@ -318,8 +318,8 @@ State the chosen tier and its reason in the round's report.
 
 `AGENTS.md` "Delegation" binds this wait as it binds any other, and this section is how the bound
 is met here. A worker
-reports merged, parked, stopped, or handed back for review. A worker that reports nothing at all needs a bound, since it is
-indistinguishable from a slow one. It also needs one because dying mid-drive is ordinary here.
+reports merged, parked, stopped, or handed back for review. A worker that reports nothing at all needs a bound.
+Its silence looks exactly like slowness, and dying mid-drive is ordinary here.
 
 The bound is a state read rather than a clock: when the other workers in the round have reported,
 read the silent worker's branch and pull request directly, `git log` on that branch and
