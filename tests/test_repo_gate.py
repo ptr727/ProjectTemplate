@@ -11,6 +11,7 @@ Run as `python3 tests/test_repo_gate.py`, or under `python3 -m unittest discover
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import os
 import re
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -27,6 +29,8 @@ import repo_gate
 
 REPO = Path(__file__).resolve().parent.parent
 GOVERNANCE = REPO / "GOVERNANCE.md"
+
+real_run = subprocess.run
 
 PINNED = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 
@@ -625,10 +629,13 @@ class TestCoverageFloors(unittest.TestCase):
 
     def test_this_repo_passes_both_checks_from_the_cli(self) -> None:
         """The gates run in CI from this entry point, so the entry point is what is proven."""
+        tools_ready = docker_ready() and schema_ready()
+        checks = [c for c in repo_gate.CHECKS if c != "composite-actions" or tools_ready]
+        narrowed = [a for c in checks for a in ("--check", c)]
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(0, repo_gate.main(["--root", str(REPO)]))
+            self.assertEqual(0, repo_gate.main(["--root", str(REPO), *narrowed]))
         printed = out.getvalue()
-        for name in repo_gate.CHECKS:
+        for name in checks:
             with self.subTest(check=name):
                 self.assertIn(f"[ok  ] {name}", printed)
 
@@ -654,6 +661,407 @@ class TestCoverageFloors(unittest.TestCase):
     def test_an_unreadable_workflow_is_skipped_rather_than_raising(self) -> None:
         """`git ls-files` lists a path a later commit deleted from the working tree."""
         self.assertEqual([], repo_gate.check_sha_pin(REPO, [".github/workflows/absent.yml"]))
+
+
+def docker_ready() -> bool:
+    """Whether the daemon answers and the image is present or pullable, as the check itself reads it."""
+    return shutil.which("docker") is not None and repo_gate.docker_unreachable() is None
+
+
+def schema_ready() -> bool:
+    return bool(shutil.which("uvx") or shutil.which("pipx"))
+
+
+_DOCKER_READY: list[bool] = []
+
+
+def NEEDS_DOCKER(test: Callable[..., None]) -> Callable[..., None]:
+    """Skip at run time, so collecting the tests never probes docker or pulls an image."""
+
+    @functools.wraps(test)
+    def wrapper(self: unittest.TestCase, *args: object) -> None:
+        if not _DOCKER_READY:
+            _DOCKER_READY.append(docker_ready())
+        if not _DOCKER_READY[0]:
+            self.skipTest("no docker daemon for shellcheck")
+        test(self, *args)
+
+    return wrapper
+
+
+NEEDS_SCHEMA = unittest.skipUnless(schema_ready(), "neither uvx nor pipx present")
+
+
+class TestCompositeActions(TreeCase):
+    def action(self, steps: str, name: str = "hook") -> list[str]:
+        folder = self.tmp / ".github" / "actions" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "action.yml").write_text(
+            f"name: Hook\ndescription: A hook.\nruns:\n  using: composite\n  steps:\n{steps}",
+            encoding="utf-8",
+        )
+        return [f".github/actions/{name}/action.yml"]
+
+    def raw(self, text: str) -> list[str]:
+        folder = self.tmp / ".github" / "actions" / "hook"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "action.yml").write_text(text, encoding="utf-8")
+        return [".github/actions/hook/action.yml"]
+
+    def shell_hits(self, files: list[str]) -> list[str]:
+        return [h for f in files for h in repo_gate.check_composite_shell(self.tmp, f)]
+
+    def body_hits(self, body: str) -> list[str]:
+        indented = "".join(f"        {line}\n" for line in body.splitlines())
+        return self.shell_hits(self.action(f"    - shell: bash\n      run: |\n{indented}"))
+
+    @NEEDS_DOCKER
+    def test_a_clean_body_passes(self) -> None:
+        files = self.action('    - shell: bash\n      run: echo "ok"\n')
+        self.assertEqual([], self.shell_hits(files))
+
+    @NEEDS_DOCKER
+    def test_a_bad_body_fails_naming_the_action_and_step(self) -> None:
+        files = self.action("    - name: Say\n      shell: bash\n      run: cd /tmp\n")
+        hits = self.shell_hits(files)
+        self.assertTrue(hits)
+        self.assertTrue(all(".github/actions/hook/action.yml step 1 (Say)" in h for h in hits))
+        self.assertTrue(any("SC2164" in h for h in hits))
+
+    @NEEDS_DOCKER
+    def test_a_step_with_no_name_is_traced_by_index(self) -> None:
+        files = self.action(
+            "    - shell: bash\n      run: echo ok\n    - shell: sh\n      run: cd /tmp\n"
+        )
+        self.assertIn("action.yml step 2: ", self.shell_hits(files)[0])
+
+    @NEEDS_DOCKER
+    def test_a_step_with_no_shell_is_checked_as_bash(self) -> None:
+        files = self.action("    - run: cd /tmp\n")
+        self.assertTrue(any("SC2164" in h for h in self.shell_hits(files)))
+
+    def test_a_pwsh_step_is_skipped(self) -> None:
+        files = self.action("    - shell: pwsh\n      run: Write-Host $x (\n")
+        self.assertEqual([], self.shell_hits(files))
+
+    def test_an_empty_body_is_not_checked(self) -> None:
+        files = self.action("    - shell: bash\n      run: ' '\n")
+        self.assertEqual([], self.shell_hits(files))
+
+    @NEEDS_DOCKER
+    def test_an_expression_does_not_trip_shellcheck(self) -> None:
+        self.assertEqual([], self.body_hits('echo "${{ inputs.who }}"'))
+
+    @NEEDS_DOCKER
+    def test_an_expression_in_single_quotes_is_not_an_sc2016_finding(self) -> None:
+        self.assertEqual([], self.body_hits("echo '${{ inputs.who }}'"))
+
+    @NEEDS_DOCKER
+    def test_an_expression_in_arithmetic_is_not_an_sc2004_finding(self) -> None:
+        self.assertEqual([], self.body_hits("echo $(( ${{ inputs.n }} + 1 ))"))
+
+    @NEEDS_DOCKER
+    def test_an_env_variable_is_not_an_sc2154_finding(self) -> None:
+        self.assertEqual([], self.body_hits('echo "$from_step_env"'))
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_keeps_a_later_error_on_its_line(self) -> None:
+        hits = self.body_hits('echo "${{ format(\n  inputs.a,\n  inputs.b) }}"\ncd /tmp')
+        self.assertTrue(hits)
+        self.assertTrue(all("run line 4:" in h for h in hits), hits)
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_as_an_argument_does_not_split_the_command(self) -> None:
+        self.assertEqual([], self.body_hits("echo ${{ format(\n  inputs.a,\n  inputs.b) }} | cat"))
+
+    @NEEDS_DOCKER
+    def test_an_expression_in_each_guard_shape_is_clean(self) -> None:
+        for guard in (
+            '[ "${{ inputs.x }}" = "true" ]',
+            '[ -z "${{ inputs.x }}" ]',
+            "[[ -n ${{ inputs.x }} ]]",
+            "[ ${{ inputs.n }} -gt 0 ]",
+        ):
+            with self.subTest(guard=guard):
+                self.assertEqual([], self.body_hits(f"if {guard}; then echo ok; fi"))
+
+    def test_a_multiline_expression_collapses_and_returns_its_newlines_after_the_line(self) -> None:
+        text = repo_gate.substitute_expressions("a ${{ x\ny }} b\nnext\n")
+        self.assertEqual("a ${GHA_EXPR} b\n\nnext\n", text)
+
+    def test_the_newlines_return_after_the_logical_line(self) -> None:
+        text = repo_gate.substitute_expressions("foo ${{ x\ny }} \\\n  && bar\nz")
+        self.assertEqual("foo ${GHA_EXPR} \\\n  && bar\n\nz", text)
+
+    def test_a_closing_delimiter_inside_a_quoted_string_does_not_end_the_expression(self) -> None:
+        text = repo_gate.substitute_expressions("echo ${{ format('a }} b') }} done\ncd")
+        self.assertEqual("echo ${GHA_EXPR} done\ncd", text)
+
+    @NEEDS_DOCKER
+    def test_an_unclosed_expression_does_not_hide_a_later_finding(self) -> None:
+        hits = self.body_hits("echo ${{ inputs.x }\ncd /tmp")
+        self.assertTrue(any("run line 2:" in h for h in hits), hits)
+
+    def test_an_unclosed_expression_is_left_as_raw_text(self) -> None:
+        self.assertEqual("echo ${{ x }\nrm", repo_gate.substitute_expressions("echo ${{ x }\nrm"))
+
+    def test_an_unclosed_opener_before_a_closed_expression_stays_raw(self) -> None:
+        text = repo_gate.substitute_expressions("echo ${{ x }\nrm ${{ y }} z")
+        self.assertEqual("echo ${{ x }\nrm ${GHA_EXPR} z", text)
+
+    @NEEDS_DOCKER
+    def test_an_unclosed_opener_does_not_swallow_the_text_before_the_next_expression(self) -> None:
+        hits = self.body_hits("echo ${{ x }\ncd ${{ y }}")
+        self.assertTrue(any("run line 2:" in h for h in hits), hits)
+
+    def test_an_inspect_timeout_and_oserror_name_the_inspect_step(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        timeout = subprocess.TimeoutExpired("docker", 1)
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, timeout]):
+            self.assertIn(
+                "image inspect did not finish within 30s", repo_gate.docker_unreachable() or ""
+            )
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, OSError("gone")]):
+            self.assertIn(
+                "image inspect could not start: gone", repo_gate.docker_unreachable() or ""
+            )
+
+    def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
+        self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_in_a_comment_does_not_make_code(self) -> None:
+        hits = self.body_hits("# note ${{ a ||\n b }} isn't set\ncd /tmp")
+        self.assertTrue(hits)
+        self.assertTrue(all("run line 3:" in h for h in hits), hits)
+
+    @NEEDS_DOCKER
+    def test_a_multiline_expression_before_a_continuation_stays_clean(self) -> None:
+        for tail in ("&& bar", "--rm img", "| cat"):
+            with self.subTest(tail=tail):
+                hits = self.body_hits(f"foo ${{{{ x\n y }}}} \\\n  {tail}\ncd /tmp")
+                self.assertTrue(hits)
+                self.assertTrue(all("run line 4:" in h for h in hits), hits)
+
+    @NEEDS_DOCKER
+    def test_a_multiline_argument_keeps_a_later_error_on_its_line(self) -> None:
+        hits = self.body_hits("echo ${{ format(\n  inputs.a) }} | cat\ncd /tmp")
+        self.assertTrue(hits)
+        self.assertTrue(all("run line 3:" in h for h in hits), hits)
+
+    def test_the_body_goes_to_shellcheck_as_utf8_bytes_at_warning_severity(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch.object(repo_gate.subprocess, "run", return_value=proc) as run:
+            repo_gate.shellcheck_body("a.yml step 1", "bash", "echo \u00e9\n")
+        self.assertEqual("echo \u00e9\n".encode(), run.call_args.kwargs["input"])
+        self.assertNotIn("text", run.call_args.kwargs)
+        command = run.call_args.args[0]
+        self.assertIn("--network=none", command)
+        self.assertEqual("warning", command[command.index("-S") + 1])
+
+    def completed_bytes(
+        self, code: int, out: bytes = b"", err: bytes = b""
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess([], code, out, err)
+
+    def completed(
+        self, code: int, out: str = "", err: str = ""
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], code, out, err)
+
+    def test_exit_one_reports_each_gcc_line(self) -> None:
+        proc = self.completed_bytes(1, b"-:2:5: note: Double quote [SC2086]\n")
+        with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
+            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+        self.assertEqual(["a.yml step 1: run line 2:5: note: Double quote [SC2086]"], hits)
+
+    def test_another_nonzero_exit_is_a_distinct_finding(self) -> None:
+        for code, out in ((2, ""), (4, "stray"), (125, ""), (1, "")):
+            with self.subTest(code=code):
+                proc = self.completed_bytes(code, out.encode(), b"boom")
+                with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
+                    hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+                self.assertEqual([f"a.yml step 1: shellcheck exited {code}: boom"], hits)
+
+    def test_a_shellcheck_timeout_is_a_finding(self) -> None:
+        with mock.patch.object(
+            repo_gate.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 1)
+        ):
+            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+        self.assertIn("timed out", hits[0])
+
+    def test_docker_missing_is_a_finding_and_the_schema_half_still_runs(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo ok\n")
+        which = {"uvx": "/bin/uvx"}
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect=which.get),
+            mock.patch.object(repo_gate.subprocess, "run", return_value=self.completed(0)) as run,
+        ):
+            hits = repo_gate.check_composite_actions(self.tmp, files)
+        self.assertEqual(["docker is not installed, so no run body was shellchecked"], hits)
+        self.assertEqual("uvx", run.call_args.args[0][0])
+
+    def test_an_unreachable_daemon_is_one_finding_not_one_per_body(self) -> None:
+        files = self.action(
+            "    - shell: bash\n      run: echo a\n    - shell: bash\n      run: echo b\n"
+        )
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
+            mock.patch.object(repo_gate, "docker_unreachable", return_value="docker info exited 1"),
+            mock.patch.object(repo_gate, "shellcheck_body") as body,
+        ):
+            hits = repo_gate.check_composite_actions(self.tmp, files)
+        self.assertEqual(2, len(hits))
+        self.assertIn("docker info exited 1, so no run body was shellchecked", hits)
+        body.assert_not_called()
+
+    def test_the_daemon_probe_reports_a_failure_and_a_timeout(self) -> None:
+        proc = subprocess.CompletedProcess([], 1, b"", b"")
+        with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
+            self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        bad = subprocess.CompletedProcess([], 1, b"", b"no route")
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad]):
+            self.assertIn("exited 1: no route", repo_gate.docker_unreachable() or "")
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, ok]) as run:
+            self.assertIsNone(repo_gate.docker_unreachable())
+        self.assertEqual(2, run.call_count)
+        with mock.patch.object(
+            repo_gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+        ):
+            self.assertIsNone(repo_gate.docker_unreachable())
+        timeout = subprocess.TimeoutExpired("docker", 1)
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=timeout):
+            self.assertIn("did not answer", repo_gate.docker_unreachable() or "")
+
+    def test_an_empty_action_file_is_a_finding_naming_the_file(self) -> None:
+        hits = self.shell_hits(self.raw(""))
+        self.assertEqual(1, len(hits))
+        self.assertIn(".github/actions/hook/action.yml: could not read the action", hits[0])
+
+    def test_a_document_that_is_not_a_mapping_is_a_finding(self) -> None:
+        hits = self.shell_hits(self.raw("---\n"))
+        self.assertIn("not a mapping", hits[0])
+
+    def test_neither_uvx_nor_pipx_is_a_finding_and_the_shell_half_still_runs(self) -> None:
+        files = self.action("    - shell: pwsh\n      run: echo ok\n")
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
+            mock.patch.object(repo_gate, "docker_unreachable", return_value=None),
+            mock.patch.object(repo_gate, "load_action", return_value={}),
+        ):
+            hits = repo_gate.check_composite_actions(self.tmp, files)
+        self.assertEqual(
+            ["neither uvx nor pipx is installed, so no action was schema-checked"], hits
+        )
+
+    def test_uvx_runs_the_latest_schema_checker(self) -> None:
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
+            mock.patch.object(repo_gate.subprocess, "run", return_value=self.completed(0)) as run,
+        ):
+            self.assertEqual([], repo_gate.check_composite_schema(self.tmp, ["a/action.yml"]))
+        self.assertEqual(["uvx", "check-jsonschema@latest"], run.call_args.args[0][:2])
+
+    def test_pipx_is_the_fallback_when_uvx_is_absent(self) -> None:
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"pipx": "/p"}.get),
+            mock.patch.object(repo_gate.subprocess, "run", return_value=self.completed(0)) as run,
+        ):
+            repo_gate.check_composite_schema(self.tmp, ["a/action.yml"])
+        self.assertEqual(["pipx", "run", "check-jsonschema"], run.call_args.args[0][:3])
+
+    def test_a_schema_timeout_is_a_finding(self) -> None:
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
+            mock.patch.object(
+                repo_gate.subprocess, "run", side_effect=subprocess.TimeoutExpired("uvx", 1)
+            ),
+        ):
+            hits = repo_gate.check_composite_schema(self.tmp, ["a/action.yml"])
+        self.assertIn("timed out", hits[0])
+
+    def test_a_tracked_but_deleted_action_is_skipped_by_both_halves(self) -> None:
+        files = [".github/actions/gone/action.yml"]
+        with (
+            mock.patch.object(repo_gate, "check_composite_shell") as shell,
+            mock.patch.object(repo_gate, "check_composite_schema") as schema,
+        ):
+            self.assertEqual([], repo_gate.check_composite_actions(self.tmp, files))
+        shell.assert_not_called()
+        schema.assert_not_called()
+        self.assertIn("nothing was checked", repo_gate.NOTES[0])
+
+    def test_a_nested_action_file_is_found(self) -> None:
+        files = [".github/actions/group/inner/action.yaml", ".github/actions/a/other.yml"]
+        self.assertEqual([files[0]], repo_gate.action_files(files))
+
+    def test_a_missing_directory_is_skipped_with_a_note(self) -> None:
+        self.assertEqual([], repo_gate.check_composite_actions(self.tmp, [".github/x.yml"]))
+        self.assertIn("nothing was checked", repo_gate.NOTES[0])
+
+    def test_invalid_yaml_is_a_finding_naming_the_file(self) -> None:
+        hits = self.shell_hits(self.raw("runs: [unclosed\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn(".github/actions/hook/action.yml: could not read the action", hits[0])
+
+    def test_a_multi_document_file_is_a_finding(self) -> None:
+        hits = self.shell_hits(self.raw("name: a\n---\nname: b\n"))
+        self.assertIn("expected one YAML document, found 2", hits[0])
+
+    def yq_run(self, stdout: str, code: int = 0) -> mock._patch:  # type: ignore[type-arg]
+        proc = self.completed(code, stdout, "bad")
+        return mock.patch.object(repo_gate.subprocess, "run", return_value=proc)
+
+    def test_yq_reads_the_action_where_pyyaml_is_absent(self) -> None:
+        payload = '{"runs": {"steps": [{"shell": "bash", "run": "echo $x"}]}}'
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
+            self.yq_run(payload),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=["seen"]) as body,
+        ):
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+        self.assertEqual(["seen"], hits)
+        self.assertEqual("echo $x", body.call_args.args[2])
+
+    def test_yq_and_pyyaml_agree_on_a_multi_document_file(self) -> None:
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
+            self.yq_run('{"a": 1}\n{"b": 2}\n'),
+        ):
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+        self.assertIn("expected one YAML document, found 2", hits[0])
+
+    def test_a_yq_failure_is_a_finding(self) -> None:
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value="/usr/bin/yq"),
+            self.yq_run("", 1),
+        ):
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+        self.assertIn("yq could not read the action: bad", hits[0])
+
+    def test_no_pyyaml_and_no_yq_is_a_finding(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo ok\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value=None),
+        ):
+            hits = self.shell_hits(files)
+        self.assertIn("neither PyYAML nor yq", hits[0])
+
+    @NEEDS_SCHEMA
+    def test_a_valid_action_passes_the_schema(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo ok\n")
+        self.assertEqual([], repo_gate.check_composite_schema(self.tmp, files))
+
+    @NEEDS_SCHEMA
+    def test_a_schema_violation_fails(self) -> None:
+        files = self.action("    - shell: bash\n      run: echo ok\n      bogus-key: 1\n")
+        hits = repo_gate.check_composite_schema(self.tmp, files)
+        self.assertTrue(any(h.startswith("schema:") for h in hits))
 
 
 class TestExcludeGlobs(unittest.TestCase):

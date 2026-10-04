@@ -23,7 +23,7 @@ on:
         default: ''
       # Threaded to the repo-gate composite action's own exclude-globs input, unvalidated.
       repo-gate-exclude-globs:
-        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing sha-pin and tracked-path eol-coverage scans via repo_gate.py's --exclude.
+        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing the sha-pin, eol-coverage, and composite-actions scans via repo_gate.py's --exclude.
         required: false
         type: string
         default: ''
@@ -451,17 +451,6 @@ jobs:
               (cd "$config_dir" && uvx "$checker@latest" "${targets[@]}") < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
-
-      - name: Lint composite actions step
-        if: hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
-        run: |
-          set -Eeuo pipefail
-          git ls-files -z ':(top,glob).github/actions/**/action.yml' ':(top,glob).github/actions/**/action.yaml' > "$RUNNER_TEMP/action-files.txt"
-          if [ -s "$RUNNER_TEMP/action-files.txt" ]; then
-            xargs -0 uvx check-jsonschema@latest --builtin-schema vendor.github-actions -- < "$RUNNER_TEMP/action-files.txt"
-          else
-            echo "no composite action metadata is tracked"
-          fi
 
       # A publish run's content is already gated by the pull request that introduced it.
       - name: Check prose step
