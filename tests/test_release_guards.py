@@ -388,6 +388,9 @@ class ReleaseGuardCase(unittest.TestCase):
         allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
         self.assertTrue(allowed)
         self.assertEqual(allowed, set(re.findall(r'"\$actor" == "([^"]+)"', script)))
+        stub = (REPO / "catalog/snippets/workflows/publish-release.yml").read_text(encoding="utf-8")
+        group = next(line for line in stub.splitlines() if line.startswith("  group:"))
+        self.assertEqual(allowed, set(re.findall(r"github\.actor != '([^']+)'", group)))
 
         bot = {"login": "ptr727-codegen[bot]"}
         middle = "e" * 40

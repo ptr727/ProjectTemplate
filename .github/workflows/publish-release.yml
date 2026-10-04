@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 # A publish is a deliberate dispatch, so runs on one ref queue rather than cancel.
+# Queuing leaves no run with a half-created GitHub release.
 # The group is ref-scoped so a supersede dispatch on one branch never replaces a pending publish of the other.
-# That leaves no run with a half-created GitHub release.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
