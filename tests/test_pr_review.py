@@ -4005,6 +4005,11 @@ class TestCoverageExitCodes(GqlCase):
                 pr = payload([review(body=self.balanced([row]))], files=[path])
                 self.assertIn(f"names {row}, which the diff", pr_review.table_shortfall(pr))
 
+    def test_a_gap_between_bare_punctuation_names_nothing(self) -> None:
+        """A row like `- ... -` carries no evidence that any file was read, so it covers none."""
+        pr = payload([review(body=self.balanced(["- ... -"]))], files=["-x-"])
+        self.assertIn("names - ... -, which the diff", pr_review.table_shortfall(pr))
+
     def test_a_row_with_several_gaps_is_decided_in_one_pass(self) -> None:
         """Each gap stands for at least one character, and a near miss returns at once."""
         self.assertTrue(pr_review.gap_fits("a-x-b-y-c", ["a", "b", "c"]))

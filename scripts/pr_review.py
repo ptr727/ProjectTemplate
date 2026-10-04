@@ -2056,6 +2056,8 @@ def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
     names a set of paths counts all three. A row the diff carries names that path, whatever
     characters it holds. Otherwise a row holding `TABLE_GAP` names every path `gap_fits`, its
     other characters read literally, and since it shortens one path it names one at most.
+    Its text outside the gaps must hold a letter or a digit, so a gap between bare punctuation
+    names nothing rather than whichever path happens to fit.
     Otherwise a row holding a wildcard names every path it matches one segment at a time, so a
     `*` never crosses a `/`, per `segment_fits`.
     """
@@ -2063,6 +2065,8 @@ def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
         return [row], True
     if TABLE_GAP in row:
         parts = row.split(TABLE_GAP)
+        if not any(c.isalnum() for c in "".join(parts)):
+            return [], True
         return sorted(p for p in diff if gap_fits(p, parts)), True
     if TABLE_GLOB & set(row):
         parts = row.split("/")
