@@ -128,7 +128,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] KiCadLibrary (drops the Dependabot semver-major filter per D8.1 unless the open decision lands first)
+- [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
 - [x] LanguageTags (`delete-branch: true`): adopted on `develop` in ptr727/LanguageTags#336 at `e44eb09`, merged 2026-09-02 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] aiopurpleair (`delete-branch: true`): adopted on `develop` in ptr727/aiopurpleair#103 at `3b69dc3`, merged 2026-09-09 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] MediaTools (`delete-branch: true`): adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
@@ -168,7 +168,7 @@ The remaining repos are one checkbox each below, the sweep list being every cata
 - [ ] ESPHome-NonRoot: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
 - [x] VSCode-Server-DotNetCore: adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 at `ca46db7`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] NxWitness: adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
-- [ ] KiCadLibrary: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [x] KiCadLibrary: adopted in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
 - [ ] EspDinIoT: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
 - [x] ESPHome-Config: adopted on `develop` in ptr727/ESPHome-Config#100 at `a21dfd7`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] HomeAssistant-Config: adopted on `develop` in ptr727/HomeAssistant-Config#33 at `f980637`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
@@ -193,7 +193,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
   - [ ] PhotoCleaner (`get-version-task.yml`)
   - [ ] PlexCleaner (`get-version-task.yml`, and gains the `plan` job D4.1 requires by adopting `publish-plan-task.yml` rather than by a copy)
   - [ ] VSCode-Server-DotNetCore (`get-version-task.yml`)
-  - [ ] KiCadLibrary (`get-version-task.yml`)
+  - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `publish-plan-task.yml`, in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
   - [ ] aiopurpleair (`get-version-task.yml`)
   - [ ] homeassistant-purpleair (`get-version-task.yml`)
   - [ ] Utilities (`publish-plan-task.yml`)
@@ -212,7 +212,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [ ] VSCode-Server-DotNetCore (vanilla Docker only)
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
-- [ ] KiCadLibrary (`build-release-asset` hook for its library zip, the hook's first caller)
+- [x] KiCadLibrary (`build-release-asset` hook for its library zip, the hook's first caller): adopted in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding, and first published as 2.1.48.
 - [ ] homeassistant-purpleair (`build-release-asset` hook for its integration zip)
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
@@ -235,7 +235,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
   - [ ] ESPHome-NonRoot (`check-upstream-version-task.yml`, both trackers, the second with `auto-merge: false`)
   - [ ] Blog (`deploy-site-task.yml`, keeping `deploy-site.yml` as its own caller)
   - [ ] LanguageTags (`run-codegen-pull-request-task.yml` and its scheduler)
-  - [ ] KiCadLibrary (deletes `build-datebadge-task.yml` and its caller job outright, per TODO.md's retired-badge cleanup, adopting no new stub)
+  - [x] KiCadLibrary (deletes `build-datebadge-task.yml` and its caller job outright, per TODO.md's retired-badge cleanup, adopting no new stub): deleted in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
 - [ ] Catalog snippets for `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml` pinned to the release that first carries each task. `catalog/snippets/workflows/run-periodic-codegen-pull-request.yml` now exists, since [Codegen](#adopting-the-type-specific-tasks) already states it keeps the same per-repo shape as today. The other four stay open: `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow rather than a standalone top-level caller with a snippet of its own, and `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job.
 - [ ] `reports/workflow-reuse.md` regenerated, and the fleet total's callers equal to the sum of the stubs the fleet needs.
 - [x] The environment-secret handoff in the deploy-site adoption, the task's own `environment:` binding (not the caller's, which cannot carry one, [issue #942][issue-942]) resolving `DEPLOY_SSH_PRIVATE_KEY` from the caller's environment store across a cross-repository `uses:`. [Confirmed against Blog's own `staging` environment][run-cross-repo-secret-probe]: `DEPLOY_SSH_PRIVATE_KEY` resolved (masked, non-empty), and only the separately-tracked `SITE_BASE_URL` naming mismatch was missing.
