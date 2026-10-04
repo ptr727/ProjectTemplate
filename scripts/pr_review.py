@@ -898,6 +898,9 @@ mutation($threadId:ID!){
 """
 
 
+WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
+
+
 def gh_graphql(query: str, **variables) -> dict:
     """Run one GraphQL document and return its `data`, raising rather than reporting a blank.
 
@@ -907,6 +910,9 @@ def gh_graphql(query: str, **variables) -> dict:
 
     `errors` is checked rather than trusted to the exit code, since a GraphQL document can fail
     per-field while the request itself succeeds, and the caller would read the null that leaves.
+
+    `gh api graphql` exits non-zero with the JSON still on stdout when the response carries errors,
+    so that stdout is read first. Only an error set made of `workflowRun` paths is tolerated.
     """
     # Every read below decodes as UTF-8 rather than as whatever the platform's locale is.
     # `gh` emits UTF-8 on every platform, where a Windows console locale is cp1252.
@@ -915,18 +921,43 @@ def gh_graphql(query: str, **variables) -> dict:
     for name, value in variables.items():
         argv += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
     r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
-    if r.returncode != 0:
+    try:
+        payload = json.loads(r.stdout)
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or (r.returncode != 0 and not payload.get("errors")):
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f"gh graphql failed rc={r.returncode}")
-    payload = json.loads(r.stdout)
-    if payload.get("errors"):
-        sys.stderr.write(json.dumps(payload["errors"])[:800])
+    errors = payload.get("errors")
+    if errors and not all(_is_workflow_run_error(e) for e in errors):
+        sys.stderr.write(json.dumps(errors)[:800])
         raise SystemExit("gh graphql reported errors")
-    return payload["data"]
+    if payload.get("data") is None:
+        sys.stderr.write(json.dumps(errors)[:800])
+        raise SystemExit("gh graphql returned no data")
+    data = payload["data"]
+    if errors:
+        sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
+        data[WORKFLOW_KEYS_UNAVAILABLE] = True
+    return data
+
+
+def _is_workflow_run_error(error: object) -> bool:
+    """True where the error is a per-field failure on `workflowRun` and nothing else.
+
+    A token without Actions read access can fail that one field, and the field is null in `data`.
+    `check_nodes` then keys Actions runs by suite instead, so the digest still reads.
+    """
+    path = error.get("path") if isinstance(error, dict) else None
+    return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
 
 def gql(query: str, owner: str, repo: str, num: int) -> dict:
-    return gh_graphql(query, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+    data = gh_graphql(query, o=owner, r=repo, n=num)
+    pr = data["repository"]["pullRequest"]
+    if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
+        pr[WORKFLOW_KEYS_UNAVAILABLE] = True
+    return pr
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -2614,6 +2645,7 @@ def check_nodes(pr: dict) -> list[dict]:
     They are normalized here so one reading serves both.
 
     Runs group by workflow and name, or by app and name where the suite has no workflow run.
+    Where the workflow is unreadable, an Actions run groups by its own suite and none is dropped.
     Each group keeps every run of its highest suite id and drops its runs from older suites.
     A name only an older suite carries stays, since the merge gate still reads it.
     The highest suite id decides, since `startedAt` misorders overlapping runs.
@@ -2630,11 +2662,15 @@ def check_nodes(pr: dict) -> list[dict]:
         if n.get("__typename") == "CheckRun":
             suite = n.get("checkSuite") or {}
             workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
-            origin = (
-                ("workflow", workflow)
-                if workflow
-                else ("app", (suite.get("app") or {}).get("slug"))
-            )
+            if workflow:
+                origin: tuple = ("workflow", workflow)
+            elif (
+                pr.get(WORKFLOW_KEYS_UNAVAILABLE)
+                and (suite.get("app") or {}).get("slug") == "github-actions"
+            ):
+                origin = ("suite", suite.get("databaseId"))
+            else:
+                origin = ("app", (suite.get("app") or {}).get("slug"))
             suite_id = suite.get("databaseId") or 0
             name = n.get("name") or ""
             group = (origin, name)
@@ -3516,6 +3552,12 @@ def digest(
             "  CHECKS UNREADABLE: the payload carries commits and none of them is the "
             "head, so no rollup here describes this head and `checks=0/0` is this "
             "reading failing rather than a pull request with no checks"
+        )
+    if pr.get(WORKFLOW_KEYS_UNAVAILABLE):
+        lines.append(
+            "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: `workflowRun` was unreadable, "
+            "so each Actions run is kept per suite and a superseded failure may still "
+            "show, which reads red rather than hiding a failing check"
         )
     if blind:
         lines.append(
