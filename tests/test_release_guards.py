@@ -1531,8 +1531,8 @@ gh() {
     def test_validator_test_matrix_check_rejects_each_malformed_shape(self) -> None:
         """The check runs before the matrix expands, so a bad value fails there with a named cause."""
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        self.assertIn("    needs: test-matrix-check\n", workflow.split("\n  unit-test:\n", 1)[1])
-        check = workflow.split("\n  test-matrix-check:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        self.assertIn("    needs: test-matrix\n", workflow.split("\n  unit-test:\n", 1)[1])
+        check = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
         self.assertIn("        if: ${{ inputs.test-matrix != '' }}\n", check)
         match = re.search(r"jq -e -s '\n(.*?)\n +' <<<", check, re.DOTALL)
         assert match is not None
@@ -1595,13 +1595,19 @@ gh() {
             job,
         )
 
-        # The matrix reads the input and the uv setup reads the matrix, so no literal survives between them.
+        # The matrix comes from the check job's output and the uv setup reads the matrix, so no literal survives between them.
+        self.assertIn("      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}\n", job)
         self.assertIn(
-            "      matrix: ${{ fromJSON(needs.test-matrix-check.outputs.matrix) }}\n", job
+            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
+            job,
         )
-        workflow_text = workflow
-        self.assertIn("matrix=$(jq -c -s '{include: .[0]}' <<<\"$TEST_MATRIX\")", workflow_text)
-        self.assertIn("'{\"python-version\": $versions}'", workflow_text)
+        self.assertNotIn('python-version: "', job)
+        builder = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+        self.assertIn("    outputs:\n      matrix: ${{ steps.build.outputs.matrix }}\n", builder)
+        self.assertIn("        id: build\n", builder)
+        self.assertIn("matrix=$(jq -c -s '{include: .[0]}' <<<\"$TEST_MATRIX\")", builder)
+        self.assertIn("'{\"python-version\": $versions}'", builder)
+        self.assertIn('jq -e -s \'length == 1 and (.[0] | type == "array"', builder)
 
         # One interpreter failing must not cancel the others, which is what a second leg is run to learn.
         self.assertIn("      fail-fast: false\n", job)

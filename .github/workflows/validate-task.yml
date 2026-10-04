@@ -1,8 +1,14 @@
 name: Validate task
 
 # The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# Three jobs: lint (the fleet doc-lint block plus language lint, by tree detection and for Python by the declared directories, the prose gate, and the repo gate), unit-test (a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory, run once per interpreter the python-versions input names), and validate (the validate hook, a repo's own domain checks such as an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests).
-# The unit-test job runs once per python-versions entry, or once per test-matrix leg when that is set.
+# The jobs are test-matrix, lint, unit-test, and validate.
+# The test-matrix job checks the python-versions and test-matrix inputs and builds the unit-test matrix.
+# The lint job is the fleet doc-lint block plus language lint, by tree detection.
+# For Python it lints the declared directories, and it also runs the prose gate and the repo gate.
+# The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
+# It runs once per interpreter the python-versions input names, or once per test-matrix leg.
+# The validate job is the validate hook, a repo's own domain checks.
+# Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
 # No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
@@ -27,7 +33,7 @@ on:
         required: false
         type: string
         default: ''
-      # Built into the unit-test job's matrix by the test-matrix-check job, and read raw by the entry check in the unit-test job.
+      # Built into the unit-test job's matrix by the test-matrix job, and read raw by the entry check in the unit-test job.
       python-versions:
         description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
@@ -44,8 +50,8 @@ on:
 
 jobs:
 
-  test-matrix-check:
-    name: Check test matrix job
+  test-matrix:
+    name: Build test matrix job
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,6 +80,20 @@ jobs:
             exit 1
           fi
 
+      - name: Validate python-versions input step
+        env:
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if ! jq -e -s 'length == 1 and (.[0] | type == "array" and length > 0 and all(.[]; type == "string" and test("\\S")))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
+            escaped=${PYTHON_VERSIONS//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::The python-versions input must be a non-empty JSON array of non-empty quoted version strings, for example '[\"3.13\", \"3.14\"]', got: $escaped"
+            exit 1
+          fi
+
+      # A matrix built inline from inputs expands at planning time, before needs: runs, so a malformed value could not be named.
       - name: Build unit-test matrix step
         id: build
         env:
@@ -463,14 +483,14 @@ jobs:
   # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
   unit-test:
     name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})
-    needs: test-matrix-check
+    needs: test-matrix
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       # A failing interpreter must not cancel its siblings, since which of them fail is the whole point of running more than one.
       fail-fast: false
-      matrix: ${{ fromJSON(needs.test-matrix-check.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}
 
     steps:
 
