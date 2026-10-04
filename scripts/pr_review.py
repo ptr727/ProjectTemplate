@@ -946,7 +946,7 @@ def _is_workflow_run_error(error: object) -> bool:
     """True where the error is a per-field failure on `workflowRun` and nothing else.
 
     A token without Actions read access can fail that one field, and the field is null in `data`.
-    The check dedupe then falls back to the app slug, so the digest does not need it.
+    `check_nodes` then keys Actions runs by suite instead, so the digest still reads.
     """
     path = error.get("path") if isinstance(error, dict) else None
     return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
@@ -2645,6 +2645,7 @@ def check_nodes(pr: dict) -> list[dict]:
     They are normalized here so one reading serves both.
 
     Runs group by workflow and name, or by app and name where the suite has no workflow run.
+    Where the workflow is unreadable, an Actions run groups by its own suite and none is dropped.
     Each group keeps every run of its highest suite id and drops its runs from older suites.
     A name only an older suite carries stays, since the merge gate still reads it.
     The highest suite id decides, since `startedAt` misorders overlapping runs.
@@ -2663,7 +2664,10 @@ def check_nodes(pr: dict) -> list[dict]:
             workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
             if workflow:
                 origin: tuple = ("workflow", workflow)
-            elif pr.get(WORKFLOW_KEYS_UNAVAILABLE):
+            elif (
+                pr.get(WORKFLOW_KEYS_UNAVAILABLE)
+                and (suite.get("app") or {}).get("slug") == "github-actions"
+            ):
                 origin = ("suite", suite.get("databaseId"))
             else:
                 origin = ("app", (suite.get("app") or {}).get("slug"))
@@ -3552,7 +3556,7 @@ def digest(
     if pr.get(WORKFLOW_KEYS_UNAVAILABLE):
         lines.append(
             "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: the token could not read `workflowRun`, "
-            "so every check run of every suite is kept and a superseded failure may still "
+            "so each Actions run is kept per suite and a superseded failure may still "
             "show, which reads red rather than hiding a failing check"
         )
     if blind:

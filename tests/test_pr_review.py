@@ -4962,6 +4962,14 @@ class TestDigestReportsChecks(GqlCase):
         self.assertTrue(pr_review.checks_unreadable(pr))
         self.assertIn("CHECKS UNREADABLE", self.digest(pr))
 
+    def test_a_third_party_rerun_still_dedupes_while_workflow_keys_are_unavailable(self) -> None:
+        """Only Actions runs lose their key, so another app's superseded failure stays dropped."""
+        old = check(name="scan", conclusion="FAILURE", suite=10, workflow=None, slug="other-app")
+        new = check(name="scan", conclusion="SUCCESS", suite=20, workflow=None, slug="other-app")
+        pr = payload([review()], checks=[old, new])
+        pr[pr_review.WORKFLOW_KEYS_UNAVAILABLE] = True
+        self.assertEqual((1, 1), pr_review.checks_tally(pr_review.check_nodes(pr)))
+
     def test_a_tolerated_workflow_run_error_keeps_same_named_jobs_of_two_workflows(self) -> None:
         """With no workflow keys, a failing `build` must not hide behind another workflow's.
 
@@ -7931,6 +7939,12 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             got = self.read({"data": data, "errors": errors})
         self.assertEqual({**data, pr_review.WORKFLOW_KEYS_UNAVAILABLE: True}, got)
+
+    def test_tolerated_errors_with_null_data_abort(self) -> None:
+        errors = [{"message": "forbidden", "path": self.WORKFLOW_RUN_PATH}]
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            self.read({"data": None, "errors": errors})
+        self.assertIn("returned no data", str(raised.exception))
 
     def test_a_mixed_error_set_still_aborts(self) -> None:
         errors = [
