@@ -203,23 +203,27 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
           permission-contents: write
 
-      # The delete is skipped when the branch tip is no longer the merged head, so a branch that moved after the merge survives.
+      # A lease-guarded push deletes the branch only while its tip still equals the merged head, so a recreated or moved branch survives.
       - name: Delete branch step
         run: |
           set -Eeuo pipefail
-          merged_sha=$(gh pr view "$PR_URL" --json headRefOid --jq .headRefOid)
-          if ! tip_sha=$(gh api "repos/$REPO/git/ref/heads/$HEAD_REF" --jq .object.sha); then
-            echo "::notice::Branch $HEAD_REF is already gone, nothing to delete"
-            exit 0
+          git init --quiet "$RUNNER_TEMP/delete-branch"
+          cd "$RUNNER_TEMP/delete-branch"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          if out=$(git push --force-with-lease="refs/heads/$HEAD_REF:$MERGED_SHA" "https://github.com/$REPO.git" ":refs/heads/$HEAD_REF" 2>&1); then
+            echo "Deleted branch $HEAD_REF at $MERGED_SHA"
+          elif grep -Eq 'stale info|remote ref does not exist' <<<"$out"; then
+            echo "::notice::Branch $HEAD_REF is gone or no longer at the merged $MERGED_SHA, not deleting"
+          else
+            echo "::error::Deleting branch $HEAD_REF failed: $out"
+            exit 1
           fi
-          if [[ "$tip_sha" != "$merged_sha" ]]; then
-            echo "::warning::Branch $HEAD_REF is at $tip_sha rather than the merged $merged_sha, not deleting"
-            exit 0
-          fi
-          gh api --method DELETE "repos/$REPO/git/refs/heads/$HEAD_REF"
-          echo "Deleted branch $HEAD_REF at $merged_sha"
         env:
           REPO: ${{ github.repository }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGED_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
