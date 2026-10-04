@@ -691,6 +691,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
       contents: read
     uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
     with:
+      ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
     secrets:
       DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
