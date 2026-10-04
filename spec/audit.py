@@ -23,6 +23,9 @@ LETTER, or ERROR finding.
 Usage: python3 spec/audit.py [RepoName ...] [--branch REF]   (default: every cataloged repo,
 each read at its registry groundTruthBranch). --branch overrides that branch for the run, so a
 convergence can be verified before it is promoted, without editing the registry.
+
+A shallow hub clone raises on the first history read, because the stale-vs-modified classification
+and the intent staleness advisory need full history. The error names `git fetch --unshallow origin`.
 """
 
 import argparse
@@ -36,6 +39,7 @@ import locale
 import pathlib
 import posixpath
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2269,6 +2273,30 @@ def classify_verbatim(down_text, canon_text, past_texts):
 
 
 @functools.cache
+def _require_full_history(root):
+    """Raise when `root` is a shallow clone, since every history read there is silently wrong.
+
+    The probe is the git-path `shallow` file, which every git version writes for a shallow clone.
+    Git before 2.15 echoes an unknown `--is-shallow-repository` flag, so that flag proves nothing.
+    """
+    probe = subprocess.run(
+        ["git", "rev-parse", "--git-path", "shallow"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=root,
+        check=False,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        return
+    if (pathlib.Path(root) / probe.stdout.strip()).exists():
+        raise RuntimeError(
+            "the hub checkout is a shallow clone, so the stale-vs-modified classification and "
+            f"the intent staleness advisory would be wrong: git -C {shlex.quote(str(root))} fetch --unshallow origin"
+        )
+
+
+@functools.cache
 def _hub_main_rev():
     """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA.
 
@@ -2323,6 +2351,7 @@ def _git_revisions(rel_path, rev=None):
     plain local branch in a throwaway repo with no `origin` to fetch, keeping the offline engine
     self-test offline.
     """
+    _require_full_history(ROOT)
     walk_rev = _hub_main_rev() if rev is None else rev
     r = subprocess.run(
         ["git", "log", "--format=%cI %H", walk_rev, "--", rel_path],
@@ -2436,6 +2465,7 @@ def git_blob_in_file_history(rel_path, blob_sha, rev=None):
     `main`, and a develop-only revision matching `blob_sha` must not read as "stale" against a
     hub history `main` doesn't actually contain.
     """
+    _require_full_history(ROOT)
     walk_rev = _hub_main_rev() if rev is None else rev
     result = subprocess.run(
         ["git", "log", "--format=%H", f"--find-object={blob_sha}", walk_rev, "--", rel_path],
@@ -4684,16 +4714,23 @@ def _selftest():
         try:
             for label, root, want_refuse in (("shallow", shallow, True), ("full", full, False)):
                 ROOT = root
-                msg = shallow_refusal(root)
-                code = main(["Utilities"]) if want_refuse else None
+                _require_full_history.cache_clear()
+                _git_revisions.cache_clear()
+                try:
+                    _git_revisions("absent.txt", rev="HEAD")
+                    msg = None
+                except RuntimeError as e:
+                    msg = str(e)
                 good = (msg is not None) == want_refuse
                 if want_refuse:
-                    good = good and bool(msg) and "fetch --unshallow origin" in msg and code == 2
+                    good = good and "fetch --unshallow origin" in msg
                 if not good:
                     ok = False
-                print(f"  {'ok  ' if good else 'FAIL'} shallow-clone refusal: {label} clone")
+                print(f"  {'ok  ' if good else 'FAIL'} shallow-clone guard: {label} clone")
         finally:
             ROOT = saved_root
+            _require_full_history.cache_clear()
+            _git_revisions.cache_clear()
 
     # CLI parsing, where a repo name and a flag value must not be confused for one another.
     # The previous hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have audited a repo called "develop" rather than overriding the branch.
@@ -6722,32 +6759,10 @@ def parse_args(argv=None):
     return ap.parse_args(argv)
 
 
-def shallow_refusal(root):
-    """Return the refusal message when `root` is a shallow git clone, else None."""
-    probe = subprocess.run(
-        ["git", "rev-parse", "--is-shallow-repository"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root,
-        check=False,
-    )
-    if probe.returncode != 0 or probe.stdout.strip() != "true":
-        return None
-    return (
-        "The hub checkout is a shallow clone, so the stale-vs-modified classification and the intent "
-        f"staleness advisory would be wrong. Run: git -C {root} fetch --unshallow origin"
-    )
-
-
 def main(argv=None):
     a = parse_args(argv)
     if a.selftest:
         return _selftest()
-    refusal = shallow_refusal(ROOT)
-    if refusal:
-        print(refusal, file=sys.stderr)
-        return 2
     # The override reaches the same path segment and the same `?ref=` value the registry's own groundTruthBranch does,
     # so it is held to the same grammar. Validating only the declared value would leave `--branch 'main?per_page=1'`
     # retargeting every read, which is the request-goes-elsewhere shape rather than a request that fails.
