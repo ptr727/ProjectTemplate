@@ -525,6 +525,8 @@ TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
 TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
 TABLE_GLOB = frozenset("*?")
 TABLE_GAP = " ... "
+TABLE_SPAN = re.compile(r"`([^`]+)`")
+TABLE_SEPARATORS = re.compile(r"[\s,]*")
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -2050,6 +2052,37 @@ def segment_fits(segment: str, pattern: str) -> bool:
 
 
 def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
+    """The changed paths one table row names, out of `diff`, read without any trailing note.
+
+    A row naming nothing that ends in a parenthesized note is read again without it, since the
+    second format writes one on a row for a file another row already names, as in
+    `docs/a.md (cleanup)`. The note is dropped only where the row names nothing, so a changed path
+    or a shortened tail that itself ends in one still reads as written.
+    """
+    while True:
+        paths, single = row_form(row, diff)
+        if paths or not (head := note_head(row)):
+            return paths, single
+        row = head
+
+
+def note_head(row: str) -> str:
+    """The row before its trailing parenthesized note, or empty where it ends in none.
+
+    The note runs from the last `(` to the closing `)`, holding no parenthesis of its own, and
+    whitespace stands between it and the text before it. That text is returned with its outer
+    backticks dropped, as `cell_paths` drops a whole cell's, since a code span can come before
+    the note.
+    """
+    if not row.endswith(")"):
+        return ""
+    start = row.rfind("(")
+    if start < 1 or ")" in row[start + 1 : -1] or not row[start - 1].isspace():
+        return ""
+    return row[:start].strip().strip("`").strip()
+
+
+def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
     """The changed paths one table row names, out of `diff`, and whether it names one at most.
 
     A row names a path in one of three ways, and every claim here and in the digest that a table
@@ -2113,7 +2146,7 @@ def file_table(body: str) -> list[str]:
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
 
-    Each cell is reduced by `bare_path`, for the reason it states.
+    Each cell is reduced by `bare_path`, for the reason it states, and read by `cell_paths`.
     """
     paths, reading = [], False
     for line in strip_fences(body or "", to_end=True).splitlines():
@@ -2124,9 +2157,22 @@ def file_table(body: str) -> list[str]:
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = bare_path(row.group(1))
-            paths.append(cell.strip().strip("`").strip())
+            paths.extend(cell_paths(bare_path(row.group(1))))
     return [p for p in paths if p]
+
+
+def cell_paths(cell: str) -> list[str]:
+    """The paths one table cell names, one per code span where it lists several.
+
+    The second format can group related files into one row, each in a code span of its own with
+    a comma between them, and read whole that cell is one path holding backticks, which names
+    none of the files it lists. So a cell holding nothing but commas and whitespace outside its
+    spans names each span, and any other cell is read whole, its outer backticks dropped.
+    """
+    spans = TABLE_SPAN.findall(cell)
+    if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
+        return [s.strip() for s in spans]
+    return [cell.strip().strip("`").strip()]
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
