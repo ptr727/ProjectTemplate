@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Drive hub-fetch-run.py's unborn-HEAD rewrite, probe-failure path, and provenance handoff.
 
-The git cases run in constructed temp repositories under a timeout. The network is stubbed, so
-nothing here reaches GitHub.
+The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
+a timeout. The network is stubbed, so nothing here reaches GitHub.
 
 Run as `python3 tests/test_hub_fetch_run.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -10,6 +10,7 @@ Run as `python3 tests/test_hub_fetch_run.py`, or under `python3 -m unittest disc
 from __future__ import annotations
 
 import contextlib
+import http.client
 import importlib.util
 import io
 import os
@@ -147,6 +148,18 @@ class HeadProbeTests(unittest.TestCase):
         message = self.assert_probe_exits(mock.Mock(side_effect=FileNotFoundError("git")))
         self.assertIn("could not run git", message)
 
+    def test_hung_probe_is_a_probe_failure(self) -> None:
+        run = mock.Mock(side_effect=subprocess.TimeoutExpired("git", 30))
+        message = self.assert_probe_exits(run)
+        self.assertIn("could not run git", message)
+
+    def test_probe_is_bounded_by_a_timeout(self) -> None:
+        probe = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        run = mock.Mock(return_value=probe)
+        with mock.patch.object(hub.subprocess, "run", run):
+            hub.head_is_unborn()
+        self.assertIsNotNone(run.call_args.kwargs.get("timeout"))
+
     def test_probe_is_not_run_without_a_diff_head_pair(self) -> None:
         run = mock.Mock(side_effect=AssertionError("probe must not run"))
         with mock.patch.object(hub.subprocess, "run", run):
@@ -168,62 +181,148 @@ class FakeResponse:
         return self.body
 
 
-class ProvenanceTests(unittest.TestCase):
-    SCRIPT = (
-        b"import os, sys\n"
-        b"open(sys.argv[1], 'w').write(os.environ.get('PROSE_GATE_PROVENANCE', '<unset>'))\n"
-    )
+SHA_BODY = SHA.encode()
+PROSE_PATH = hub.PROSE_GATE_PATH
+RESOLVED = f"ptr727/ProjectTemplate@{SHA} (hub-fetch-run main)"
+UNRESOLVED = "ptr727/ProjectTemplate@main (hub-fetch-run, commit unresolved)"
+RECORD = (
+    b"import os, sys\n"
+    b"with open(sys.argv[1], 'w') as out:\n"
+    b"    out.write(os.environ.get('PROSE_GATE_PROVENANCE', '<unset>'))\n"
+)
+RAISE = b"raise RuntimeError('gate crashed')\n"
+ENV_KEYS = ("PROSE_GATE_PROVENANCE", "GH_TOKEN", "GITHUB_TOKEN")
 
+
+class ProvenanceTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.out = Path(self._tmp.name) / "seen.txt"
-        self.urls: list[str] = []
+        self.requests: list[urllib.request.Request | str] = []
+        self.stderr = io.StringIO()
 
-    def fake_urlopen(self, sha_body: bytes | Exception):
-        def opener(target, timeout=None):
+    def urls(self) -> list[str]:
+        return [r if isinstance(r, str) else r.full_url for r in self.requests]
+
+    def lookup_requests(self) -> list[urllib.request.Request]:
+        return [
+            r
+            for r in self.requests
+            if isinstance(r, urllib.request.Request) and r.full_url == hub.HUB_MAIN_SHA_URL
+        ]
+
+    def opener(self, lookup: bytes | Exception, script: bytes):
+        def urlopen(target, timeout=None):
+            self.requests.append(target)
             url = target if isinstance(target, str) else target.full_url
-            self.urls.append(url)
-            if url == hub.HUB_MAIN_SHA_URL:
-                if isinstance(sha_body, Exception):
-                    raise sha_body
-                return FakeResponse(sha_body)
-            return FakeResponse(self.SCRIPT)
+            if url != hub.HUB_MAIN_SHA_URL:
+                return FakeResponse(script)
+            if isinstance(lookup, Exception):
+                raise lookup
+            return FakeResponse(lookup)
 
-        return opener
+        return urlopen
 
-    def run_main(self, sha_body: bytes | Exception, env: dict[str, str] | None = None) -> str:
-        scrubbed = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+    @contextlib.contextmanager
+    def environment(self, env: dict[str, str] | None = None):
+        """Patch a clean environment so an exported variable in the shell cannot leak in."""
+        scrubbed = {k: v for k, v in os.environ.items() if k not in ENV_KEYS}
         scrubbed.update(env or {})
+        with mock.patch.dict(os.environ, scrubbed, clear=True):
+            yield
+
+    def run_main(
+        self,
+        lookup: bytes | Exception = SHA_BODY,
+        env: dict[str, str] | None = None,
+        path: str = PROSE_PATH,
+        script: bytes = RECORD,
+    ) -> str:
+        """Run main() and return what the fetched script saw, checking the env right after."""
+        before = None
         with (
-            mock.patch.dict(os.environ, scrubbed, clear=True),
-            mock.patch.object(urllib.request, "urlopen", self.fake_urlopen(sha_body)),
+            self.environment(env),
+            mock.patch.object(urllib.request, "urlopen", self.opener(lookup, script)),
+            contextlib.redirect_stderr(self.stderr),
         ):
-            code = hub.main(["scripts/x.py", str(self.out)])
-            self.assertEqual(code, 0)
+            before = os.environ.get("PROSE_GATE_PROVENANCE")
+            self.assertEqual(hub.main([path, str(self.out)]), 0)
+            self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), before)
         return self.out.read_text()
 
     def test_resolved_commit_names_the_fetched_copy(self) -> None:
-        seen = self.run_main(SHA.encode())
-        self.assertEqual(seen, f"ptr727/ProjectTemplate@{SHA}")
-        self.assertTrue(self.urls[-1].endswith(f"/{SHA}/scripts/x.py"))
+        self.assertEqual(self.run_main(), RESOLVED)
+        self.assertTrue(self.urls()[-1].endswith(f"/{SHA}/{PROSE_PATH}"))
 
-    def test_unresolved_commit_is_reported_as_such(self) -> None:
-        seen = self.run_main(urllib.error.URLError("offline"))
-        self.assertEqual(seen, "ptr727/ProjectTemplate@main (commit unresolved)")
-        self.assertTrue(self.urls[-1].endswith("/main/scripts/x.py"))
+    def test_value_does_not_look_like_a_ci_pin(self) -> None:
+        self.assertNotRegex(self.run_main(), r"^[^ ]+@[^ ]+$")
 
-    def test_malformed_commit_body_is_unresolved(self) -> None:
-        seen = self.run_main(b"not a hash")
-        self.assertIn("commit unresolved", seen)
+    def test_lookup_only_for_the_prose_gate(self) -> None:
+        seen = self.run_main(path=".github/actions/repo-gate/repo_gate.py")
+        self.assertEqual(seen, "<unset>")
+        self.assertEqual(self.lookup_requests(), [])
+        self.assertTrue(self.urls()[-1].endswith("/main/.github/actions/repo-gate/repo_gate.py"))
 
-    def test_callers_own_value_wins(self) -> None:
-        seen = self.run_main(SHA.encode(), {"PROSE_GATE_PROVENANCE": "reproducing x@y"})
+    def test_fallback_causes_print_a_line_and_the_gate_still_runs(self) -> None:
+        cases: dict[str, bytes | Exception] = {
+            "HTTP 403": urllib.error.HTTPError("u", 403, "rate limit", {}, None),  # type: ignore[arg-type]
+            "HTTP 429": urllib.error.HTTPError("u", 429, "slow down", {}, None),  # type: ignore[arg-type]
+            "URLError": urllib.error.URLError("offline"),
+            "IncompleteRead": http.client.IncompleteRead(b"ab"),
+            "UnicodeDecodeError": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"),
+            "unexpected response body": b"\xff not a hash",
+        }
+        for cause, lookup in cases.items():
+            with self.subTest(cause=cause):
+                self.stderr.seek(0)
+                self.stderr.truncate()
+                self.assertEqual(self.run_main(lookup), UNRESOLVED)
+                line = self.stderr.getvalue()
+                self.assertIn(cause, line)
+                self.assertEqual(line.count("\n"), 1, line)
+
+    def test_token_header_sent_only_when_set(self) -> None:
+        self.run_main()
+        self.assertIsNone(self.lookup_requests()[-1].get_header("Authorization"))
+        self.assertEqual(
+            self.lookup_requests()[-1].get_header("Accept"), "application/vnd.github.sha"
+        )
+        self.run_main(env={"GH_TOKEN": "tok-one"})
+        self.assertEqual(self.lookup_requests()[-1].get_header("Authorization"), "Bearer tok-one")
+        self.run_main(env={"GITHUB_TOKEN": "tok-two"})
+        self.assertEqual(self.lookup_requests()[-1].get_header("Authorization"), "Bearer tok-two")
+
+    def test_token_is_never_printed(self) -> None:
+        self.run_main(urllib.error.URLError("offline"), env={"GH_TOKEN": "tok-secret"})
+        self.assertNotIn("tok-secret", self.stderr.getvalue())
+
+    def test_caller_value_survives_and_is_restored(self) -> None:
+        seen = self.run_main(env={"PROSE_GATE_PROVENANCE": "reproducing x@y"})
         self.assertEqual(seen, "reproducing x@y")
 
-    def test_environment_is_restored(self) -> None:
-        self.run_main(SHA.encode())
-        self.assertNotIn("PROSE_GATE_PROVENANCE", os.environ)
+    def test_whitespace_only_caller_value_is_overwritten_then_restored(self) -> None:
+        self.assertEqual(self.run_main(env={"PROSE_GATE_PROVENANCE": "  "}), RESOLVED)
+
+    def test_environment_is_restored_when_the_script_raises(self) -> None:
+        with (
+            self.environment({"PROSE_GATE_PROVENANCE": "keep me"}),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA.encode(), RAISE)),
+            self.assertRaises(RuntimeError),
+        ):
+            try:
+                hub.main([PROSE_PATH])
+            finally:
+                self.assertEqual(os.environ["PROSE_GATE_PROVENANCE"], "keep me")
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA.encode(), RAISE)),
+            self.assertRaises(RuntimeError),
+        ):
+            try:
+                hub.main([PROSE_PATH])
+            finally:
+                self.assertNotIn("PROSE_GATE_PROVENANCE", os.environ)
 
 
 if __name__ == "__main__":
