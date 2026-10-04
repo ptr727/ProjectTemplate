@@ -74,10 +74,9 @@ A round is the unit. Each one runs these steps in order.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    anything. A group whose files are already claimed waits for the next round.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
-5. **Collect** each worker's outcome: merged to develop, stopped on a question only the
-   maintainer can answer, parked behind another group's file claim, handed back for review, or
-   abandoned. The adjudication in "Grouping and File Claims" and a confirmed-gone worker both
-   produce abandoned. Bound this wait per "Bounding the Wait on a Worker".
+5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
+   parked behind another group's file claim, handed back for review, or abandoned.
+   The adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
