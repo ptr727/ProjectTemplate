@@ -50,11 +50,13 @@ survives the squash is the pull request's own file scope. Open it through the re
 per the [`branching-and-release-model`][branching-and-release-model] Skill, and work in this order:
 
 1. **Merge the hub's defaults into `.editorconfig` and `.gitattributes`, never overwrite either
-   file.** Replace the old fleet defaults, `[*] end_of_line = crlf` and `* -text`, with the hub's
-   `[*]` defaults and its `*.bat` / `*.cmd` CRLF pins, rather than adding the new defaults beside
-   them, since Git applies the last matching `.gitattributes` line and a surviving `* -text` leaves
-   `--renormalize` with nothing to do. Keep every attribute and section that is the repo's own,
-   such as LFS filters, `linguist-generated`, `export-ignore`, and path pins.
+   file.** Remove the old fleet defaults, `[*] end_of_line = crlf` and `* -text`, rather than
+   leaving them beside the new ones. Put the hub's `* text=auto eol=lf` line first in
+   `.gitattributes` and its `[*]` section first in `.editorconfig`, then the `*.bat` / `*.cmd`
+   CRLF pins, then every attribute and section that is the repo's own, such as LFS filters,
+   `linguist-generated`, `export-ignore`, and path pins, and then the step 2 pins. In both files
+   a later match overrides a property an earlier one set, so a pin above the default is silently
+   cancelled, and a `* -text` below it unsets `text` for every file.
 2. **Pin every vendor file whose bytes the repo has to keep, before renormalizing.** `text=auto`
    leaves a file byte-preserved only where Git's heuristic detects it as binary, so a text-shaped
    vendor download, a STEP model or DXF and SVG artwork for example, is normalized unless pinned.
@@ -72,7 +74,7 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
    committed. Only `--renormalize`, or the add of a file new to the index, normalizes, and a plain
    re-add of a file already committed with CRLF leaves it unchanged. Before committing, confirm
    that `git diff --cached --ignore-cr-at-eol` shows no content change and that
-   `git diff --cached --stat` lists no file a step 2 `-text` or `binary` pin covers, per
+   `git diff --cached --stat` lists no file a `-text` or `binary` pin covers, per
    [`references/line-endings.md`][line-endings] "Editing discipline".
 4. **Check the branch out fresh, then run `editorconfig-checker` clean.** `--renormalize` changes
    only the index, so the working tree it ran in keeps its CRLF bytes, and `editorconfig-checker`
