@@ -82,11 +82,11 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
    A driver that cannot dispatch a subagent follows that skill's "Running It".
-   Then push the branch and open the feature -> develop PR if it does not exist yet. Open it
-   carrying the `comments` label where the change adds or edits a comment line in code or config,
-   which the prose gate otherwise refuses. Where the lint job's log says "Read the pull request's
-   labels live", a label added after a check fails applies when that job reruns. Otherwise it
-   applies to the next push.
+   Then push the branch and open the feature -> develop PR if it does not exist yet. Where the
+   change writes a code or config comment line, add the `comments` label after creating the PR, or
+   the prose gate refuses it. Where a public repository's lint log says "Read the pull
+   request's labels live", a rerun of the failed job picks the label up. Otherwise it applies to
+   the next push.
    A push refused by a `.husky/pre-push` hook, which the hub carries and a
    repository has only if it adds one, is that gate working rather than an
    obstacle to route around, and that

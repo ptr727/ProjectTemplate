@@ -192,10 +192,10 @@ pull request carries the `comments` label and the gate stands down for that chan
 and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
 
-Three things about reaching those escapes read as a broken gate until they are known. Where the
-lint job's log says "Read the pull request's labels live", the label was read when that job ran. A
-label added before then applies, and a rerun picks up one added since. Otherwise the event's
-snapshot decides. It misses a label applied after the event, `gh pr create --label` included, so
+Three things about reaching those escapes read as a broken gate until they are known. On a public
+repository the lint job reads the label when it runs, and its log says "Read the pull request's
+labels live". A label added before then applies, and a rerun picks up one added since. In a private
+repository, or where the log lacks that line, the event's snapshot decides. It misses a label applied after the event, `gh pr create --label` included, so
 there the label applies to the next push. The label reaches a repository only when the fleet label
 set is applied to it, so a repository that has not had that applied since the label was declared
 cannot carry it, and there the finding names a remedy that is not yet available. And the local
