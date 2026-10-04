@@ -25,7 +25,7 @@ each read at its registry groundTruthBranch). --branch overrides that branch for
 convergence can be verified before it is promoted, without editing the registry.
 
 A shallow hub clone raises on the first history read, because the stale-vs-modified classification
-and the intent staleness advisory need full history. The error names `git fetch --unshallow origin`.
+and the intent staleness advisory need full history. The error says to run `git fetch --unshallow origin` in that checkout.
 """
 
 import argparse
@@ -39,7 +39,6 @@ import locale
 import pathlib
 import posixpath
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -2272,6 +2271,10 @@ def classify_verbatim(down_text, canon_text, past_texts):
     return "modified"
 
 
+class ShallowCloneError(RuntimeError):
+    """The hub checkout is a shallow clone, a hub-local condition rather than a repo finding."""
+
+
 @functools.cache
 def _require_full_history(root):
     """Raise when `root` is a shallow clone, since every history read there is silently wrong.
@@ -2290,9 +2293,10 @@ def _require_full_history(root):
     if probe.returncode != 0 or not probe.stdout.strip():
         return
     if (pathlib.Path(root) / probe.stdout.strip()).exists():
-        raise RuntimeError(
-            "the hub checkout is a shallow clone, so the stale-vs-modified classification and "
-            f"the intent staleness advisory would be wrong: git -C {shlex.quote(str(root))} fetch --unshallow origin"
+        raise ShallowCloneError(
+            f"the hub checkout at {root} is a shallow clone, so the stale-vs-modified "
+            "classification and the intent staleness advisory would be wrong. "
+            "Run `git fetch --unshallow origin` in that checkout."
         )
 
 
@@ -4716,21 +4720,32 @@ def _selftest():
                 ROOT = root
                 _require_full_history.cache_clear()
                 _git_revisions.cache_clear()
-                try:
-                    _git_revisions("absent.txt", rev="HEAD")
-                    msg = None
-                except RuntimeError as e:
-                    msg = str(e)
-                good = (msg is not None) == want_refuse
-                if want_refuse:
-                    good = good and "fetch --unshallow origin" in msg
-                if not good:
-                    ok = False
-                print(f"  {'ok  ' if good else 'FAIL'} shallow-clone guard: {label} clone")
+                git_blob_in_file_history.cache_clear()
+                reads = (
+                    ("revisions", lambda: _git_revisions("absent.txt", rev="HEAD")),
+                    ("blob", lambda: git_blob_in_file_history("absent.txt", "0" * 40, rev="HEAD")),
+                )
+                for read, call in reads:
+                    try:
+                        call()
+                        msg = None
+                    except ShallowCloneError as e:
+                        msg = str(e)
+                    good = (msg is not None) == want_refuse
+                    if want_refuse:
+                        good = (
+                            good and "Run `git fetch --unshallow origin` in that checkout." in msg
+                        )
+                    if not good:
+                        ok = False
+                    print(
+                        f"  {'ok  ' if good else 'FAIL'} shallow-clone guard: {label} clone, {read}"
+                    )
         finally:
             ROOT = saved_root
             _require_full_history.cache_clear()
             _git_revisions.cache_clear()
+            git_blob_in_file_history.cache_clear()
 
     # CLI parsing, where a repo name and a flag value must not be confused for one another.
     # The previous hand-rolled parse took every non `--` argument as a repo name, so `--branch develop` would have audited a repo called "develop" rather than overriding the branch.
@@ -6816,6 +6831,9 @@ def main(argv=None):
         entry = repos[0]
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
+        except ShallowCloneError as e:
+            print(e, file=sys.stderr)
+            return 2
         # An unverifiable audit still produces an honest issue.
         except Exception as e:  # noqa: BLE001
             findings, audited_sha = [("ERROR", str(e))], ""
