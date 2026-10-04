@@ -37,8 +37,8 @@ Everything below turns on which seat is acting, so both are named once here.
 - **The orchestrator** is the session this skill runs in. It ranks, groups, dispatches, and drives
   the promotion pull request. It opens no feature branch and fixes no issue itself, which is what
   keeps it out of every worker's files. It does write: it comments on issues, it drives and
-  amends the promotion pull request, and it owns worktree and branch cleanup, which "Dispatching a
-  Worker" states in full.
+  amends the promotion pull request, and it records the review receipt in a worker's worktree.
+  It also owns worktree and branch cleanup, which "Dispatching a Worker" states in full.
 - **A worker** is one dispatched subagent holding one group, one worktree, and one feature branch,
   the dispatched task `AGENTS.md` "Session Scope" describes. It drives its own pull request into
   develop and ends there.
@@ -75,9 +75,9 @@ A round is the unit. Each one runs these steps in order.
    anything. A group whose files are already claimed waits for the next round.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a question only the
-   maintainer can answer, parked behind another group's file claim, or abandoned, which is what
-   the adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce, or
-   handed back for review. Bound this wait per "Bounding the Wait on a Worker".
+   maintainer can answer, parked behind another group's file claim, handed back for review, or
+   abandoned. The adjudication in "Grouping and File Claims" and a confirmed-gone worker both
+   produce abandoned. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
