@@ -489,7 +489,7 @@ A repo whose publisher needs the release-gate decision reaches `publish-plan-tas
 
 `build-release-task.yml` also calls `get-version-task.yml` through `$/`, so the sibling resolves at the release task's pinned hub commit. A caller that needs the version outputs without the rest of the release orchestrator reaches `get-version-task.yml` directly, using the pinned owner-scoped form shown above.
 
-The `get-version` example passes no `ref`, so the task versions the triggering commit. A caller passing `ref` passes `${{ github.sha }}` rather than a branch name.
+The `get-version` example passes no `ref`, so the task versions the triggering commit. A caller passes `${{ github.sha }}` to version the triggering commit, and another ref only to version a different tree deliberately.
 
 ## Adopting the Release Chain
 
