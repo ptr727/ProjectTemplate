@@ -1709,13 +1709,14 @@ TABLE_DELIMITER = re.compile(
     r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$|^\s*\|\s*:?-+:?\s*\|?\s*$"
 )
 HTML_COMMENT = re.compile(r"^\s*<!--")
-BLOCK_TAGS = (
-    "details|summary|div|p|br|hr|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|section|pre"
-    "|blockquote|center|img|picture|source"
+INTERRUPTING_TAGS = (
+    "details|summary|div|p|hr|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|section|pre"
+    "|blockquote|center"
 )
-HTML_TAG_LINE = re.compile(
-    rf"^\s*(?:</?(?:{BLOCK_TAGS})\b[^>]*>|<({BLOCK_TAGS})\b[^>]*>.*</\1>)\s*$", re.IGNORECASE
-)
+STANDALONE_TAGS = "br|img|picture|source"
+TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
+OPENING_TAG = re.compile(rf"^\s*</?(?:({INTERRUPTING_TAGS})|{STANDALONE_TAGS})\b", re.IGNORECASE)
+TAG = re.compile(r"<[^<>]*>")
 YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
 FRONT_MATTER_REACH = 50
 
@@ -1811,6 +1812,11 @@ def sentence_length_findings(
                 pos = m.end()
 
     start = front_matter_end(lines)
+    for i, line in enumerate(lines[:start], 1):
+        span = line.rstrip("\r").strip()
+        if span and not span.startswith("#"):
+            block.append((i, span))
+            flush()
     in_fence = in_comment = in_table = in_code = in_list = False
     item_offset = 0
     code_indent = 4
@@ -1844,7 +1850,9 @@ def sentence_length_findings(
             continue
         marker = LIST_MARKER.match(line)
         number = marker.group(1) if marker else None
-        is_item = bool(marker and (number is None or in_list or not block or int(number) == 1))
+        is_item = bool(
+            marker and (number is None or in_list or not block or number.lstrip("0") == "1")
+        )
         if not block and was_blank:
             code_indent = 4 + (item_offset if in_list else 0)
             if indent >= code_indent and not is_item:
@@ -1856,7 +1864,19 @@ def sentence_length_findings(
             flush()
             in_comment = "-->" not in line
             continue
-        if not block and HTML_TAG_LINE.match(line):
+        tag = OPENING_TAG.match(line)
+        if tag and TAGS_ONLY.match(line):
+            if tag.group(1):
+                flush()
+                continue
+            if not block:
+                continue
+        elif tag and tag.group(1):
+            flush()
+            text = TAG.sub(lambda m: " " * len(m.group()), line).strip()
+            if text:
+                block.append((i, text))
+                flush()
             continue
         if TABLE_DELIMITER.match(line) and "|" in line:
             if block and block[-1][0] == i - 1:

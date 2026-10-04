@@ -1982,8 +1982,31 @@ class TestSentenceLength(BaitCase):
 
     def test_front_matter_is_not_joined_into_the_body(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        text = f"---\nname: {half}\ndescription: {half}\n...\n\nBody text.\n"
+        text = f"---\nname: {half}\ndescription: {half}\n...\n{half}.\n"
         self.assertEqual([], self.found(text))
+
+    def test_a_long_front_matter_line_is_still_flagged(self) -> None:
+        text = f"---\nname: x\ndescription: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_block_level_tag_line_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        self.assertEqual([], self.found(f"{a}\n<div>\n{a}.\n"))
+        text = f"<details>\n<summary>S</summary>\n\n- {a}\n</details>\n{a}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_prose_wrapped_in_tags_is_still_measured(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f'<p align="center">{over}.</p>\n'))
+        self.assertEqual(flagged, self.found(f"<summary>{over}.</summary>\n"))
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.found(f'<p align="center">{at_cap}</p>\n'))
+
+    def test_a_huge_digit_run_is_not_a_marker_and_does_not_crash(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"{half}\n{'1' * 5000}) {half}\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
 
     def test_other_block_boundaries_end_a_block(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
@@ -2544,6 +2567,26 @@ class TestCli(unittest.TestCase):
             mock.patch.object(prose_lint, "changed_lines", return_value={}),
         ):
             self.assertEqual(0, prose_lint.main(["--check", "dupword", "--diff", "HEAD"]))
+
+    def test_diff_scope_keeps_a_wrapped_sentence_edited_on_a_continuation_line(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        bait = self.tmp / "wrapped.md"
+        text = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n" + " ".join(words[20:])
+        bait.write_text(text + ".\n", encoding="utf-8")
+        argv = ["--check", "sentence-length", "--diff", "HEAD"]
+        for changed, code in (({2}, 1), ({9}, 0)):
+            with self.subTest(changed=changed):
+                out = io.StringIO()
+                with (
+                    mock.patch.object(prose_lint, "discover", return_value=[bait]),
+                    mock.patch.object(
+                        prose_lint, "changed_lines", return_value={prose_lint.rel(bait): changed}
+                    ),
+                    contextlib.redirect_stdout(out),
+                ):
+                    self.assertEqual(code, prose_lint.main(argv))
+                if code:
+                    self.assertIn(":2: sentence-length", out.getvalue())
 
     def test_diff_scope_reports_only_the_changed_lines(self) -> None:
         """A finding on an untouched line is the backlog, which the diff run must not attribute."""
