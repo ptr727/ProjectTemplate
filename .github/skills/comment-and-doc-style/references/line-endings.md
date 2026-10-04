@@ -13,9 +13,11 @@ summary, preserve the existing ending and verify with a byte scan, covers that c
   the redundant per-type LF rules are intentionally omitted, since the default already
   gives shell scripts, Dockerfiles, workflow YAML, `uv.lock`, and every shebang-executed `.py`
   the ending they need without a path-specific pin.
-- **`.gitattributes` mirrors the repository-wide defaults**: `* text=auto eol=lf` normalizes every
-  detected text file to LF, and leaves byte-preserved only what Git's heuristic detects as binary,
-  so a text-shaped file whose bytes have to be kept takes a `-text` or `binary` pin of its own.
+- **`.gitattributes` mirrors the repository-wide defaults**: `* text=auto eol=lf` normalizes a
+  detected text file to LF when the file is first added or renormalized with
+  `git add --renormalize`, while a file already committed with CRLF stays CRLF on a plain re-add.
+  It leaves byte-preserved only what Git's heuristic detects as binary, so a text-shaped file whose
+  bytes have to be kept takes a `-text` or `binary` pin of its own.
   `*.bat` and `*.cmd` override that default to CRLF. Do not add per-language or per-file LF pins where the global LF default
   already applies. The CRLF-native exception for POSIX-executed paths is defined below.
 - **Both files are required together.** `.editorconfig` governs the editor, `.gitattributes`

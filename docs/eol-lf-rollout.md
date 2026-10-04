@@ -19,16 +19,24 @@ The fleet default flipped from `[*] end_of_line = crlf` to `[*] end_of_line = lf
 `.editorconfig`, and `.gitattributes` replaced its `* -text` default, under which Git converts
 nothing, with `* text=auto eol=lf`. The only CRLF exception is `*.bat` / `*.cmd`, pinned in both
 files, the one type Windows itself requires it for. The per-type LF pins the old files carried are
-dropped, since the `[*]` default already covers them. The hub (`ProjectTemplate`) carried this
-change, including a one-time renormalization of every tracked file the new default touches, in the
-pull request that added this doc.
+dropped, since the `[*]` default already covers them. The hub (`ProjectTemplate`) carried the
+`.editorconfig` flip and a one-time renormalization of every tracked file it touches in the pull
+request that added this doc, and the `.gitattributes` default in a later one.
 
 ## Per-Repo Conversion
 
-A repo needs this conversion when its `.editorconfig` still sets `[*] end_of_line = crlf`, or sets
-no `[*]` `end_of_line` at all, or when its `.gitattributes` still sets `* -text`. An operational
-repo whose `registry/repos.json` entry records `lineEndings: crlf` is the exception, covered at the
-end of this section.
+A repo needs this conversion when any of these holds on any of its long-lived branches, `main`
+and `develop` both where it keeps both:
+
+- `.editorconfig` or `.gitattributes` is missing.
+- `.editorconfig` sets no `[*] end_of_line = lf`.
+- `.gitattributes` sets no `* text=auto eol=lf`.
+- `git ls-files --eol` lists a file at `i/crlf` or `i/mixed` whose attributes are neither `-text`
+  nor `binary`, since a file committed with CRLF stays CRLF in the index until it is renormalized,
+  whatever the two config files say.
+
+An operational repo whose `registry/repos.json` entry records `lineEndings: crlf` is the exception,
+covered at the end of this section.
 
 The conversion lands before any carried instruction file or baseline file. A resync or standup
 that carries LF files into a repo still on the CRLF default fails `editorconfig-checker` on every
@@ -60,12 +68,16 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
    `Vantage-Config` pins its `*.dc` exports.
 3. **Renormalize in its own commit.** Run `git add --renormalize .` after the two config files are
    committed. Only `--renormalize`, or the add of a file new to the index, normalizes, and a plain
-   re-add of a file already committed with CRLF leaves it unchanged. Confirm the commit with
-   `git diff --ignore-cr-at-eol`, which shows nothing for a renormalization alone, per
+   re-add of a file already committed with CRLF leaves it unchanged. Before committing, confirm
+   that `git diff --cached --ignore-cr-at-eol` shows no content change and that
+   `git diff --cached --stat` lists no file a step 2 pin covers, per
    [`references/line-endings.md`][line-endings] "Editing discipline".
-4. **Run `editorconfig-checker` clean**, then open the pull request.
+4. **Check the branch out fresh, then run `editorconfig-checker` clean.** `--renormalize` changes
+   only the index, so the working tree it ran in keeps its CRLF bytes, and `editorconfig-checker`
+   reads the working tree. A new worktree of the branch holds the converted bytes. Then open the
+   pull request.
 
-After it merges, check the box below and reconcile the repo's `registry/repos.json` entry per
+Once the conversion reaches the default branch, check the box below and reconcile the repo's `registry/repos.json` entry per
 [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] where the
 conversion surfaced anything the registry did not already record.
 
@@ -81,9 +93,10 @@ below is checked as converted rather than not applicable.
 
 Repos and their current `registry/repos.json` `workflowModel` / `lineEndings`, from the hub's own
 registry as of this doc's authorship, except where an entry records a later reclassification. A
-row marked **defaults in place** had both `[*] end_of_line = lf` in `.editorconfig` and
-`* text=auto eol=lf` in `.gitattributes` on its default branch when read on 2026-10-03, which is
-the state a conversion leaves, so it is checked without a conversion pull request of its own.
+row marked **defaults in place** was read on its default branch on 2026-10-03 and had both
+`[*] end_of_line = lf` in `.editorconfig` and `* text=auto eol=lf` in `.gitattributes`, and no
+committed text file holding CRLF outside a `-text` pin. That is the state a conversion leaves, so
+the row is checked without a conversion pull request of its own.
 
 - [x] **ProjectTemplate** (`release`): hub, converted in the pull request that added this doc
 - [x] **Utilities** (`release`): defaults in place
