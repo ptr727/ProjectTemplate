@@ -4962,6 +4962,31 @@ class TestDigestReportsChecks(GqlCase):
         self.assertTrue(pr_review.checks_unreadable(pr))
         self.assertIn("CHECKS UNREADABLE", self.digest(pr))
 
+    def test_a_tolerated_workflow_run_error_keeps_same_named_jobs_of_two_workflows(self) -> None:
+        """With no workflow keys, a failing `build` must not hide behind another workflow's.
+
+        Every Actions suite then keys by its app slug, and deduping on that would keep only the
+        highest suite id of two unrelated `build` jobs and read a failure as green.
+        """
+        failed = check(name="build", conclusion="FAILURE", suite=10, workflow=None)
+        passed = check(name="build", conclusion="SUCCESS", suite=20, workflow=None)
+        pr_in = payload([review()], checks=[failed, passed])
+        errors = [{"message": "forbidden", "path": ["a", "checkSuite", "workflowRun"]}]
+        body = {"data": {"repository": {"pullRequest": pr_in}}, "errors": errors}
+        done = subprocess.CompletedProcess([], 1, json.dumps(body), "")
+        with (
+            mock.patch.object(pr_review.subprocess, "run", return_value=done),
+            contextlib.redirect_stderr(io.StringIO()) as warned,
+        ):
+            pr = pr_review.gql(pr_review.Q_FULL, "o", "r", 7)
+        self.assertIn("workflowRun unreadable", warned.getvalue())
+        self.assertEqual((1, 2), pr_review.checks_tally(pr_review.check_nodes(pr)))
+        self.assertIn("CHECKS DEDUPED WITHOUT WORKFLOW KEYS", self.digest(pr))
+        self.assertNotIn(
+            "CHECKS DEDUPED WITHOUT WORKFLOW KEYS",
+            self.digest(payload([review()], checks=[passed])),
+        )
+
     def test_a_rollup_past_the_window_says_so_rather_than_reporting_what_it_saw(self) -> None:
         """The `window_blind` guard one connection along, and the same false clean it prevents.
 
@@ -7903,7 +7928,9 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
     def test_a_workflow_run_only_error_is_tolerated_with_the_data_kept(self) -> None:
         data = {"repository": {"name": "r"}}
         errors = [{"message": "forbidden", "path": self.WORKFLOW_RUN_PATH}]
-        self.assertEqual(data, self.read({"data": data, "errors": errors}))
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = self.read({"data": data, "errors": errors})
+        self.assertEqual({**data, pr_review.WORKFLOW_KEYS_UNAVAILABLE: True}, got)
 
     def test_a_mixed_error_set_still_aborts(self) -> None:
         errors = [

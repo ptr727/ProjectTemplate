@@ -898,6 +898,9 @@ mutation($threadId:ID!){
 """
 
 
+WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
+
+
 def gh_graphql(query: str, **variables) -> dict:
     """Run one GraphQL document and return its `data`, raising rather than reporting a blank.
 
@@ -932,7 +935,11 @@ def gh_graphql(query: str, **variables) -> dict:
     if payload.get("data") is None:
         sys.stderr.write(json.dumps(errors)[:800])
         raise SystemExit("gh graphql returned no data")
-    return payload["data"]
+    data = payload["data"]
+    if errors:
+        sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
+        data[WORKFLOW_KEYS_UNAVAILABLE] = True
+    return data
 
 
 def _is_workflow_run_error(error: object) -> bool:
@@ -946,7 +953,11 @@ def _is_workflow_run_error(error: object) -> bool:
 
 
 def gql(query: str, owner: str, repo: str, num: int) -> dict:
-    return gh_graphql(query, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+    data = gh_graphql(query, o=owner, r=repo, n=num)
+    pr = data["repository"]["pullRequest"]
+    if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
+        pr[WORKFLOW_KEYS_UNAVAILABLE] = True
+    return pr
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -2650,11 +2661,12 @@ def check_nodes(pr: dict) -> list[dict]:
         if n.get("__typename") == "CheckRun":
             suite = n.get("checkSuite") or {}
             workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
-            origin = (
-                ("workflow", workflow)
-                if workflow
-                else ("app", (suite.get("app") or {}).get("slug"))
-            )
+            if workflow:
+                origin: tuple = ("workflow", workflow)
+            elif pr.get(WORKFLOW_KEYS_UNAVAILABLE):
+                origin = ("suite", suite.get("databaseId"))
+            else:
+                origin = ("app", (suite.get("app") or {}).get("slug"))
             suite_id = suite.get("databaseId") or 0
             name = n.get("name") or ""
             group = (origin, name)
@@ -3536,6 +3548,12 @@ def digest(
             "  CHECKS UNREADABLE: the payload carries commits and none of them is the "
             "head, so no rollup here describes this head and `checks=0/0` is this "
             "reading failing rather than a pull request with no checks"
+        )
+    if pr.get(WORKFLOW_KEYS_UNAVAILABLE):
+        lines.append(
+            "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: the token could not read `workflowRun`, "
+            "so every check run of every suite is kept and a superseded failure may still "
+            "show, which reads red rather than hiding a failing check"
         )
     if blind:
         lines.append(
