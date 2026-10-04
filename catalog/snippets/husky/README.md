@@ -9,9 +9,11 @@ gate and the whole-tree line-ending check. Copy `../hub-fetch-run.py` alongside 
 the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main`
 branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
 goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
-change that lands broken on `main` before it does real damage locally. These are two more
-network fetches alongside the Docker pulls the Lint tasks below already do. A fetch failure
-fails the commit rather than silently skipping the gate.
+change that lands broken on `main` before it does real damage locally. The prose gate adds one
+`api.github.com` commit lookup to its fetch, and an allow-list permitting only
+`raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
+alongside the Docker pulls the Lint tasks below already do. A fetch failure fails the commit
+rather than silently skipping the gate.
 
 This snippet is for a repo that already keeps a .NET tool manifest declaring Husky.Net, since
 the hook sources `.husky/_/husky.sh`, a file `dotnet husky install` generates after

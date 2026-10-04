@@ -45,6 +45,8 @@ def relative_root(root: pathlib.Path, value: str) -> pathlib.Path:
         raise CarryError(
             f"path must be repository-relative and below the repository root without '..': {value}"
         )
+    if any(pathlib.PureWindowsPath(part).anchor for part in declared.parts):
+        raise CarryError(f"path must not carry a Windows drive or root in any component: {value}")
     resolved_root = root.resolve()
     candidate = resolved_root / value
     resolved_candidate = candidate.resolve(strict=False)

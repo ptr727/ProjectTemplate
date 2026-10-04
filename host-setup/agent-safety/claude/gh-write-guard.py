@@ -2391,7 +2391,7 @@ _RESERVED_WORDS = frozenset(
 )
 
 
-def _redirects_stdin(after_done):
+def _redirects_stdin(after_done, quoted=None):
     """True if `after_done` binds descriptor 0 to a source that ends, which a `read` drains.
 
     Three things have to hold, and reading only the first accepted loops that never end.
@@ -2408,7 +2408,26 @@ def _redirects_stdin(after_done):
     `if while read l; do sleep 30; done then echo x < f; fi` binds the `echo`.
     That includes a closing word such as `}`, since a pipe inside the compound it closes can feed
     the loop, so `{ yes | while read l; do sleep 30; done } < f` reads the pipe.
+    It ends at a comment too, since bash reads nothing after one, so `done # < f` reads the pipe.
+    A word opens a comment when it starts with an unquoted `#`, which `quoted` says per token.
+    Where that is unknown, every such word reads as one.
+    A comment keeps an earlier binding only where it is surely one, since ending early at a `#`
+    that is not skips the later binding that applies.
+    It is not sure where the quoting is unknown or after an expansion that can hold a space,
+    as in `< ${g:- #x} < /dev/zero`, where a `$(` arrives as a token ending in `$`.
+    The caller passes no mask where the command holds a carriage return, which the lex splits
+    words at and bash does not, so `log\r#x` is one word rather than a comment.
+    A redirect whose target opens a comment has none, so it bounds nothing.
     """
+
+    def comment(j):
+        return after_done[j].startswith("#") and not (quoted is not None and quoted[j])
+
+    def sure(j):
+        return quoted is not None and not any(
+            t.endswith("$") or any(c in t for c in ("${", "$[", "`")) for t in after_done[:j]
+        )
+
     bound = False
     i = 0
     while i < len(after_done):
@@ -2419,6 +2438,8 @@ def _redirects_stdin(after_done):
             return bound
         if tok in _RESERVED_WORDS:
             return bound
+        if comment(i):
+            return bound and sure(i)
         fd = ""
         # A descriptor carries as its own token, so `2>&1 < f` arrives as five.
         # Reading the token before the `<` as a descriptor read the previous redirect's target as one.
@@ -2433,6 +2454,8 @@ def _redirects_stdin(after_done):
         if not _is_redir_op(tok):
             i += 1
             continue
+        if i + 1 < len(after_done) and comment(i + 1):
+            return False
         target = after_done[i + 1] if i + 1 < len(after_done) else ""
         if _is_shell_op(target):
             target = ""
@@ -2452,7 +2475,7 @@ def _redirects_stdin(after_done):
     return bound
 
 
-def _reads_its_input(keyword, cond, after_done):
+def _reads_its_input(keyword, cond, after_done, quoted=None):
     """True if a `while` loop's condition is a `read`, which ends it when the input is exhausted.
 
     `while read -r line; do ...; sleep 1; done < file` is bounded by its input rather than by a
@@ -2474,7 +2497,7 @@ def _reads_its_input(keyword, cond, after_done):
     # `done < <(yes)` and `done < <(tail -f log)` never exhaust, so neither reads as a bound.
     if any(t.startswith(("<(", ">(")) for t in after_done):
         return False
-    if not _redirects_stdin(after_done):
+    if not _redirects_stdin(after_done, quoted):
         return False
     words = [t for t in cond if not _ENV_ASSIGN_RE.match(t)]
     if not words or words[0].rsplit("/", 1)[-1] != "read":
@@ -2488,8 +2511,85 @@ def _reads_its_input(keyword, cond, after_done):
 # A zero duration is excluded, since GNU `timeout` documents 0 as disabling the timeout entirely.
 _TIMEOUT_DURATION = re.compile(r"^(?!0+(?:\.0*)?[smhd]?$)\d+(?:\.\d+)?[smhd]?$")
 
-# The `timeout` options taking their value as a separate argument, which is therefore not the duration.
-_TIMEOUT_VALUE_OPTS = {"-k", "--kill-after", "-s", "--signal"}
+_TIMEOUT_SIGNAL_ZERO_NAME = re.compile(r"^(?:sig)?(?:0+|exit)$", re.IGNORECASE)
+
+
+def _timeout_signal_number(val):
+    """The signal GNU `timeout` reads a digit-string `-s` value as, or None where it reads none.
+
+    A bare number is masked the way GNU `timeout` masks it to accept a shell exit status, 0xFF from
+    255 up and 0x7F below, so `128` and `256` are signal 0 as surely as `0` is. A number past the
+    range of an int is rejected as no signal at all. The length is checked before `int()`, which
+    raises on a digit string past 4300 digits and would crash the hook.
+    """
+    digits = val.lstrip("0")
+    if len(digits) > 10:
+        return None
+    n = int(digits or "0")
+    return n & (0xFF if n >= 0xFF else 0x7F) if n <= 0x7FFFFFFF else None
+
+
+def _is_timeout_signal_zero(val):
+    """True if GNU `timeout` reads the `-s` value as signal 0, which is delivered to no process."""
+    if re.fullmatch(r"[0-9]+", val):
+        return _timeout_signal_number(val) == 0
+    return bool(_TIMEOUT_SIGNAL_ZERO_NAME.match(val))
+
+
+_TILDE_EXPANSION = re.compile(r"(?:^|[=:])~")
+
+
+def _may_brace_expand(val):
+    """True if a `,` or `..` sits between the first `{` and the last `}` of the word.
+
+    Read across the whole span rather than per pair, since bash expands `{Y={},ti}meout` although
+    its comma lies outside the inner `{}`, and a quoted `}` is a token character here too.
+    """
+    i = val.find("{")
+    j = val.rfind("}")
+    return 0 <= i < j and ("," in val[i + 1 : j] or ".." in val[i + 1 : j])
+
+
+def _is_shell_rewritable(val):
+    """True if the shell may rewrite the word at run time, so the text cannot say what it names.
+
+    A substitution, a brace expansion, a glob, and a tilde expansion each can, as `$SIG`, `{0..0}`,
+    `[0]`, and `~` do, and so can zsh's expansion of a leading `=`, as `=timeout` names a path. The
+    rewrite can also split one word into several, so `-k $K` becomes `-k 0 -s 0` where `K` holds
+    `0 -s 0`. The test reads the characters rather than the quoting, so a quoted word holding one,
+    as `'a*b'` does, is read as rewritable too. A brace counts only where a comma or `..`, the forms
+    a brace expansion takes, sits between the word's first `{` and its last `}`, so `{` alone and
+    the `{}` of `xargs -I{}` do not, and a tilde counts only where it opens the word or follows a
+    `=` or `:`, which holds every place bash expands one and some it does not, as `--chdir=~`. A
+    `(` inside a word counts too, since the fallback lexer keeps an extglob group such as
+    `/usr/bin/@(timeout)` in one word, with no `)` token for `_run_start` to stop at.
+    """
+    return (
+        val.startswith("=")
+        or any(ch in val for ch in "$`[*?(")
+        or _may_brace_expand(val)
+        or bool(_TILDE_EXPANSION.search(val))
+    )
+
+
+def _timeout_option(tok):
+    """Split one `timeout` option token the way getopt reads it, as `(option, value)`.
+
+    `option` is `s` for the signal, `k` for the kill-after, or empty for any other flag. `value` is
+    the value the token carries itself, or None where the option takes the next token instead. A
+    long option matches by any prefix, as getopt_long does, so `--sig=0` is `--signal=0`, and a
+    short cluster such as `-vs0` ends at its first value-taking option, the rest being that value.
+    """
+    if tok.startswith("--"):
+        name, eq, val = tok[2:].partition("=")
+        for opt, full in (("s", "signal"), ("k", "kill-after")):
+            if name and full.startswith(name):
+                return opt, (val if eq else None)
+        return "", ""
+    for j, ch in enumerate(tok[1:], 1):
+        if ch in "ks":
+            return ch, (tok[j + 1 :] or None)
+    return "", ""
 
 
 def _is_timeout_exe(tok):
@@ -2541,7 +2641,7 @@ _NAMES_ITS_ARGUMENTS = {
 }
 
 
-def _runs_as_command(toks, w):
+def _runs_as_command(toks, w, quoted=None):
     """True if the token at index w is the command its run executes, past any prefix or `timeout`.
 
     Whether a wrapper runs is a different question from whether it is bounded, and conflating them
@@ -2552,7 +2652,9 @@ def _runs_as_command(toks, w):
     if _opens_command(toks, w):
         return True
     start = w
-    while start > 0 and not _is_separator(toks[start - 1]):
+    while start > 0 and not (
+        _is_separator(toks[start - 1]) and not (quoted is not None and quoted[start - 1])
+    ):
         start -= 1
         if _opens_with_separator(toks[start]):
             break
@@ -2571,23 +2673,118 @@ def _runs_as_command(toks, w):
     return head not in _NAMES_ITS_ARGUMENTS
 
 
-def _timeout_bounds_wrapper(toks, w):
+def _run_start(toks, w, quoted=None):
+    """The index of the first token in the command run holding index w, or None where it is unknown.
+
+    The run reaches back to the previous unquoted shell operator, as `quoted` says per token where
+    it is known, an opening `(` or `<(` included. Where that operator holds a redirection, or ends
+    in a `)` other than a function definition's, None says the text cannot place the run's start. A
+    redirection's target is a word of the run, and the lexer fuses a separator into the redirection
+    after it, as `;>` is one token, so neither stopping nor walking on is right for both. A `)`
+    closes a group whose output may be a word of the run, a `$(...)` or a `<(...)` as in `timeout -s
+    KILL 10 $(true) timeout 800`, or a glob group such as `/usr/bin/@(nice)`. Starting the run after
+    it hides an outer `timeout`, and its `(` cannot be found on the tokens, since a `$` fused into a
+    word, as `nice$(true)` holds, is no token of its own.
+    """
+    start = w
+    while start > 0:
+        k = start - 1
+        tok = toks[k]
+        if not _is_shell_op(tok) or (quoted is not None and quoted[k]):
+            start = k
+            continue
+        if tok.endswith("("):
+            break
+        if ">" in tok or "<" in tok or (tok.endswith(")") and not _closes_function_name(toks, k)):
+            return None
+        break
+    return start
+
+
+_FUNCTION_DEFINITION_OPENERS = {
+    "function",
+    "{",
+    "!",
+    "time",
+    "if",
+    "then",
+    "elif",
+    "else",
+    "while",
+    "until",
+    "do",
+}
+
+
+def _closes_function_name(toks, k):
+    """True if the `)` token at index k ends the `()` of a function definition, as in `f() {`.
+
+    The name has to open the command, or follow a word in `_FUNCTION_DEFINITION_OPENERS` or a
+    separator other than a `)`, and hold no `$` and no extglob operator, so the `$()` in
+    `timeout -s KILL 10 $() timeout 800` and in `nice $() timeout 800` is none, and so is an `@()`,
+    which expands to nothing under bash's `extglob` and `nullglob`. A `)` before the name ends a
+    group rather than a command.
+    """
+    if toks[k] == "()":
+        n = k - 1
+    elif toks[k] == ")" and k > 0 and toks[k - 1] == "(":
+        n = k - 2
+    else:
+        return False
+    if n < 0 or _is_shell_op(toks[n]) or any(ch in toks[n] for ch in "$`@*?+!"):
+        return False
+    if n == 0 or toks[n - 1] in _FUNCTION_DEFINITION_OPENERS:
+        return True
+    return _is_separator(toks[n - 1]) and not toks[n - 1].endswith(")")
+
+
+def _timeout_bounds_wrapper(toks, w, quoted=None):
     """True if a `timeout <duration>` runs the shell wrapper at index w, so its payload is bounded.
 
-    The test is on the command run the wrapper sits in, the tokens back to the previous shell
-    operator, rather than on the tokens immediately before it. That run is bounded when it begins
-    with `timeout` and carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as
-    bounded while `timeout 5 echo hi && bash -c '<loop>'` does not, the `timeout` there running
-    `echo` in a run of its own.
+    The test is on the command run the wrapper sits in, the tokens `_run_start` places, rather than
+    on the tokens immediately before it. That run is bounded when it begins with `timeout` and
+    carries a duration, so `timeout -k 30 900 nice bash -c '<loop>'` reads as bounded while `timeout
+    5 echo hi && bash -c '<loop>'` does not, the `timeout` there running `echo` in a run of its own.
+    Where it cannot place them, the run is no bound.
+
+    A `timeout` sending signal 0, in any spelling GNU `timeout` reads as that signal, is no bound
+    unless a `-k` in the duration form, given before or after the `-s`, sends a SIGKILL after the
+    signal 0. Signal 0 is delivered to no process, so the `timeout` goes on waiting for a child that
+    keeps running.
+
+    A word in the run, before the `timeout` or between it and the wrapper, that the shell may
+    rewrite at run time, such as `-${F}0`, `"$SIG"`, `{0..0}`, or `X=$T` after `env`, makes the run
+    no bound, whatever follows it. The rewrite may name signal 0, a kill-after, or another
+    `timeout`, or split into words that end option parsing early. That is a false deny wherever the
+    rewrite yields a bound, as it does in `timeout 900 env PATH=$HOME/bin bash -c '<loop>'` and in
+    an assignment prefix such as `X=$T timeout 900 bash -c '<loop>'`, which the shell does not
+    split, and wherever quoting keeps the word literal, as it does in `timeout 900 env MSG='a*b'
+    bash -c '<loop>'`.
+
+    Where a `timeout`'s command is another `timeout`, past any command prefix, the run is bounded
+    only when every outer one sends signal 0, which is inert, with no `-k` given a non-empty value,
+    and the innermost one is a bound. Any other such nesting is read as no bound, since an outer
+    signal can end the inner `timeout` before its deadline and leave the loop under it running. Past
+    the command prefixes and assignments directly after an outer duration, a word naming `timeout`
+    anywhere before the wrapper is read as that nesting. These readings are a false deny wherever
+    the outer signal would have stopped the loop too, wherever the inner deadline ends the loop
+    before any outer signal is sent, as in `timeout -s KILL 1000 timeout 800 bash -c '<loop>'`, and
+    wherever a prefix's argument merely names `timeout`, as a path ending in `/timeout` does. A
+    launcher building the inner `timeout` from its own arguments, as `env -S 'timeout 800'` does,
+    names no `timeout` in a word and is not reached. Behind outer ones that each send signal 0 with
+    no `-k`, the nesting is a false deny too wherever a prefix between two of them takes an
+    argument, as `nice -n 5` does. Behind any other outer one the nesting is denied anyway, so the
+    argument changes nothing.
 
     A bound is read only here, never for a loop at the same level as the `timeout`. `timeout` takes a
     command, and a `while`/`until` keyword is not one: `timeout 5 while true; do sleep 1; done` is a
     syntax error rather than a bounded loop, so a `timeout` earlier on the line bounds nothing that
     follows it.
     """
-    start = w
-    while start > 0 and not _is_shell_op(toks[start - 1]):
-        start -= 1
+    start = _run_start(toks, w, quoted)
+    if start is None:
+        return False
+    run = start
     # A run can open with a keyword or a command prefix, as `if timeout 600 bash -c ...` does.
     while start < w and _is_command_prefix(toks[start]):
         start += 1
@@ -2597,16 +2794,35 @@ def _timeout_bounds_wrapper(toks, w):
     # One written inside the payload is caught where that payload is read, on its own terms.
     if _forks_out_of_reach(toks[start:w]):
         return False
+    if any(_is_shell_rewritable(t) for t in toks[run:w]):
+        return False
     i = start + 1
+    signal = kill_after = ""
     while i < w:
         tok = toks[i]
-        if tok in _TIMEOUT_VALUE_OPTS:
-            i += 2  # the option's value is the next token, never the duration
-            continue
         if tok.startswith("-"):
-            i += 1  # a flag, or a long option carrying its own value
+            opt, val = _timeout_option(tok)
+            if val is None:
+                i += 1  # the option's value is the next token, never the duration
+                val = toks[i] if i < w else ""
+            if opt == "s":
+                signal = val  # getopt keeps the last one given
+            elif opt == "k":
+                kill_after = val
+            i += 1
             continue
-        return bool(_TIMEOUT_DURATION.match(tok))
+        if not _TIMEOUT_DURATION.match(tok):
+            return False
+        kills = bool(_TIMEOUT_DURATION.match(kill_after))
+        i += 1
+        while i < w and _is_command_prefix(toks[i]):
+            i += 1
+        if not any(_is_timeout_exe(t) for t in toks[i:w]):
+            return kills or not _is_timeout_signal_zero(signal)
+        if kill_after or not _is_timeout_signal_zero(signal) or not _is_timeout_exe(toks[i]):
+            return False
+        i += 1
+        signal = kill_after = ""
     return False
 
 
@@ -2671,21 +2887,30 @@ def _sleeps(toks, _depth=0, quoted=None):
     return False
 
 
-def _loop_parts(toks, i):
+def _loop_parts(toks, i, quoted=None):
     """(condition tokens, body tokens, index of the closing `done`) for the loop at index i, or None.
 
     None means the loop is not closed in this command string, a shape this rule leaves alone rather
     than denies, matching the precision-over-recall stance rules 1-3 take.
+    `quoted` is the per-token quote mask, where known.
+    A quoted word is no reserved word, and a word after a quoted `;` is an argument.
+    So `while true; do echo ";" done; sleep 1; done` closes at its last `done` rather than its first.
     """
     n = len(toks)
-    do_at = next((j for j in range(i + 1, n) if toks[j] == "do" and _opens_command(toks, j)), None)
+
+    def keyword(j, word):
+        if toks[j] != word or not _opens_command(toks, j):
+            return False
+        return quoted is None or not (quoted[j] or (j > 0 and quoted[j - 1]))
+
+    do_at = next((j for j in range(i + 1, n) if keyword(j, "do")), None)
     if do_at is None:
         return None
     depth = 0
     for j in range(do_at + 1, n):
-        if toks[j] == "do" and _opens_command(toks, j):
+        if keyword(j, "do"):
             depth += 1
-        elif toks[j] == "done" and _opens_command(toks, j):
+        elif keyword(j, "done"):
             if depth == 0:
                 return toks[i + 1 : do_at], toks[do_at + 1 : j], j
             depth -= 1
@@ -2819,7 +3044,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
     for i, tok in enumerate(toks):
         # A wrapper is read where its run executes it, covering `timeout 600 bash -c` and `nice bash -c`.
         # Reading one anywhere denied `echo bash -c '...'`, which runs no shell at all.
-        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i):
+        if _is_shell_wrapper_exe(tok) and _runs_as_command(toks, i, mask):
             args, _ = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`), the command string still the next argv token, the same reading `_embedded_wrapper_commands` gives it.
             ci = next(
@@ -2831,7 +3056,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
                 None,
             )
             if ci is not None and ci + 1 < len(args):
-                local = _timeout_bounds_wrapper(toks, i)
+                local = _timeout_bounds_wrapper(toks, i, mask)
                 # A fork anywhere in this command puts the payload out of an inherited timeout's reach.
                 # `timeout 600 bash -c "bash -c '<loop>' &"` outlives the shell that timeout controls.
                 backgrounded = forks_away
@@ -2846,7 +3071,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             if inner is not None:
                 return inner
         elif _opens_loop(toks, i):
-            parts = _loop_parts(toks, i)
+            parts = _loop_parts(toks, i, mask)
             if parts is None:
                 continue
             cond, body, done_at = parts
@@ -2861,7 +3086,10 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0):
             # Measured: the same leak as having written no bound at all.
             backgrounded = forks_away
             bounded = (inherited_timeout and not backgrounded) or _reads_its_input(
-                tok, cond, toks[done_at + 1 :]
+                tok,
+                cond,
+                toks[done_at + 1 :],
+                mask[done_at + 1 :] if mask and "\r" not in cmd else None,
             )
             quoted = mask[i + 1 : i + 1 + len(cond)] if mask else None
             if sleeps and not bounded and not _bound_in_condition(cond, quoted):
@@ -5369,6 +5597,481 @@ _WAIT_CASES = [
         "an option taking a separate value still leaves the duration findable",
     ),
     (
+        "timeout -s 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "signal 0 is delivered to no process, so a timeout sending it expires and leaves its child running",
+    ),
+    (
+        "timeout --signal 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and the long option spelling sends the same nothing",
+    ),
+    (
+        "timeout --signal=0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as does the long option carrying its value inline",
+    ),
+    (
+        "timeout -s0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and the short option carrying its value attached",
+    ),
+    (
+        "timeout -vs0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "including at the end of a short option cluster",
+    ),
+    (
+        "timeout --sig=0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a long option abbreviated as getopt_long accepts it",
+    ),
+    (
+        "timeout -s EXIT 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and EXIT, the name GNU timeout gives signal 0",
+    ),
+    (
+        "timeout -s sig00 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "in any case, with the SIG prefix and leading zeros",
+    ),
+    (
+        "timeout -s KILL -s 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "the last signal option given is the one timeout sends",
+    ),
+    (
+        "timeout -s 0 -s KILL 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "so a signal 0 overridden by a later one is still a bound",
+    ),
+    (
+        "timeout -s KILL 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "an ordinary signal is still a bound",
+    ),
+    (
+        "timeout --signal=TERM 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "in the inline long spelling too",
+    ),
+    (
+        "timeout -s 128 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a number GNU timeout masks to 0 is signal 0 too, as 128 is",
+    ),
+    (
+        "timeout -s 256 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and 256, masked from 255 up",
+    ),
+    (
+        "timeout -s " + "0" * 5000 + " 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a zero past the digits int() converts is still signal 0, and still read without a crash",
+    ),
+    (
+        "timeout -s 1" + "0" * 5000 + " 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while a number that long past its leading zeros is no signal at all",
+    ),
+    (
+        "timeout -s 129 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while one masking to a real signal, as 129 does to HUP, is a bound",
+    ),
+    (
+        "timeout -s 0 -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a kill-after follows signal 0 with a SIGKILL, so the pair is a bound",
+    ),
+    (
+        "timeout --kill-after=30 --signal 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "in either order and either spelling",
+    ),
+    (
+        "timeout -s 0 -k 0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while a zero kill-after disables it and bounds nothing",
+    ),
+    (
+        "timeout -s 0 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a signal-0 timeout running another timeout is bounded by the inner one",
+    ),
+    (
+        "timeout -s 0 900 nice timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while an inner timeout sending signal 0 too bounds nothing either",
+    ),
+    (
+        "timeout -s 0 900 nice timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a prefix taking no argument between the two leaves the inner one as the bound",
+    ),
+    (
+        "timeout -s 0 900 timeout -s 0 800 timeout 700 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "every outer timeout sending signal 0 leaves the innermost one as the bound",
+    ),
+    (
+        "timeout -s 0 -k 30 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an outer kill-after is not inert, so the nesting is read as no bound, a declared false deny here",
+    ),
+    (
+        "timeout 900 timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and neither is an outer SIGTERM, a declared false deny",
+    ),
+    (
+        "timeout -k 30 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor one carrying a kill-after, however the inner one is spelled",
+    ),
+    (
+        "timeout -s KILL 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an outer signal can end the inner timeout before its deadline and leave the loop running",
+    ),
+    (
+        "timeout 900 time timeout -s 0 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a command prefix between the two changes nothing about the outer one",
+    ),
+    (
+        "timeout -s KILL 10 nice -n 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor does a prefix taking an argument between the two",
+    ),
+    (
+        "timeout -s 0 900 nice -n 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "which is read as no bound even behind a signal-0 outer one, a declared false deny",
+    ),
+    (
+        "timeout -s 0 900 foo -s 0 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a word naming timeout after any other command is read as nesting too",
+    ),
+    (
+        "timeout -s 0 -k .5 900 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an outer kill-after counts in any spelling, since GNU timeout reads more than the duration form",
+    ),
+    (
+        "timeout -s 10 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a number is signal 0 only where GNU timeout masks it to 0, which 10 is not",
+    ),
+    (
+        "timeout -s \"$SIG\" 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a signal the shell expands at run time may be signal 0, so it is no bound",
+    ),
+    (
+        "timeout -s \"$SIG\" -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and no later kill-after rescues it, since the rewrite may split into more words",
+    ),
+    (
+        "timeout -s {0..0} 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a brace expansion the shell rewrites to 0 is read the same way",
+    ),
+    (
+        "timeout -s ~ 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as is a tilde, which the shell rewrites to HOME",
+    ),
+    (
+        "timeout -${F}0 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and an option word the shell may rewrite into -s0 names no signal either",
+    ),
+    (
+        "timeout -${F}0 -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor here, where a rewrite into a duration and a command ends option parsing",
+    ),
+    (
+        "timeout -s 0 -$X 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and behind an outer timeout it may be a kill-after, so the nesting is read as no bound",
+    ),
+    (
+        "timeout -$X -s 0 10 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "even where a later literal -s 0 follows it",
+    ),
+    (
+        "timeout -k $K 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a kill-after value the shell may split, as into 0 -s 0, bounds nothing",
+    ),
+    (
+        "timeout -k 30 -s $SIG 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "nor does an earlier kill-after that a rewritten signal value may replace",
+    ),
+    (
+        "timeout -k {0,-s0} 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a brace expansion splitting into more options is read the same way",
+    ),
+    (
+        "timeout -s KILL 10 $T 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a rewritable word past the duration is no bound, as one that may become timeout",
+    ),
+    (
+        "timeout -s KILL 10 env X=$T 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is an assignment argument the shell splits after env",
+    ),
+    (
+        "timeout -$X -k 30 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a rewritable option word is no bound whatever literal options follow it",
+    ),
+    (
+        "timeout 900 env PATH=$HOME/bin bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a declared false deny, since the rewrite here yields a bound",
+    ),
+    (
+        "timeout 900 env MSG='a*b' bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is a quoted word holding a rewrite character, which the shell leaves literal",
+    ),
+    (
+        "env X=$T timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a rewritable word before the timeout is read too, since env splits it into a possible outer timeout",
+    ),
+    (
+        "sudo X=$T timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as sudo does",
+    ),
+    (
+        "X=$T timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and an assignment prefix the shell does not split, a declared false deny",
+    ),
+    (
+        "timeout -s KILL 10 $(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a command substitution closing before the run leaves its start unknown",
+    ),
+    (
+        "$(echo timeout -s KILL 10) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so does one that may print an outer timeout",
+    ),
+    (
+        "{ timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
+        "allow",
+        "a bare { is the brace-group reserved word rather than a rewrite",
+    ),
+    (
+        "x=$(timeout 900 bash -c 'until [ -f x ]; do sleep 60; done')",
+        "allow",
+        "a wrapper inside a substitution starts its run at the group it sits in",
+    ),
+    (
+        "case $x in a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "deny",
+        "a case pattern's ) before the run is a declared false deny",
+    ),
+    (
+        "timeout -s KILL 10 $(true;) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and so is one whose closing parenthesis the lexer fuses with an operator",
+    ),
+    (
+        "timeout -s KILL 10 $(echo $(true)) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as a nested substitution's is",
+    ),
+    (
+        "timeout -s KILL 10 /usr/bin/@(time)out 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a glob group closing before the run leaves its start unknown",
+    ),
+    (
+        "timeout 900 grep -c \"(\" f; case a in a) bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "deny",
+        "and a quoted ( never reaches across a separator to an earlier timeout",
+    ),
+    (
+        "case foo in (a) timeout 900 bash -c 'until [ -f x ]; do sleep 60; done';; esac",
+        "deny",
+        "with or without its optional (",
+    ),
+    (
+        "timeout -s KILL 10 nice$(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a substitution fused into a word is read the same way",
+    ),
+    (
+        "timeout -s KILL 10 $(echo \")\") timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as is one holding a quoted parenthesis",
+    ),
+    (
+        "timeout -s KILL 10 flock <(true) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a process substitution",
+    ),
+    (
+        "timeout -s KILL 10 /usr/bin/@(nice) timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a glob group that may name a prefix",
+    ),
+    (
+        "x=$(date); timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a ) fused with a separator ends the earlier run instead",
+    ),
+    (
+        "f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
+        "allow",
+        "and a function definition's () opens no group before the run",
+    ),
+    (
+        "timeout -s KILL 10 $() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an empty substitution is no function definition",
+    ),
+    (
+        "f ( ) { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }",
+        "allow",
+        "while a spaced function definition is one",
+    ),
+    (
+        "timeout -s KILL 10 env -u ';' timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a quoted operator is a word of the run rather than its end",
+    ),
+    (
+        "timeout 900 sudo -p ')' bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "so a quoted ) closes no group",
+    ),
+    (
+        "timeout -s KILL 10 env >timeout -us0 -u 5 timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a redirection in the run leaves its start unknown",
+    ),
+    (
+        ">log timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and any redirection in the run is a declared false deny",
+    ),
+    (
+        "timeout 900 true;>f bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as one fused with a separator does",
+    ),
+    (
+        "timeout 5>f 0 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "so a descriptor number is never read as the duration",
+    ),
+    (
+        "timeout -s KILL 10 nice $() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a $ never names a function, behind a prefix either",
+    ),
+    (
+        "timeout -s KILL 10 env -u function $() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "or after the word function",
+    ),
+    (
+        "if true; then f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; fi",
+        "allow",
+        "while a function defined after then is one",
+    ),
+    (
+        "shopt -s extglob\ntimeout -s KILL 10 /usr/bin/@(timeout) 800 bash -c 'until false; do sleep 1; done' # it's",
+        "deny",
+        "an extglob group the fallback lexer keeps in one word is read as a rewrite",
+    ),
+    (
+        "mapfile -t lines < <(timeout 900 bash -c 'until [ -f x ]; do sleep 60; done')",
+        "allow",
+        "a run opening a process substitution starts after its <(",
+    ),
+    (
+        "timeout -s KILL 10 $(true) @() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "an extglob group is no function name",
+    ),
+    (
+        "timeout -s KILL 10 env -u do @() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "even after a word that may open a definition",
+    ),
+    (
+        "timeout -s KILL 10 $(true) f() timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "and a name after a group's ) opens none",
+    ),
+    (
+        "if f() { timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'; }; then f; fi",
+        "allow",
+        "a function defined after if is one",
+    ),
+    (
+        "echo ';' timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a quoted separator after a command naming its arguments runs no shell",
+    ),
+    (
+        "timeout 900 xargs -I{} bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "a brace pair with no comma or .. is no brace expansion",
+    ),
+    (
+        "timeout -s KILL 10 env {Y={},ti}meout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while a comma between the outer braces is one, whatever pair sits inside",
+    ),
+    (
+        "timeout 900 env A=x~y bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "and a tilde inside a word is not expanded",
+    ),
+    (
+        "timeout -s KILL 10 env A=~ timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "while one after = is",
+    ),
+    (
+        "timeout -s KILL 10 =timeout 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "a leading = is rewritten into a command path by zsh, so it may name timeout",
+    ),
+    (
+        "timeout -s KILL 10 /usr/bin/time?ut 800 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "deny",
+        "as is a glob that may match it",
+    ),
+    (
+        "timeout 900 env X=/timeout bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "while an assignment directly after the duration is skipped as a prefix",
+    ),
+    (
+        "timeout 900 bash -c 'until [ -f x ]; do sleep 60; done'",
+        "allow",
+        "the same wait with no signal option is bounded",
+    ),
+    (
         "timeout 900 nice bash -c 'until [ -f x ]; do sleep 60; done'",
         "allow",
         "and a command prefix between the timeout and the shell does not hide it",
@@ -5619,6 +6322,16 @@ _WAIT_CASES = [
         "two quoted backticks pair into no substitution to hide the separator between them",
     ),
     (
+        'while true; do echo ";" done; sleep 1; done',
+        "deny",
+        "a `done` after a quoted `;` is an argument rather than the loop's close",
+    ),
+    (
+        'while true; do echo x; "done"; sleep 1; done',
+        "deny",
+        "a quoted `done` is a command name rather than the loop's close",
+    ),
+    (
         'while ! echo ";" [ 1 -lt 2 ]; do sleep 30; done',
         "deny",
         "a bracket after a quoted `;` is an argument rather than a command",
@@ -5767,6 +6480,51 @@ _WAIT_CASES = [
         "{ yes | while read l; do sleep 30; done } < f",
         "deny",
         "since a redirect after a closing word binds a compound whose pipe can still feed the loop",
+    ),
+    (
+        "yes | while read l; do sleep 30; done # < f",
+        "deny",
+        "nor does one inside a trailing comment, which bash reads none of",
+    ),
+    (
+        "yes | while read l; do sleep 30; done #< f",
+        "deny",
+        "and a comment glued to the redirect hides it the same way",
+    ),
+    (
+        "yes | while read l; do sleep 30; done < #f",
+        "deny",
+        "a target opening a comment leaves the redirect with none",
+    ),
+    (
+        "bash -c 'yes | while read l; do sleep 30; done # < f'",
+        "deny",
+        "and a payload's trailing comment hides its redirect as well",
+    ),
+    (
+        "while read l; do sleep 30; done < f # x",
+        "allow",
+        "while a comment after the redirect leaves the file it binds in place",
+    ),
+    (
+        "while read l; do sleep 30; done < '#f'",
+        "allow",
+        "and a quoted `#` names a file rather than opening a comment",
+    ),
+    (
+        "while read l; do sleep 30; done < ${g:- #x} < /dev/zero",
+        "deny",
+        "a `#` inside an expansion opens no comment, so the stream after it still binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f < '#x' < /dev/zero\n# don't",
+        "deny",
+        "nor does one whose quoting is unknown end the scan before the stream that binds",
+    ),
+    (
+        "while read l; do sleep 30; done < f > log\r#x < /dev/zero",
+        "deny",
+        "and a `#` after a carriage return sits inside a word bash reads whole",
     ),
     (
         "yes | while read l; do sleep 30; done {fd}< f",

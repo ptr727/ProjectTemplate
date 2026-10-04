@@ -47,10 +47,10 @@ not a reason to leave the box unchecked, since the doc-gate half alone already s
 confirms `parity.hooks` operational, open the small hub-side PR the maintenance rule above
 describes and check the box below in it.
 
-A repo declaring neither `csharp` nor `python` in `registry/repos.json` (the `eda` repos, and any
-repo with no fleet-covered language) has no language-format half to add: the doc-gate half alone
-is the complete, operational state for that repo, not an incomplete one a later resync should
-mistake for unfinished work.
+A repo declaring neither `csharp` nor `python` in `registry/repos.json` (an `eda` repo with no
+Python, and any repo with no fleet-covered language) has no language-format half to add: the
+doc-gate half alone is the complete, operational state for that repo, not an incomplete one a
+later resync should mistake for unfinished work.
 
 ## Rollout Checklist
 
@@ -71,7 +71,7 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **VSCode-Server-DotNetCore** (`docker`): doc-gate half only, no declared language.
 - [ ] **NxWitness** (`docker`, `upstream-wrapper`, `codegen`, `csharp`): Husky.Net + doc gates.
 - [ ] **HomeAutomation-Config** (`source-only`): doc-gate half only, no declared language.
-- [ ] **KiCadLibrary** (`eda`): doc-gate half only, no fleet-covered language.
+- [ ] **KiCadLibrary** (`eda`, `python`): `pre-commit` framework + doc gates.
 - [ ] **EspDinIoT** (`eda`): doc-gate half only, no fleet-covered language.
 - [ ] **ESPHome-Config** (`source-only`, `python`, `cpp`): `pre-commit` framework + doc gates for
       the Python half. `cpp` has no fleet linter declared today, out of scope here.
@@ -82,7 +82,7 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **AudioCleaner** (`csharp`, `dotnet-publish`): Husky.Net + doc gates.
 - [ ] **Vantage-Config** (`source-only`): doc-gate half only, no declared language.
 - [ ] **HolidayLights** (`source-only`): doc-gate half only, no declared language.
-- [ ] **Blog** (`hugo`, `source-only`): doc-gate half only, no declared language.
+- [ ] **Blog** (`hugo`, `source-only`, `python`): `pre-commit` framework + doc gates.
 
 <!-- Repo -->
 

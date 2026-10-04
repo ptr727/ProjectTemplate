@@ -155,7 +155,7 @@ One pull request giving a repo a declared way to say what it needs at runtime, t
   - **Settled** - Blog needs it immediately, since it deploys on the proxmox host through HomeAutomation-Config's Docker Compose stack and carries the copy destinations and the internal URI.
   - **Settled** - Adopting it in the hub comes first, since the hub carries neither piece.
   - **Settled** - The GitHub side has the same missing axis, surfaced by the `hugo` type, since a deploy's credentials are per-environment secrets and variables while `stores` is a closed enum of `actions` and `dependabot`, and [`spec/audit.py`][audit] seeds its map with those two keys and indexes it unguarded, so adding an `environments` value raises a key error for every repo whose publish maps to that mechanism.
-  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema] so a repo may declare its per-environment names, and no tool reads one where it exists, which is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
+  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema], but it has no per-repo dimension and downstream copies of `spec/secrets.json` are retired, so no repo declares its per-environment names there, and no tool would read one, which is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
 
 ### The Docker Image Freshness Rule
 
@@ -188,7 +188,7 @@ The hosted gates, release chain, Docker core, and type-specific tasks are implem
   - **Issue** - None filed.
   - **Checked** - `develop` at `7c67328` on 2026-08-15, against the 16 downstream copies read for the design.
   - **Open** - All three, stated in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Open Decisions".
-  - **Settled** - Neither blocks adoption: `delete-branch: false` is the hub's behavior and seven repos opt in, and the semver filter is a D8.1 conformance question for the two repos that carry it.
+  - **Settled** - Neither blocks adoption: `delete-branch: false` is the task default and adopters opt in, and the semver filter is a D8.1 conformance question for the two repos that carry it.
 
 - **Bring the Docker repos onto one multi-stage Dockerfile shape.** The build stages are inconsistent across the five Docker repos, and that is Dockerfile content rather than workflow content, so it rides beside the workflow migration rather than inside it.
   - **Blocked by** - Nothing.
@@ -402,20 +402,6 @@ Two loaders exist so a copy-paste snippet takes a stock OS install to a configur
   - **Checked** - Branch `feature/windows-bootstrap-loader` on 2026-08-13, adding this loader for the first time. It has run under `-DryRun` and against `PSScriptAnalyzer` on a dev machine that already carries `pwsh`, `winget`, and most managed tools, which is signal on the script's internal consistency and none at all on whether it survives a host it has not touched.
   - **Open** - Same as the Linux entry: which images, who runs the pass, and how a finding routes back.
 
-### Blog's `.gitattributes` Diverges from the Fleet's `text=auto` Pattern
-
-Blog carries `* -text` plus explicit named `eol=lf` pins plus a dedicated rotted-pin gate, `checks/check-eol-pins.py`, instead of the fleet default `* text=auto eol=lf`. Whether to accept that as a second pattern, or ask Blog to converge, is the hub's call rather than the reporting session's.
-
-**State** `decision`. **Touches** [`.agents/skills/comment-and-doc-style/references/line-endings.md`][line-endings-ref] if accepted as a pattern, or the registry's `driftNote` shape if recorded as Blog's own deviation instead. **Cost** one hub edit either way, no code change.
-
-- **Decide whether `-text` plus explicit named pins plus a rotted-pin gate is an accepted alternative to `text=auto eol=lf` for a repo with heavy binary content.**
-  - **Blocked by** - Nothing.
-  - **Issue** - [#931][issue-931].
-  - **Checked** - Not measured against Blog's own commits by this session. Per the issue, Blog carries 566 MB of binary media and a dedicated pin-plus-audit gate run on every pull request. Verified against `.github/actions/repo-gate/repo_gate.py`'s `check_eol_coverage` (lines 276-334) and a scratch git repository, on 2026-08-22. A bare `* text=auto eol=lf` wildcard with no other pins fails on `*.bat`/`*.cmd`, since they resolve to `lf` rather than the required `crlf`. Adding the two exception pins every repo needs regardless of Blog's own choice resolves every other representative path to `lf`. Every tracked shebang file resolves to `lf` the same way, with no per-file pin at all.
-  - **Settled** - Adopting `text=auto eol=lf` and dropping the pin list is ruled out anyway. Once the two baseline `*.bat`/`*.cmd` pins are in place, `eol-coverage`'s remaining `lf` checks (from #634) can never fail on a missing per-file pin. That is the exact defect class they exist to catch.
-  - **Open** - Documenting the `-text` plus pins plus gate shape in `line-endings.md` as an accepted alternative, versus recording it as Blog's own `driftNote`. The issue's follow-up comment leans toward documenting it, since `eol-coverage` already rewards this shape.
-  - **Open** - Whether `scripts/repo_gate.py --check eol-coverage` runs in Blog's own CI, or only on demand from a hub checkout. Blog's `check-eol-pins.py` already runs every pull request, so the fleet may carry this logic at two fidelities.
-
 ## Standalone Chores
 
 Small work with no research to preserve, selectable one bullet at a time.
@@ -458,7 +444,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 
 - **Adopt the merge-bot caller stub, which is one file per repo replacing the copied job bodies.** The audit reports the missing `merge-bot` caller job on every copy until the repo adopts, which is the work list.
   - **Hub state** - Done on `develop`, where `.github/workflows/merge-bot-task.yml` is the task and the hub's own `merge-bot-pull-request.yml` is the stub. The stub a repo copies is in [`docs/reusable-workflows.md`][reusable-workflows-doc] "Adopting the Merge-Bot", and its pin is the first hub release carrying the task, so no repo can adopt before that release.
-  - **Outstanding** - Every repo still carrying the job bodies rather than the stub, which the audit's missing `merge-bot` job finding lists. PhotoCleaner adopted in ptr727/PhotoCleaner#53 and promoted it in ptr727/PhotoCleaner#54 on 2026-08-15, and HomeAutomation-Config adopted in ptr727/HomeAutomation-Config#58 on 2026-08-19, so the repos still carrying the bodies, homeassistant-purpleair for the `rules` input among them, are the adopters still to come. HomeAutomation-Config piloted the direct-to-`develop` path while it was still an operational repo, where [a merge-bot run][ha-config-pilot-run] merged the Dependabot pull request ptr727/HomeAutomation-Config#412 into `develop` on 2026-09-23, and none of the repos still carrying the bodies is operational, so no pilot of that path is owed.
+  - **Outstanding** - Every repo whose box in the stage 1 list of [`docs/reusable-workflows.md`][reusable-workflows-doc] is still unticked, which the audit's missing `merge-bot` job finding also lists. That list is the tracker and names the adopters, so this entry does not. HomeAutomation-Config piloted the direct-to-`develop` path while it was still an operational repo, where [a merge-bot run][ha-config-pilot-run] merged the Dependabot pull request ptr727/HomeAutomation-Config#412 into `develop` on 2026-09-23, and none of the repos still carrying the bodies is operational, so no pilot of that path is owed.
   - **Issue** - [#521][issue-521], whose hub half is done and whose sweep half this is.
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
@@ -539,7 +525,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
-[issue-931]: https://github.com/ptr727/ProjectTemplate/issues/931
 [issue-1161]: https://github.com/ptr727/ProjectTemplate/issues/1161
 
 <!-- Pull requests -->
@@ -574,7 +559,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [host-setup-windows]: ./host-setup/windows/
 [install-tools]: ./host-setup/linux/install-tools.sh
 [install-tools-ps1]: ./host-setup/windows/install-tools.ps1
-[line-endings-ref]: ./.agents/skills/comment-and-doc-style/references/line-endings.md
 [markdownlint]: ./.markdownlint-cli2.jsonc
 [matrix]: ./reports/conformance-matrix.md
 [operations]: ./OPERATIONS.md

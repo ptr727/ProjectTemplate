@@ -80,6 +80,57 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     )
 
 
+def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, str, list[str]]:
+    """Run the workflow's own label-reading step against a stub gh.
+
+    Returns the exit code, the step output written, the log, and the arguments gh received.
+
+    `live` is what the stub prints as the label names, and None makes the read fail.
+    """
+    workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+    marker = "      - name: Read comments label step\n"
+    _, body = workflow.split(marker, 1)
+    _, block = body.split("        run: |\n", 1)
+    script_lines = []
+    for line in block.splitlines():
+        if line.startswith("          "):
+            script_lines.append(line.removeprefix("          "))
+        elif not line:
+            script_lines.append(line)
+        else:
+            break
+    with tempfile.TemporaryDirectory() as scratch:
+        stub = Path(scratch) / "gh"
+        if live is None:
+            stub.write_text("#!/bin/sh\necho 'HTTP 403: denied' >&2\nexit 1\n", encoding="utf-8")
+        else:
+            (Path(scratch) / "labels").write_text(live, encoding="utf-8")
+            stub.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{scratch}/args'\ncat '{scratch}/labels'\n",
+                encoding="utf-8",
+            )
+        stub.chmod(0o755)
+        output = Path(scratch) / "output"
+        env = os.environ | {
+            "GITHUB_OUTPUT": str(output),
+            "LABELS_PATH": "repos/example/widget/issues/7/labels",
+            "PATH": f"{scratch}{os.pathsep}{os.environ['PATH']}",
+            "PAYLOAD_LABELED": payload,
+        }
+        result = subprocess.run(
+            ["bash", "-c", "\n".join(script_lines)],
+            env=env,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        written = output.read_text(encoding="utf-8").strip() if output.exists() else ""
+        args = Path(scratch) / "args"
+        called = args.read_text(encoding="utf-8").split("\n") if args.exists() else []
+    return str(result.returncode), written, result.stdout + result.stderr, called
+
+
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
 DUP = "the " + "the"
@@ -143,6 +194,17 @@ class TestTierTables(BaitCase):
         self.assertEqual(
             ["charset-unknown"], self.kinds(f"a {unknown} here\n", {"charset-unknown"})
         )
+
+    def test_an_unclassified_character_names_where_to_classify_it(self) -> None:
+        """The message names the skill section and the tables a tier is classified in."""
+        path = self.tmp / "bait.md"
+        path.write_text(f"a {chr(0x2603)} here\n", encoding="utf-8")
+        [(_, kind, message)] = prose_lint.check_file(path, {"charset-unknown"})
+        self.assertEqual("charset-unknown", kind)
+        self.assertIn('the comment-and-doc-style skill\'s "Character set" section', message)
+        self.assertIn("prose_lint.py's TIER1, TIER2, or TIER3 table", message)
+        self.assertIn("classify it in ptr727/ProjectTemplate:", message)
+        self.assertNotIn("GOVERNANCE.md", message)
 
     def test_a_latin_letter_in_a_recorded_name_is_left_alone(self) -> None:
         """Folding a name's letter to ASCII records a different name, so no tier rule reports it."""
@@ -1916,6 +1978,197 @@ class TestSentenceLength(BaitCase):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
+    def found(self, text: str) -> list[tuple[int, str]]:
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"})
+        return [(n, kind) for n, kind, _ in found]
+
+    def test_a_wrapped_sentence_over_the_cap_is_flagged_where_it_starts(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        one_line = " ".join(words) + "."
+        wrapped = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n"
+        wrapped += " ".join(words[20:]) + "."
+        expected = [(3, "sentence-length")]
+        self.assertEqual(expected, self.found(f"Intro.\n\n{one_line}\n"))
+        self.assertEqual(expected, self.found(f"Intro.\n\n{wrapped}\n"))
+
+    def test_a_wrapped_sentence_within_the_cap_passes(self) -> None:
+        words = ["word"] * 20
+        self.assertEqual([], self.found(" ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"))
+
+    def test_short_sentences_across_a_line_break_are_judged_alone(self) -> None:
+        lead = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([], self.found(f"{lead}.\n{lead}.\n"))
+
+    def test_a_list_item_is_measured_with_its_continuation_lines(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        item = "- " + " ".join(words[:15]) + "\n  " + " ".join(words[15:]) + ".\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro:\n" + item))
+
+    def test_separate_blocks_are_never_joined(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        fence = "```\ncode\n```\n"
+        for text in (
+            f"- {half}\n- {half}\n",
+            f"{half}\n\n{half}\n",
+            f"{half}\n# Head\n{half}\n",
+            f"{half}\n{fence}{half}\n",
+            f"{half}\n| a | b |\n{half}\n",
+        ):
+            with self.subTest(text=text[:30]):
+                self.assertEqual([], self.found(text))
+
+    def over(self, n: int = 6) -> str:
+        return " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + n))
+
+    def test_an_edit_to_a_continuation_line_flags_the_sentence(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        text = "Intro.\n\n" + " ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"}, allowed={4})
+        self.assertEqual([4], [n for n, _, _ in found])
+        self.assertEqual([], prose_lint.check_file(path, {"sentence-length"}, allowed={1}))
+
+    def test_front_matter_is_not_joined_into_the_body(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"---\nname: {half}\ndescription: {half}\n...\n{half}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_a_long_front_matter_line_is_still_flagged(self) -> None:
+        text = f"---\nname: x\ndescription: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_block_level_tag_line_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        self.assertEqual([], self.found(f"{a}\n<div>\n{a}.\n"))
+        text = f"<details>\n<summary>S</summary>\n\n- {a}\n</details>\n{a}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_prose_wrapped_in_tags_is_still_measured(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f'<p align="center">{over}.</p>\n'))
+        self.assertEqual(flagged, self.found(f"<summary>{over}.</summary>\n"))
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.found(f'<p align="center">{at_cap}</p>\n'))
+
+    def test_a_huge_digit_run_is_not_a_marker_and_does_not_crash(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"{half}\n{'1' * 5000}) {half}\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_other_block_boundaries_end_a_block(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        cases = {
+            "setext": f"{half}\n===\n{half}\n",
+            "setext dashes": f"{half}\n---\n{half}\n",
+            "thematic": f"{half}\n***\n{half}\n",
+            "thematic underscores": f"{half}\n___\n{half}\n",
+            "html block": f"<details>\n<summary>{half}</summary>\n{half}\n</details>\n",
+            "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
+            "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
+            "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(text))
+
+    def test_an_indented_list_continuation_is_not_code(self) -> None:
+        text = f"- Item.\n\n    {self.over()}.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_wrapped_code_span_is_one_word(self) -> None:
+        cap = prose_lint.SENTENCE_WORD_CAP
+        lead = " ".join(["word"] * (cap - 3))
+        text = f"{lead} `one\ntwo three four` end.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_a_quote_mark_pairs_within_its_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f'Cut 5" pipe {half}\n{half} and 6" pipe end.\n'
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_inline_html_and_a_tag_inside_a_paragraph_stay_prose(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        for mid in ("<br>", "<number>", "<https://example.test>", "<kbd>x</kbd>"):
+            with self.subTest(mid=mid):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n{mid} {half}\n"))
+        for lead in ("<kbd>x</kbd>", "<number>", "<https://example.test>"):
+            self.assertEqual([(1, "sentence-length")], self.found(f"{lead} {self.over()}.\n"))
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n<br>\n{c}\n"))
+
+    def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"<!--\n```\n-->\n{half}\n{half}\n"
+        self.assertEqual([(4, "sentence-length")], self.found(text))
+
+    def test_a_setext_underline_discards_the_heading_only(self) -> None:
+        over = self.over()
+        self.assertEqual([], self.found(f"{over}\n===\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n---\nShort.\n"))
+        self.assertEqual([], self.found(f"{over}\n-\nShort.\n"))
+
+    def test_a_thematic_break_flushes_the_paragraph(self) -> None:
+        over = self.over()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found(f"{over}.\n- - -\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}.\n***\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"- {over}.\n---\nShort.\n"))
+        self.assertEqual(flagged, self.found(f"{over}\nmore words.\n---\nShort.\n"))
+
+    def test_only_the_line_above_a_table_delimiter_is_the_header(self) -> None:
+        text = f"{self.over()}.\nhead | x\n--- | ---\nrow | y\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text))
+
+    def test_a_column_zero_fence_ends_a_list(self) -> None:
+        text = f"- item\n\n```\ncode\n```\n\n    {self.over()}.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_code_indented_past_a_list_item_is_code(self) -> None:
+        self.assertEqual([], self.found(f"- item\n\n      {self.over()}.\n"))
+
+    def test_front_matter_needs_a_closing_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\nname: x\n{self.over()}.\n"))
+        self.assertEqual([(2, "sentence-length")], self.found(f"---\n{half} here\n{half}\n---\n"))
+
+    def test_a_thematic_break_with_fences_or_tables_is_not_front_matter(self) -> None:
+        a = " ".join(["word"] * 15)
+        fenced = f"---\n```\n{self.over()}\n```\n---\nShort.\n"
+        table = f"---\n| {a} | x |\n| --- | --- |\n---\nShort.\n"
+        self.assertEqual([], self.found(fenced))
+        self.assertEqual([], self.found(table))
+
+    def test_source_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        for tag in ("<source>", "</style>", "</pre>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
+
+    def test_front_matter_has_no_line_reach(self) -> None:
+        keys = "".join(f"key{n}: value\n" for n in range(55))
+        text = f"---\n{keys}description: {self.over()}.\n---\nBody.\n"
+        self.assertEqual([(57, "sentence-length")], self.found(text))
+
+    def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<search>", "</div>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
+
+    def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))
+        self.assertEqual([], self.found(f"{half}\n1) {half}\n"))
+        self.assertEqual([], self.found(f"- a\n  {half}\n2) {half}\n"))
+
+    def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
+        tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro line.\n" + tail))
+
     def test_the_rule_is_markdown_only(self) -> None:
         """A source file's long lines are code, which no sentence rule judges."""
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
@@ -2388,6 +2641,26 @@ class TestCli(unittest.TestCase):
             mock.patch.object(prose_lint, "changed_lines", return_value={}),
         ):
             self.assertEqual(0, prose_lint.main(["--check", "dupword", "--diff", "HEAD"]))
+
+    def test_diff_scope_keeps_a_wrapped_sentence_edited_on_a_continuation_line(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        bait = self.tmp / "wrapped.md"
+        text = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n" + " ".join(words[20:])
+        bait.write_text(text + ".\n", encoding="utf-8")
+        argv = ["--check", "sentence-length", "--diff", "HEAD"]
+        for changed, code in (({2}, 1), ({9}, 0)):
+            with self.subTest(changed=changed):
+                out = io.StringIO()
+                with (
+                    mock.patch.object(prose_lint, "discover", return_value=[bait]),
+                    mock.patch.object(
+                        prose_lint, "changed_lines", return_value={prose_lint.rel(bait): changed}
+                    ),
+                    contextlib.redirect_stdout(out),
+                ):
+                    self.assertEqual(code, prose_lint.main(argv))
+                if code:
+                    self.assertIn(":2: sentence-length", out.getvalue())
 
     def test_diff_scope_reports_only_the_changed_lines(self) -> None:
         """A finding on an untouched line is the backlog, which the diff run must not attribute."""
@@ -4767,13 +5040,17 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         self.assertIn("tool.py:1: comment-added", result.stdout)
 
     def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
-        """Three surfaces name this label, and a rename that misses one silently disarms it."""
+        """Four surfaces name this label, and a rename that misses one silently disarms it."""
         declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
         self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             f"contains(github.event.pull_request.labels.*.name, '{prose_lint.COMMENT_LABEL_NAME}')",
             workflow,
+        )
+        self.assertEqual(
+            ("0", "labeled=true"),
+            run_comments_label_step(prose_lint.COMMENT_LABEL_NAME + "\n", "false")[:2],
         )
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
@@ -4801,13 +5078,42 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         """
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
-            "allow-comments: ${{ contains(github.event.pull_request.labels.*.name, "
-            f"'{prose_lint.COMMENT_LABEL_NAME}') || "
+            "allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || "
             "(github.event.pull_request.head.repo.full_name == github.repository && "
             "github.head_ref == 'develop' && "
             "github.base_ref == github.event.repository.default_branch) }}",
             workflow,
         )
+
+    def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
+        """The payload is a snapshot from the event, which a label applied after it never reaches.
+
+        The live answer wins in both directions, so a payload that predates the label, or one
+        that predates its removal, decides nothing while the read succeeds. It ignores case, as
+        the payload's contains() does. The log line is the one the skills tell a driver to look for.
+        """
+        for live, payload, expected in (
+            ("bug\ncomments\n", "false", "true"),
+            ("Comments\n", "false", "true"),
+            ("bug\n", "true", "false"),
+            ("", "true", "false"),
+            ("comments-wanted\n", "false", "false"),
+        ):
+            with self.subTest(live=live, payload=payload):
+                code, output, log, called = run_comments_label_step(live, payload)
+                self.assertEqual(("0", f"labeled={expected}"), (code, output), log)
+                self.assertIn("Read the pull request's labels live", log)
+                self.assertIn("repos/example/widget/issues/7/labels", called)
+                self.assertIn("--paginate", called)
+                self.assertIn(".[].name", called)
+
+    def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
+        """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
+        for payload in ("true", "false"):
+            with self.subTest(payload=payload):
+                code, output, log, _ = run_comments_label_step(None, payload)
+                self.assertEqual(("0", f"labeled={payload}"), (code, output), log)
+                self.assertIn("could not be read live", log)
 
 
 class TestTheIssueRefRule(unittest.TestCase):
