@@ -1036,23 +1036,65 @@ class TestCompositeActions(TreeCase):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertIn("expected one YAML document, found 2", hits[0])
 
-    def test_a_uvx_failure_is_a_finding(self) -> None:
+    def test_a_file_problem_under_uvx_is_a_finding_for_that_file(self) -> None:
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
             mock.patch.object(repo_gate.shutil, "which", side_effect={"uvx": "/u"}.get),
-            self.uvx_run("", 1),
+            self.uvx_run("", repo_gate.UVX_FILE_PROBLEM),
         ):
             hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
         self.assertEqual(["a/action.yml: could not read the action: bad"], hits)
 
-    def test_no_pyyaml_and_no_uvx_is_a_finding(self) -> None:
-        files = self.action("    - shell: bash\n      run: echo ok\n")
+    def uvx_hits(self, run: mock.Mock, which: dict[str, str]) -> list[str]:
+        files = [f for name in "abc" for f in self.action("    - run: echo ok\n", name)]
         with (
             mock.patch.dict(sys.modules, {"yaml": None}),
-            mock.patch.object(repo_gate.shutil, "which", return_value=None),
+            mock.patch.object(repo_gate.shutil, "which", side_effect=which.get),
+            mock.patch.object(repo_gate, "docker_unreachable", return_value=None),
+            mock.patch.object(repo_gate, "check_composite_schema", return_value=[]),
+            mock.patch.object(repo_gate.subprocess, "run", run),
         ):
-            hits = self.shell_hits(files)
+            return repo_gate.check_composite_actions(self.tmp, files)
+
+    def test_no_pyyaml_and_no_uvx_is_one_finding(self) -> None:
+        hits = self.uvx_hits(mock.Mock(), {"docker": "/d"})
+        self.assertEqual(1, len(hits))
         self.assertIn("neither PyYAML nor uvx", hits[0])
+
+    def test_a_uvx_timeout_is_one_finding_without_the_script(self) -> None:
+        run = mock.Mock(side_effect=subprocess.TimeoutExpired(["uvx", repo_gate.UVX_READER], 60))
+        hits = self.uvx_hits(run, {"docker": "/d", "uvx": "/u"})
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(1, len(hits))
+        self.assertIn("uvx timed out after", hits[0])
+        self.assertNotIn("import json", hits[0])
+
+    def test_a_uvx_exit_is_one_finding_naming_its_first_line(self) -> None:
+        run = mock.Mock(return_value=self.completed(2, "", "error: no network\nsecond line\n"))
+        hits = self.uvx_hits(run, {"docker": "/d", "uvx": "/u"})
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(1, len(hits))
+        self.assertIn("uvx exited 2 reading the action: error: no network", hits[0])
+        self.assertNotIn("second line", hits[0])
+
+    @unittest.skipUnless(os.name == "posix", "the stub uvx is a shell script")
+    def test_child_stderr_is_utf8_and_decoded_leniently(self) -> None:
+        stub = self.tmp / "uvx"
+        stub.write_text(
+            "#!/bin/sh\n"
+            "printf 'invalid YAML: %s \\377\\n' \"$PYTHONIOENCODING\" >&2\n"
+            f"exit {repo_gate.UVX_FILE_PROBLEM}\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate.shutil, "which", return_value=str(stub)),
+        ):
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+        self.assertEqual(
+            ["a/action.yml: could not read the action: invalid YAML: utf-8 \ufffd"], hits
+        )
 
     @NEEDS_UVX
     def test_uvx_provisions_pyyaml_for_a_real_action(self) -> None:
@@ -1070,6 +1112,35 @@ class TestCompositeActions(TreeCase):
             hits = self.shell_hits(self.raw("runs: [unclosed\n"))
         self.assertEqual(1, len(hits))
         self.assertIn("could not read the action: invalid YAML:", hits[0])
+        self.assertNotIn("\n", hits[0])
+
+    @NEEDS_UVX
+    def test_uvx_reads_a_timestamp_key(self) -> None:
+        files = self.raw("2024-01-01: x\nruns:\n  steps:\n    - shell: bash\n      run: echo $x\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        self.assertEqual("echo $x", body.call_args.args[2])
+
+    @NEEDS_UVX
+    def test_uvx_reports_a_recursive_alias_in_one_line(self) -> None:
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            hits = self.shell_hits(self.raw("a: &x [*x]\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn("could not read the action: unreadable: RecursionError", hits[0])
+        self.assertNotIn("\n", hits[0])
+
+    @NEEDS_UVX
+    def test_uvx_reports_a_non_utf8_file_in_one_line(self) -> None:
+        files = self.raw("")
+        (self.tmp / files[0]).write_bytes(b"name: \xff\n")
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            hits = self.shell_hits(files)
+        self.assertEqual(1, len(hits))
+        self.assertIn("could not read the action: unreadable: UnicodeDecodeError", hits[0])
+        self.assertNotIn("\n", hits[0])
 
     @NEEDS_SCHEMA
     def test_a_valid_action_passes_the_schema(self) -> None:

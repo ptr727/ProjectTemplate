@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -429,32 +430,59 @@ def single_document(documents: list[object]) -> object:
     return documents[0]
 
 
+UVX_FILE_PROBLEM = 65
 UVX_READER = (
     "import json, sys, yaml\n"
+    "def keyed(node):\n"
+    "    if isinstance(node, dict):\n"
+    "        return {str(key): keyed(value) for key, value in node.items()}\n"
+    "    if isinstance(node, list):\n"
+    "        return [keyed(value) for value in node]\n"
+    "    return node\n"
     "try:\n"
     "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
-    "        documents = list(yaml.safe_load_all(handle))\n"
-    "except yaml.YAMLError as error:\n"
-    "    sys.exit(f'invalid YAML: {error}')\n"
-    "json.dump(documents, sys.stdout, default=str)\n"
+    "        text = json.dumps(keyed(list(yaml.safe_load_all(handle))), default=str)\n"
+    "except Exception as error:\n"
+    "    if isinstance(error, yaml.YAMLError):\n"
+    "        line = f'invalid YAML: {error}'\n"
+    "    else:\n"
+    "        line = f'unreadable: {type(error).__name__}: {error}'\n"
+    "    sys.stderr.write(' '.join(line.split()) + '\\n')\n"
+    f"    sys.exit({UVX_FILE_PROBLEM})\n"
+    "sys.stdout.write(text)\n"
 )
+
+
+class UvxUnavailable(Exception):
+    """uvx itself failed, so every later read through it would fail the same way."""
 
 
 def load_through_uvx(path: Path) -> list[object]:
     """Every document of a YAML file, parsed by PyYAML in an interpreter uvx provisions."""
     uvx = shutil.which("uvx")
     if uvx is None:
-        raise RuntimeError("neither PyYAML nor uvx is available to read the action")
-    result = subprocess.run(
-        [uvx, "--with", "pyyaml", "python", "-c", UVX_READER, str(path)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        timeout=YAML_TIMEOUT,
-    )
+        raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
+    try:
+        result = subprocess.run(
+            [uvx, "--with", "pyyaml", "python", "-c", UVX_READER, str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            check=False,
+            timeout=YAML_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise UvxUnavailable(f"uvx timed out after {YAML_TIMEOUT}s reading the action") from None
+    except OSError as error:
+        raise UvxUnavailable(f"uvx could not start: {error}") from None
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    if result.returncode == UVX_FILE_PROBLEM and lines:
+        raise ValueError(lines[-1])
     if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or f"uvx exited {result.returncode}")
+        first = f": {lines[0]}" if lines else ""
+        raise UvxUnavailable(f"uvx exited {result.returncode} reading the action{first}")
     documents: list[object] = json.loads(result.stdout)
     return documents
 
@@ -695,7 +723,11 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
         hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
         for path in actions:
-            hits.extend(check_composite_shell(root, path))
+            try:
+                hits.extend(check_composite_shell(root, path))
+            except UvxUnavailable as error:
+                hits.append(f"{path}: {error}, so it and any later action were not shellchecked")
+                break
     hits.extend(check_composite_schema(root, actions))
     NOTES.append(f"checked {len(actions)} action file(s).")
     return hits
