@@ -4973,8 +4973,8 @@ class TestDigestReportsChecks(GqlCase):
     def test_a_tolerated_workflow_run_error_keeps_same_named_jobs_of_two_workflows(self) -> None:
         """With no workflow keys, a failing `build` must not hide behind another workflow's.
 
-        Every Actions suite then keys by its app slug, and deduping on that would keep only the
-        highest suite id of two unrelated `build` jobs and read a failure as green.
+        Keying Actions runs by app slug would keep only the highest suite id of two unrelated
+        `build` jobs and read a failure as green, so each run keys by its own suite instead.
         """
         failed = check(name="build", conclusion="FAILURE", suite=10, workflow=None)
         passed = check(name="build", conclusion="SUCCESS", suite=20, workflow=None)
