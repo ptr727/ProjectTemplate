@@ -192,9 +192,12 @@ pull request carries the `comments` label and the gate stands down for that chan
 and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
 
-Three things about reaching those escapes read as a broken gate until they are known. The label is read off the event that started the run, so a label added after a run fails
-applies to the next push rather than to a re-run of that one, and labeling the pull request when it
-is opened is what avoids the round trip. The label reaches a repository only when the fleet label
+Three things about reaching those escapes read as a broken gate until they are known. The fleet's
+caller reads the label live when the lint job runs, so a label added before that job starts applies.
+A rerun of a failed job reads it again, so it picks up a label added since. Where the workflow's
+token cannot read the labels, the log says so and the event's snapshot decides instead. That
+snapshot misses a label applied after the event, `gh pr create --label` included, so there the
+label applies to the next push. The label reaches a repository only when the fleet label
 set is applied to it, so a repository that has not had that applied since the label was declared
 cannot carry it, and there the finding names a remedy that is not yet available. And the local
 escape reaches a commit before any of that, which is where a repository meets this rule first, since

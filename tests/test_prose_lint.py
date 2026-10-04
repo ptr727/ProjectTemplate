@@ -80,6 +80,57 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     )
 
 
+def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, str, list[str]]:
+    """Run the workflow's own label-reading step against a stub gh.
+
+    Returns the exit code, the step output written, the log, and the arguments gh received.
+
+    `live` is what the stub prints as the label names, and None makes the read fail.
+    """
+    workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+    marker = "      - name: Read comments label step\n"
+    _, body = workflow.split(marker, 1)
+    _, block = body.split("        run: |\n", 1)
+    script_lines = []
+    for line in block.splitlines():
+        if line.startswith("          "):
+            script_lines.append(line.removeprefix("          "))
+        elif not line:
+            script_lines.append(line)
+        else:
+            break
+    with tempfile.TemporaryDirectory() as scratch:
+        stub = Path(scratch) / "gh"
+        if live is None:
+            stub.write_text("#!/bin/sh\necho 'HTTP 403: denied' >&2\nexit 1\n", encoding="utf-8")
+        else:
+            (Path(scratch) / "labels").write_text(live, encoding="utf-8")
+            stub.write_text(
+                f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{scratch}/args'\ncat '{scratch}/labels'\n",
+                encoding="utf-8",
+            )
+        stub.chmod(0o755)
+        output = Path(scratch) / "output"
+        env = os.environ | {
+            "GITHUB_OUTPUT": str(output),
+            "LABELS_PATH": "repos/example/widget/issues/7/labels",
+            "PATH": f"{scratch}{os.pathsep}{os.environ['PATH']}",
+            "PAYLOAD_LABELED": payload,
+        }
+        result = subprocess.run(
+            ["bash", "-c", "\n".join(script_lines)],
+            env=env,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        written = output.read_text(encoding="utf-8").strip() if output.exists() else ""
+        args = Path(scratch) / "args"
+        called = args.read_text(encoding="utf-8").split("\n") if args.exists() else []
+    return str(result.returncode), written, result.stdout + result.stderr, called
+
+
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
 DUP = "the " + "the"
@@ -4997,6 +5048,10 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             f"contains(github.event.pull_request.labels.*.name, '{prose_lint.COMMENT_LABEL_NAME}')",
             workflow,
         )
+        self.assertEqual(
+            ("0", "labeled=true"),
+            run_comments_label_step(prose_lint.COMMENT_LABEL_NAME + "\n", "false")[:2],
+        )
         # A promotion diffs against the default branch's tip.
         # Its scope is a whole release of lines that were reviewed where they landed.
 
@@ -5023,13 +5078,39 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         """
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
-            "allow-comments: ${{ contains(github.event.pull_request.labels.*.name, "
-            f"'{prose_lint.COMMENT_LABEL_NAME}') || "
+            "allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || "
             "(github.event.pull_request.head.repo.full_name == github.repository && "
             "github.head_ref == 'develop' && "
             "github.base_ref == github.event.repository.default_branch) }}",
             workflow,
         )
+
+    def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
+        """The payload is a snapshot from the event, which a label applied after it never reaches.
+
+        The live answer wins in both directions, so a payload that predates the label, or one
+        that predates its removal, decides nothing while the read succeeds.
+        """
+        for live, payload, expected in (
+            ("bug\ncomments\n", "false", "true"),
+            ("bug\n", "true", "false"),
+            ("", "true", "false"),
+            ("comments-wanted\n", "false", "false"),
+        ):
+            with self.subTest(live=live, payload=payload):
+                code, output, log, called = run_comments_label_step(live, payload)
+                self.assertEqual(("0", f"labeled={expected}"), (code, output), log)
+                self.assertIn("read the pull request's labels live", log.lower())
+                self.assertIn("repos/example/widget/issues/7/labels", called)
+                self.assertIn("--paginate", called)
+
+    def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
+        """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
+        for payload in ("true", "false"):
+            with self.subTest(payload=payload):
+                code, output, log, _ = run_comments_label_step(None, payload)
+                self.assertEqual(("0", f"labeled={payload}"), (code, output), log)
+                self.assertIn("could not be read live", log)
 
 
 class TestTheIssueRefRule(unittest.TestCase):

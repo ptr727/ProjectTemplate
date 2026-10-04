@@ -452,6 +452,27 @@ jobs:
             fi
           done <<< "$PYTHON_PROJECTS"
 
+      - name: Read comments label step
+        id: comments-label
+        if: github.event.pull_request != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABELS_PATH: repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels
+          PAYLOAD_LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'comments') }}
+        run: |
+          set -Eeuo pipefail
+          if names=$(gh api --paginate --jq '.[].name' "$LABELS_PATH"); then
+            labeled=false
+            if grep -qxF comments <<< "$names"; then
+              labeled=true
+            fi
+            echo "Read the pull request's labels live, comments label present: $labeled."
+          else
+            labeled=$PAYLOAD_LABELED
+            echo "The pull request's labels could not be read live, so the event payload's snapshot decides, comments label present: $labeled."
+          fi
+          echo "labeled=$labeled" >> "$GITHUB_OUTPUT"
+
       # A publish run's content is already gated by the pull request that introduced it.
       - name: Check prose step
         if: github.event.pull_request != null
@@ -465,7 +486,7 @@ jobs:
           # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
           # The head branch is tested as well as the base, since a feature branch may target the default branch directly and that one carries new lines.
           # The head repository is tested too, since a fork's branch may be named `develop` and its lines were reviewed nowhere.
-          allow-comments: ${{ contains(github.event.pull_request.labels.*.name, 'comments') || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'develop' && github.base_ref == github.event.repository.default_branch) }}
+          allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'develop' && github.base_ref == github.event.repository.default_branch) }}
 
       # An empty repo-gate-exclude-globs leaves the action's own input at its default, so the default caller excludes nothing.
       - name: Check repo gates step
