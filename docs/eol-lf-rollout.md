@@ -8,9 +8,9 @@ restatement of the rule. It is **hub-only** and is not carried downstream, the s
 than a fact a downstream repo's own docs need to carry.
 
 **Maintenance rule.** The conversion pull request lands in the converted repo, so check its box
-here in a hub pull request once that conversion has merged. Update the row where the conversion
+here in a hub pull request once that conversion reaches `main`. Update the row where the conversion
 found something the summary below did not anticipate, such as a file that has to stay CRLF beyond
-the ones already named. A row left unchecked after its conversion merged is stale prose, so this
+the ones already named. A row left unchecked after its conversion reached `main` is stale prose, so this
 doc is only trustworthy while that rule holds.
 
 ## What Changed
@@ -25,8 +25,8 @@ request that added this doc, and the `.gitattributes` default in a later one.
 
 ## Per-Repo Conversion
 
-A repo needs this conversion when any of these holds on any of its long-lived branches, `main`
-and `develop` both where it keeps both:
+A repo needs this conversion when any of these holds on the branch its work is based on, `develop`
+where it keeps one and `main` otherwise:
 
 - `.editorconfig` or `.gitattributes` is missing.
 - `.editorconfig` sets no `[*] end_of_line = lf`.
@@ -70,14 +70,15 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
    committed. Only `--renormalize`, or the add of a file new to the index, normalizes, and a plain
    re-add of a file already committed with CRLF leaves it unchanged. Before committing, confirm
    that `git diff --cached --ignore-cr-at-eol` shows no content change and that
-   `git diff --cached --stat` lists no file a step 2 pin covers, per
+   `git diff --cached --stat` lists no file a step 2 `-text` or `binary` pin covers, per
    [`references/line-endings.md`][line-endings] "Editing discipline".
 4. **Check the branch out fresh, then run `editorconfig-checker` clean.** `--renormalize` changes
    only the index, so the working tree it ran in keeps its CRLF bytes, and `editorconfig-checker`
-   reads the working tree. A new worktree of the branch holds the converted bytes. Then open the
+   reads the working tree. A detached worktree of the branch, `git worktree add --detach <path> <branch>`, holds the
+   converted bytes. Then open the
    pull request.
 
-Once the conversion reaches the default branch, check the box below and reconcile the repo's `registry/repos.json` entry per
+Once the conversion reaches `main`, check the box below and reconcile the repo's `registry/repos.json` entry per
 [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-onboarding] where the
 conversion surfaced anything the registry did not already record.
 
@@ -93,7 +94,7 @@ below is checked as converted rather than not applicable.
 
 Repos and their current `registry/repos.json` `workflowModel` / `lineEndings`, from the hub's own
 registry as of this doc's authorship, except where an entry records a later reclassification. A
-row marked **defaults in place** was read on its default branch on 2026-10-03 and had both
+row marked **defaults in place** was read on `main` on 2026-10-03 and had both
 `[*] end_of_line = lf` in `.editorconfig` and `* text=auto eol=lf` in `.gitattributes`, and no
 committed text file holding CRLF outside a `-text` pin. That is the state a conversion leaves, so
 the row is checked without a conversion pull request of its own.
