@@ -291,8 +291,7 @@ A repo that needs either input appends the block to the `merge-bot` job. This is
 
 The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and `delete-branch` (default `false`), which when `true` deletes the bot head once the merge lands. The `rules` input is a JSON array of `{"head": "<exact>"}` or `{"head-prefix": "<prefix>"}` plus `"base"`, default `[]`. The merge method follows the base, `develop` squashes and `main` merges, so a rule carries none. An App pull request that matches no rule is annotated with a warning rather than merged, so a renamed tracker branch is visible in the run rather than silent.
 
-Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate.
-Those two repos therefore drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
+Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate. Those two repos therefore drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
 
 ## Adopting the Gates
 
