@@ -34,7 +34,7 @@ on:
         type: string
         default: ''
       # Read through fromJSON into the unit-test job's matrix, which is expanded before any step runs, when test-matrix is unset.
-      # Either way the entry check in the unit-test job reads the raw input, and it is the only guard when test-matrix is set.
+      # Either way the entry check in the unit-test job reads the raw input, and it is that job's only guard when test-matrix is set.
       python-versions:
         description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
