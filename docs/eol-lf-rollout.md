@@ -51,12 +51,14 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
 
 1. **Merge the hub's defaults into `.editorconfig` and `.gitattributes`, never overwrite either
    file.** Remove the old fleet defaults, `[*] end_of_line = crlf` and `* -text`, rather than
-   leaving them beside the new ones. Put the hub's `* text=auto eol=lf` line first in
-   `.gitattributes` and its `[*]` section first in `.editorconfig`, then the `*.bat` / `*.cmd`
-   CRLF pins, then every attribute and section that is the repo's own, such as LFS filters,
-   `linguist-generated`, `export-ignore`, and path pins, and then the step 2 pins. In both files
-   a later match overrides a property an earlier one set, so a pin above the default is silently
-   cancelled, and a `* -text` below it unsets `text` for every file.
+   leaving them beside the new ones, and remove the old fleet's per-type LF pins too, such as
+   `*.sh`, `uv.lock`, Dockerfiles, and its by-path script pins, since the new `[*]` default covers
+   them. Put the hub's `* text=auto eol=lf` line first in `.gitattributes` and its `[*]` section
+   first in `.editorconfig`, then the `*.bat` / `*.cmd` CRLF pins, then every attribute and section
+   that is the repo's own, such as LFS filters, `linguist-generated`, `export-ignore`, and the
+   repo's own path pins, and then the step 2 pins. In both files a later match overrides a property
+   an earlier one set, so a pin above the default is silently cancelled, and a `* -text` below it
+   unsets `text` for every file.
 2. **Pin every vendor file whose bytes the repo has to keep, before renormalizing.** `text=auto`
    leaves a file byte-preserved only where Git's heuristic detects it as binary, so a text-shaped
    vendor download, a STEP model or DXF and SVG artwork for example, is normalized unless pinned.
