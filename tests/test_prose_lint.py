@@ -1968,6 +1968,59 @@ class TestSentenceLength(BaitCase):
             with self.subTest(text=text[:30]):
                 self.assertEqual([], self.found(text))
 
+    def over(self, n: int = 6) -> str:
+        return " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + n))
+
+    def test_an_edit_to_a_continuation_line_flags_the_sentence(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        text = "Intro.\n\n" + " ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"}, allowed={4})
+        self.assertEqual([4], [n for n, _, _ in found])
+        self.assertEqual([], prose_lint.check_file(path, {"sentence-length"}, allowed={1}))
+
+    def test_front_matter_is_not_joined_into_the_body(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"---\nname: {half}\ndescription: {half}\n...\n\nBody text.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_other_block_boundaries_end_a_block(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        cases = {
+            "setext": f"{half}\n===\n{half}\n",
+            "setext dashes": f"{half}\n---\n{half}\n",
+            "thematic": f"{half}\n***\n{half}\n",
+            "thematic underscores": f"{half}\n___\n{half}\n",
+            "html": f"{half}\n<br>\n{half}\n",
+            "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
+            "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
+            "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(text))
+
+    def test_an_indented_list_continuation_is_not_code(self) -> None:
+        text = f"- Item.\n\n    {self.over()}.\n"
+        self.assertEqual([(3, "sentence-length")], self.found(text))
+
+    def test_a_wrapped_code_span_is_one_word(self) -> None:
+        cap = prose_lint.SENTENCE_WORD_CAP
+        lead = " ".join(["word"] * (cap - 3))
+        text = f"{lead} `one\ntwo three four` end.\n"
+        self.assertEqual([], self.found(text))
+
+    def test_a_wrapped_quotation_is_one_word(self) -> None:
+        cap = prose_lint.SENTENCE_WORD_CAP
+        lead = " ".join(["word"] * (cap - 3))
+        text = f'{lead} "one two\nthree four five" end.\n'
+        self.assertEqual([], self.found(text))
+
+    def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
+        tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro line.\n" + tail))
+
     def test_the_rule_is_markdown_only(self) -> None:
         """A source file's long lines are code, which no sentence rule judges."""
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)

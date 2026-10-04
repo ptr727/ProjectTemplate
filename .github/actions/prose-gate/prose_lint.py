@@ -1703,15 +1703,45 @@ def sentences(span: str) -> list[str]:
 
 
 LIST_MARKER = re.compile(r"^\s*(?:[-*+]|[0-9]+[.)])\s")
+SETEXT_EQUALS = re.compile(r"^ {0,3}=+\s*$")
+THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
+TABLE_DELIMITER = re.compile(
+    r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$|^\s*\|\s*:?-+:?\s*\|?\s*$"
+)
+HTML_LINE = re.compile(r"^\s*<(?:[A-Za-z/!?]|!--)")
 
 
-def sentence_length_findings(lines: list[str]) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in Markdown prose, each judged whole and reported where it starts.
+def mask_code_and_quotes(text: str) -> str:
+    """The text with each code span and quotation blanked to one token of the same length.
+
+    The length is kept so an offset in the result is still an offset in the original.
+    A terminator ending a quotation survives, as `strip_quoted` keeps it.
+    """
+
+    def code(m: re.Match[str]) -> str:
+        return "`" * len(m.group())
+
+    def quote(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if inner and inner[-1] in ".!?":
+            return '"' * (len(inner) + 1) + inner[-1]
+        return '"' * len(m.group())
+
+    return re.sub(r'"([^"]*)"', quote, re.sub(r"`[^`]*`", code, text))
+
+
+def sentence_length_findings(
+    lines: list[str], allowed: set[int] | None = None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in Markdown prose, each judged whole.
 
     A paragraph, or a list item with its continuation lines, is one block joined before the split.
-    A blank line, a heading, a table row, a blockquote, a link definition, a fence, and the next
-    list item each end the block, so no sentence is measured across one of them.
-    A code span and a quotation each collapse to one token, deliberately.
+    Front matter, headings, table rows, blockquotes, link definitions, HTML, fences, and code end a block.
+    A blank line, a thematic break, and the next list item end it too.
+    A code span and a quotation each collapse to one token, judged on the joined block.
+    A sentence is reported on its first line, so the finding sits where the sentence starts.
+    Given the changed lines, it is reported on its first changed line, or dropped when none changed.
+    That keeps an edit to a continuation line from hiding the sentence it pushed over the cap.
     """
     out: list[tuple[int, str, str]] = []
     block: list[tuple[int, str]] = []
@@ -1719,47 +1749,93 @@ def sentence_length_findings(lines: list[str]) -> list[tuple[int, str, str]]:
     def flush() -> None:
         if not block:
             return
-        text = ""
+        raw = ""
         starts: list[int] = []
         for _, span in block:
-            if text:
-                text += " "
-            starts.append(len(text))
-            text += span
+            if raw:
+                raw += " "
+            starts.append(len(raw))
+            raw += span
         numbers = [n for n, _ in block]
         block.clear()
+        text = mask_code_and_quotes(raw)
         pos = 0
         for m in [*SENTENCE_BREAK.finditer(text), None]:
-            piece = text[pos : m.start()] if m else text[pos:]
+            end = m.start() if m else len(text)
+            piece = text[pos:end]
             words = len(piece.split())
             if words > SENTENCE_WORD_CAP:
-                lead = len(piece) - len(piece.lstrip())
-                msg = (
-                    f"{words} words in one sentence -> "
-                    f"sentences of {SENTENCE_WORD_CAP} words or fewer"
-                )
-                out.append((numbers[bisect_right(starts, pos + lead) - 1], "sentence-length", msg))
+                first = bisect_right(starts, pos) - 1
+                last = bisect_right(starts, max(end - 1, pos)) - 1
+                rows = numbers[first : last + 1]
+                hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
+                if hit:
+                    msg = (
+                        f"{words} words in one sentence -> "
+                        f"sentences of {SENTENCE_WORD_CAP} words or fewer"
+                    )
+                    out.append((hit, "sentence-length", msg))
             if m:
                 pos = m.end()
 
-    in_fence = False
-    for i, line in enumerate(lines, 1):
+    start = 0
+    if lines and lines[0].rstrip("\r").strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].rstrip("\r").strip() in ("---", "..."):
+                start = j + 1
+                break
+    in_fence = in_comment = in_table = in_code = in_list = False
+    prev_blank = True
+    for i, line in enumerate(lines[start:], start + 1):
         line = line.rstrip("\r")
+        blank = not line.strip()
+        was_blank, prev_blank = prev_blank, blank
         if CODE_FENCE.match(line):
             in_fence = not in_fence
             flush()
             continue
-        span = strip_quoted(strip_inline_code(line)).strip()
-        if (
-            in_fence
-            or not span
-            or span.startswith(("|", ">", "#"))
-            or re.match(r"^\[[^\]]+\]:", span)
-        ):
+        if in_fence:
+            continue
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if blank:
+            flush()
+            in_table = False
+            continue
+        indented = line.startswith(("    ", "\t"))
+        if in_code:
+            if indented:
+                continue
+            in_code = False
+        if in_table:
+            continue
+        if not block and was_blank and indented and not in_list:
+            in_code = True
+            continue
+        if not indented and not LIST_MARKER.match(line):
+            in_list = False
+        if HTML_LINE.match(line):
+            flush()
+            in_comment = line.lstrip().startswith("<!--") and "-->" not in line
+            continue
+        if TABLE_DELIMITER.match(line) and "|" in line:
+            block.clear()
+            in_table = True
+            continue
+        if SETEXT_EQUALS.match(line) or (block and THEMATIC_BREAK.match(line) and "-" in line):
+            block.clear()
+            continue
+        if THEMATIC_BREAK.match(line):
+            flush()
+            continue
+        span = line.strip()
+        if span.startswith(("|", ">", "#")) or re.match(r"^\[[^\]]+\]:", span):
             flush()
             continue
         if LIST_MARKER.match(line):
             flush()
+            in_list = True
         block.append((i, span))
     flush()
     return out
@@ -2406,7 +2482,12 @@ def issue_ref_findings(
     return out
 
 
-def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tuple[int, str, str]]:
+def check_file(
+    path: Path,
+    rules: set[str],
+    root: Path | None = None,
+    allowed: set[int] | None = None,
+) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode("utf-8")
@@ -2435,7 +2516,7 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     if "sentence-length" in rules and path.suffix == ".md":
-        out.extend(sentence_length_findings(lines))
+        out.extend(sentence_length_findings(lines, allowed))
     in_fence = False
     prev_txt = ""
     prev_no = 0
@@ -2731,7 +2812,7 @@ def main(argv: list[str] | None = None) -> int:
     byfile: dict[str, int] = {}
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
