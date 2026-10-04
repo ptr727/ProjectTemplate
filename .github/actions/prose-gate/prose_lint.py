@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tokenize
 import unicodedata
+from bisect import bisect_right
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
@@ -1701,6 +1702,69 @@ def sentences(span: str) -> list[str]:
     return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
+LIST_MARKER = re.compile(r"^\s*(?:[-*+]|[0-9]+[.)])\s")
+
+
+def sentence_length_findings(lines: list[str]) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in Markdown prose, each judged whole and reported where it starts.
+
+    A paragraph, or a list item with its continuation lines, is one block joined before the split.
+    A blank line, a heading, a table row, a blockquote, a link definition, a fence, and the next
+    list item each end the block, so no sentence is measured across one of them.
+    A code span and a quotation each collapse to one token, deliberately.
+    """
+    out: list[tuple[int, str, str]] = []
+    block: list[tuple[int, str]] = []
+
+    def flush() -> None:
+        if not block:
+            return
+        text = ""
+        starts: list[int] = []
+        for _, span in block:
+            if text:
+                text += " "
+            starts.append(len(text))
+            text += span
+        numbers = [n for n, _ in block]
+        block.clear()
+        pos = 0
+        for m in [*SENTENCE_BREAK.finditer(text), None]:
+            piece = text[pos : m.start()] if m else text[pos:]
+            words = len(piece.split())
+            if words > SENTENCE_WORD_CAP:
+                lead = len(piece) - len(piece.lstrip())
+                msg = (
+                    f"{words} words in one sentence -> "
+                    f"sentences of {SENTENCE_WORD_CAP} words or fewer"
+                )
+                out.append((numbers[bisect_right(starts, pos + lead) - 1], "sentence-length", msg))
+            if m:
+                pos = m.end()
+
+    in_fence = False
+    for i, line in enumerate(lines, 1):
+        line = line.rstrip("\r")
+        if CODE_FENCE.match(line):
+            in_fence = not in_fence
+            flush()
+            continue
+        span = strip_quoted(strip_inline_code(line)).strip()
+        if (
+            in_fence
+            or not span
+            or span.startswith(("|", ">", "#"))
+            or re.match(r"^\[[^\]]+\]:", span)
+        ):
+            flush()
+            continue
+        if LIST_MARKER.match(line):
+            flush()
+        block.append((i, span))
+    flush()
+    return out
+
+
 def list_spans(s: str) -> list[str]:
     """Split a line into the spans that each hold their own list.
 
@@ -2370,6 +2434,8 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
+    if "sentence-length" in rules and path.suffix == ".md":
+        out.extend(sentence_length_findings(lines))
     in_fence = False
     prev_txt = ""
     prev_no = 0
@@ -2443,24 +2509,6 @@ def check_file(path: Path, rules: set[str], root: Path | None = None) -> list[tu
             for m in BRITISH_RE.finditer(strip_inline_code(" ".join(texts))):
                 found = m.group(0)
                 out.append((i, "spelling", f"British spelling '{found}' -> '{us_form(found)}'"))
-
-        if "sentence-length" in rules and path.suffix == ".md":
-            span = prose.strip()
-            # A table row, a heading, a link definition, and a blockquote are not prose sentences.
-            structural = (
-                not span or span.startswith(("|", ">", "#")) or re.match(r"^\s*\[[^\]]+\]:", span)
-            )
-            if not structural:
-                # Counted per line, so a wrapped sentence is fragments the split rule owns.
-                # A code span and a quotation each collapse to one token above, deliberately.
-                for sentence in sentences(span):
-                    words = len(sentence.split())
-                    if words > SENTENCE_WORD_CAP:
-                        msg = (
-                            f"{words} words in one sentence -> "
-                            f"sentences of {SENTENCE_WORD_CAP} words or fewer"
-                        )
-                        out.append((i, "sentence-length", msg))
 
         if "sentence-split" in rules and path.suffix == ".md":
             stripped = txt.strip()

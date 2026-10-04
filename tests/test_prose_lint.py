@@ -1927,6 +1927,47 @@ class TestSentenceLength(BaitCase):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
+    def found(self, text: str) -> list[tuple[int, str]]:
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"})
+        return [(n, kind) for n, kind, _ in found]
+
+    def test_a_wrapped_sentence_over_the_cap_is_flagged_where_it_starts(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        one_line = " ".join(words) + "."
+        wrapped = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n"
+        wrapped += " ".join(words[20:]) + "."
+        expected = [(3, "sentence-length")]
+        self.assertEqual(expected, self.found(f"Intro.\n\n{one_line}\n"))
+        self.assertEqual(expected, self.found(f"Intro.\n\n{wrapped}\n"))
+
+    def test_a_wrapped_sentence_within_the_cap_passes(self) -> None:
+        words = ["word"] * 20
+        self.assertEqual([], self.found(" ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"))
+
+    def test_short_sentences_across_a_line_break_are_judged_alone(self) -> None:
+        lead = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([], self.found(f"{lead}.\n{lead}.\n"))
+
+    def test_a_list_item_is_measured_with_its_continuation_lines(self) -> None:
+        words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
+        item = "- " + " ".join(words[:15]) + "\n  " + " ".join(words[15:]) + ".\n"
+        self.assertEqual([(2, "sentence-length")], self.found("Intro:\n" + item))
+
+    def test_separate_blocks_are_never_joined(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        fence = "```\ncode\n```\n"
+        for text in (
+            f"- {half}\n- {half}\n",
+            f"{half}\n\n{half}\n",
+            f"{half}\n# Head\n{half}\n",
+            f"{half}\n{fence}{half}\n",
+            f"{half}\n| a | b |\n{half}\n",
+        ):
+            with self.subTest(text=text[:30]):
+                self.assertEqual([], self.found(text))
+
     def test_the_rule_is_markdown_only(self) -> None:
         """A source file's long lines are code, which no sentence rule judges."""
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
