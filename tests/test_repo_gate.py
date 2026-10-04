@@ -11,6 +11,7 @@ Run as `python3 tests/test_repo_gate.py`, or under `python3 -m unittest discover
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import os
 import re
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -670,7 +672,23 @@ def schema_ready() -> bool:
     return bool(shutil.which("uvx") or shutil.which("pipx"))
 
 
-NEEDS_DOCKER = unittest.skipUnless(docker_ready(), "no docker daemon for shellcheck")
+_DOCKER_READY: list[bool] = []
+
+
+def NEEDS_DOCKER(test: Callable[..., None]) -> Callable[..., None]:
+    """Skip at run time, so collecting the tests never probes docker or pulls an image."""
+
+    @functools.wraps(test)
+    def wrapper(self: unittest.TestCase, *args: object) -> None:
+        if not _DOCKER_READY:
+            _DOCKER_READY.append(docker_ready())
+        if not _DOCKER_READY[0]:
+            self.skipTest("no docker daemon for shellcheck")
+        test(self, *args)
+
+    return wrapper
+
+
 NEEDS_SCHEMA = unittest.skipUnless(schema_ready(), "neither uvx nor pipx present")
 
 
@@ -786,6 +804,27 @@ class TestCompositeActions(TreeCase):
 
     def test_an_unclosed_expression_is_left_as_raw_text(self) -> None:
         self.assertEqual("echo ${{ x }\nrm", repo_gate.substitute_expressions("echo ${{ x }\nrm"))
+
+    def test_an_unclosed_opener_before_a_closed_expression_stays_raw(self) -> None:
+        text = repo_gate.substitute_expressions("echo ${{ x }\nrm ${{ y }} z")
+        self.assertEqual("echo ${{ x }\nrm ${GHA_EXPR} z", text)
+
+    @NEEDS_DOCKER
+    def test_an_unclosed_opener_does_not_swallow_the_text_before_the_next_expression(self) -> None:
+        hits = self.body_hits("echo ${{ x }\ncd ${{ y }}")
+        self.assertTrue(any("run line 2:" in h for h in hits), hits)
+
+    def test_an_inspect_timeout_and_oserror_name_the_inspect_step(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        timeout = subprocess.TimeoutExpired("docker", 1)
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, timeout]):
+            self.assertIn(
+                "image inspect did not finish within 30s", repo_gate.docker_unreachable() or ""
+            )
+        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, OSError("gone")]):
+            self.assertIn(
+                "image inspect could not start: gone", repo_gate.docker_unreachable() or ""
+            )
 
     def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
         self.assertEqual("a ${GHA_EXPR}\n", repo_gate.substitute_expressions("a ${{ x\ny }}"))

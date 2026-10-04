@@ -477,6 +477,7 @@ def step_dialect(shell: object) -> str | None:
 def expression_end(body: str, start: int) -> int:
     """The index just past the `}}` closing the expression at `start`, quoted strings skipped.
 
+    An expression whose `}}` comes after the next opener outside a string is unterminated too.
     An unterminated expression returns -1, so the caller leaves it as raw text for shellcheck.
     """
     at = start + len(EXPRESSION_START)
@@ -487,6 +488,8 @@ def expression_end(body: str, start: int) -> int:
             quoted = not quoted
         elif not quoted and body.startswith("}}", at):
             return at + 2
+        elif not quoted and body.startswith(EXPRESSION_START, at):
+            return -1
         at += 1
     return -1
 
@@ -578,8 +581,13 @@ def docker_unreachable() -> str | None:
             check=False,
             timeout=DOCKER_TIMEOUT,
         )
-        if present.returncode == 0:
-            return None
+    except subprocess.TimeoutExpired:
+        return f"docker image inspect did not finish within {DOCKER_TIMEOUT}s"
+    except OSError as error:
+        return f"docker image inspect could not start: {error}"
+    if present.returncode == 0:
+        return None
+    try:
         pull = subprocess.run(
             ["docker", "pull", "--quiet", SHELLCHECK_IMAGE],
             capture_output=True,
