@@ -4805,6 +4805,13 @@ class TestCheckShapes(unittest.TestCase):
             kept = sorted((n["name"], n["conclusion"]) for n in nodes)
             self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
+    def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
+        """A misspelled field would give every run the fallback identity and disable the dedup."""
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn(
+            "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
+        )
+
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
         """A node missing its suite reads as suite zero under no workflow and no app."""
         bare = check(name="lint")
