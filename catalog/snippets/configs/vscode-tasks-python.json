@@ -14,7 +14,7 @@
         // A repo whose CI type checker is mypy, with pyright editor-only, swaps "Python Types" to
         // `uv run mypy`.
         // A pyright-strict repo keeps `uv run pyright`.
-        // A subdirectory listed in CI's `python-directories` input adapts "Python Types" to the command `validate-task.yml`'s "Type check Python step" runs for that directory.
+        // A subdirectory listed in CI's `python-directories` input adapts "Python Types" to the command the hub's `validate-task.yml` "Type check Python step", at the commit this repository's caller workflow pins, runs for that directory.
         // A build-profile directory in its pip form, a `requirements*.txt` with no `uv.lock`, keeps every task here, "Python Test" included, and runs no `uv sync` and no project-scoped `uv run`, since either writes a `uv.lock`.
         // It replaces "uv Sync" with a `dependsOrder: sequence` aggregator over `uv venv --clear`, one `uv pip install` taking every `requirements*.txt` as a `-r` argument, and `uv pip install -e .` where its pyproject.toml has a [project] table, and adapts or drops "uv Upgrade", which runs `uv sync` too.
         // It runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
