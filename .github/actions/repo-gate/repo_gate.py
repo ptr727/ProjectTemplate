@@ -435,7 +435,9 @@ UVX_READER = (
     "def step(item):\n"
     "    if not isinstance(item, dict):\n"
     "        return None\n"
-    "    out = {key: item[key] for key in ('run', 'name') if isinstance(item.get(key), str)}\n"
+    "    out = {'run': item['run']} if isinstance(item.get('run'), str) else {}\n"
+    "    if item.get('name') and not isinstance(item['name'], (dict, list)):\n"
+    "        out['name'] = str(item['name'])\n"
     "    if item.get('shell') is not None:\n"
     "        out['shell'] = item['shell'] if isinstance(item['shell'], str) else ''\n"
     "    return out\n"
@@ -502,10 +504,13 @@ def pyyaml_python() -> str:
 
 def load_through_uvx(path: Path) -> list[object]:
     """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
+    python = pyyaml_python()
     try:
-        result = run_utf8([pyyaml_python(), "-c", UVX_READER, str(path)])
+        result = run_utf8([python, "-c", UVX_READER, str(path)])
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
+    except OSError as error:
+        raise UvxUnavailable(f"the interpreter uvx provided could not start: {error}") from None
     if result.returncode != 0:
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         raise ValueError(lines[-1] if lines else f"the reader exited {result.returncode}")

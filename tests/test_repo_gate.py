@@ -1082,6 +1082,16 @@ class TestCompositeActions(TreeCase):
         self.assertNotIn("second line", hits[0])
         self.assertEqual("schema ran", hits[1])
 
+    def test_a_vanished_interpreter_is_one_finding_and_the_schema_still_runs(self) -> None:
+        gone = FileNotFoundError(2, "No such file or directory", "/gone")
+        run = mock.Mock(side_effect=[self.completed(0, "/gone\n"), gone])
+        hits = self.uvx_hits(run, {"docker": "/d", "uvx": "/u"})
+        self.assertEqual(2, run.call_count)
+        self.assertEqual(2, len(hits))
+        self.assertIn("the interpreter uvx provided could not start", hits[0])
+        self.assertIn("/gone", hits[0])
+        self.assertEqual("schema ran", hits[1])
+
     def stub_python(self, body: str) -> str:
         stub = self.tmp / "python"
         stub.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
@@ -1117,6 +1127,26 @@ class TestCompositeActions(TreeCase):
         )
         with self.assertRaises(ProcessLookupError):
             os.kill(int(pid_file.read_text(encoding="utf-8")), 0)
+
+    @NEEDS_UVX
+    def test_the_real_reader_skips_a_non_string_shell(self) -> None:
+        files = self.action("    - shell: 5\n      run: echo $x\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        body.assert_not_called()
+
+    @NEEDS_UVX
+    def test_the_real_reader_labels_a_numeric_name(self) -> None:
+        files = self.action("    - name: 2024\n      shell: bash\n      run: echo $x\n")
+        with (
+            mock.patch.dict(sys.modules, {"yaml": None}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        self.assertEqual(f"{files[0]} step 1 (2024)", body.call_args.args[0])
 
     @NEEDS_UVX
     def test_the_real_reader_counts_documents_like_pyyaml(self) -> None:
