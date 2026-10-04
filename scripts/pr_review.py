@@ -907,6 +907,9 @@ def gh_graphql(query: str, **variables) -> dict:
 
     `errors` is checked rather than trusted to the exit code, since a GraphQL document can fail
     per-field while the request itself succeeds, and the caller would read the null that leaves.
+
+    `gh api graphql` exits non-zero with the JSON still on stdout when the response carries errors,
+    so that stdout is read first. Only an error set made of `workflowRun` paths is tolerated.
     """
     # Every read below decodes as UTF-8 rather than as whatever the platform's locale is.
     # `gh` emits UTF-8 on every platform, where a Windows console locale is cp1252.
@@ -915,14 +918,31 @@ def gh_graphql(query: str, **variables) -> dict:
     for name, value in variables.items():
         argv += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
     r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
-    if r.returncode != 0:
+    try:
+        payload = json.loads(r.stdout)
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or (r.returncode != 0 and not payload.get("errors")):
         sys.stderr.write(r.stderr[:800])
         raise SystemExit(f"gh graphql failed rc={r.returncode}")
-    payload = json.loads(r.stdout)
-    if payload.get("errors"):
-        sys.stderr.write(json.dumps(payload["errors"])[:800])
+    errors = payload.get("errors")
+    if errors and not all(_is_workflow_run_error(e) for e in errors):
+        sys.stderr.write(json.dumps(errors)[:800])
         raise SystemExit("gh graphql reported errors")
+    if payload.get("data") is None:
+        sys.stderr.write(json.dumps(errors)[:800])
+        raise SystemExit("gh graphql returned no data")
     return payload["data"]
+
+
+def _is_workflow_run_error(error: object) -> bool:
+    """True where the error is a per-field failure on `workflowRun` and nothing else.
+
+    A token without Actions read access can fail that one field, and the field is null in `data`.
+    The check dedupe then falls back to the app slug, so the digest does not need it.
+    """
+    path = error.get("path") if isinstance(error, dict) else None
+    return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
 
 def gql(query: str, owner: str, repo: str, num: int) -> dict:

@@ -25,6 +25,7 @@ import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -7880,6 +7881,72 @@ class TestHarness(unittest.TestCase):
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
         self.assertGreaterEqual(loaded.countTestCases(), 48)
+
+
+class TestWorkflowRunErrorTolerance(unittest.TestCase):
+    """`gh_graphql` tolerates a per-field `workflowRun` error and no other."""
+
+    WORKFLOW_RUN_PATH: ClassVar[list[str]] = [
+        "repository",
+        "pullRequest",
+        "commits",
+        "checkSuite",
+        "workflowRun",
+    ]
+
+    def read(self, payload_in: dict, code: int = 1) -> dict:
+        """Run `gh_graphql` against a constructed response, as `gh api graphql` emits it."""
+        done = subprocess.CompletedProcess([], code, json.dumps(payload_in), "")
+        with mock.patch.object(pr_review.subprocess, "run", return_value=done):
+            return pr_review.gh_graphql("query{ x }")
+
+    def test_a_workflow_run_only_error_is_tolerated_with_the_data_kept(self) -> None:
+        data = {"repository": {"name": "r"}}
+        errors = [{"message": "forbidden", "path": self.WORKFLOW_RUN_PATH}]
+        self.assertEqual(data, self.read({"data": data, "errors": errors}))
+
+    def test_a_mixed_error_set_still_aborts(self) -> None:
+        errors = [
+            {"message": "forbidden", "path": self.WORKFLOW_RUN_PATH},
+            {"message": "other", "path": ["repository", "pullRequest", "reviews"]},
+        ]
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.read({"data": {"repository": {}}, "errors": errors})
+
+    def test_an_error_on_another_path_or_with_no_path_still_aborts(self) -> None:
+        for error in (
+            {"message": "x", "path": ["repository", "workflowRunX"]},
+            {"message": "x", "path": []},
+            {"message": "x"},
+        ):
+            with (
+                self.subTest(error=error),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                self.read({"data": {"repository": {}}, "errors": [error]})
+
+    def test_a_failed_call_with_no_json_errors_still_aborts(self) -> None:
+        done = subprocess.CompletedProcess([], 1, "", "HTTP 502")
+        with (
+            mock.patch.object(pr_review.subprocess, "run", return_value=done),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            pr_review.gh_graphql("query{ x }")
+
+    def test_the_dedupe_falls_back_to_the_app_slug_for_a_null_workflow_run(self) -> None:
+        """A null `workflowRun` groups by app slug, so two suites of one app still supersede."""
+        old = check(
+            name="lint", conclusion="FAILURE", suite=10, workflow=None, slug="github-actions"
+        )
+        new = check(
+            name="lint", conclusion="SUCCESS", suite=20, workflow=None, slug="github-actions"
+        )
+        other = check(name="lint", conclusion="FAILURE", suite=5, workflow=None, slug="other-app")
+        nodes = pr_review.check_nodes(payload([review()], checks=[old, new, other]))
+        kept = sorted((n["name"], n["conclusion"]) for n in nodes)
+        self.assertEqual([("lint", "FAILURE"), ("lint", "SUCCESS")], kept)
 
 
 if __name__ == "__main__":
