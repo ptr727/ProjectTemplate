@@ -51,6 +51,7 @@ class RepoCase(unittest.TestCase):
     """
 
     target = "develop"
+    ref_format: str | None = None
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
@@ -59,7 +60,10 @@ class RepoCase(unittest.TestCase):
         # The file then outlives the run, and two concurrent runs collide on one name.
         self.outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.isolate_git_config()
-        run(self.tmp, "init", "--initial-branch=develop", ".")
+        init = ["init", "--initial-branch=develop"]
+        if self.ref_format is not None:
+            init.append(f"--ref-format={self.ref_format}")
+        run(self.tmp, *init, ".")
         run(self.tmp, "config", "user.email", "test@example.invalid")
         run(self.tmp, "config", "user.name", "Test")
         run(self.tmp, "config", "commit.gpgsign", "false")
@@ -559,6 +563,105 @@ class ContentKeyCase(RepoCase):
         os.chdir(self.tmp / "sub")
         self.assertEqual(local_review.repo_root(), self.tmp)
         self.assertEqual(self.digest(), from_root, "the key changed with the working directory")
+
+
+class DanglingRemoteTrackingCase(RepoCase):
+    """A remote-tracking ref that exists but resolves to no object refuses rather than falls through.
+
+    `show-ref --verify` rejects both shapes below, and reading that as "no such ref" reached the
+    as-written step, where a local branch sharing the short name defined the review scope.
+    """
+
+    def shadow_with_a_local_branch(self) -> None:
+        run(self.tmp, "branch", "upstream/main", "HEAD")
+
+    def test_a_symbolic_ref_whose_target_is_gone_refuses(self) -> None:
+        run(self.tmp, "symbolic-ref", "refs/remotes/upstream/main", "refs/remotes/upstream/gone")
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_dangling_symbolic_ref_is_found_without_its_loose_file(self) -> None:
+        """A files store also holds it as a loose file, which would hide a gap on a reftable store."""
+        run(self.tmp, "symbolic-ref", "refs/remotes/upstream/main", "refs/remotes/upstream/gone")
+        hidden = FileNotFoundError(2, "No such file or directory")
+        with unittest.mock.patch.object(local_review.Path, "stat", side_effect=hidden):
+            self.assertTrue(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
+
+    def test_a_loose_ref_file_that_cannot_be_checked_is_a_boundary(self) -> None:
+        """A name `check-ref-format` accepts can still be one the filesystem rejects, as too long.
+
+        `Path.is_file` answers False for that on Python 3.14, which would fall through again, so
+        it is made to answer that way on every version.
+        """
+        too_long = OSError(36, "File name too long")
+        with (
+            unittest.mock.patch.object(local_review.Path, "stat", side_effect=too_long),
+            unittest.mock.patch.object(local_review.Path, "is_file", return_value=False),
+            self.assertRaises(local_review.CannotRun),
+        ):
+            local_review.remote_tracking_ref("upstream/main", self.tmp)
+
+    def test_a_ref_naming_an_absent_object_refuses(self) -> None:
+        content = self.outside / "gone.txt"
+        content.write_text("about to go missing\n", encoding="utf-8")
+        blob = run(self.tmp, "hash-object", "-w", str(content)).strip()
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main", blob)
+        loose = local_review.objects_dir(self.tmp) / blob[:2] / blob[2:]
+        loose.unlink()
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_an_empty_loose_ref_file_refuses(self) -> None:
+        """An empty ref file, such as a crash can leave, is skipped by every ref-listing command."""
+        if self.ref_format == "reftable":
+            self.skipTest("a reftable store holds no loose ref files")
+        loose = (
+            self.tmp
+            / run(self.tmp, "rev-parse", "--git-path", "refs/remotes/upstream/main").strip()
+        )
+        loose.parent.mkdir(parents=True, exist_ok=True)
+        loose.write_bytes(b"")
+        self.shadow_with_a_local_branch()
+        with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
+            local_review.target_ref("upstream/main", self.tmp)
+
+    def test_a_name_git_rejects_is_not_looked_for_on_disk(self) -> None:
+        """`refs/remotes/../../HEAD` would otherwise reach the repository's own HEAD file."""
+        self.assertIsNone(local_review.remote_tracking_ref("../../HEAD", self.tmp))
+
+    def test_a_ref_whose_parent_is_a_ref_file_is_absent(self) -> None:
+        """A files store holds `refs/remotes/upstream` as a file, so the lookup meets ENOTDIR."""
+        run(self.tmp, "update-ref", "refs/remotes/upstream", "HEAD")
+        self.assertIsNone(local_review.remote_tracking_ref("upstream/main", self.tmp))
+
+    def test_a_ref_nested_under_the_name_is_not_the_name(self) -> None:
+        """`for-each-ref` also lists a ref nested under the name, so only an exact match counts."""
+        run(self.tmp, "update-ref", "refs/remotes/upstream/main/nested", "HEAD")
+        self.assertFalse(local_review.ref_name_exists("refs/remotes/upstream/main", self.tmp))
+
+    def test_an_absent_ref_still_falls_through_to_the_as_written_step(self) -> None:
+        """Only a ref that exists refuses, so a target with no remote-tracking ref still resolves."""
+        self.shadow_with_a_local_branch()
+        self.assertEqual(local_review.target_ref("upstream/main", self.tmp), "upstream/main")
+
+
+class ReftableDanglingRemoteTrackingCase(DanglingRemoteTrackingCase):
+    """The same shapes on the reftable backend, which stores refs in no loose file at all."""
+
+    ref_format = "reftable"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as probe:
+            proc = subprocess.run(
+                ["git", "init", "--ref-format=reftable", probe],
+                capture_output=True,
+                check=False,
+            )
+        if proc.returncode != 0:
+            raise unittest.SkipTest("this git cannot create a reftable repository")
 
 
 class HeadContentCase(RepoCase):
@@ -1317,6 +1420,7 @@ class ExitCodeCase(RepoCase):
         self.assertEqual(code, 0)
         data = json.loads(buf.getvalue())
         self.assertEqual(data["reviewers"], ["agent-skill"])
+        self.assertEqual(data["findings"], {"agent-skill": 2})
         self.assertTrue(data["covered"])
 
     def test_record_reports_what_it_recorded(self) -> None:

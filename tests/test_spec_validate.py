@@ -330,6 +330,109 @@ class TreeSourceRootCase(unittest.TestCase):
                 self.assertFalse(validate.reduces_to_repo_root(value))
 
 
+class TreePathGateCase(unittest.TestCase):
+    """A tree path `scripts/carry.py` refuses is refused here too, run as the real script against a scratch tree.
+
+    Calling `escapes_repo_root` directly proves the rule and leaves the tree loop's call to it unproven.
+    Every run adds a marker tree carrying one deliberate defect the loop always reports, which is how each case proves the loop ran.
+    """
+
+    def run_against(self, trees: list[dict], make_tree=None) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            shutil.copytree(validate.ROOT / "registry", root / "registry")
+            (root / "real" / "sub").mkdir(parents=True)
+            if make_tree is not None:
+                make_tree(root)
+            files_path = root / "spec" / "files.json"
+            files = json.loads(files_path.read_text(encoding="utf-8"))
+            marker = self.tree("real", "marker-target", fidelity="verbatim")
+            files["trees"] = trees + [marker]
+            files_path.write_text(json.dumps(files), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertIn(
+                "files.json: tree real fidelity must be 'verbatim-tree'",
+                output,
+                "the tree loop was never reached, so an absence assertion would be vacuous",
+            )
+            return output
+
+    @staticmethod
+    def tree(source: str, target: str, fidelity: str = "verbatim-tree") -> dict:
+        return {
+            "source": source,
+            "target": target,
+            "fidelity": fidelity,
+            "appliesTo": "*",
+            "include": ["**/*"],
+            "prune": True,
+        }
+
+    @staticmethod
+    def link_alias(root: Path) -> None:
+        try:
+            (root / "alias").symlink_to(root / "real", target_is_directory=True)
+        except OSError as exc:
+            raise unittest.SkipTest(f"this host cannot create a symlink: {exc}") from exc
+
+    def test_a_backslash_spelling_is_refused(self) -> None:
+        for field, value in (("source", "..\\"), ("source", "real\\sub"), ("target", "docs\\x")):
+            with self.subTest(field=field, value=value):
+                tree = self.tree("real", "t") | {field: value}
+                self.assertIn(
+                    f"tree {tree['source']} {field} '{value}' must be a path below the repository root",
+                    self.run_against([tree]),
+                )
+
+    def test_a_drive_letter_spelling_is_refused(self) -> None:
+        for field, value in (
+            ("source", "C:real"),
+            ("target", "c:/docs"),
+            ("source", "real/C:x"),
+            ("target", "docs/c:x"),
+            ("source", "real/1:x"),
+        ):
+            with self.subTest(field=field, value=value):
+                tree = self.tree("real", "t") | {field: value}
+                self.assertIn(
+                    f"tree {tree['source']} {field} '{value}' must be a path below the repository root",
+                    self.run_against([tree]),
+                )
+
+    def test_a_symlinked_source_component_is_refused(self) -> None:
+        for source in ("alias", "alias/sub"):
+            with self.subTest(source=source):
+                self.assertIn(
+                    f"tree {source} source '{source}' has a symlinked component alias, which scripts/carry.py refuses",
+                    self.run_against([self.tree(source, "t")], self.link_alias),
+                )
+
+    def test_a_plain_tree_draws_no_path_error(self) -> None:
+        output = self.run_against([self.tree("real/sub", "t")])
+        self.assertNotIn("tree real/sub source", output)
+        self.assertNotIn("tree real/sub target", output)
+
+    def test_every_tree_the_live_manifest_declares_passes_the_path_checks(self) -> None:
+        trees = json.loads((validate.ROOT / "spec" / "files.json").read_text(encoding="utf-8"))[
+            "trees"
+        ]
+        self.assertTrue(trees)
+        for tree in trees:
+            for value in (tree["source"], tree["target"]):
+                with self.subTest(value=value):
+                    self.assertFalse(validate.escapes_repo_root(value))
+                    self.assertIsNone(validate.symlinked_component(validate.ROOT, value))
+
+
 class RegistryNameUniquenessCase(unittest.TestCase):
     """A registry name is the key both configure.sh and audit.py resolve an entry by.
 

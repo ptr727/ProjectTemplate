@@ -691,7 +691,7 @@ def regenerate():
     return names
 
 
-def is_stale():
+def is_stale(drift=None):
     """Whether a generated distribution needs regenerating: missing, corrupted, or built from
     different source bytes. Checks the manifest's own content and the generated tree's actual
     bytes, not only the digest stamps, since a stamp surviving a partial deletion, a hand-edited
@@ -701,7 +701,7 @@ def is_stale():
     the in-place edit: nothing else here re-reads the generated files at all.
     """
     # First, so a region behind its source reads stale however current the mirrors are, and a key that no longer resolves raises here whatever else is missing.
-    if include_drift():
+    if include_drift() if drift is None else drift:
         return True
     if not DIGEST_DIR.is_dir() or not PLUGIN_MANIFEST.is_file():
         return True
@@ -751,7 +751,7 @@ def main():
     if args.check:
         try:
             drift = include_drift()
-            stale = is_stale()
+            stale = is_stale(drift)
         except (ValueError, OSError) as exc:
             # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below, which also exits 1 by this flag's own documented contract.
             # OSError alongside ValueError: is_stale() reads several files beyond the one call already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises that, not ValueError.

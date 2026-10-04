@@ -192,7 +192,8 @@ swap_in() {
 
     if exists "$tree"; then
         is_ours "$tree" || die "$tree exists and this loader did not create it, so it will not be replaced. Choose another --dir."
-        remove_owned "$retired"
+        remove_owned "$retired" ||
+            die "Could not remove the previous tree at $retired, which an entry that will not go causes. Close what holds it or remove it by hand, then run this again."
         mv "$tree" "$retired"
         moved=true
     fi

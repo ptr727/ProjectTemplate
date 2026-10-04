@@ -67,6 +67,8 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
 
 
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
+LABELS_OK = lift(r"^(labels_payload_ok\(\) \{\n.*?\n\}\n)")
+LABELS = ROOT / "repo-config" / "labels.json"
 PAYLOAD_OK = lift(r"^(project_payload_ok\(\) \{\n.*?\n\}\n)")
 NODE_ID = lift(r"^(project_node_id\(\) \{ # owner number title\n.*?\n\}\n)")
 REPO_PROJECTS = lift(r"^(repo_projects\(\) \{\n.*?\n\}\n)")
@@ -135,6 +137,88 @@ class PayloadContractCase(unittest.TestCase):
         ):
             with self.subTest(label=label):
                 self.assertFalse(self.payload_ok(document))
+
+
+class LabelsPayloadCase(unittest.TestCase):
+    """The label pre-flight refuses each defect for its own reason, and admits the committed payload."""
+
+    def verdict(self, document: str, prelude: str = "") -> tuple[bool, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.json"
+            path.write_text(document, encoding="utf-8")
+            result = run_bash(
+                f"labels_file={shlex.quote(str(path))}\n{prelude}{LABELS_OK}"
+                'if why="$(labels_payload_ok)"; then echo yes; else echo "no: $why"; fi\n',
+                "jq",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            out = result.stdout.strip()
+            return out == "yes", out
+
+    def test_the_committed_payload_meets_its_own_contract(self) -> None:
+        self.assertEqual(self.verdict(LABELS.read_text(encoding="utf-8")), (True, "yes"))
+
+    def test_a_repeated_name_is_refused(self) -> None:
+        document = (
+            '[{"name": "a", "color": "a2eeef", "description": "x"},'
+            ' {"name": "a", "color": "ffffff", "description": "y"}]'
+        )
+        ok, out = self.verdict(document)
+        self.assertFalse(ok)
+        self.assertIn("more than once", out)
+
+    def test_a_name_repeated_in_another_case_is_refused(self) -> None:
+        document = (
+            '[{"name": "bug", "color": "a2eeef", "description": "x"},'
+            ' {"name": "Bug", "color": "ffffff", "description": "y"}]'
+        )
+        ok, out = self.verdict(document)
+        self.assertFalse(ok)
+        self.assertIn("more than once", out)
+
+    def test_an_uppercase_color_is_refused(self) -> None:
+        ok, out = self.verdict('[{"name": "a", "color": "A2EEEF", "description": "x"}]')
+        self.assertFalse(ok)
+        self.assertIn("field contract", out)
+
+    def test_each_cause_is_reported_as_itself(self) -> None:
+        entry = '{"name": "a", "color": "a2eeef", "description": "x"}'
+        for label, document, expected in (
+            ("not JSON", "[", "did not parse"),
+            ("null", "null", "not an array"),
+            ("empty file", "", "exactly one JSON document"),
+            ("two documents", "[] []", "exactly one JSON document"),
+            ("not an array", entry, "not an array"),
+            ("empty array", "[]", "is empty"),
+            ("entry that is not an object", "[1]", "field contract"),
+            ("missing description", '[{"name": "a", "color": "a2eeef"}]', "field contract"),
+        ):
+            with self.subTest(label=label):
+                ok, out = self.verdict(document)
+                self.assertFalse(ok)
+                self.assertIn(expected, out)
+
+    def test_a_jq_that_fails_is_not_blamed_on_the_payload(self) -> None:
+        """A jq failing inside a contract step, as one lacking test/1 does, must not read as a bad label."""
+        prelude = (
+            "jq() {\n"
+            '  case "$*" in\n'
+            '    *"test("*) echo "jq: error: test/1 is not defined" >&2; return 3 ;;\n'
+            '    *) command jq "$@" ;;\n'
+            "  esac\n"
+            "}\n"
+        )
+        ok, out = self.verdict('[{"name": "a", "color": "a2eeef", "description": "x"}]', prelude)
+        self.assertFalse(ok)
+        self.assertIn("jq failed (exit 3", out)
+        self.assertIn("test/1 is not defined", out)
+        self.assertNotIn("field contract", out)
+
+    def test_a_jq_that_fails_while_parsing_is_not_blamed_on_the_payload(self) -> None:
+        prelude = 'jq() {\n  echo "jq: unusable" >&2\n  return 3\n}\n'
+        ok, out = self.verdict('[{"name": "a", "color": "a2eeef", "description": "x"}]', prelude)
+        self.assertFalse(ok)
+        self.assertIn("jq failed (exit 3", out)
 
 
 class ProjectLookupCase(unittest.TestCase):

@@ -39,9 +39,10 @@ Subcommands
 
 Exit codes
   0  the command did what it says.
-  1  a refusal the caller can act on: the label is missing from the repository, no handoff is
-     open on the track, a track is ambiguous, a handoff carries no metadata block, a body is
-     over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
+  1  a refusal the caller can act on: the label is missing, other than where `tracks` answers
+     an unregistered fork under the fleet's owner or `new --create-label` creates the label there,
+     no handoff is open on the track, a track is ambiguous, a handoff carries no metadata block, a
+     body is over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
      `Parser` below moves it here off argparse's own 2.
   2  the command did not run to an answer: `gh` failed, a write did not confirm, or an exception
      nobody modeled reached the top. A refusal and a failure to reach one never share a code,
@@ -52,12 +53,27 @@ Usage
   python3 scripts/handoff.py resume  --repo OWNER/NAME [--track T] [--history N]
   python3 scripts/handoff.py chain   --repo OWNER/NAME [--track T] [--limit N] [--grep PATTERN]
   python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
+                                     [--create-label]
   python3 scripts/handoff.py link    --repo OWNER/NAME --new N --previous N
   python3 scripts/handoff.py tracks  --repo OWNER/NAME
 
 Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one: an
 issue number resolves in every repository, and a chain read out of the wrong one is well formed.
 Add `--dry-run` to any writing subcommand to print the calls it would make and write nothing.
+
+A repository missing the label is drift on a fleet repository, one `registry/repos.json` lists, and
+every subcommand refuses there. A fork under the registry's owner that the registry does not list,
+such as one kept for an upstream contribution, can still use a chain to hold state, and the fleet
+label set does not belong on it. There the reads warn and answer as an empty chain does, and
+`new --create-label` creates the one `handoff` label and nothing else. Every other repository
+missing the label refuses, a repository under another owner and an unregistered repository of the
+owner's that is not a fork among them.
+
+The two writing subcommands, `new` and `link`, are bounded whatever the label state, an
+in-process refusal of the kind `pr_review.py` makes, with the owner read from the registry. They
+refuse a repository under another owner before any call, and an unregistered repository of the
+owner's unless it is a fork, since these writes run as subprocesses a write guard on the caller
+never sees. That write scope bounds no read.
 """
 
 from __future__ import annotations
@@ -83,6 +99,11 @@ LABEL = "handoff"
 # A downstream session then enumerated an empty queue and reported it healthy.
 # A `handoff` label declared and not applied fails the same silent way, so this refuses instead.
 APPLY = "repo-config/configure.sh apply OWNER/NAME release|operational"
+
+REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
+LABELS = Path(__file__).resolve().parent.parent / "repo-config" / "labels.json"
+
+READS = frozenset({"current", "resume", "chain", "tracks"})
 
 DEFAULT_TRACK = "default"
 
@@ -215,11 +236,11 @@ def rows_of(data: object, what: str, field: str) -> list[dict]:
     return data
 
 
-def require_label(repo: str) -> None:
-    """Refuse where the target repository does not carry the label the chain is indexed by.
+def label_present(repo: str) -> bool:
+    """Whether the target repository carries the label the chain is indexed by.
 
-    Degrading instead would report an empty chain on a repository that has one, which is the
-    failure mode `decision` already demonstrated fleet-wide.
+    A read that filled its window refuses rather than answering, since there the label's absence is
+    unproven rather than established.
     """
     rows = rows_of(
         gh_json(["label", "list", "--repo", repo, "--limit", str(WINDOW), "--json", "name"]),
@@ -233,11 +254,178 @@ def require_label(repo: str) -> None:
             "could sit past it. Reporting the label as absent here would send you to re-apply a "
             "set that may already be applied."
         )
-    if LABEL not in names:
+    return LABEL in names
+
+
+def registry() -> tuple[str, set[str]]:
+    """The registry's owner and its repository names, lowercased, as GitHub compares them.
+
+    An unreadable registry is a failure to answer rather than an answer, since reading it as empty
+    would move every fleet repository onto the warning path.
+    """
+    try:
+        data = json.loads(REGISTRY.read_text(encoding="utf-8"))
+        owner = data["owner"]
+        names = {row["name"].lower() for row in data["repos"]}
+        if not isinstance(owner, str):
+            raise TypeError(f"owner is {owner!r}, not a string")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise Execution(f"could not read the fleet registry at {REGISTRY}: {exc}") from exc
+    return owner.lower(), names
+
+
+def repo_flags(a: argparse.Namespace) -> dict[str, bool]:
+    """Whether the repository has issues turned on and whether it is a fork, read live once a run.
+
+    The write scope and the missing-label path both ask, so the answer rides on the parsed
+    arguments rather than costing a second request.
+    """
+    cached = getattr(a, "repo_flags", None)
+    if cached is not None:
+        return cached
+    data = gh_json(["repo", "view", a.repo, "--json", "hasIssuesEnabled,isFork"])
+    fields = ("hasIssuesEnabled", "isFork")
+    if not isinstance(data, dict) or not all(isinstance(data.get(f), bool) for f in fields):
+        raise Execution(f"repo view for {a.repo} returned no {' and '.join(fields)}: {data!r}")
+    a.repo_flags = {field: data[field] for field in fields}
+    return a.repo_flags
+
+
+def require_write_scope(a: argparse.Namespace) -> None:
+    """Refuse a write outside the registry's owner, or to an unregistered repository not a fork.
+
+    It runs before the label is read, so a label a stranger's repository happens to carry opens no
+    write there. A registered repository costs no request, and the reads are never bounded here.
+    """
+    if a.cmd in READS:
+        return
+    owner, names = registry()
+    repo_owner, _, name = a.repo.partition("/")
+    if repo_owner.lower() != owner:
         raise Refusal(
-            f"{repo} carries no `{LABEL}` label, so no handoff can be found or filed there. "
-            f"Apply the fleet label set from a hub checkout: {APPLY}"
+            f"{a.repo} is not under {owner}, so this script writes nothing there. A different "
+            "owner goes through the runbook's own `gh` path, where the write guard reads the "
+            "maintainer's grant."
         )
+    if name.lower() in names:
+        return
+    if not repo_flags(a)["isFork"]:
+        raise Refusal(
+            f"{a.repo} is neither in registry/repos.json nor a fork, so it is registry drift "
+            "rather than a fork keeping state, and this script writes nothing there. Register it, "
+            f"then apply the fleet label set: {APPLY}"
+        )
+
+
+def label_definition() -> tuple[str, str]:
+    """The `handoff` label's color and description, read from the fleet label set it belongs to.
+
+    One definition keeps a label created here identical to the one the fleet set applies, should the
+    repository it lands on join the fleet later.
+    """
+    try:
+        rows = json.loads(LABELS.read_text(encoding="utf-8"))
+        row = next(row for row in rows if row["name"] == LABEL)
+        color, description = row["color"], row["description"]
+        if not isinstance(color, str) or not isinstance(description, str):
+            raise TypeError(f"the `{LABEL}` entry is {row!r}")
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+        raise Execution(f"could not read the `{LABEL}` label from {LABELS}: {exc!r}") from exc
+    return color, description
+
+
+def create_label(repo: str, dry_run: bool) -> None:
+    """Create the one `handoff` label and confirm it by reading the label set back."""
+    color, description = label_definition()
+    out = gh(
+        [
+            "label",
+            "create",
+            LABEL,
+            "--repo",
+            repo,
+            "--description",
+            description,
+            "--color",
+            color,
+        ],
+        dry_run=dry_run,
+    ).strip()
+    if dry_run:
+        return
+    print(f"  label created: {out or LABEL}")
+    if not label_present(repo):
+        raise Execution(
+            f"{repo} still carries no `{LABEL}` label after the create, so the create is not "
+            "confirmed. A write that appears to have failed is verified, never assumed harmless."
+        )
+
+
+def without_label(a: argparse.Namespace) -> int | None:
+    """What a repository missing the label gets, or None where the subcommand goes on to run.
+
+    On a fleet repository it is drift, and every subcommand refuses, since degrading there would
+    report an empty chain on a repository that has one, the failure `decision` demonstrated.
+    On an unregistered fork under the registry's owner no issue can carry a label that does not
+    exist, so an empty chain is the true answer there rather than a degraded one, and only
+    `new --create-label` writes anything.
+
+    The body is read once, before the label is created, and that read is the one `new` files, so a
+    body `new` would refuse leaves no label behind. Everything else refuses before any write. A
+    repository under another owner, or an unregistered one of the owner's that is not a fork,
+    refuses here for a read and in `require_write_scope` for a write, which runs first.
+    """
+    repo = a.repo
+    create = getattr(a, "create_label", False)
+    owner, names = registry()
+    repo_owner, _, name = repo.partition("/")
+    missing = f"{repo} carries no `{LABEL}` label, so no handoff can be found or filed there."
+    if repo_owner.lower() != owner:
+        raise Refusal(
+            f"{missing} It is not under {owner}, so this script neither reads a chain there nor "
+            "creates the label."
+        )
+    if name.lower() in names:
+        flag = " `--create-label` is for an unregistered fork." if create else ""
+        raise Refusal(f"{missing}{flag} Apply the fleet label set from a hub checkout: {APPLY}")
+    flags = repo_flags(a)
+    if not flags["isFork"]:
+        raise Refusal(
+            f"{missing} It is neither in registry/repos.json nor a fork, so it is registry drift "
+            f"rather than a fork keeping state. Register it, then apply the fleet label set: {APPLY}"
+        )
+    fix = f"gh label create {LABEL} --repo {repo}"
+    if not flags["hasIssuesEnabled"]:
+        fix = f"gh repo edit {repo} --enable-issues, then {fix}"
+        if create:
+            raise Refusal(
+                f"{repo} has issues turned off, so no handoff can be filed there. Run "
+                f"gh repo edit {repo} --enable-issues first, then rerun with --create-label."
+            )
+    if a.cmd in READS:
+        print(
+            f"warning: {repo} is a fork outside the fleet and carries no `{LABEL}` label, so it "
+            f"holds no handoff chain. `new --create-label` creates that one label, or run: {fix}",
+            file=sys.stderr,
+        )
+        if a.cmd == "tracks":
+            print(f"(no open `{LABEL}` issues in {repo})")
+            return 0
+        raise Refusal(
+            f"{repo} has no handoff on track {a.track!r}. Zero is the state before the first "
+            "handoff on a track, so `new` is what follows, not a retry of this."
+        )
+    if a.cmd == "new" and create:
+        a.body = body_from(Path(a.body_file))
+        print(f"0. create the `{LABEL}` label on {repo}, a fork outside the fleet")
+        create_label(repo, a.dry_run)
+        a.fresh_label = True
+        return None
+    raise Refusal(
+        f"{repo} is a fork outside the fleet and carries no `{LABEL}` label, so no handoff can be "
+        f"filed there. Rerun `new` with --create-label to create that one label, or run: {fix}. "
+        "The fleet label set does not belong on a fork outside the fleet."
+    )
 
 
 def parse_marker(body: str, number: int) -> dict[str, str] | None:
@@ -764,11 +952,20 @@ def cmd_new(a: argparse.Namespace) -> int:
     filing on one track at once both resolve the same predecessor and both create. That leaves the
     two open handoffs every later command refuses over, which is detectable rather than silent, and
     naming a track per lane is what keeps two sessions off one chain in the first place.
+
+    After `--create-label` the chain is empty by construction, since a label this run just created
+    sits on no issue yet, so no chain read is made, which also keeps a dry run from querying a label
+    it never created.
     """
-    body = body_from(Path(a.body_file))
-    rows = open_handoffs(a.repo)
-    require_marked(rows)
-    previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
+    body = getattr(a, "body", None)
+    if body is None:
+        body = body_from(Path(a.body_file))
+    if getattr(a, "fresh_label", False):
+        rows, previous = [], None
+    else:
+        rows = open_handoffs(a.repo)
+        require_marked(rows)
+        previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
     # A head can already have a successor, whatever key resolved it.
@@ -1040,6 +1237,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--body-file", required=True, metavar="PATH", help="the handoff body, per the skill"
     )
+    p.add_argument(
+        "--create-label",
+        action="store_true",
+        help="on an unregistered fork with no handoff label, create that one label first",
+    )
 
     p = sub.add_parser("link", help="finish a chain that half-applied")
     add_repo(p)
@@ -1080,7 +1282,11 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
             ap.error(f"--{flag} takes an issue number, so it cannot be below 1")
     try:
-        require_label(a.repo)
+        require_write_scope(a)
+        if not label_present(a.repo):
+            answered = without_label(a)
+            if answered is not None:
+                return answered
         return HANDLERS[a.cmd](a)
     except Refusal as exc:
         print(f"refused: {exc}", file=sys.stderr)

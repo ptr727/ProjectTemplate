@@ -3,8 +3,8 @@ name: Get version information task
 # The fleet's single NBGV run, hosted here once and reached by a leaf or a publisher through a pinned uses:.
 # It has no repo-specific line, since version.json and the git history it walks are the only per-repo input.
 # Every caller reads the same five outputs plus the derived Prerelease flag.
-# The ref input defaults to the caller's own checkout ref, and each run versions the one branch it was triggered on.
-# NBGV classifies that branch from GITHUB_REF directly, with no IGNORE_GITHUB_REF override, per WORKFLOW.md D3.1.
+# The ref input defaults to the triggering commit.
+# NBGV classifies the triggering branch from GITHUB_REF directly, with no IGNORE_GITHUB_REF override, per WORKFLOW.md D3.1.
 # Classification follows the trigger ref whatever ref the caller checks out, so a caller passing a commit or another branch as ref gets that tree's height under the trigger branch's classification, never a different branch's.
 # AssemblyVersion, AssemblyFileVersion and AssemblyInformationalVersion are exposed for a .NET build to stamp.
 # A caller with no compiled code, a PyPI or HACS package, simply leaves them unused rather than the task growing a per-ecosystem branch.
@@ -15,8 +15,8 @@ on:
   workflow_call:
     inputs:
       # Git ref to check out and version.
-      # Empty falls back to the caller's default checkout ref (`github.ref`).
-      # The publisher passes an explicit branch so a scheduled run can still compute versions for `develop`.
+      # Empty checks out the triggering commit (`github.sha`).
+      # The publisher passes `github.sha` too.
       ref:
         required: false
         type: string

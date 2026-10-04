@@ -490,6 +490,28 @@ class IncludeCase(TreeCase):
         with self.assertRaisesRegex(ValueError, "no heading 'Alpha'"):
             build_dist.regenerate()
 
+    def test_check_renders_the_include_walk_once_per_run(self) -> None:
+        """One --check run renders every include region once, whether the tree is current or a region has drifted."""
+        from unittest import mock
+
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        for drifted in (False, True):
+            if drifted:
+                (self.tmp / "RULES.md").write_text(
+                    self.HOME.replace("Alpha rule.", "Alpha rule, v2."), encoding="utf-8"
+                )
+            with (
+                mock.patch("sys.argv", ["build_dist.py", "--check"]),
+                mock.patch("builtins.print"),
+                mock.patch.object(
+                    build_dist, "filled_bytes", wraps=build_dist.filled_bytes
+                ) as render,
+            ):
+                exit_code = build_dist.main()
+            self.assertEqual(exit_code, 1 if drifted else 0)
+            self.assertEqual(render.call_count, len(build_dist.include_documents()))
+
     def test_check_reports_a_broken_key_as_2_and_a_stale_region_as_1(self) -> None:
         self.make_skill("foo", self.region("RULES.md > Alpha"))
         build_dist.regenerate()
