@@ -159,10 +159,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   names each issue in the list directly after it, a list that ends at the first word other than an
   issue reference or `and`. Any other mention, such as an issue the pull request filed along the
   way, does not exclude the issue. The set is wider than the `Closes on promotion:` line a
-  promotion closes from. Excluding an issue not yet fixed only delays it until the next promotion,
-  while taking a fixed one redoes finished work. No open handoff on any track names it in its next
-  steps, and no comment on it claims it for a `backlog-burndown` group, since both mark work that
-  has no pull request yet.
+  promotion closes from. Excluding an issue not yet fixed only delays it until the pull request
+  naming it is promoted or closed, while taking a fixed one redoes finished work. No open handoff on
+  any track names it in its next steps, and no comment on it claims it for a `backlog-burndown`
+  group, since both mark work that has no pull request yet.
 
 ## The Picker
 
