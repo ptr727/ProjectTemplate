@@ -90,12 +90,13 @@ conversion surfaced anything the registry did not already record.
 
 For an operational repo whose `lineEndings` is `crlf`: no conversion, since its global default
 follows its consuming Windows-native app rather than the fleet default, and its box below is
-checked as **not applicable** rather than as converted. It still carries both files, with the
-CRLF defaults and LF overrides [`references/line-endings.md`][line-endings] "Operational (config)
-repos" sets out, and a missing one is added that way rather than through this procedure. None currently do: `Vantage-Config` was
-the one operational repo recording `crlf`, and it has since converted to the fleet `lf` default
-with only its Design Center `.dc` exports pinned CRLF (ptr727/Vantage-Config#28), so its box
-below is checked as converted rather than not applicable.
+checked as **not applicable** rather than as converted. None currently do: `Vantage-Config` was the
+one operational repo recording `crlf`, and it has since converted to the fleet `lf` default with
+only its Design Center `.dc` exports pinned CRLF (ptr727/Vantage-Config#28), so its box below is
+checked as converted rather than not applicable. A repo in this case still carries both files, with
+the CRLF defaults [`references/line-endings.md`][line-endings] "Operational (config) repos" sets
+out and the LF overrides its "Scripts and extensionless executables" sets out for scripts the repo
+executes on POSIX, and a missing one is added that way rather than through this procedure.
 
 ## Rollout Checklist
 
