@@ -2052,7 +2052,7 @@ def segment_fits(segment: str, pattern: str) -> bool:
 
 
 def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
-    """The changed paths one table row names, out of `diff`, read without any trailing note.
+    """The changed paths one table row names, out of `diff`, reading past a note where it must.
 
     A row naming nothing that ends in a parenthesized note is read again without it, since the
     second format writes one on a row for a file another row already names, as in
@@ -2236,7 +2236,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
         return (
-            f"the reviewer names {len(named)} rows in its own table and the diff could not "
+            f"the reviewer names {len(named)} paths in its own table and the diff could not "
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
