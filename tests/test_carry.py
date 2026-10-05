@@ -285,10 +285,19 @@ class CarryManifestTests(unittest.TestCase):
 
     def test_rejects_windows_drive_or_root_in_any_component(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            for value in ("C:x", "real/C:x", "real/sub/d:", "real/1:x", "real/\\x"):
+            for value in ("C:x", "real/C:x", "real/sub/d:", "real/1:x"):
                 with (
                     self.subTest(value=value),
                     self.assertRaisesRegex(carry.CarryError, "Windows drive or root"),
+                ):
+                    carry.relative_root(pathlib.Path(temp), value)
+
+    def test_rejects_backslash_anywhere(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            for value in ("real/alias\\sub", "real/\\x", "a\\b", "real\\"):
+                with (
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(carry.CarryError, "backslash"),
                 ):
                     carry.relative_root(pathlib.Path(temp), value)
 
