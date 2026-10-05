@@ -181,8 +181,10 @@ Subcommands
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
            rather than failing. This takes a pull request number and words from the
-           finding, queries the id itself, and offers no argument an id fits in. Exit 0 =
-           done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
+           finding, queries the id itself, and offers no argument an id fits in. A finding
+           posted twice on one file, threads whose opening comments read the same, is
+           answered as one under --all-identical. Exit 0 = done, 60 = no thread matched,
+           61 = more than one did and the flag did not apply, 62 = the reply returned
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
@@ -3924,17 +3926,20 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     copied from that printed line still matches the raw body it was copied from, whether the
     whitespace the printed line flattened was a line break, a tab, or a run of spaces.
     """
-
-    def fold(text: str) -> str:
-        return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
-
-    needle = fold(match)
+    needle = fold_finding(match)
     return [
-        t
-        for t in threads
-        if needle in fold(first_comment(t).get("body") or "")
-        and (path is None or t.get("path") == path)
+        t for t in threads if needle in finding_text(t) and (path is None or t.get("path") == path)
     ]
+
+
+def fold_finding(text: str) -> str:
+    """The form `--match` compares in, as `matching_threads` describes."""
+    return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
+
+
+def finding_text(thread: dict) -> str:
+    """A thread's opening comment in the form `--match` compares against."""
+    return fold_finding(first_comment(thread).get("body") or "")
 
 
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
@@ -4201,7 +4206,14 @@ def local_cover(pr: dict) -> bool:
 
 
 def reply_to_thread(
-    owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
+    owner: str,
+    repo: str,
+    num: int,
+    match: str,
+    body: str,
+    path: str | None,
+    resolve: bool,
+    all_identical: bool = False,
 ) -> int:
     """Answer the one thread `match` selects, and resolve it where asked. Returns an exit code.
 
@@ -4210,6 +4222,13 @@ def reply_to_thread(
     of those closes a finding while leaving it unanswered, which is the state a reviewer reads as
     addressed. A no-match names the unresolved count, since zero and several otherwise read the
     same without the reader counting the lines the refusal prints below it.
+
+    `all_identical` covers the one ambiguity no wording can narrow: a reviewer posting the same
+    finding as two threads. Their opening comments fold to the same text, so every pattern that
+    selects one selects the other, and the refusal left both open with no route to either. The
+    flag answers every candidate with the one body, and only when they all sit on one file and
+    fold identically, so two findings that merely share the quoted words still refuse, and the
+    same text on two files stays two findings that `--path` already tells apart.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -4230,17 +4249,55 @@ def reply_to_thread(
         for t in threads:
             print(f"  unresolved: {describe(t)}")
         return 60
-    if len(hits) > 1:
+    paths = {t.get("path") for t in hits}
+    identical = len(paths) == 1 and len({finding_text(t) for t in hits}) == 1
+    if len(hits) > 1 and not (all_identical and identical):
+        if len(paths) > 1:
+            hint = "The candidates sit on different files, so add --path to select one."
+        elif identical:
+            hint = (
+                "Every candidate opens with the same text, so no wording selects one: pass "
+                "--all-identical to answer each of them with this body."
+            )
+        elif all_identical:
+            hint = (
+                "--all-identical answers only candidates whose opening comments read the same, "
+                "and these differ, so quote more of the finding."
+            )
+        else:
+            hint = "Quote more of the finding, or add --path."
         print(
             f"status=AMBIGUOUS nothing was written: {len(hits)} unresolved threads carry "
             f"{match!r}, and picking one of them is the failure this avoids rather than a "
-            "default it can take. Quote more of the finding, or add --path."
+            f"default it can take. {hint}"
         )
         for t in hits:
             print(f"  candidate: {describe(t)}")
         return 61
 
-    target = hits[0]
+    for done, target in enumerate(hits):
+        code = answer_thread(target, body, resolve)
+        if code:
+            if len(hits) > 1:
+                print(
+                    f"  {done} of {len(hits)} identical threads were answered before this one, "
+                    "and none after it was attempted."
+                )
+            return code
+
+    count = f" ({len(hits)} identical threads)" if len(hits) > 1 else ""
+    if not resolve:
+        print(
+            f"status=REPLIED{count} answered and left open, since --resolve was not given. "
+            "A decline is resolved only once its evidence is in the thread."
+        )
+        return 0
+    print(f"status=REPLIED_AND_RESOLVED{count}")
+    return 0
+
+
+def answer_thread(target: dict, body: str, resolve: bool) -> int:
+    """Reply to one selected thread and resolve it where asked. Returns 0, or an exit code."""
     print(f"answering: {describe(target)}")
     reply = (
         gh_graphql(M_REPLY, threadId=target["id"], body=body).get("addPullRequestReviewThreadReply")
@@ -4260,10 +4317,6 @@ def reply_to_thread(
     print(f"replied: {comment['url']}")
 
     if not resolve:
-        print(
-            "status=REPLIED the thread is answered and left open, since --resolve was not "
-            "given. A decline is resolved only once its evidence is in the thread."
-        )
         return 0
 
     thread = (gh_graphql(M_RESOLVE, threadId=target["id"]).get("resolveReviewThread") or {}).get(
@@ -4276,7 +4329,6 @@ def reply_to_thread(
         )
         print(f"  response: {json.dumps(thread)[:400]}")
         return 63
-    print("status=REPLIED_AND_RESOLVED")
     return 0
 
 
@@ -4551,6 +4603,12 @@ def main(argv: list[str] | None = None) -> int:
         help="reply: narrow --match to one file, for a file with several findings",
     )
     ap.add_argument(
+        "--all-identical",
+        action="store_true",
+        help="reply: where --match selects several threads whose opening comments read the "
+        "same, a finding posted twice, answer each of them with --body rather than refusing",
+    )
+    ap.add_argument(
         "--body",
         metavar="TEXT",
         help="comment or reply: the answer to post, carrying the fixing commit SHA or "
@@ -4575,6 +4633,7 @@ def main(argv: list[str] | None = None) -> int:
         "--match": a.match,
         "--path": a.path,
         "--resolve": a.resolve or None,
+        "--all-identical": a.all_identical or None,
     }
     if a.cmd != "reply":
         for flag, value in reply_only.items():
@@ -4635,7 +4694,9 @@ def main(argv: list[str] | None = None) -> int:
         return report_verdict(pr, owner, repo)
 
     if a.cmd == "reply":
-        return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
+        return reply_to_thread(
+            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
+        )
 
     # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
     # The policy is that a cross-owner target is not touched at all, so the refusal precedes the reading half too.
