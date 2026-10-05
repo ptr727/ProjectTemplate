@@ -926,7 +926,7 @@ class NewCase(unittest.TestCase):
         """An open head keeps `newest_closed` from ever running, so nothing else reads the bare row.
 
         `on_track` takes precedence unconditionally, and the closed side is scanned only when it
-        returns nothing. So `successor_of` is the one read that meets a bare closed row on this
+        returns nothing. So the head check is the one read that meets a bare closed row on this
         path, and reading it as "nothing succeeds the open head" is the guess that forks the lane.
         """
         fake = FakeGh(
@@ -1352,6 +1352,176 @@ class ResumeCase(unittest.TestCase):
         code, out, _ = run(FakeGh({12: link(12, "default", 1, None)}), "resume", "--repo", "o/r")
         self.assertEqual(code, 0)
         self.assertIn("first handoff on this track", out)
+
+
+class HeadCheckCase(unittest.TestCase):
+    """A read resolving a head the chain has moved past says so, rather than answering over it.
+
+    Each state is one `new` refuses over and the reads once answered silently: a successor closed
+    by hand while its predecessor stayed open, an open head below the closed side's round, and two
+    links at one round. The text a search is for sits in the link the head does not reach.
+    """
+
+    def successor_closed_by_hand(self) -> FakeGh:
+        return FakeGh(
+            {
+                1001: link(1001, "t", 1, None),
+                1002: link(
+                    1002, "t", 2, 1001, state="CLOSED", body=marked("vendored copy", "t", 2, 1001)
+                ),
+            }
+        )
+
+    def open_head_below_the_closed_side(self) -> FakeGh:
+        return FakeGh(
+            {
+                10: link(10, "t", 1, None, state="CLOSED"),
+                11: link(11, "t", 2, 10, state="CLOSED"),
+                12: link(12, "t", 3, 11, state="CLOSED", body=marked("vendored copy", "t", 3, 11)),
+                99: link(99, "t", 1, None),
+            }
+        )
+
+    def tie_at_one_round(self, head_state: str) -> FakeGh:
+        return FakeGh(
+            {
+                10: link(10, "t", 1, None, state="CLOSED"),
+                11: link(11, "t", 2, 10, state="CLOSED", body=marked("vendored copy", "t", 2, 10)),
+                12: link(12, "t", 2, None, state=head_state),
+            }
+        )
+
+    def assert_noticed(self, fake: FakeGh, head: str, reason: str) -> None:
+        for argv in (("current",), ("resume",), ("chain", "--grep", "vendored copy")):
+            with self.subTest(command=argv[0]):
+                code, out, _ = run(fake, *argv, "--repo", "o/r", "--track", "t")
+                self.assertEqual(code, 0)
+                self.assertIn(f"{head} may not be the head of track 't'", out)
+                self.assertIn(reason, out)
+
+    def test_a_successor_closed_by_hand_is_noticed(self) -> None:
+        self.assert_noticed(
+            self.successor_closed_by_hand(), "#1001", "#1002 already succeeds #1001"
+        )
+
+    def test_an_open_head_below_the_closed_side_is_noticed(self) -> None:
+        self.assert_noticed(
+            self.open_head_below_the_closed_side(), "#99", "#12 holds round 3, above #99's 1"
+        )
+
+    def test_a_tie_at_one_round_is_noticed(self) -> None:
+        self.assert_noticed(self.tie_at_one_round("OPEN"), "#12", "#11 also holds round 2")
+
+    def test_a_closed_tie_is_noticed_by_the_walk_from_the_closed_side(self) -> None:
+        """The issue's own form of the tie, every link closed, which only `chain` reads."""
+        code, out, _ = run(
+            self.tie_at_one_round("CLOSED"),
+            "chain",
+            "--repo",
+            "o/r",
+            "--track",
+            "t",
+            "--grep",
+            "vendored copy",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("0 of 1 links walked match", out)
+        self.assertIn("#11 also holds round 2", out)
+
+    def test_no_match_names_every_link_the_walk_did_not_reach(self) -> None:
+        """A fork below a sound head is the case no head check sees, so the walk names it."""
+        fake = FakeGh(
+            {
+                10: link(10, "t", 1, None, state="CLOSED"),
+                11: link(11, "t", 2, 10, state="CLOSED"),
+                12: link(12, "t", 3, 11, state="CLOSED", body=marked("vendored copy", "t", 3, 11)),
+                13: link(13, "t", 4, 11),
+            }
+        )
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "t", "--grep", "vendored")
+        self.assertEqual(code, 0)
+        self.assertIn("0 of 3 links walked match", out)
+        self.assertIn("the walk did not reach #12", out)
+        self.assertNotIn("may not be the head", out)
+
+    def test_a_sound_chain_prints_no_notice(self) -> None:
+        """The check must stay quiet on the ordinary lane it sits over."""
+        fake = FakeGh(
+            {
+                10: link(10, "t", 1, None, state="CLOSED"),
+                11: link(11, "t", 2, 10),
+                20: link(20, "other", 5, None, state="CLOSED"),
+            }
+        )
+        for argv in (("current",), ("resume",), ("chain",)):
+            with self.subTest(command=argv[0]):
+                code, out, _ = run(fake, *argv, "--repo", "o/r", "--track", "t")
+                self.assertEqual(code, 0)
+                self.assertNotIn("may not be the head", out)
+                self.assertNotIn("did not reach", out)
+
+    def test_new_refuses_onto_an_open_head_below_the_closed_side(self) -> None:
+        fake = self.open_head_below_the_closed_side()
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "t",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#12 holds round 3", err)
+        self.assertNotIn(1001, fake.issues)
+
+    def test_a_full_closed_window_is_noticed_and_refused(self) -> None:
+        """A successor past the window is unseen, so the check says it could not look."""
+        rows = {
+            n: link(n, f"filler-{n}", 1, None, state="CLOSED")
+            for n in range(1, handoff.CLOSED_WINDOW + 1)
+        }
+        rows[9099] = link(9099, "t", 1, None)
+        code, out, _ = run(FakeGh(rows), "current", "--repo", "o/r", "--track", "t")
+        self.assertEqual(code, 0)
+        self.assertIn("fill the read window", out)
+        fake = FakeGh(rows)
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "t",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("fill the read window", err)
+        self.assertNotIn(1001, fake.issues)
+
+    def test_new_refuses_onto_a_head_that_ties_another_link(self) -> None:
+        fake = self.tie_at_one_round("CLOSED")
+        code, _, err = run(
+            fake,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "t",
+            "--title",
+            "T",
+            "--body-file",
+            body_file(self, "w"),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("#11 also holds round 2", err)
+        self.assertNotIn(1001, fake.issues)
 
 
 class TracksCase(unittest.TestCase):
