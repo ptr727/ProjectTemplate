@@ -402,6 +402,30 @@ class TestWholeFileOwnership(StampCase):
         self.assertIn("is not UTF-8", r.stdout)
         self.assertIn("first, since the installer refuses it", r.stdout)
 
+    def test_a_dangling_local_symlink_stops_the_install_rather_than_reading_as_absent(self):
+        """A configured local file that went missing must not silently drop its text."""
+        self.local.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.local.symlink_to(self.local.parent / "missing-target.md")
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
+        """A hand-edited stamp could otherwise carry a digest that skips the backup."""
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["instructionsDigest"] = install.text_digest(edited)
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
     def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
         self.local.mkdir(parents=True)
         r = run(self.home)
@@ -426,7 +450,7 @@ class TestWholeFileOwnership(StampCase):
         ):
             self.assertEqual(install.main(), 0)
         expected = install.text_digest(
-            install.render_instructions(self.local.resolve(), "A constructed note.")
+            install.render_instructions(self.local.absolute(), "A constructed note.")
         )
         self.assertEqual(spy.call_args.args[2], expected)
 

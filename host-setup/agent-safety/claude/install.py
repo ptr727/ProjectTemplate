@@ -417,7 +417,8 @@ def local_instructions_path():
     """The host-local instruction file, under the XDG config root unless the override names one."""
     override = os.environ.get(LOCAL_INSTRUCTIONS_ENV)
     if override:
-        return pathlib.Path(override).expanduser().resolve()
+        # Absolute rather than resolved, so a symlink stays a symlink and a dangling one is still seen.
+        return pathlib.Path(override).expanduser().absolute()
     # The XDG spec treats a relative value as unset, and honoring one made the file depend on the cwd.
     root = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or "").expanduser()
     base = root if root.is_absolute() else pathlib.Path.home() / ".config"
@@ -431,7 +432,8 @@ def read_local_instructions(local_path):
     A file carrying this kit's own markers is refused, since appending it would duplicate a block,
     and copying an old backup into the local file is exactly how that happens.
     """
-    if not local_path.exists():
+    # A dangling symlink reports as absent to exists(), so it is checked too and refused as unreadable.
+    if not local_path.exists() and not local_path.is_symlink():
         return "", None
     try:
         raw = local_path.read_bytes()
@@ -485,7 +487,10 @@ def stamped_instructions_digest(claude_home):
         stamp = json.loads((claude_home / "agent-safety-stamp.json").read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return None
-    value = stamp.get("instructionsDigest") if isinstance(stamp, dict) else None
+    # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
+    if stamp_problems(stamp):
+        return None
+    value = stamp.get("instructionsDigest")
     return value if isinstance(value, str) else None
 
 
