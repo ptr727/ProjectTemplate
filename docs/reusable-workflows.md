@@ -121,7 +121,7 @@ A stage carries three kinds of item, plus a proof item where a claim needs a liv
 
 ### Stage 1: Merge-Bot Adoption
 
-Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot][adopting-the-merge-bot], on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first and records what the hub cannot prove, cross-repository resolution of the pin, the `rules` input where the repo has a tracker, and the first Dependabot bump of the pin, as proof items here.
+Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub in [Adopting the Merge-Bot][adopting-the-merge-bot], on its own feature branch, and the audit's `missing required job 'merge-bot'` finding on that file is the work list. The pilot goes first, and its pin's resolution and its first Dependabot bump are proof items here.
 
 - [x] PhotoCleaner (pilot, chosen as a release-model repo with Dependabot, .NET publish and Docker targets and a fresh resync, so what it shows is the mechanism): adopted on `develop` in ptr727/PhotoCleaner#53 at `a3158ce` and promoted to `main`, its ground-truth branch, in ptr727/PhotoCleaner#54 at `4efcae8`, both on 2026-08-15, where `python3 spec/audit.py PhotoCleaner` reports no `interface` finding on the file. The live proofs it owes, cross-repository resolution of the pin with a Dependabot PR to `develop` merged with `--squash` through the callee, and Dependabot bumping the pin, are the two proof items directly below, ticked with their evidence when they happen.
 - [ ] Proof: the first `pull_request_target` run on PhotoCleaner `develop` after `a3158ce` resolves the owner-scoped `uses:` and merges the Dependabot PR that opened it. Tick with the run URL.
@@ -767,7 +767,7 @@ The task is .NET-specific orchestration. It installs the .NET SDK, runs the call
 
 The hub's own stub, which sets `delete-branch: true`, proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. The first Dependabot pull request merged into `develop` once the delete job is there proves it, by the branch being gone afterwards. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
 
-Four things the hub cannot prove fall to the first downstream adopter. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. The hub's audit report on the pilot records each of those as observed rather than assumed here.
+Four things the hub cannot prove fall to downstream adopters. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. The first two are proof items under Stage 1 above, and [#2412][issue-2412] tracks the other two.
 
 ## Open Decisions
 
@@ -796,6 +796,7 @@ Four things the hub cannot prove fall to the first downstream adopter. They are 
 [issue-942]: https://github.com/ptr727/ProjectTemplate/issues/942
 [issue-2031]: https://github.com/ptr727/ProjectTemplate/issues/2031
 [issue-2336]: https://github.com/ptr727/ProjectTemplate/issues/2336
+[issue-2412]: https://github.com/ptr727/ProjectTemplate/issues/2412
 [no-build-caller-snippet]: ../catalog/snippets/workflows/test-pull-request.yml
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
