@@ -3306,7 +3306,7 @@ class TestSecondOverviewFormat(GqlCase):
             "</DETAILS\t>",
             "</details x>",
             "</details/>",
-            "  </details x/>",
+            "</details x/>",
         ):
             with self.subTest(close=close):
                 body = self.narrated() + (
@@ -3316,9 +3316,15 @@ class TestSecondOverviewFormat(GqlCase):
                 )
                 self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
 
-    def test_a_close_html_shows_as_text_does_not_end_the_narrative(self) -> None:
-        """Only a line's own start hands an attributed close to HTML, so mid-line it is prose."""
-        for prose in ("Prose naming </details x> mid-line.", "    </details x>"):
+    def test_a_tag_html_shows_as_text_does_not_end_the_narrative(self) -> None:
+        """Markdown hands HTML only a well-formed tag, and an attributed close only at a line start."""
+        for prose in (
+            "Prose naming </details x> mid-line.",
+            "    </details x>",
+            "`a` </details x> mid-line.",
+            "Prose naming <details/x> mid-line.",
+            "</details/x>",
+        ):
             with self.subTest(prose=prose):
                 body = self.narrated() + (
                     "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
