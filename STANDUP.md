@@ -77,7 +77,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 - **The repository**, with its owner, name, and visibility.
 - **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
 - **The App secret values**, in the Actions and Dependabot stores both.
-- **Every publish credential and environment the repo uses, each named where it is declared.** The publish credentials are the ones the repo's mechanisms declare in [`spec/secrets.json`][secrets]. Step 1 records the environment names in the `environments` of the repo's [`registry/repos.json`][repos] entry, which `check_environments` in [`repo-config/configure.sh`][configure-sh] checks for existence and branch policy. A site deploy's variable and secret names are the ones the hub's [`.github/workflows/deploy-site-task.yml`][deploy-site-task] reads, and the maintainer supplies the values for those the repo uses.
+- **Every publish credential and environment the repo uses.** The publish credentials are the ones the repo's mechanisms declare in [`spec/secrets.json`][secrets]. Step 1 records the environment names in the `environments` of the repo's [`registry/repos.json`][repos] entry. For a site deploy, the hub's [`.github/workflows/deploy-site-task.yml`][deploy-site-task] fixes both the environment names it accepts and the variable and secret names it reads. The maintainer supplies the values of the variables and secrets the repo uses.
 
 **A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
 
@@ -243,7 +243,6 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [audit]: ./AUDIT.md
 [claude-md]: ./CLAUDE.md
 [codestyle]: ./CODESTYLE.md
-[configure-sh]: ./repo-config/configure.sh
 [content-import]: ./docs/content-import.md
 [deploy-site-task]: ./.github/workflows/deploy-site-task.yml
 [divergences]: ./spec/divergences.json
