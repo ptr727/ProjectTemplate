@@ -60,7 +60,7 @@ LATE = "2026-08-02T11:00:00Z"
 # The shape 28 of the 333 measured bodies carry: an overview, and no count of what was read.
 # A body of no text at all is not one of the shapes, and the reader now says so, correctly.
 OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
-# The wall-clock ceiling the two backtracking cases read, stated once so they cannot drift apart.
+# The wall-clock ceiling the backtracking cases read, stated once so they cannot drift apart.
 # Each case sizes its own input so that a regression finishes and trips this rather than running long enough to hang the suite.
 # Three seconds against readings of microseconds and milliseconds, which is the margin that makes a loaded runner a non-issue rather than the clock being trusted.
 BACKTRACK_BOUND = 3.0
@@ -3347,6 +3347,7 @@ class TestSecondOverviewFormat(GqlCase):
         """A tail reaching another line or another tag swallowed the opener or heading after it."""
         cases = {
             "</details x <details>": ["<details>"],
+            "<details x <details>": ["<details>"],
             "</details x\n### Suppressed comments (1)\n>": [],
             "</details\v>": [],
             "<details\v>": [],
@@ -3358,6 +3359,16 @@ class TestSecondOverviewFormat(GqlCase):
             with self.subTest(text=text):
                 found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
                 self.assertEqual(tags, found)
+
+    def test_a_body_of_unclosed_openers_is_read_in_linear_time(self) -> None:
+        """An opener with no closing `>` ends its scan at the next `<`, so a body of such openers reads in linear time."""
+        body = "<details x\n" * 9000
+        start = time.monotonic()
+        self.assertEqual([], pr_review.details_spans(body)[0])
+        self.assertEqual(body, pr_review.mask_narrative(body))
+        pr_review.unrecognized_in(body)
+        self.assertEqual([], pr_review.marker_blocks(body, pr_review.SUPPRESSED))
+        self.assertLess(time.monotonic() - start, BACKTRACK_BOUND)
 
     def test_a_region_ends_at_a_close_in_another_html_spelling(self) -> None:
         """The section readers pair on the same tags, so their regions end where HTML ends them."""
