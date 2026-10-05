@@ -449,7 +449,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Rides with** - The `verbatim` re-vendor above.
   - **Detail** - The unused `GITHUB_TOKEN` grants #521 names are gone with the copy, since the task declares none and the stub sets `permissions: {}`.
   - **Detail** - Two repos filter Dependabot by ecosystem and semver tier, and per D8.1 the filter drops on adoption unless the open decision in the cluster above lands first.
-  - **Detail** - The hub's audit report on the pilot records what the hub cannot prove, cross-repository resolution of the pin, the first Dependabot bump of it, and the `rules` input end to end.
+  - **Detail** - The hub's audit report on the pilot records what the hub cannot prove. That is cross-repository resolution of the pin, the first Dependabot bump of it, and the `rules` input end to end.
 
 - **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires, naming the part of the repo's contract CI structurally cannot exercise, and a repo whose gates are entirely in CI says that under it rather than omitting it.
   - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings and this repo's own [`OPERATIONS.md`][operations] leads with the section.
