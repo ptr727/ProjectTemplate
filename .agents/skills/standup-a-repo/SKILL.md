@@ -88,8 +88,8 @@ maintainer can supply what section 0A lists.
    reported, never from a hand-built or carried copy.
 
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
-   up only when it passes for its type, or its residual deltas are tracked in
-   `reports/<repo>/audit.md` plus an issue.
+   up only when it passes for its type, or its residual deltas are tracked in a
+   `reports/<repo>/audit.md` committed in the hub plus an issue.
 
 ## Onboarding a new repo type
 
