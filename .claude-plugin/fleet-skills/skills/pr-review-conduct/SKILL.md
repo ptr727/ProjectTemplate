@@ -328,6 +328,7 @@ longer carries. `status` reports coverage, threads, body-only findings, and
 shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
 answer after it reads the PR node ID. `reply` answers a thread by matching the finding's own
 words instead of a line number a fix push can move, and resolves it only when `--resolve` is
-given. The repository's
+given. A finding posted twice, as two threads with the same text, is answered with
+`--all-identical`, which the refusal names. The repository's
 `.github/copilot-instructions.md` bootstraps Copilot into the `fleet-code-review` skill and its stable
 coverage marker. Do not reconstruct the API operations by hand.

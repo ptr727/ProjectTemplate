@@ -6873,6 +6873,76 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertEqual(0, self.run_reply("--resolve", "--path", "b.py"))
         self.assertIn("b.py:12", self.out.getvalue())
 
+    def test_a_finding_posted_twice_refuses_and_names_the_flag(self) -> None:
+        """No wording selects one of two identical threads, so the refusal names the way out."""
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(61, self.run_reply("--resolve"))
+        self.assertFalse(self.wrote())
+        self.assertIn("--all-identical", self.out.getvalue())
+
+    def test_all_identical_answers_and_resolves_every_copy(self) -> None:
+        ids = []
+
+        def capture(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1", line=118), rthread("t2", line=399)]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=capture):
+            self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_all_identical_compares_in_the_folded_form_match_reads(self) -> None:
+        """Bodies differing only where `--match` cannot see are still one finding to it."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count\nis off \u2014 by one."),
+                    rthread("t2", body="The Retry Count is off - by one."),
+                ]
+            )
+        )
+        self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_all_identical_still_refuses_findings_that_only_share_words(self) -> None:
+        """Two findings quoting the same words are two findings, and one body answers neither."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count is off by one."),
+                    rthread("t2", body="The retry count is never logged."),
+                ]
+            )
+        )
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("these differ", self.out.getvalue())
+
+    def test_all_identical_stops_at_the_first_unconfirmed_reply(self) -> None:
+        """A later copy is not attempted past a failure, and the count says what already landed."""
+        replies = [LANDED, {"id": "c2", "url": None, "body": ""}]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": replies.pop(0)}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2"], ids)
+        self.assertIn("1 of 3 identical threads were answered", self.out.getvalue())
+
     def test_a_resolved_thread_is_not_a_candidate(self) -> None:
         """It is answered, and replying again reopens a conversation nobody is reading."""
         self.wire(page([rthread("t1", resolved=True)]))
@@ -7062,7 +7132,7 @@ class TestReplyArguments(unittest.TestCase):
                 self.assertIn("--body", self.err(["comment", "7", "--repo", "o/r", "--body", body]))
 
     def test_reply_only_options_are_rejected_on_comment(self) -> None:
-        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"], ["--all-identical"]):
             with self.subTest(flag=flag[0]):
                 self.assertIn(
                     flag[0],
@@ -7071,7 +7141,13 @@ class TestReplyArguments(unittest.TestCase):
 
     def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
         """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
-        for flag in (["--body", "Fixed."], ["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (
+            ["--body", "Fixed."],
+            ["--match", "x"],
+            ["--resolve"],
+            ["--path", "a.py"],
+            ["--all-identical"],
+        ):
             with self.subTest(flag=flag[0]):
                 self.assertIn(flag[0], self.err(["status", "7", "--repo", "o/r", *flag]))
 
