@@ -426,7 +426,7 @@ class TestWholeFileOwnership(StampCase):
         ):
             self.assertEqual(install.main(), 0)
         expected = install.text_digest(
-            install.render_instructions(self.local, "A constructed note.")
+            install.render_instructions(self.local.resolve(), "A constructed note.")
         )
         self.assertEqual(spy.call_args.args[2], expected)
 
