@@ -906,6 +906,9 @@ def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> di
     round already taken and the real chain goes unreachable while every step exits 0. The number
     breaks a tie between two links claiming one round, which is itself a defect the reader should
     not have to resolve.
+
+    A caller that already read the closed list passes it as `closed`, and it is used as given
+    rather than read again.
     """
     rows = closed if closed is not None else read_closed(repo)
     malformed: list[str] = []
@@ -1048,12 +1051,12 @@ class Lane(typing.NamedTuple):
 
 
 def track_links(repo: str, track: str, rows: list[dict], closed: list[dict] | None = None) -> Lane:
-    """The links on `track`, the open ones taken from `rows` and the closed ones read here.
+    """The links on `track`, the open ones taken from `rows` and the closed ones from `closed`.
 
     A row whose block is absent or cannot be read could be on this track, so it is named in
     `unreadable` rather than skipped, and a closed read that fills its window sets `full`, since a
     link past it is unseen. Each caller decides whether those refuse or are reported. A caller
-    that already read the closed list passes it as `closed`, so one command reads it once.
+    that already read the closed list passes it as `closed`, and one that passes none has it read here.
     """
     if closed is None:
         closed = read_closed(repo)
