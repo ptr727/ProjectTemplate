@@ -3359,6 +3359,19 @@ class TestSecondOverviewFormat(GqlCase):
                 found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
                 self.assertEqual(tags, found)
 
+    def test_a_close_behind_a_blockquote_marker_keeps_its_tail_on_its_own_line(self) -> None:
+        """The next line carries its own container, so a tail crossing it ended inside that markup."""
+        cases = {
+            "> </details x\n> ### H (1)": [],
+            "> </details x\nfoo>": [],
+            "> </details x>": ["</details x>"],
+            "  </details x\n>": ["</details x\n>"],
+        }
+        for text, tags in cases.items():
+            with self.subTest(text=text):
+                found = [text[a:b] for a, b, _ in pr_review.details_tags(text)]
+                self.assertEqual(tags, found)
+
     def test_a_region_ends_at_a_close_in_another_html_spelling(self) -> None:
         """The section readers pair on the same tags, so their regions end where HTML ends them."""
         body = "<details>\na\n</details >\nb\n<details>\nc\n</details>\n"
@@ -3941,7 +3954,7 @@ class TestSecondOverviewFormat(GqlCase):
             5, pr_review.stated_total(f"{CCR_MARKER}\n\n<detailsfoo>\n\n**Findings:** 5\n")
         )
 
-    def test_the_preamble_ends_at_the_opener_details_tag_reads(self) -> None:
+    def test_the_preamble_ends_at_the_boundary_details_tag_reads(self) -> None:
         """A boundary of its own let a section's total stand as the round's, or dropped the round's."""
         self.assertEqual(
             2,

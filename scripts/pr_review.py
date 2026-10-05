@@ -2946,9 +2946,9 @@ def heading_of(block: str) -> str:
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
     r"(?P<open><details(?:[ \t\n\f\r][^>]*|/)?>)"
-    r"|(?P<lead>(?<![^\n\r]) {0,3}(?:> {0,4})*)?</details"
+    r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
-    r"(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?)"
+    r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
     r"|[ \t]*)>",
     re.IGNORECASE,
 )
@@ -2959,8 +2959,10 @@ def details_tags(text: str) -> list[tuple[int, int, bool]]:
 
     A close is read anywhere bare. With more before its bracket, or its bracket on the next line, it
     is read only where its own line opens an HTML block: up to three spaces in, behind any
-    blockquote markers, its tail allowed one line break. Mid-line a next line opening on `>` is a
-    blockquote, which leaves the close as text, so a next-line bracket is not read there at all.
+    blockquote markers, its tail allowed one line break where no marker leads it. Behind a marker
+    the next line carries its own container, so a tail crossing it would end the close inside
+    that line's markup or swallow a line outside the blockquote. Mid-line a next line opening on
+    `>` is a blockquote, which leaves the close as text, so a next-line bracket is not read there.
     HTML still reads some closes these rules leave unread, such as one inside an HTML block already
     open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
     tag or heading.
