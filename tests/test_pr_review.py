@@ -3344,7 +3344,7 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
 
     def test_a_tag_is_bounded_by_html_s_own_syntax(self) -> None:
-        """A tail reaching another line or another tag swallowed the opener or heading after it."""
+        """A tail reaching past its next line or another tag swallowed the opener or heading after it."""
         cases = {
             "</details x <details>": ["<details>"],
             "</details x\n### Suppressed comments (1)\n>": [],
@@ -3352,7 +3352,7 @@ class TestSecondOverviewFormat(GqlCase):
             "<details\v>": [],
         }
         for sep in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029":
-            cases[f"</details x{sep}>"] = []
+            cases[f"</details x{sep}>"] = [f"</details x{sep}>"] if sep in "\n\r" else []
             cases[f"a{sep}</details x>"] = ["</details x>"] if sep in "\n\r" else []
         for text, tags in cases.items():
             with self.subTest(text=text):
@@ -3364,6 +3364,51 @@ class TestSecondOverviewFormat(GqlCase):
         body = "<details>\na\n</details >\nb\n<details>\nc\n</details>\n"
         regions, _ = pr_review.details_spans(body)
         self.assertEqual(["\na\n", "\nc\n"], [body[a:b] for a, b in regions])
+
+    def test_a_close_a_line_hands_to_html_ends_the_narrative(self) -> None:
+        """Indented, behind a blockquote, or with its bracket on the next line, it is still a close."""
+        for close in (
+            "  </details x>",
+            "   </details/>",
+            "> </details x>",
+            "> > </details x/>",
+            "</details\n>",
+            "</details x\n>",
+            "</details\nx>",
+        ):
+            with self.subTest(close=close):
+                body = self.narrated() + (
+                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n{close}\n\n- **Confidence:** high\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_region_ends_at_a_close_a_line_hands_to_html(self) -> None:
+        """The section readers read the same closes, so their regions end where HTML ends them."""
+        body = "<details>\na\n  </details x>\nb\n<details>\nc\n> </details/>\n"
+        regions, _ = pr_review.details_spans(body)
+        self.assertEqual(["\na\n  ", "\nc\n> "], [body[a:b] for a, b in regions])
+
+    def test_a_code_span_ahead_of_a_tag_does_not_put_it_at_a_line_start(self) -> None:
+        """Masked to spaces, a span left the literal after it looking indented, and it was paired."""
+        for prose in ("`a`</details x>", "`a` > </details x>", "`a`  </details/>"):
+            with self.subTest(prose=prose):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"{prose}\n\n- **Gadget (#1):** x\n</details>\n"
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+        for prose in ("`a`</details x>", "`a`> </details x>"):
+            with self.subTest(prose=prose):
+                body = (
+                    "<details>\n<summary>Review details</summary>\n\n"
+                    f"### Suppressed comments (1)\n\n{prose}\n\n**a.py:12**\n"
+                    "* Validate the input.\n</details>\n"
+                )
+                blocks = pr_review.suppressed_blocks(body)
+                self.assertEqual(1, len(blocks))
+                self.assertIn("Validate the input.", blocks[0])
 
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
@@ -3885,6 +3930,20 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertEqual(
             5, pr_review.stated_total(f"{CCR_MARKER}\n\n<detailsfoo>\n\n**Findings:** 5\n")
         )
+
+    def test_the_preamble_ends_at_the_opener_details_tag_reads(self) -> None:
+        """A boundary of its own let a section's total stand as the round's, or dropped the round's."""
+        self.assertEqual(
+            2,
+            pr_review.stated_total(
+                f"{CCR_MARKER}\n\n**Findings:** 2\n\n<details/>\n\n**Findings:** 9\n"
+            ),
+        )
+        for opener in ("<details\v>", "`a`<details>"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    5, pr_review.stated_total(f"{CCR_MARKER}\n\n{opener}\n\n**Findings:** 5\n")
+                )
 
     def test_a_total_indented_into_a_code_block_is_a_quotation(self) -> None:
         """Bounded to three spaces for the reason the marker is, a fourth making the line a code

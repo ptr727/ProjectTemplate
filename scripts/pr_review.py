@@ -650,6 +650,7 @@ COUNT_MARKUP = re.compile(
 STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--")
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
+SPAN_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
 # Bounded to four digits, because a review states tens of findings and never thousands.
 # A longer run is an identifier, so the mask is not the only thing saying an anchor id is not one.
@@ -671,10 +672,11 @@ STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
 # Anchored to a line for the reason the marker and the total above are.
-# Given a tag boundary as `DETAILS_TAG` already has, so a `<detailsfoo>` is not this tag.
+# The opener `DETAILS_TAG` reads, so `<details/>` ends the preamble and `<detailsfoo>` does not.
 # Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
 # That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
-DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[\s>])", re.IGNORECASE | re.MULTILINE)
+DETAILS_OPENER = r"<details(?:[ \t\n\f\r][^>]*|/)?>"
+DETAILS_OPEN = re.compile(rf"^ {{0,3}}{DETAILS_OPENER}", re.IGNORECASE | re.MULTILINE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -1920,10 +1922,12 @@ def stated_total(body: str) -> int | None:
     the shortfall rather than fabricating one.
 
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
-    shortfall rather than suppressing it.
+    shortfall rather than suppressing it. The opener is found where each code span is one
+    `SPAN_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
     """
-    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
-    opener = DETAILS_OPEN.search(plain)
+    stripped = strip_fences(body or "")
+    plain = CODE_SPAN.sub(" ", stripped)
+    opener = DETAILS_OPEN.search(CODE_SPAN.sub(SPAN_MASK, stripped))
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
     return max([t for t in totals if t is not None], default=None)
@@ -2522,9 +2526,10 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
+    stripped = strip_fences(body or "")
+    plain = CODE_SPAN.sub(" ", stripped)
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    lines = mask_narrative(plain).splitlines()
+    lines = mask_narrative(plain, CODE_SPAN.sub(SPAN_MASK, stripped)).splitlines()
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
@@ -2941,10 +2946,31 @@ def heading_of(block: str) -> str:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    r"<details(?:[ \t\n\f\r][^>]*|/)?>|</details[ \t]*>"
-    r"|(?<![^\n\r])</details(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*|/)>",
+    rf"(?P<open>{DETAILS_OPENER})"
+    r"|(?P<lead>(?<![^\n\r]) {0,3}(?:> {0,4})*)?</details"
+    r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
+    r"(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?)"
+    r"|[ \t]*(?:(?:\r\n|\n|\r)[ \t]*)?)>",
     re.IGNORECASE,
 )
+
+
+def details_tags(text: str) -> list[tuple[int, int, bool]]:
+    """Each `<details>` tag in `text` as `(start, end, opening)`, starting at its `<` past any lead.
+
+    A close is read anywhere bare, its bracket allowed onto the next line as an inline tag's may be.
+    With more before its bracket it is read only where a line hands it to HTML as a block: up to
+    three spaces in, behind any blockquote markers, its tail allowed one line break. A tail stops at
+    any `<` and at every other line boundary, so it never swallows a later tag or heading.
+
+    Read from a copy whose code spans are each `SPAN_MASK`, a control character as `MARKUP_MASK`
+    is, rather than spaces. A span masked to spaces left the text after it looking indented, and a
+    literal mid-line then read as a tag.
+    """
+    return [
+        (max(m.start(), m.end("lead")), m.end(), m.group("open") is not None)
+        for m in DETAILS_TAG.finditer(text)
+    ]
 
 
 def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
@@ -2960,48 +2986,48 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
     depth = 0
     region_start = 0
     cursor = 0
-    for m in DETAILS_TAG.finditer(body):
-        opening = not m.group().startswith("</")
+    for start, end, opening in details_tags(body):
         if opening:
             if depth == 0:
-                leftover.append((cursor, m.start()))
-                cursor = m.start()
-                region_start = m.end()
+                leftover.append((cursor, start))
+                cursor = start
+                region_start = end
             depth += 1
         elif depth > 0:
             depth -= 1
             if depth == 0:
-                regions.append((region_start, m.start()))
-                cursor = m.end()
+                regions.append((region_start, start))
+                cursor = end
     leftover.append((cursor, len(body)))
     return regions, leftover
 
 
-def mask_narrative(text: str) -> str:
+def mask_narrative(text: str, tags: str | None = None) -> str:
     """The text with each narrative block's own content blanked, offsets and lines left alone.
 
     A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`. A block
     nested inside it keeps its content, and an unclosed block is never blanked, so a label it
-    holds is still read wherever it sits.
+    holds is still read wherever it sits. The tags are read from `tags` where given, the same text
+    with its code spans masked as `details_tags` needs, and everything else from `text`.
     """
     stack: list[tuple[int, int, list[tuple[int, int]]]] = []
     blank: list[tuple[int, int]] = []
-    for m in DETAILS_TAG.finditer(text):
-        if not m.group().startswith("</"):
-            stack.append((m.start(), m.end(), []))
+    for tag_at, tag_end, opening in details_tags(text if tags is None else tags):
+        if opening:
+            stack.append((tag_at, tag_end, []))
             continue
         if not stack:
             continue
         tag_start, start, children = stack.pop()
-        opener = SUMMARY.match(text[start : m.start()].lstrip())
+        opener = SUMMARY.match(text[start:tag_at].lstrip())
         if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
             cursor = start
             for child_start, child_end in children:
                 blank.append((cursor, child_start))
                 cursor = child_end
-            blank.append((cursor, m.start()))
+            blank.append((cursor, tag_at))
         if stack:
-            stack[-1][2].append((tag_start, m.end()))
+            stack[-1][2].append((tag_start, tag_end))
     masked = text
     for start, end in blank:
         masked = masked[:start] + QUOTED_CHAR.sub(" ", masked[start:end]) + masked[end:]
@@ -3017,8 +3043,10 @@ def mask_narrative(text: str) -> str:
 QUOTED_CHAR = re.compile("[^\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
-def mask_quotations(body: str) -> str:
+def mask_quotations(body: str, span: str = " ") -> str:
     """The body with every fenced block and inline code span blanked, offsets left alone.
+
+    A span's characters become `span`, which `details_tags` needs to be other than a space.
 
     A review quoting a section heading is not a review carrying that section, which is the reading
     every other reader in this file already takes and the one `marker_blocks` did not. This file's
@@ -3026,7 +3054,7 @@ def mask_quotations(body: str) -> str:
     its test data names as findings the round had raised.
     """
     return CODE_SPAN.sub(
-        lambda m: QUOTED_CHAR.sub(" ", m.group()),
+        lambda m: QUOTED_CHAR.sub(span, m.group()),
         strip_fences(body or "", lambda m: QUOTED_CHAR.sub(" ", m.group())),
     )
 
@@ -3049,7 +3077,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     # Found in the masked copy and taken from the body, which is what makes a quoted heading not a section.
     # The mask keeps every offset, so one set of spans addresses both.
     masked = mask_quotations(body)
-    region_spans, leftover_spans = details_spans(masked)
+    region_spans, leftover_spans = details_spans(mask_quotations(body, SPAN_MASK))
     blocks = []
     for spans in [[s] for s in region_spans] + [leftover_spans]:
         raw_lines = "".join(body[a:b] for a, b in spans).splitlines()
