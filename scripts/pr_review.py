@@ -672,11 +672,10 @@ STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
 # Anchored to a line for the reason the marker and the total above are.
-# The opener `DETAILS_TAG` reads, so `<details/>` ends the preamble and `<detailsfoo>` does not.
+# Bounded as `DETAILS_TAG`'s opener is, so `<details/>` ends the preamble and `<detailsfoo>` does not.
 # Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
 # That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
-DETAILS_OPENER = r"<details(?:[ \t\n\f\r][^>]*|/)?>"
-DETAILS_OPEN = re.compile(rf"^ {{0,3}}{DETAILS_OPENER}", re.IGNORECASE | re.MULTILINE)
+DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[ \t\n\f\r]|/?>)", re.IGNORECASE | re.MULTILINE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -2946,7 +2945,7 @@ def heading_of(block: str) -> str:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    rf"(?P<open>{DETAILS_OPENER})"
+    r"(?P<open><details(?:[ \t\n\f\r][^>]*|/)?>)"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?:> {0,4})*)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?)"
@@ -2959,10 +2958,12 @@ def details_tags(text: str) -> list[tuple[int, int, bool]]:
     """Each `<details>` tag in `text` as `(start, end, opening)`, starting at its `<` past any lead.
 
     A close is read anywhere bare. With more before its bracket, or its bracket on the next line, it
-    is read only where a line hands it to HTML as a block: up to three spaces in, behind any
-    blockquote markers, its tail allowed one line break. Mid-line, a next line opening on `>` is a
-    blockquote that ends the paragraph, which leaves the close as text. A tail stops at any `<` and
-    at every other line boundary, so it never swallows a later tag or heading.
+    is read only where its own line opens an HTML block: up to three spaces in, behind any
+    blockquote markers, its tail allowed one line break. Mid-line a next line opening on `>` is a
+    blockquote, which leaves the close as text, so a next-line bracket is not read there at all.
+    HTML still reads some closes these rules leave unread, such as one inside an HTML block already
+    open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
+    tag or heading.
 
     Read from a copy whose code spans are each `SPAN_MASK`, a control character as `MARKUP_MASK`
     is, rather than spaces. A span masked to spaces left the text after it looking indented, and a
