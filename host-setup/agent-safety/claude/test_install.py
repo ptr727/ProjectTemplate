@@ -414,6 +414,36 @@ class TestWholeFileOwnership(StampCase):
         self.assertIn("cannot be read", r.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_a_local_file_in_a_directory_that_cannot_be_entered_stops_with_a_message(self):
+        """exists() raises there rather than answering, which would otherwise be a traceback."""
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("needs a non-root POSIX user for a directory mode to deny access")
+        locked = self.local.parent / "locked"
+        locked.mkdir(parents=True)
+        inner = locked / "local.md"
+        inner.write_text("A constructed note.\n", encoding="utf-8")
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(inner),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="0",
+        )
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse(self.home.exists())
+
     def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
         """A hand-edited stamp could otherwise carry a digest that skips the backup."""
         self.install()
