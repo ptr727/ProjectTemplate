@@ -650,7 +650,6 @@ COUNT_MARKUP = re.compile(
 STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--")
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
-SPAN_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
 # Bounded to four digits, because a review states tens of findings and never thousands.
 # A longer run is an identifier, so the mask is not the only thing saying an anchor id is not one.
@@ -1922,11 +1921,11 @@ def stated_total(body: str) -> int | None:
 
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it. The opener is found where each code span is one
-    `SPAN_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
+    `MARKUP_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
     """
     stripped = strip_fences(body or "")
     plain = CODE_SPAN.sub(" ", stripped)
-    opener = DETAILS_OPEN.search(CODE_SPAN.sub(SPAN_MASK, stripped))
+    opener = DETAILS_OPEN.search(CODE_SPAN.sub(MARKUP_MASK, stripped))
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
     return max([t for t in totals if t is not None], default=None)
@@ -2528,7 +2527,7 @@ def unrecognized_in(body: str) -> list[str]:
     stripped = strip_fences(body or "")
     plain = CODE_SPAN.sub(" ", stripped)
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    lines = mask_narrative(plain, CODE_SPAN.sub(SPAN_MASK, stripped)).splitlines()
+    lines = mask_narrative(plain, CODE_SPAN.sub(MARKUP_MASK, stripped)).splitlines()
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
@@ -2967,9 +2966,9 @@ def details_tags(text: str) -> list[tuple[int, int, bool]]:
     open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
     tag.
 
-    Read from a copy whose code spans are each `SPAN_MASK`, a control character as `MARKUP_MASK`
-    is, rather than spaces. A span masked to spaces left the text after it looking indented, and a
-    literal mid-line then read as a tag.
+    `text` is read as given, so a caller masks its code spans first, each to `MARKUP_MASK` rather
+    than to spaces. A span masked to spaces left the text after it looking indented, and a literal
+    mid-line then read as a tag.
     """
     return [
         (max(m.start(), m.end("lead")), m.end(), m.group("open") is not None)
@@ -3081,7 +3080,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     # Found in the masked copy and taken from the body, which is what makes a quoted heading not a section.
     # The mask keeps every offset, so one set of spans addresses both.
     masked = mask_quotations(body)
-    region_spans, leftover_spans = details_spans(mask_quotations(body, SPAN_MASK))
+    region_spans, leftover_spans = details_spans(mask_quotations(body, MARKUP_MASK))
     blocks = []
     for spans in [[s] for s in region_spans] + [leftover_spans]:
         raw_lines = "".join(body[a:b] for a, b in spans).splitlines()
