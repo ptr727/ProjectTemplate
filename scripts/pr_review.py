@@ -181,8 +181,10 @@ Subcommands
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
            rather than failing. This takes a pull request number and words from the
-           finding, queries the id itself, and offers no argument an id fits in. Exit 0 =
-           done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
+           finding, queries the id itself, and offers no argument an id fits in. A finding
+           posted twice on one file, threads whose opening comments read the same, is
+           answered as one under --all-identical. Exit 0 = done, 60 = no thread matched,
+           61 = more than one did and the flag did not apply, 62 = the reply returned
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
@@ -4224,8 +4226,9 @@ def reply_to_thread(
     `all_identical` covers the one ambiguity no wording can narrow: a reviewer posting the same
     finding as two threads. Their opening comments fold to the same text, so every pattern that
     selects one selects the other, and the refusal left both open with no route to either. The
-    flag answers every candidate with the one body, and only when they all fold identically, so
-    two findings that merely share the quoted words still refuse.
+    flag answers every candidate with the one body, and only when they all sit on one file and
+    fold identically, so two findings that merely share the quoted words still refuse, and the
+    same text on two files stays two findings that `--path` already tells apart.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -4246,9 +4249,12 @@ def reply_to_thread(
         for t in threads:
             print(f"  unresolved: {describe(t)}")
         return 60
-    identical = len({finding_text(t) for t in hits}) == 1
+    paths = {t.get("path") for t in hits}
+    identical = len(paths) == 1 and len({finding_text(t) for t in hits}) == 1
     if len(hits) > 1 and not (all_identical and identical):
-        if identical:
+        if len(paths) > 1:
+            hint = "The candidates sit on different files, so add --path to select one."
+        elif identical:
             hint = (
                 "Every candidate opens with the same text, so no wording selects one: pass "
                 "--all-identical to answer each of them with this body."
@@ -4256,7 +4262,7 @@ def reply_to_thread(
         elif all_identical:
             hint = (
                 "--all-identical answers only candidates whose opening comments read the same, "
-                "and these differ, so quote more of the finding, or add --path."
+                "and these differ, so quote more of the finding."
             )
         else:
             hint = "Quote more of the finding, or add --path."
@@ -4279,13 +4285,14 @@ def reply_to_thread(
                 )
             return code
 
+    count = f" ({len(hits)} identical threads)" if len(hits) > 1 else ""
     if not resolve:
         print(
-            "status=REPLIED the thread is answered and left open, since --resolve was not "
-            "given. A decline is resolved only once its evidence is in the thread."
+            f"status=REPLIED{count} the thread is answered and left open, since --resolve was "
+            "not given. A decline is resolved only once its evidence is in the thread."
         )
         return 0
-    print("status=REPLIED_AND_RESOLVED")
+    print(f"status=REPLIED_AND_RESOLVED{count}")
     return 0
 
 

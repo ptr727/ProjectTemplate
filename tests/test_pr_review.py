@@ -6895,7 +6895,15 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         with mock.patch.object(pr_review, "gh_graphql", side_effect=capture):
             self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
         self.assertEqual(["t1", "t1", "t2", "t2"], ids)
-        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+        self.assertIn("REPLIED_AND_RESOLVED (2 identical threads)", self.out.getvalue())
+
+    def test_all_identical_refuses_the_same_text_on_two_files(self) -> None:
+        """Generic text on two files is two findings, and `--path` already selects between them."""
+        self.wire(page([rthread("t1", path="a.py"), rthread("t2", path="b.py")]))
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("add --path", self.out.getvalue())
+        self.assertNotIn("pass --all-identical", self.out.getvalue())
 
     def test_all_identical_compares_in_the_folded_form_match_reads(self) -> None:
         """Bodies differing only where `--match` cannot see are still one finding to it."""
