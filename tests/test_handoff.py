@@ -746,6 +746,15 @@ class ExitCodeCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("#7", out)
 
+    def test_a_closed_head_reads_the_closed_list_once_per_command(self) -> None:
+        """A second read would let the head and its doubts come from two snapshots."""
+        rows = {1: link(1, "lane", 1, None, state="CLOSED")}
+        gh = FakeGh(rows)
+        code, _, _ = run(gh, "chain", "--repo", "o/r", "--track", "lane")
+        self.assertEqual(code, 0)
+        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        self.assertEqual(len(reads), 1)
+
     def test_a_usage_error_refuses_at_one_rather_than_sharing_argparse_s_two(self) -> None:
         """Two is the command not having run, so a mistyped flag must not land on it."""
         err = io.StringIO()
@@ -836,6 +845,27 @@ class NewCase(unittest.TestCase):
         self.assertEqual(fake.issues[30]["state"], "CLOSED")
         body = next(c for c in fake.calls if c[:2] == ["issue", "comment"])
         self.assertIn("Continued in #1001", body[body.index("--body") + 1])
+
+    def test_new_onto_a_closed_head_reads_the_closed_list_once(self) -> None:
+        """`new` shares `chain`'s head resolution, so it holds the same single read."""
+        rows = {1: link(1, "lane", 1, None, state="CLOSED")}
+        gh = FakeGh(rows)
+        code, _, _ = run(
+            gh,
+            "new",
+            "--repo",
+            "o/r",
+            "--track",
+            "lane",
+            "--title",
+            "t",
+            "--body-file",
+            self.body_file("work"),
+            "--dry-run",
+        )
+        self.assertEqual(code, 0)
+        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        self.assertEqual(len(reads), 1)
 
     def test_the_round_increments_from_the_previous_link(self) -> None:
         fake = FakeGh({30: link(30, "default", 7, 29)})
