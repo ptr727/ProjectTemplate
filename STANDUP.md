@@ -213,7 +213,7 @@ For a **private** repo, confirm the owner-level toggle named `Dependabot on self
 
 ## 5. Verify: Run the Audit
 
-Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **operational** (every applicable check passes) or its residual deltas are tracked in `reports/<repo>/audit.md` plus an issue. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
+Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **operational** (every applicable check passes) or a hub-committed `reports/<repo>/audit.md` plus an issue tracks its residual deltas. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
 
 ## Onboarding a New Repo Type
 
