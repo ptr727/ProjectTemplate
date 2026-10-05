@@ -4278,7 +4278,7 @@ def reply_to_thread(
     for done, target in enumerate(hits):
         code = answer_thread(target, body, resolve)
         if code:
-            if done:
+            if len(hits) > 1:
                 print(
                     f"  {done} of {len(hits)} identical threads were answered before this one, "
                     "and none after it was attempted."

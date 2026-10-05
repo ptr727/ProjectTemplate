@@ -6938,6 +6938,13 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertFalse(self.wrote())
         self.assertIn("these differ", self.out.getvalue())
 
+    def test_all_identical_says_none_was_attempted_after_a_first_copy_fails(self) -> None:
+        """A failure on the first copy still leaves the others unanswered, and the output says so."""
+        self.wire(page([rthread("t1"), rthread("t2")]), reply={"id": "c1", "url": None, "body": ""})
+        self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn("0 of 2 identical threads were answered", self.out.getvalue())
+
     def test_all_identical_stops_at_the_first_unconfirmed_reply(self) -> None:
         """A later copy is not attempted past a failure, and the count says what already landed."""
         replies = [LANDED, {"id": "c2", "url": None, "body": ""}]
