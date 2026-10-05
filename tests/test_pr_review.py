@@ -3344,7 +3344,7 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
 
     def test_a_tag_is_bounded_by_html_s_own_syntax(self) -> None:
-        """A tail reaching another line or another tag swallowed the opener or heading after it."""
+        """A tail reaching past its next line or another tag swallowed the opener or heading after it."""
         cases = {
             "</details x <details>": ["<details>"],
             "<details x <details>": ["<details>"],
@@ -3353,11 +3353,24 @@ class TestSecondOverviewFormat(GqlCase):
             "<details\v>": [],
         }
         for sep in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029":
-            cases[f"</details x{sep}>"] = []
+            cases[f"</details x{sep}>"] = [f"</details x{sep}>"] if sep in "\n\r" else []
             cases[f"a{sep}</details x>"] = ["</details x>"] if sep in "\n\r" else []
         for text, tags in cases.items():
             with self.subTest(text=text):
                 found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
+                self.assertEqual(tags, found)
+
+    def test_a_close_behind_a_blockquote_marker_keeps_its_tail_on_its_own_line(self) -> None:
+        """The next line carries its own container, so a tail crossing it ended inside that markup."""
+        cases = {
+            "> </details x\n> ### H (1)": [],
+            "> </details x\nfoo>": [],
+            "> </details x>": ["</details x>"],
+            "  </details x\n>": ["</details x\n>"],
+        }
+        for text, tags in cases.items():
+            with self.subTest(text=text):
+                found = [text[a:b] for a, b, _ in pr_review.details_tags(text)]
                 self.assertEqual(tags, found)
 
     def test_a_body_of_unclosed_openers_is_read_in_linear_time(self) -> None:
@@ -3375,6 +3388,61 @@ class TestSecondOverviewFormat(GqlCase):
         body = "<details>\na\n</details >\nb\n<details>\nc\n</details>\n"
         regions, _ = pr_review.details_spans(body)
         self.assertEqual(["\na\n", "\nc\n"], [body[a:b] for a, b in regions])
+
+    def test_a_close_a_line_hands_to_html_ends_the_narrative(self) -> None:
+        """Indented, behind a blockquote, or with its bracket on the next line, it is still a close."""
+        for close in (
+            "  </details x>",
+            "   </details/>",
+            "> </details x>",
+            "> > </details x/>",
+            "</details\n>",
+            "</details x\n>",
+            "</details\nx>",
+        ):
+            with self.subTest(close=close):
+                body = self.narrated() + (
+                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n{close}\n\n- **Confidence:** high\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_region_ends_at_a_close_a_line_hands_to_html(self) -> None:
+        """The section readers read the same closes, so their regions end where HTML ends them."""
+        body = "<details>\na\n  </details x>\nb\n<details>\nc\n> </details/>\n"
+        regions, _ = pr_review.details_spans(body)
+        self.assertEqual(["\na\n  ", "\nc\n> "], [body[a:b] for a, b in regions])
+
+    def test_a_code_span_ahead_of_a_tag_does_not_put_it_at_a_line_start(self) -> None:
+        """Masked to spaces, a span left the literal after it looking indented, and it was paired."""
+        for prose in ("`a`</details x>", "`a` > </details x>", "`a`  </details/>"):
+            with self.subTest(prose=prose):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"{prose}\n\n- **Gadget (#1):** x\n</details>\n"
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+        for prose in ("`a`</details x>", "`a`> </details x>"):
+            with self.subTest(prose=prose):
+                body = (
+                    "<details>\n<summary>Review details</summary>\n\n"
+                    f"### Suppressed comments (1)\n\n{prose}\n\n**a.py:12**\n"
+                    "* Validate the input.\n</details>\n"
+                )
+                blocks = pr_review.suppressed_blocks(body)
+                self.assertEqual(1, len(blocks))
+                self.assertIn("Validate the input.", blocks[0])
+
+    def test_a_close_mid_line_with_its_bracket_on_the_next_line_is_text(self) -> None:
+        """A next line opening on `>` is a blockquote, which ends the paragraph the close sits in."""
+        body = (
+            "<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n"
+            "Closed with </details\n> as shown.\n\n**a.py:12**\n* Validate the input.\n</details>\n"
+        )
+        blocks = pr_review.suppressed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertIn("Validate the input.", blocks[0])
 
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
@@ -3896,6 +3964,20 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertEqual(
             5, pr_review.stated_total(f"{CCR_MARKER}\n\n<detailsfoo>\n\n**Findings:** 5\n")
         )
+
+    def test_the_preamble_ends_at_the_boundary_details_tag_reads(self) -> None:
+        """A boundary of its own let a section's total stand as the round's, or dropped the round's."""
+        self.assertEqual(
+            2,
+            pr_review.stated_total(
+                f"{CCR_MARKER}\n\n**Findings:** 2\n\n<details/>\n\n**Findings:** 9\n"
+            ),
+        )
+        for opener in ("<details\v>", "`a`<details>"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    5, pr_review.stated_total(f"{CCR_MARKER}\n\n{opener}\n\n**Findings:** 5\n")
+                )
 
     def test_a_total_indented_into_a_code_block_is_a_quotation(self) -> None:
         """Bounded to three spaces for the reason the marker is, a fourth making the line a code
@@ -6791,6 +6873,122 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertEqual(0, self.run_reply("--resolve", "--path", "b.py"))
         self.assertIn("b.py:12", self.out.getvalue())
 
+    def test_a_finding_posted_twice_refuses_and_names_the_flag(self) -> None:
+        """No wording selects one of two identical threads, so the refusal names the way out."""
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(61, self.run_reply("--resolve"))
+        self.assertFalse(self.wrote())
+        self.assertIn("--all-identical", self.out.getvalue())
+
+    def test_all_identical_answers_and_resolves_every_copy(self) -> None:
+        ids = []
+
+        def capture(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1", line=118), rthread("t2", line=399)]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=capture):
+            self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn("REPLIED_AND_RESOLVED (2 identical threads)", self.out.getvalue())
+
+    def test_all_identical_without_resolve_names_the_count_and_leaves_both_open(self) -> None:
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(0, self.run_reply("--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn("status=REPLIED (2 identical threads)", self.out.getvalue())
+
+    def test_all_identical_refuses_the_same_text_on_two_files(self) -> None:
+        """Generic text on two files is two findings, and `--path` already selects between them."""
+        self.wire(page([rthread("t1", path="a.py"), rthread("t2", path="b.py")]))
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("add --path", self.out.getvalue())
+        self.assertNotIn("pass --all-identical", self.out.getvalue())
+
+    def test_all_identical_compares_in_the_folded_form_match_reads(self) -> None:
+        """Bodies differing only where `--match` cannot see are still one finding to it."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count\nis off \u2014 by one."),
+                    rthread("t2", body="The Retry Count is off - by one."),
+                ]
+            )
+        )
+        self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_all_identical_still_refuses_findings_that_only_share_words(self) -> None:
+        """Two findings quoting the same words are two findings, and one body answers neither."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count is off by one."),
+                    rthread("t2", body="The retry count is never logged."),
+                ]
+            )
+        )
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("these differ", self.out.getvalue())
+
+    def test_all_identical_says_none_was_attempted_after_a_first_copy_fails(self) -> None:
+        """A failure on the first copy still leaves the others unanswered, and the output says so."""
+        self.wire(page([rthread("t1"), rthread("t2")]), reply={"id": "c1", "url": None, "body": ""})
+        self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn(
+            "0 of 2 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
+    def test_all_identical_stops_at_the_first_unconfirmed_reply(self) -> None:
+        """A later copy is not attempted past a failure, and the count says what already landed."""
+        replies = [LANDED, {"id": "c2", "url": None, "body": ""}]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": replies.pop(0)}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2"], ids)
+        self.assertIn(
+            "1 of 3 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
+    def test_all_identical_counts_the_reply_under_a_failed_resolve(self) -> None:
+        """A resolve that fails comes after its own reply landed, so that copy carries the answer."""
+        resolves = [True, False]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": resolves.pop(0)}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(63, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn(
+            "2 of 3 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
     def test_a_resolved_thread_is_not_a_candidate(self) -> None:
         """It is answered, and replying again reopens a conversation nobody is reading."""
         self.wire(page([rthread("t1", resolved=True)]))
@@ -6980,7 +7178,7 @@ class TestReplyArguments(unittest.TestCase):
                 self.assertIn("--body", self.err(["comment", "7", "--repo", "o/r", "--body", body]))
 
     def test_reply_only_options_are_rejected_on_comment(self) -> None:
-        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"], ["--all-identical"]):
             with self.subTest(flag=flag[0]):
                 self.assertIn(
                     flag[0],
@@ -6989,7 +7187,13 @@ class TestReplyArguments(unittest.TestCase):
 
     def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
         """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
-        for flag in (["--body", "Fixed."], ["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (
+            ["--body", "Fixed."],
+            ["--match", "x"],
+            ["--resolve"],
+            ["--path", "a.py"],
+            ["--all-identical"],
+        ):
             with self.subTest(flag=flag[0]):
                 self.assertIn(flag[0], self.err(["status", "7", "--repo", "o/r", *flag]))
 
