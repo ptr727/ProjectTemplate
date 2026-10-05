@@ -4279,9 +4279,10 @@ def reply_to_thread(
         code = answer_thread(target, body, resolve)
         if code:
             if len(hits) > 1:
+                replied = done + (code == 63)
                 print(
-                    f"  {done} of {len(hits)} identical threads were answered before this one, "
-                    "and none after it was attempted."
+                    f"  {replied} of {len(hits)} identical threads carry this reply, "
+                    "and none after this one was attempted."
                 )
             return code
 

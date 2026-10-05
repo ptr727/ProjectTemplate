@@ -6943,7 +6943,7 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.wire(page([rthread("t1"), rthread("t2")]), reply={"id": "c1", "url": None, "body": ""})
         self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
         self.assertFalse(self.resolved_a_thread())
-        self.assertIn("0 of 2 identical threads were answered", self.out.getvalue())
+        self.assertIn("0 of 2 identical threads carry this reply", self.out.getvalue())
 
     def test_all_identical_stops_at_the_first_unconfirmed_reply(self) -> None:
         """A later copy is not attempted past a failure, and the count says what already landed."""
@@ -6962,7 +6962,26 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
             self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
         self.assertEqual(["t1", "t1", "t2"], ids)
-        self.assertIn("1 of 3 identical threads were answered", self.out.getvalue())
+        self.assertIn("1 of 3 identical threads carry this reply", self.out.getvalue())
+
+    def test_all_identical_counts_the_reply_under_a_failed_resolve(self) -> None:
+        """A resolve that fails comes after its own reply landed, so that copy carries the answer."""
+        resolves = [True, False]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": resolves.pop(0)}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(63, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn("2 of 3 identical threads carry this reply", self.out.getvalue())
 
     def test_a_resolved_thread_is_not_a_candidate(self) -> None:
         """It is answered, and replying again reopens a conversation nobody is reading."""
