@@ -444,6 +444,23 @@ class TestWholeFileOwnership(StampCase):
         self.assertNotIn("Traceback", r.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_a_claude_md_that_is_a_directory_stops_the_install_with_nothing_changed(self):
+        """The write would raise after the hooks and settings were already replaced."""
+        self.md.mkdir(parents=True)
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse((self.home / "hooks").exists())
+
+    def test_the_report_on_a_claude_md_directory_gives_a_verdict_rather_than_crashing(self):
+        self.install()
+        self.md.unlink()
+        self.md.mkdir()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
         """A hand-edited stamp could otherwise carry a digest that skips the backup."""
         self.install()

@@ -547,7 +547,7 @@ def blocks_present(claude_md):
     Read from the file rather than from what the installer meant to write, since the question the
     stamp answers is what is on the machine.
     """
-    if not claude_md.exists():
+    if not claude_md.is_file():
         return {}
     text = claude_md.read_text(encoding="utf-8", errors="replace")
     found = {}
@@ -1025,6 +1025,13 @@ def main():
     local_text, local_problem = read_local_instructions(local_path)
     if local_problem:
         sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
+        return 1
+    # Refused here rather than at the write, which would raise after the hooks and settings were already replaced.
+    if claude_md.exists() and not claude_md.is_file():
+        sys.stderr.write(
+            f"Nothing was installed: {claude_md} exists and is not a regular file, so it cannot be "
+            "rendered. Move it aside and re-run.\n"
+        )
         return 1
 
     print(f"Installing agent host-safety kit into: {claude_home}")
