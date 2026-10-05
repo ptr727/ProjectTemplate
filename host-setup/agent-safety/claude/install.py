@@ -3,9 +3,9 @@
 
 Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
 registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
-in its `env`, merges the permission rules this kit owns into the same file, adds the safety rules to
-the user CLAUDE.md (marker-delimited so re-runs update in place), and self-tests each hook before
-registering it.
+in its `env`, merges the permission rules this kit owns into the same file, renders the user
+CLAUDE.md whole from the kit's blocks and the host-local instruction file, and self-tests each hook
+before registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -18,6 +18,7 @@ Usage: python3 install.py            (installs to ~/.claude)
        CLAUDE_HOME=/x python3 install.py   (override target, for testing)
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing)
        AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing)
+       AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing)
 """
 
 import argparse
@@ -67,6 +68,12 @@ CLAUDE_MD_BLOCKS = (
     ("fleet-bootstrap", "claude-md-fleet.md"),
 )
 BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
+
+# The host-local file appended to the rendered instruction file, the one place host-specific text lives.
+# One file rather than one per agent, since a host's own notes are rarely about a single agent.
+# Another agent's global file is rendered from these same parts, so adding one changes no part of this.
+LOCAL_INSTRUCTIONS_ENV = "AGENT_FLEET_LOCAL_INSTRUCTIONS"
+LOCAL_MARKER = "host-local"
 
 # The files whose bytes this kit actually places on a machine, the hook first and then each block.
 # Derived rather than listed, so a block added above enters the digest without a second edit.
@@ -406,6 +413,111 @@ def normalized(data):
     return data.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def local_instructions_path():
+    """The host-local instruction file, under the XDG config root unless the override names one."""
+    override = os.environ.get(LOCAL_INSTRUCTIONS_ENV)
+    if override:
+        # Absolute rather than resolved, so a symlink stays a symlink and a dangling one is still seen.
+        return pathlib.Path(override).expanduser().absolute()
+    # The XDG spec treats a relative value as unset, and honoring one made the file depend on the cwd.
+    root = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or "").expanduser()
+    base = root if root.is_absolute() else pathlib.Path.home() / ".config"
+    return base / "agent-fleet" / "local.md"
+
+
+def read_local_instructions(local_path):
+    """The host-local text, stripped, and why it cannot be used, or None where it can.
+
+    Checked before anything is installed, so an unusable file stops the run with nothing changed.
+    A file carrying this kit's own markers is refused, since appending it would duplicate a block,
+    and copying an old backup into the local file is exactly how that happens.
+    """
+    # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
+    # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
+    try:
+        os.lstat(local_path)
+    except (FileNotFoundError, NotADirectoryError):
+        return "", None
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    try:
+        raw = local_path.read_bytes()
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    try:
+        text = normalized(raw.decode("utf-8")).strip()
+    except UnicodeDecodeError as e:
+        return "", f"{local_path} is not UTF-8 ({e})"
+    for marker in (*BLOCK_MARKERS, LOCAL_MARKER):
+        if re.search(rf"<!-- {marker} (?:v\d+ )?(?:start|end) -->", text):
+            return "", (
+                f"{local_path} carries this kit's {marker} marker, so appending it would duplicate "
+                "kit content. Keep only host-specific text in it"
+            )
+    return text, None
+
+
+def render_instructions(local_path, local_text):
+    """The whole global instruction file in newline form: a header, each block, then the local file.
+
+    Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
+    blocks were never written or checked, so they restated rules in wording the fleet had since
+    changed, and every session on the host read them anyway.
+    """
+    header = (
+        "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
+        f"every install. Put host-specific content in {local_path}, appended below. -->"
+    )
+    parts = [header]
+    parts += [
+        (HERE / filename).read_text(encoding="utf-8").strip() for _, filename in CLAUDE_MD_BLOCKS
+    ]
+    if local_text:
+        parts.append(f"<!-- {LOCAL_MARKER} start -->\n{local_text}\n<!-- {LOCAL_MARKER} end -->")
+    return normalized("\n\n".join(parts)) + "\n"
+
+
+def text_digest(text):
+    """A digest over text with its line endings normalized, so CRLF and LF copies agree."""
+    return hashlib.sha256(normalized(text).encode("utf-8")).hexdigest()[:16]
+
+
+def stamped_instructions_digest(claude_home):
+    """The digest of the instruction file the last install wrote, or None where none is recorded.
+
+    None covers a missing or unreadable stamp and one written before the field existed. Each of
+    those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
+    """
+    try:
+        stamp = json.loads((claude_home / "agent-safety-stamp.json").read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
+    if stamp_problems(stamp):
+        return None
+    value = stamp.get("instructionsDigest")
+    return value if isinstance(value, str) else None
+
+
+def write_backup(claude_md, raw):
+    """Write `raw` to a new backup beside CLAUDE.md and return its path, never replacing an earlier one.
+
+    Created exclusively rather than checked and then written, so two runs in one second cannot
+    both pick the same free name and have the second overwrite the first.
+    """
+    when = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
+    n = 0
+    while True:
+        suffix = f"{when}.bak" if n == 0 else f"{when}-{n}.bak"
+        candidate = claude_md.with_name(f"{claude_md.name}.{suffix}")
+        try:
+            with open(candidate, "xb") as f:
+                f.write(raw)
+            return candidate
+        except FileExistsError:
+            n += 1
+
+
 def payload_digest():
     """One digest over the content this kit installs, normalized the way the installer writes it.
 
@@ -498,8 +610,13 @@ def installed_digest(claude_home):
     return h.hexdigest()[:16]
 
 
-def build_stamp(claude_home, installed):
-    """The record written to the machine after an install, or computed live for a report."""
+def build_stamp(claude_home, installed, instructions_digest=None):
+    """The record written to the machine after an install, or computed live for a report.
+
+    An install passes the digest of what it rendered rather than re-reading the file. A write by
+    anything else between the install's write and this read would otherwise be stamped as the
+    install's own, and the next run would replace it with no backup.
+    """
     return {
         "stampVersion": STAMP_VERSION,
         "host": host_facts(),
@@ -507,6 +624,12 @@ def build_stamp(claude_home, installed):
         "payloadDigest": payload_digest(),
         "installedDigest": installed_digest(claude_home),
         "blocks": blocks_present(claude_home / "CLAUDE.md"),
+        "instructionsDigest": instructions_digest
+        or (
+            text_digest((claude_home / "CLAUDE.md").read_text(encoding="utf-8", errors="replace"))
+            if (claude_home / "CLAUDE.md").is_file()
+            else None
+        ),
         "installedUtc": installed,
     }
 
@@ -816,6 +939,27 @@ def report(claude_home):
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
+    # The whole file is compared too, since content outside the blocks is drift no block check sees.
+    # The stamp's digest of the file it wrote says which kind: an earlier render, or a hand edit.
+    claude_md = claude_home / "CLAUDE.md"
+    local_path = local_instructions_path()
+    local_text, local_problem = read_local_instructions(local_path)
+    if local_problem:
+        problems.append(local_problem)
+    elif claude_md.is_file():
+        live_text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+        if live_text != render_instructions(local_path, local_text):
+            if text_digest(live_text) == stamp.get("instructionsDigest"):
+                problems.append(
+                    f"CLAUDE.md is the file the last install wrote, and this checkout and "
+                    f"{local_path} now render a different one"
+                )
+            else:
+                problems.append(
+                    "CLAUDE.md was edited since the last install, or predates whole-file "
+                    "ownership, so a re-run backs it up before rewriting it. Move host-specific "
+                    f"content into {local_path}"
+                )
     if live != stamp.get("blocks"):
         problems.append(
             f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}"
@@ -828,7 +972,13 @@ def report(claude_home):
         print("STALE:")
         for p in problems:
             print(f"  - {p}")
-        print("  Re-run the installer with no arguments. It is idempotent.")
+        # The installer refuses an unusable local file, so re-running first would only repeat the refusal.
+        if local_problem:
+            print(f"  Fix {local_path} first, since the installer refuses it as it stands.")
+        print(
+            "  Re-run the installer with no arguments. It is idempotent, and it backs up a "
+            "CLAUDE.md edited since the last install before rewriting it."
+        )
         return 1
     print("CURRENT: this machine matches this checkout.")
     return 0
@@ -870,6 +1020,12 @@ def main():
     # Reported before anything is created, so a report on an uninstalled machine does not install it.
     if args.report:
         return report(claude_home)
+
+    local_path = local_instructions_path()
+    local_text, local_problem = read_local_instructions(local_path)
+    if local_problem:
+        sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
+        return 1
 
     print(f"Installing agent host-safety kit into: {claude_home}")
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -1085,53 +1241,40 @@ def main():
     for line in done:
         print(f"  settings -> {settings} ({line})")
 
-    # 4. CLAUDE.md carries one marker block per snippet, replaced where present and appended where not.
-    # The two blocks install and update independently, so one can change without rewriting the other.
+    # 4. CLAUDE.md is rendered whole: a header, one marker block per snippet, then the host-local file.
     # The safety block states restrictions only.
     # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
+    # A file whose digest matches the stamp is the one the last install wrote, so it is replaced silently.
+    # Anything else is a hand edit, or a file from before whole-file ownership, so it is backed up first.
     # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
+    # A file that is not valid UTF-8 still decodes for the comparison, and the backup keeps its raw bytes.
+    rendered = render_instructions(local_path, local_text)
+    backup = None
     if claude_md.exists():
         raw = claude_md.read_bytes()
         newline = "\r\n" if b"\r\n" in raw else "\n"
-        existing = normalized(raw.decode("utf-8"))
-    else:
-        newline, existing = "\n", ""
-    for marker, filename in CLAUDE_MD_BLOCKS:
-        snippet = (HERE / filename).read_text(encoding="utf-8").strip()
-        block_re = re.compile(
-            rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL
-        )
-        if block_re.search(existing):
-            # Keep the first occurrence and drop any duplicate, rather than rewriting each in place.
-            # Substituting every match preserved the duplication, so a file arriving with two blocks kept two.
-            # The report's own remedy of re-running could then never clear it.
-            written = []
-
-            def once(_match, _snippet=snippet, _written=written):
-                _written.append(True)
-                return _snippet if len(_written) == 1 else ""
-
-            existing = block_re.sub(once, existing)
-            action = (
-                "updated"
-                if len(written) == 1
-                else f"updated, {len(written) - 1} duplicate(s) removed"
-            )
+        existing = normalized(raw.decode("utf-8", errors="replace"))
+        if existing == rendered:
+            action = "already current"
+        elif text_digest(existing) == stamped_instructions_digest(claude_home):
+            action = "updated"
         else:
-            sep = (
-                ""
-                if existing == "" or existing.endswith("\n\n")
-                else ("\n" if existing.endswith("\n") else "\n\n")
-            )
-            existing, action = existing + sep + snippet + "\n", "appended"
-        print(f"  CLAUDE.md -> {claude_md} ({marker} block {action})")
-    claude_md.write_bytes(existing.replace("\n", newline).encode("utf-8"))
+            backup = write_backup(claude_md, raw)
+            action = f"rewritten, the edited prior file backed up to {backup}"
+    else:
+        newline, action = "\n", "written"
+    claude_md.write_bytes(rendered.replace("\n", newline).encode("utf-8"))
+    print(f"  CLAUDE.md -> {claude_md} ({action})")
+    if backup is not None:
+        print(f"    Move anything host-specific into {local_path}, then re-run to append it.")
 
     # 5. Stamp the machine, written last so it records a completed install rather than an attempted one.
     # The blocks are read back off disk here, so the stamp reports what CLAUDE.md holds rather than what was intended.
     stamp_path = claude_home / "agent-safety-stamp.json"
     stamp = build_stamp(
-        claude_home, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        claude_home,
+        datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        text_digest(rendered),
     )
     stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
     print(f"  stamp -> {stamp_path}")

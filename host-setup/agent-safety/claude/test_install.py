@@ -7,6 +7,8 @@ a real home by default, so a test that forgot the override would rewrite the dev
 Standard library only, matching the rest of the gates, so CI needs no install step.
 """
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -38,10 +40,14 @@ def run(home, *args, dirty=False, contain=True):
 
     contain forces the containment-capable signal the same way, so a verdict does not depend on
     whether the machine running the suite has a systemd user manager.
+
+    The host-local instruction file is pointed beside the throwaway home, so no case reads the
+    developer's own file into what it renders.
     """
     env = dict(
         os.environ,
         CLAUDE_HOME=str(home),
+        AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
     )
@@ -53,6 +59,11 @@ def run(home, *args, dirty=False, contain=True):
         env=env,
         check=False,
     )
+
+
+def local_file(home):
+    """The host-local instruction file every case uses, beside its throwaway CLAUDE_HOME."""
+    return home.parent / "local.md"
 
 
 class StampCase(unittest.TestCase):
@@ -261,6 +272,248 @@ class TestInstalledContent(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 0)
 
 
+class TestWholeFileOwnership(StampCase):
+    """CLAUDE.md is rendered whole, so nothing outside the kit's content survives an install unseen."""
+
+    def setUp(self):
+        super().setUp()
+        self.local = local_file(self.home)
+
+    def backups(self):
+        return sorted(self.home.glob("CLAUDE.md.*.bak"))
+
+    def test_an_install_writes_the_header_and_both_blocks_and_nothing_else(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("<!-- Written by ProjectTemplate host-setup/agent-safety"))
+        for marker in install.BLOCK_MARKERS:
+            self.assertEqual(len(re.findall(rf"<!-- {marker} v\d+ start -->", text)), 1)
+        self.assertNotIn("host-local", text.split("-->", 1)[1])
+        self.assertEqual(self.backups(), [])
+
+    def test_the_local_file_is_appended_under_its_marker_and_reports_current(self):
+        self.local.write_text("Constructed host note for this case.\n", encoding="utf-8")
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertIn(
+            "<!-- host-local start -->\nConstructed host note for this case.\n<!-- host-local end -->",
+            text,
+        )
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_content_from_before_whole_file_ownership_is_backed_up_and_dropped(self):
+        """A pre-existing file has no stamp digest, so it cannot be told from a hand edit."""
+        self.home.mkdir(parents=True)
+        original = b"## A Hand-Written Section\n\nAn older wording of a fleet rule.\n"
+        self.md.write_bytes(original)
+        r = self.install()
+        self.assertNotIn("older wording", self.md.read_text(encoding="utf-8"))
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+        self.assertIn("backed up", r.stdout)
+
+    def test_an_untouched_earlier_render_is_replaced_without_a_backup(self):
+        """The file the last install wrote matches the stamp, so nothing in it is anyone's edit."""
+        self.install()
+        self.local.write_text("A note added after the first install.\n", encoding="utf-8")
+        r = self.install()
+        self.assertIn("(updated)", r.stdout)
+        self.assertEqual(self.backups(), [])
+        self.assertIn("A note added after the first install.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_hand_edit_after_an_install_is_backed_up_before_the_rewrite(self):
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertIn("A line added by hand.", backups[0].read_text(encoding="utf-8"))
+        self.assertNotIn("A line added by hand.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_stamp_without_the_digest_treats_a_changed_file_as_an_edit(self):
+        """A stamp from before the field existed cannot vouch for the file, so it is kept."""
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        del stamp["instructionsDigest"]
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_the_report_names_an_earlier_render(self):
+        self.install()
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the file the last install wrote", r.stdout)
+
+    def test_the_report_names_a_hand_edit(self):
+        self.install()
+        self.md.write_text(
+            self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n", encoding="utf-8"
+        )
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("edited since the last install", r.stdout)
+
+    def test_a_second_backup_never_overwrites_the_first(self):
+        self.home.mkdir(parents=True)
+        first = install.write_backup(self.md, b"first")
+        second = install.write_backup(self.md, b"second")
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.read_bytes(), b"first")
+        self.assertEqual(second.read_bytes(), b"second")
+
+    def test_a_claude_md_that_is_not_utf8_is_backed_up_byte_for_byte(self):
+        """The file the installer most needs to back up is the one it cannot decode."""
+        self.home.mkdir(parents=True)
+        original = b"A hand-written note with a Latin-1 byte: \xe9.\n"
+        self.md.write_bytes(original)
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+
+    def test_a_local_file_carrying_a_kit_marker_stops_the_install_with_nothing_changed(self):
+        """Copying an old backup into the local file would otherwise duplicate a block for good."""
+        self.local.write_text(
+            "<!-- agent-safety v1 start -->\ncopied\n<!-- agent-safety v1 end -->\n",
+            encoding="utf-8",
+        )
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Nothing was installed", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_file_that_is_not_utf8_stops_the_install_with_nothing_changed(self):
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not UTF-8", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_the_report_names_an_unusable_local_file_rather_than_crashing(self):
+        self.install()
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not UTF-8", r.stdout)
+        self.assertIn("first, since the installer refuses it", r.stdout)
+
+    def test_a_dangling_local_symlink_stops_the_install_rather_than_reading_as_absent(self):
+        """A configured local file that went missing must not silently drop its text."""
+        self.local.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.local.symlink_to(self.local.parent / "missing-target.md")
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_file_in_a_directory_that_cannot_be_entered_stops_with_a_message(self):
+        """exists() raises there rather than answering, which would otherwise be a traceback."""
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("needs a non-root POSIX user for a directory mode to deny access")
+        locked = self.local.parent / "locked"
+        locked.mkdir(parents=True)
+        inner = locked / "local.md"
+        inner.write_text("A constructed note.\n", encoding="utf-8")
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(inner),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="0",
+        )
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
+        """A hand-edited stamp could otherwise carry a digest that skips the backup."""
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["instructionsDigest"] = install.text_digest(edited)
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
+        self.local.mkdir(parents=True)
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertNotIn("UTF-8", r.stderr)
+
+    def test_the_install_stamps_the_digest_it_rendered(self):
+        """main() must hand build_stamp the rendered digest, or the stamp re-reads the file."""
+        self.local.write_text("A constructed note.\n", encoding="utf-8")
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "0",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "build_stamp", wraps=install.build_stamp) as spy,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 0)
+        expected = install.text_digest(
+            install.render_instructions(self.local.absolute(), "A constructed note.")
+        )
+        self.assertEqual(spy.call_args.args[2], expected)
+
+    def test_the_stamp_records_the_rendered_digest_rather_than_rereading_the_file(self):
+        """A write between the install's own write and the stamp must not be vouched for."""
+        self.home.mkdir(parents=True)
+        self.md.write_text("written by something else after the install\n", encoding="utf-8")
+        stamp = install.build_stamp(self.home, "2026-01-01T00:00:00Z", "rendereddigest00")
+        self.assertEqual(stamp["instructionsDigest"], "rendereddigest00")
+
+
+class TestLocalInstructionsPath(unittest.TestCase):
+    def test_a_relative_xdg_config_home_is_ignored(self):
+        """The XDG spec treats a relative value as unset, so the file cannot depend on the cwd."""
+        env = {"XDG_CONFIG_HOME": "relative/config"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, pathlib.Path.home() / ".config" / "agent-fleet" / "local.md")
+
+    def test_an_absolute_xdg_config_home_is_honored(self):
+        root = pathlib.Path(tempfile.gettempdir()).resolve() / "xdg-case"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root)}, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, root / "agent-fleet" / "local.md")
+
+    def test_a_relative_override_resolves_to_an_absolute_path(self):
+        with mock.patch.dict(os.environ, {install.LOCAL_INSTRUCTIONS_ENV: "local.md"}):
+            path = install.local_instructions_path()
+        self.assertTrue(path.is_absolute())
+
+
 class TestDuplicateBlocks(StampCase):
     def test_a_duplicated_block_is_not_reported_as_present(self):
         """Two blocks mean the second silently governs, and naming the first hides that."""
@@ -286,7 +539,12 @@ class TestDuplicateBlocks(StampCase):
 class TestDegradedEnvironments(StampCase):
     def test_a_host_without_git_stamps_rather_than_crashing(self):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
-        env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+            PATH="",
+        )
         r = subprocess.run(
             [sys.executable, str(INSTALL)],
             capture_output=True,
@@ -630,7 +888,11 @@ class TestRegistration(StampCase):
             ),
             encoding="utf-8",
         )
-        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+        )
         r = subprocess.run(
             [sys.executable, str(broken / "install.py")],
             capture_output=True,
