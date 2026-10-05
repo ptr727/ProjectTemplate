@@ -3361,8 +3361,8 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual(tags, found)
 
     def test_a_body_of_unclosed_openers_is_read_in_linear_time(self) -> None:
-        """An opener with no closing `>` ends its scan at the next tag, so a body of such openers reads in linear time."""
-        body = "<details x\n" * 6000
+        """An opener with no closing `>` ends its scan at the next `<`, so a body of such openers reads in linear time."""
+        body = "<details x\n" * 9000
         start = time.monotonic()
         self.assertEqual([], pr_review.details_spans(body)[0])
         self.assertEqual(body, pr_review.mask_narrative(body))
