@@ -4281,7 +4281,7 @@ def reply_to_thread(
             if len(hits) > 1:
                 replied = done + (code == 63)
                 print(
-                    f"  {replied} of {len(hits)} identical threads carry this reply, "
+                    f"  {replied} of {len(hits)} identical threads are confirmed to carry this reply, "
                     "and none after this one was attempted."
                 )
             return code
