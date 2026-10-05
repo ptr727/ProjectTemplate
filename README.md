@@ -180,7 +180,7 @@ host-setup/agent-safety/claude/install.sh        # Linux, WSL, macOS
 .\host-setup\agent-safety\claude\install.ps1     # Windows, and the .\ prefix is required
 ```
 
-Restart Claude Code sessions on the machine afterward so the hook and the `CLAUDE.md` blocks load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
+Restart Claude Code sessions on the machine afterward so the hook and the rendered `CLAUDE.md` load. The installer is idempotent, so re-running it is also how a machine picks up an upstream change to the guard. It owns the whole of `~/.claude/CLAUDE.md`. The first run on an existing file, or any run after a hand edit, copies that file to a timestamped `.bak` before replacing it. Host-specific text belongs in `~/.config/agent-fleet/local.md` instead. What it installs, how to verify it, and what it deliberately does not catch are in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. The surrounding host prerequisites are in [`docs/host-setup.md`][host-setup].
 
 ### Install the Fleet Skills
 

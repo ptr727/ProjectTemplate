@@ -358,11 +358,75 @@ class TestWholeFileOwnership(StampCase):
 
     def test_a_second_backup_never_overwrites_the_first(self):
         self.home.mkdir(parents=True)
-        first = install.next_backup(self.md)
-        first.write_text("first", encoding="utf-8")
-        second = install.next_backup(self.md)
+        first = install.write_backup(self.md, b"first")
+        second = install.write_backup(self.md, b"second")
         self.assertNotEqual(first, second)
-        self.assertFalse(second.exists())
+        self.assertEqual(first.read_bytes(), b"first")
+        self.assertEqual(second.read_bytes(), b"second")
+
+    def test_a_claude_md_that_is_not_utf8_is_backed_up_byte_for_byte(self):
+        """The file the installer most needs to back up is the one it cannot decode."""
+        self.home.mkdir(parents=True)
+        original = b"A hand-written note with a Latin-1 byte: \xe9.\n"
+        self.md.write_bytes(original)
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+
+    def test_a_local_file_carrying_a_kit_marker_stops_the_install_with_nothing_changed(self):
+        """Copying an old backup into the local file would otherwise duplicate a block for good."""
+        self.local.write_text(
+            "<!-- agent-safety v1 start -->\ncopied\n<!-- agent-safety v1 end -->\n",
+            encoding="utf-8",
+        )
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Nothing was installed", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_file_that_is_not_utf8_stops_the_install_with_nothing_changed(self):
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read as UTF-8", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_the_report_names_an_unusable_local_file_rather_than_crashing(self):
+        self.install()
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read as UTF-8", r.stdout)
+
+    def test_the_stamp_records_the_rendered_digest_rather_than_rereading_the_file(self):
+        """A write between the install's own write and the stamp must not be vouched for."""
+        self.home.mkdir(parents=True)
+        self.md.write_text("written by something else after the install\n", encoding="utf-8")
+        stamp = install.build_stamp(self.home, "2026-01-01T00:00:00Z", "rendereddigest00")
+        self.assertEqual(stamp["instructionsDigest"], "rendereddigest00")
+
+
+class TestLocalInstructionsPath(unittest.TestCase):
+    def test_a_relative_xdg_config_home_is_ignored(self):
+        """The XDG spec treats a relative value as unset, so the file cannot depend on the cwd."""
+        env = {"XDG_CONFIG_HOME": "relative/config"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, pathlib.Path.home() / ".config" / "agent-fleet" / "local.md")
+
+    def test_an_absolute_xdg_config_home_is_honored(self):
+        root = pathlib.Path(tempfile.gettempdir()).resolve() / "xdg-case"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root)}, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, root / "agent-fleet" / "local.md")
+
+    def test_a_relative_override_resolves_to_an_absolute_path(self):
+        with mock.patch.dict(os.environ, {install.LOCAL_INSTRUCTIONS_ENV: "local.md"}):
+            path = install.local_instructions_path()
+        self.assertTrue(path.is_absolute())
 
 
 class TestDuplicateBlocks(StampCase):
