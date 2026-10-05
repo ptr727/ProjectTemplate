@@ -820,13 +820,15 @@ def cmd_chain(a: argparse.Namespace) -> int:
         raise Refusal(f"--grep is not a valid regular expression: {exc}") from exc
     rows = open_handoffs(a.repo)
     require_marked(rows)
-    head = on_track(rows, a.track) or newest_closed(a.repo, a.track)
+    head = on_track(rows, a.track)
+    closed = None if head else read_closed(a.repo)
+    head = head or newest_closed(a.repo, a.track, closed)
     if head is None:
         raise Refusal(
             f"{a.repo} has no handoff on track {a.track!r}, open or closed, so there is no chain "
             "to walk."
         )
-    lane = track_links(a.repo, a.track, rows)
+    lane = track_links(a.repo, a.track, rows, closed)
     doubts = head_doubts(head, lane)
     links, stopped = walk(a.repo, head["number"], a.limit, "--limit")
     shown = 0
@@ -868,22 +870,8 @@ def cut(text: str) -> str:
     return f"{text[:STDERR_CAP]} ... {len(text) - STDERR_CAP} more character(s) not shown."
 
 
-def newest_closed(repo: str, track: str) -> dict | None:
-    """The newest closed handoff on a track, or None where the track has never had one.
-
-    A track with no open handoff is either one that has never had a handoff or one whose lane was
-    closed out, and the two are not the same. Reading the second as the first makes the next `new`
-    start a second chain at round 1 with `previous=none`, orphaning every link already written,
-    which is the failure the chain exists to prevent.
-
-    The head is the highest round rather than the highest issue number, because a chain is ordered
-    by round everywhere else and an issue number only agrees with that where the links were filed
-    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
-    number there hands `new` a predecessor that is not the head, so it files a second link at a
-    round already taken and the real chain goes unreachable while every step exits 0. The number
-    breaks a tie between two links claiming one round, which is itself a defect the reader should
-    not have to resolve.
-    """
+def read_closed(repo: str) -> list[dict]:
+    """The closed `handoff` issues, up to `CLOSED_WINDOW`, with their bodies."""
     rows = gh_json(
         [
             "issue",
@@ -900,7 +888,29 @@ def newest_closed(repo: str, track: str) -> dict | None:
             "number,body,state",
         ]
     )
-    rows = rows_of(rows, f"closed handoff list for {repo}", "number")
+    return rows_of(rows, f"closed handoff list for {repo}", "number")
+
+
+def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> dict | None:
+    """The newest closed handoff on a track, or None where the track has never had one.
+
+    A track with no open handoff is either one that has never had a handoff or one whose lane was
+    closed out, and the two are not the same. Reading the second as the first makes the next `new`
+    start a second chain at round 1 with `previous=none`, orphaning every link already written,
+    which is the failure the chain exists to prevent.
+
+    The head is the highest round rather than the highest issue number, because a chain is ordered
+    by round everywhere else and an issue number only agrees with that where the links were filed
+    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
+    number there hands `new` a predecessor that is not the head, so it files a second link at a
+    round already taken and the real chain goes unreachable while every step exits 0. The number
+    breaks a tie between two links claiming one round, which is itself a defect the reader should
+    not have to resolve.
+
+    A caller that already read the closed list passes it as `closed`, and it is used as given
+    rather than read again.
+    """
+    rows = closed if closed is not None else read_closed(repo)
     malformed: list[str] = []
     bare: list[str] = []
     found: list[dict] = []
@@ -984,12 +994,15 @@ def cmd_new(a: argparse.Namespace) -> int:
     body = getattr(a, "body", None)
     if body is None:
         body = body_from(Path(a.body_file))
+    closed = None
     if getattr(a, "fresh_label", False):
         rows, previous = [], None
     else:
         rows = open_handoffs(a.repo)
         require_marked(rows)
-        previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
+        previous = on_track(rows, a.track)
+        closed = None if previous else read_closed(a.repo)
+        previous = previous or newest_closed(a.repo, a.track, closed)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
     # A head can already have a successor, whatever key resolved it.
@@ -999,7 +1012,7 @@ def cmd_new(a: argparse.Namespace) -> int:
     # The check runs before the create rather than after it.
     # A refusal that leaves an issue behind is a refusal that changed something.
     if previous is not None:
-        doubts = head_doubts(previous, track_links(a.repo, a.track, rows))
+        doubts = head_doubts(previous, track_links(a.repo, a.track, rows, closed))
         if doubts:
             raise Refusal(
                 cut(
@@ -1037,30 +1050,16 @@ class Lane(typing.NamedTuple):
     full: bool
 
 
-def track_links(repo: str, track: str, rows: list[dict]) -> Lane:
-    """The links on `track`, the open ones taken from `rows` and the closed ones read here.
+def track_links(repo: str, track: str, rows: list[dict], closed: list[dict] | None = None) -> Lane:
+    """The links on `track`, the open ones taken from `rows` and the closed ones from `closed`.
 
     A row whose block is absent or cannot be read could be on this track, so it is named in
     `unreadable` rather than skipped, and a closed read that fills its window sets `full`, since a
-    link past it is unseen. Each caller decides whether those refuse or are reported.
+    link past it is unseen. Each caller decides whether those refuse or are reported. A caller
+    that already read the closed list passes it as `closed`, and one that passes none has it read here.
     """
-    closed = gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--label",
-            LABEL,
-            "--state",
-            "closed",
-            "--limit",
-            str(CLOSED_WINDOW),
-            "--json",
-            "number,body,state",
-        ]
-    )
-    closed = rows_of(closed, f"closed handoff list for {repo}", "number")
+    if closed is None:
+        closed = read_closed(repo)
     links: list[dict] = []
     unreadable: list[str] = []
     for row in [*rows, *closed]:
