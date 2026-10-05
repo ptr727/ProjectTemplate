@@ -3347,6 +3347,7 @@ class TestSecondOverviewFormat(GqlCase):
         """A tail reaching another line or another tag swallowed the opener or heading after it."""
         cases = {
             "</details x <details>": ["<details>"],
+            "<details x <details>": ["<details>"],
             "</details x\n### Suppressed comments (1)\n>": [],
             "</details\v>": [],
             "<details\v>": [],
@@ -3358,6 +3359,16 @@ class TestSecondOverviewFormat(GqlCase):
             with self.subTest(text=text):
                 found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
                 self.assertEqual(tags, found)
+
+    def test_a_body_of_unclosed_openers_is_read_in_linear_time(self) -> None:
+        """An opener no `>` closes ends its scan at the next tag, so each reader stays linear in the body."""
+        body = "<details x\n" * 12000
+        start = time.monotonic()
+        self.assertEqual([], pr_review.details_spans(body)[0])
+        self.assertEqual(body, pr_review.mask_narrative(body))
+        pr_review.unrecognized_in(body)
+        self.assertEqual([], pr_review.marker_blocks(body, pr_review.SUPPRESSED))
+        self.assertLess(time.monotonic() - start, 1.0)
 
     def test_a_region_ends_at_a_close_in_another_html_spelling(self) -> None:
         """The section readers pair on the same tags, so their regions end where HTML ends them."""
