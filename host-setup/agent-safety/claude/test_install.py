@@ -7,6 +7,8 @@ a real home by default, so a test that forgot the override would rewrite the dev
 Standard library only, matching the rest of the gates, so CI needs no install step.
 """
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -389,7 +391,7 @@ class TestWholeFileOwnership(StampCase):
         self.local.write_bytes(b"\xe9\n")
         r = run(self.home)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("cannot be read as UTF-8", r.stderr)
+        self.assertIn("is not UTF-8", r.stderr)
         self.assertFalse(self.home.exists())
 
     def test_the_report_names_an_unusable_local_file_rather_than_crashing(self):
@@ -397,7 +399,36 @@ class TestWholeFileOwnership(StampCase):
         self.local.write_bytes(b"\xe9\n")
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("cannot be read as UTF-8", r.stdout)
+        self.assertIn("is not UTF-8", r.stdout)
+        self.assertIn("first, since the installer refuses it", r.stdout)
+
+    def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
+        self.local.mkdir(parents=True)
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertNotIn("UTF-8", r.stderr)
+
+    def test_the_install_stamps_the_digest_it_rendered(self):
+        """main() must hand build_stamp the rendered digest, or the stamp re-reads the file."""
+        self.local.write_text("A constructed note.\n", encoding="utf-8")
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "0",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "build_stamp", wraps=install.build_stamp) as spy,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 0)
+        expected = install.text_digest(
+            install.render_instructions(self.local, "A constructed note.")
+        )
+        self.assertEqual(spy.call_args.args[2], expected)
 
     def test_the_stamp_records_the_rendered_digest_rather_than_rereading_the_file(self):
         """A write between the install's own write and the stamp must not be vouched for."""

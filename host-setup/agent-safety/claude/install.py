@@ -434,9 +434,13 @@ def read_local_instructions(local_path):
     if not local_path.exists():
         return "", None
     try:
-        text = normalized(local_path.read_bytes().decode("utf-8")).strip()
-    except (OSError, UnicodeDecodeError) as e:
-        return "", f"{local_path} cannot be read as UTF-8 ({e})"
+        raw = local_path.read_bytes()
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    try:
+        text = normalized(raw.decode("utf-8")).strip()
+    except UnicodeDecodeError as e:
+        return "", f"{local_path} is not UTF-8 ({e})"
     for marker in (*BLOCK_MARKERS, LOCAL_MARKER):
         if re.search(rf"<!-- {marker} (?:v\d+ )?(?:start|end) -->", text):
             return "", (
@@ -958,6 +962,9 @@ def report(claude_home):
         print("STALE:")
         for p in problems:
             print(f"  - {p}")
+        # The installer refuses an unusable local file, so re-running first would only repeat the refusal.
+        if local_problem:
+            print(f"  Fix {local_path} first, since the installer refuses it as it stands.")
         print(
             "  Re-run the installer with no arguments. It is idempotent, and it backs up a "
             "CLAUDE.md edited since the last install before rewriting it."
