@@ -541,15 +541,54 @@ def payload_digest():
     return h.hexdigest()[:16]
 
 
+def read_claude_md(claude_md):
+    """CLAUDE.md's text, or None where it is absent, not a regular file, or unreadable.
+
+    One reader for every caller, so a file none of them can read gives each the same answer rather
+    than a traceback in whichever reads it first.
+    """
+    try:
+        if not claude_md.is_file():
+            return None
+        return claude_md.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def claude_md_problem(claude_md):
+    """Why CLAUDE.md cannot be rendered in place, or None where it can, checked before any write.
+
+    An access probe rather than a type check: a dangling link, a link loop, and a read-only or
+    unreadable file each passed `exists()` or `is_file()` and then raised at the write, after the
+    hooks and settings had already been replaced.
+    """
+    try:
+        os.lstat(claude_md)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as e:
+        return f"{claude_md} cannot be read ({e})"
+    try:
+        if not claude_md.is_file():
+            return f"{claude_md} is not a regular file, or is a link that leads to none"
+        with open(claude_md, "rb"):
+            pass
+    except OSError as e:
+        return f"{claude_md} cannot be read ({e})"
+    if not os.access(claude_md, os.W_OK):
+        return f"{claude_md} is not writable"
+    return None
+
+
 def blocks_present(claude_md):
     """The marker version of each block actually in CLAUDE.md, by name.
 
     Read from the file rather than from what the installer meant to write, since the question the
     stamp answers is what is on the machine.
     """
-    if not claude_md.is_file():
+    text = read_claude_md(claude_md)
+    if text is None:
         return {}
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     found = {}
     for marker in BLOCK_MARKERS:
         # A start marker alone is a half-written block, which a presence check reads as installed.
@@ -569,9 +608,9 @@ def marker_corruption(claude_md):
     CLAUDE.md records the same empty block set it reads, so the stamp and the file agree and the
     corruption reads as a match. Two wrong answers agreeing is the failure this exists to catch.
     """
-    if not claude_md.is_file():
+    text = read_claude_md(claude_md)
+    if text is None:
         return []
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     valid = blocks_present(claude_md)
     out = []
     for marker in BLOCK_MARKERS:
@@ -594,12 +633,13 @@ def installed_digest(claude_home):
     # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
     deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
-    if not all(f.is_file() for f in deployed) or not claude_md.is_file():
+    claude_text = read_claude_md(claude_md)
+    if not all(f.is_file() for f in deployed) or claude_text is None:
         return None
     h = hashlib.sha256()
     for f in deployed:
         h.update(normalized(f.read_bytes()))
-    text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+    text = normalized(claude_text)
     for marker in BLOCK_MARKERS:
         found = re.search(
             rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL
@@ -626,8 +666,8 @@ def build_stamp(claude_home, installed, instructions_digest=None):
         "blocks": blocks_present(claude_home / "CLAUDE.md"),
         "instructionsDigest": instructions_digest
         or (
-            text_digest((claude_home / "CLAUDE.md").read_text(encoding="utf-8", errors="replace"))
-            if (claude_home / "CLAUDE.md").is_file()
+            text_digest(claude_text)
+            if (claude_text := read_claude_md(claude_home / "CLAUDE.md")) is not None
             else None
         ),
         "installedUtc": installed,
@@ -944,10 +984,13 @@ def report(claude_home):
     claude_md = claude_home / "CLAUDE.md"
     local_path = local_instructions_path()
     local_text, local_problem = read_local_instructions(local_path)
+    claude_problem = claude_md_problem(claude_md)
     if local_problem:
         problems.append(local_problem)
-    elif claude_md.is_file():
-        live_text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+    if claude_problem:
+        problems.append(claude_problem)
+    elif not local_problem and (claude_text := read_claude_md(claude_md)) is not None:
+        live_text = normalized(claude_text)
         if live_text != render_instructions(local_path, local_text):
             if text_digest(live_text) == stamp.get("instructionsDigest"):
                 problems.append(
@@ -972,9 +1015,10 @@ def report(claude_home):
         print("STALE:")
         for p in problems:
             print(f"  - {p}")
-        # The installer refuses an unusable local file, so re-running first would only repeat the refusal.
-        if local_problem:
-            print(f"  Fix {local_path} first, since the installer refuses it as it stands.")
+        # The installer refuses either file when unusable, so re-running first would only repeat the refusal.
+        for problem, path in ((local_problem, local_path), (claude_problem, claude_md)):
+            if problem:
+                print(f"  Fix {path} first, since the installer refuses it as it stands.")
         print(
             "  Re-run the installer with no arguments. It is idempotent, and it backs up a "
             "CLAUDE.md edited since the last install before rewriting it."
@@ -1027,11 +1071,9 @@ def main():
         sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
         return 1
     # Refused here rather than at the write, which would raise after the hooks and settings were already replaced.
-    if claude_md.exists() and not claude_md.is_file():
-        sys.stderr.write(
-            f"Nothing was installed: {claude_md} exists and is not a regular file, so it cannot be "
-            "rendered. Move it aside and re-run.\n"
-        )
+    claude_problem = claude_md_problem(claude_md)
+    if claude_problem:
+        sys.stderr.write(f"Nothing was installed: {claude_problem}.\n")
         return 1
 
     print(f"Installing agent host-safety kit into: {claude_home}")
