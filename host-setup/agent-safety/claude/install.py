@@ -432,7 +432,6 @@ def read_local_instructions(local_path):
     A file carrying this kit's own markers is refused, since appending it would duplicate a block,
     and copying an old backup into the local file is exactly how that happens.
     """
-    # A dangling symlink reports as absent to exists(), so it is checked too and refused as unreadable.
     # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
     # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
     try:
