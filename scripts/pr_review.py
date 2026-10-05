@@ -4288,8 +4288,8 @@ def reply_to_thread(
     count = f" ({len(hits)} identical threads)" if len(hits) > 1 else ""
     if not resolve:
         print(
-            f"status=REPLIED{count} the thread is answered and left open, since --resolve was "
-            "not given. A decline is resolved only once its evidence is in the thread."
+            f"status=REPLIED{count} answered and left open, since --resolve was not given. "
+            "A decline is resolved only once its evidence is in the thread."
         )
         return 0
     print(f"status=REPLIED_AND_RESOLVED{count}")

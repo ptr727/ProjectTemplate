@@ -6897,6 +6897,12 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertEqual(["t1", "t1", "t2", "t2"], ids)
         self.assertIn("REPLIED_AND_RESOLVED (2 identical threads)", self.out.getvalue())
 
+    def test_all_identical_without_resolve_names_the_count_and_leaves_both_open(self) -> None:
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(0, self.run_reply("--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn("status=REPLIED (2 identical threads)", self.out.getvalue())
+
     def test_all_identical_refuses_the_same_text_on_two_files(self) -> None:
         """Generic text on two files is two findings, and `--path` already selects between them."""
         self.wire(page([rthread("t1", path="a.py"), rthread("t2", path="b.py")]))
