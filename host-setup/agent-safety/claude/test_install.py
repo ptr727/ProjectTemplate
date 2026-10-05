@@ -38,10 +38,14 @@ def run(home, *args, dirty=False, contain=True):
 
     contain forces the containment-capable signal the same way, so a verdict does not depend on
     whether the machine running the suite has a systemd user manager.
+
+    The host-local instruction file is pointed beside the throwaway home, so no case reads the
+    developer's own file into what it renders.
     """
     env = dict(
         os.environ,
         CLAUDE_HOME=str(home),
+        AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
     )
@@ -53,6 +57,11 @@ def run(home, *args, dirty=False, contain=True):
         env=env,
         check=False,
     )
+
+
+def local_file(home):
+    """The host-local instruction file every case uses, beside its throwaway CLAUDE_HOME."""
+    return home.parent / "local.md"
 
 
 class StampCase(unittest.TestCase):
@@ -261,6 +270,101 @@ class TestInstalledContent(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 0)
 
 
+class TestWholeFileOwnership(StampCase):
+    """CLAUDE.md is rendered whole, so nothing outside the kit's content survives an install unseen."""
+
+    def setUp(self):
+        super().setUp()
+        self.local = local_file(self.home)
+
+    def backups(self):
+        return sorted(self.home.glob("CLAUDE.md.*.bak"))
+
+    def test_an_install_writes_the_header_and_both_blocks_and_nothing_else(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("<!-- Written by ProjectTemplate host-setup/agent-safety"))
+        for marker in install.BLOCK_MARKERS:
+            self.assertEqual(len(re.findall(rf"<!-- {marker} v\d+ start -->", text)), 1)
+        self.assertNotIn("host-local", text.split("-->", 1)[1])
+        self.assertEqual(self.backups(), [])
+
+    def test_the_local_file_is_appended_under_its_marker_and_reports_current(self):
+        self.local.write_text("Constructed host note for this case.\n", encoding="utf-8")
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertIn(
+            "<!-- host-local start -->\nConstructed host note for this case.\n<!-- host-local end -->",
+            text,
+        )
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_content_from_before_whole_file_ownership_is_backed_up_and_dropped(self):
+        """A pre-existing file has no stamp digest, so it cannot be told from a hand edit."""
+        self.home.mkdir(parents=True)
+        original = b"## A Hand-Written Section\n\nAn older wording of a fleet rule.\n"
+        self.md.write_bytes(original)
+        r = self.install()
+        self.assertNotIn("older wording", self.md.read_text(encoding="utf-8"))
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+        self.assertIn("backed up", r.stdout)
+
+    def test_an_untouched_earlier_render_is_replaced_without_a_backup(self):
+        """The file the last install wrote matches the stamp, so nothing in it is anyone's edit."""
+        self.install()
+        self.local.write_text("A note added after the first install.\n", encoding="utf-8")
+        r = self.install()
+        self.assertIn("(updated)", r.stdout)
+        self.assertEqual(self.backups(), [])
+        self.assertIn("A note added after the first install.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_hand_edit_after_an_install_is_backed_up_before_the_rewrite(self):
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertIn("A line added by hand.", backups[0].read_text(encoding="utf-8"))
+        self.assertNotIn("A line added by hand.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_stamp_without_the_digest_treats_a_changed_file_as_an_edit(self):
+        """A stamp from before the field existed cannot vouch for the file, so it is kept."""
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        del stamp["instructionsDigest"]
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_the_report_names_an_earlier_render(self):
+        self.install()
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the file the last install wrote", r.stdout)
+
+    def test_the_report_names_a_hand_edit(self):
+        self.install()
+        self.md.write_text(
+            self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n", encoding="utf-8"
+        )
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("edited since the last install", r.stdout)
+
+    def test_a_second_backup_never_overwrites_the_first(self):
+        self.home.mkdir(parents=True)
+        first = install.next_backup(self.md)
+        first.write_text("first", encoding="utf-8")
+        second = install.next_backup(self.md)
+        self.assertNotEqual(first, second)
+        self.assertFalse(second.exists())
+
+
 class TestDuplicateBlocks(StampCase):
     def test_a_duplicated_block_is_not_reported_as_present(self):
         """Two blocks mean the second silently governs, and naming the first hides that."""
@@ -286,7 +390,12 @@ class TestDuplicateBlocks(StampCase):
 class TestDegradedEnvironments(StampCase):
     def test_a_host_without_git_stamps_rather_than_crashing(self):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
-        env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+            PATH="",
+        )
         r = subprocess.run(
             [sys.executable, str(INSTALL)],
             capture_output=True,
@@ -630,7 +739,11 @@ class TestRegistration(StampCase):
             ),
             encoding="utf-8",
         )
-        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+        )
         r = subprocess.run(
             [sys.executable, str(broken / "install.py")],
             capture_output=True,
