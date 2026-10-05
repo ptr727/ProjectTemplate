@@ -433,13 +433,14 @@ def read_local_instructions(local_path):
     and copying an old backup into the local file is exactly how that happens.
     """
     # A dangling symlink reports as absent to exists(), so it is checked too and refused as unreadable.
-    # The existence check itself raises where a parent directory cannot be entered.
+    # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
+    # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
     try:
-        present = local_path.exists() or local_path.is_symlink()
+        os.lstat(local_path)
+    except (FileNotFoundError, NotADirectoryError):
+        return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
-    if not present:
-        return "", None
     try:
         raw = local_path.read_bytes()
     except OSError as e:
