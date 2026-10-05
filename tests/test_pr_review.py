@@ -3410,6 +3410,16 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual(1, len(blocks))
                 self.assertIn("Validate the input.", blocks[0])
 
+    def test_a_close_mid_line_with_its_bracket_on_the_next_line_is_text(self) -> None:
+        """A next line opening on `>` is a blockquote, which ends the paragraph the close sits in."""
+        body = (
+            "<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n"
+            "Closed with </details\n> as shown.\n\n**a.py:12**\n* Validate the input.\n</details>\n"
+        )
+        blocks = pr_review.suppressed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertIn("Validate the input.", blocks[0])
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 

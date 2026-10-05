@@ -2950,7 +2950,7 @@ DETAILS_TAG = re.compile(
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?:> {0,4})*)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?)"
-    r"|[ \t]*(?:(?:\r\n|\n|\r)[ \t]*)?)>",
+    r"|[ \t]*)>",
     re.IGNORECASE,
 )
 
@@ -2958,10 +2958,11 @@ DETAILS_TAG = re.compile(
 def details_tags(text: str) -> list[tuple[int, int, bool]]:
     """Each `<details>` tag in `text` as `(start, end, opening)`, starting at its `<` past any lead.
 
-    A close is read anywhere bare, its bracket allowed onto the next line as an inline tag's may be.
-    With more before its bracket it is read only where a line hands it to HTML as a block: up to
-    three spaces in, behind any blockquote markers, its tail allowed one line break. A tail stops at
-    any `<` and at every other line boundary, so it never swallows a later tag or heading.
+    A close is read anywhere bare. With more before its bracket, or its bracket on the next line, it
+    is read only where a line hands it to HTML as a block: up to three spaces in, behind any
+    blockquote markers, its tail allowed one line break. Mid-line, a next line opening on `>` is a
+    blockquote that ends the paragraph, which leaves the close as text. A tail stops at any `<` and
+    at every other line boundary, so it never swallows a later tag or heading.
 
     Read from a copy whose code spans are each `SPAN_MASK`, a control character as `MARKUP_MASK`
     is, rather than spaces. A span masked to spaces left the text after it looking indented, and a
