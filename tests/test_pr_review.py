@@ -3281,6 +3281,81 @@ class TestSecondOverviewFormat(GqlCase):
             ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
         )
 
+    def test_a_label_also_in_the_narrative_is_listed_where_it_is_metadata(self) -> None:
+        """A narrative line is prose rather than metadata, so its position is not the label's."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Bbb:** x\n</details>\n\n- **Aaa:** x\n- **Bbb:** x\n"
+        )
+        self.assertEqual(
+            ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
+        )
+
+    def test_an_unclosed_narrative_is_never_blanked(self) -> None:
+        """Blanked through to the end of the body, it would hide every label after its opener."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Confidence:** high\n"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_narrative_closed_in_another_html_spelling_ends_there(self) -> None:
+        """Left unread, the close let the narrative pair with its parent's and blank a label."""
+        for close in (
+            "</details >",
+            "</DETAILS\t>",
+            "</details x>",
+            "</details/>",
+            "  </details x/>",
+        ):
+            with self.subTest(close=close):
+                body = self.narrated() + (
+                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n{close}\n\n- **Confidence:** high\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_close_html_shows_as_text_does_not_end_the_narrative(self) -> None:
+        """Only a line's own start hands an attributed close to HTML, so mid-line it is prose."""
+        for prose in ("Prose naming </details x> mid-line.", "    </details x>"):
+            with self.subTest(prose=prose):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"{prose}\n\n- **Gadget (#1):** x\n</details>\n"
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_self_closed_opener_in_the_narrative_still_opens_a_block(self) -> None:
+        """HTML ignores the slash on `<details/>`, so its close is its own rather than the parent's."""
+        for opener in ("<details/>", "<details />"):
+            with self.subTest(opener=opener):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n\n{opener}\n<summary>Review details</summary>\n\n"
+                    "- **Confidence:** high\n</details>\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_tag_is_bounded_by_html_s_own_syntax(self) -> None:
+        """A tail reaching another line or another tag swallowed the opener or heading after it."""
+        cases = {
+            "</details x <details>": ["<details>"],
+            "</details x\n### Suppressed comments (1)\n>": [],
+            "</details\v>": [],
+            "<details\v>": [],
+        }
+        for text, tags in cases.items():
+            with self.subTest(text=text):
+                found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
+                self.assertEqual(tags, found)
+
+    def test_a_region_ends_at_a_close_in_another_html_spelling(self) -> None:
+        """The section readers pair on the same tags, so their regions end where HTML ends them."""
+        body = "<details>\na\n</details >\nb\n<details>\nc\n</details>\n"
+        regions, _ = pr_review.details_spans(body)
+        self.assertEqual(["\na\n", "\nc\n"], [body[a:b] for a, b in regions])
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 

@@ -2940,7 +2940,11 @@ def heading_of(block: str) -> str:
 
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
-DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
+DETAILS_TAG = re.compile(
+    r"<details(?:[ \t\n\f\r/][^>]*)?>|</details[ \t]*>"
+    r"|(?:(?<=^)|(?<=^ )|(?<=^  )|(?<=^   ))</details[ \t/][^<>\n]*>",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
