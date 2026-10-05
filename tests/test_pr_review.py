@@ -3351,6 +3351,8 @@ class TestSecondOverviewFormat(GqlCase):
             "</details\v>": [],
             "<details\v>": [],
         }
+        for sep in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029":
+            cases[f"</details x{sep}>"] = []
         for text, tags in cases.items():
             with self.subTest(text=text):
                 found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
