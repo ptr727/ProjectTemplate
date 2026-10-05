@@ -2965,7 +2965,8 @@ def details_tags(text: str) -> list[tuple[int, int, bool]]:
     `>` is a blockquote, which leaves the close as text, so a next-line bracket is not read there.
     HTML still reads some closes these rules leave unread, such as one inside an HTML block already
     open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
-    tag or heading.
+    tag. A next line holding a `>` with no `<` ahead of it is taken whole, heading text included,
+    as CommonMark takes it, since that line sits inside the HTML block the close opens.
 
     Read from a copy whose code spans are each `SPAN_MASK`, a control character as `MARKUP_MASK`
     is, rather than spaces. A span masked to spaces left the text after it looking indented, and a
