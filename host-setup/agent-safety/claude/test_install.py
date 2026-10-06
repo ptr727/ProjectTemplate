@@ -553,7 +553,6 @@ class TestWholeFileOwnership(StampCase):
         self.assertNotIn("Nothing was installed", r.stderr)
         self.assertIn("was left incomplete", r.stderr)
         self.assertIn("could not be put back", r.stderr)
-        self.assertIn("last install's render", r.stderr)
         self.assertEqual(self.md.stat().st_size, 4096)
 
     def test_a_write_cut_short_puts_the_prior_content_back_where_it_fits(self):
@@ -667,6 +666,19 @@ class TestWholeFileOwnership(StampCase):
             self.assertRaisesRegex(install.IncompleteWrite, "could not be put back"),
         ):
             install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_failed_truncate_reads_as_unchanged_rather_than_incomplete(self):
+        """A byte-range lock can refuse the size change, and the file then still holds its prior bytes."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        locked = OSError(33, "constructed: the region is locked")
+        with (
+            mock.patch.object(install.os, "ftruncate", side_effect=locked),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertEqual(self.md.read_bytes(), b"prior\n")
 
     def test_a_failed_close_before_the_truncate_still_reads_as_unchanged(self):
         """A refused open-time check never touched the file, so it stays a plain OSError."""

@@ -484,6 +484,7 @@ def write_regular_file(path, data, prior=None, before=None):
             raise NotRegularFile(f"{path} is not a regular file")
         if before is not None:
             before()
+        os.ftruncate(fd, 0)
         truncated = True
         try:
             _replace_contents(fd, data)
@@ -1233,18 +1234,9 @@ def main():
                 else None,
             )
         except IncompleteWrite as e:
-            if backups:
-                kept = f"Its prior content is backed up at {backups[0]}."
-            elif raw is not None:
-                kept = (
-                    "Its prior content was the last install's render, so nothing written by hand "
-                    "was lost, though a re-run backs up the partial file before rewriting it."
-                )
-            else:
-                kept = "It did not exist before this run."
+            kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             sys.stderr.write(
-                f"{e}. New sessions load that partial file until a re-run succeeds. {kept} "
-                "Fix what stopped the write, then re-run. No hook or setting was changed.\n"
+                f"{e}.{kept} Fix what the error names, then re-run. No hook or setting was changed.\n"
             )
             return 1
         except OSError as e:
@@ -1333,10 +1325,7 @@ def main():
     except FileNotFoundError:
         settings_raw, settings_text = None, ""
     except (ValueError, OSError) as e:
-        sys.stderr.write(
-            f"{settings} cannot be read ({e}). Fix or move it aside, then re-run. This file is "
-            "unchanged, so the hook is deployed but not registered.\n"
-        )
+        sys.stderr.write(f"{settings} cannot be read ({e}). Fix or move it aside, then re-run.\n")
         return 1
     if settings_text.strip():
         try:
@@ -1489,20 +1478,11 @@ def main():
             settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"), prior=settings_raw
         )
     except IncompleteWrite as e:
-        remedy = (
-            "It did not exist before this run, so remove it"
-            if settings_raw is None
-            else "Put its prior content back from a copy, or remove it"
-        )
-        sys.stderr.write(
-            f"{e}. Claude Code cannot parse it as it stands, and a re-run refuses it too. Fix what "
-            f"stopped the write. {remedy}, then re-run.\n"
-        )
+        sys.stderr.write(f"{e}. Fix what the error names, check the file, then re-run.\n")
         return 1
     except OSError as e:
         sys.stderr.write(
-            f"{settings} could not be written ({e}). This file is unchanged, so the hook is "
-            "deployed but not registered. Fix what the error names, then re-run.\n"
+            f"{settings} could not be written ({e}). Fix what the error names, then re-run.\n"
         )
         return 1
     for line in done:
