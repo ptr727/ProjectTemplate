@@ -2985,26 +2985,33 @@ _EVAL_RUNNERS = {
     "{",
     "!",
     "time",
-    "command",
-    "builtin",
     "coproc",
 }
 
-_EVAL_RUNNER_OPTION_RE = re.compile(r"^-(?:p+|-)$")
-_EVAL_OPTION_RUNNERS = {"time", "command", "builtin"}
+_EVAL_RUNNER_BUILTINS = {"command", "builtin"}
 
-_ASSIGNMENT_WORD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_EVAL_RUNNER_OPTIONS = {
+    "time": re.compile(r"^-(?:p|-)$"),
+    "command": re.compile(r"^-(?:p+|-)$"),
+    "builtin": re.compile(r"^--$"),
+}
+
+_EVAL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+
+_NAMED_FD_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
 
 def _runs_eval(toks, i, quoted=None, raw=None):
     """True if the `eval` at index i of `toks` runs.
 
-    It runs where `_runs_as_command` says it does and nothing but `_EVAL_RUNNERS` words,
-    assignments, and redirections stand before it in its run, since an external launcher such as
-    `timeout` or `nohup` cannot run a builtin and exits without running anything. A `-p` or `--`
-    after `time`, `command`, or `builtin` still runs it, where `command -v eval` only names it.
-    That walk runs first and stops at the first other word, so each eval of `echo eval eval ...`
-    costs one step rather than a walk to the start of its run.
+    It runs where nothing but runners, assignments, and redirections stand between it and the
+    operator that opens its run, since an external launcher such as `timeout` or `nohup` cannot run
+    a builtin and exits without running anything. A runner is an unquoted `_EVAL_RUNNERS` word,
+    since a quoted one is no reserved word, or `command` or `builtin`, quoted or not, each with the
+    options `_EVAL_RUNNER_OPTIONS` allows it, where `command -v eval` only names the eval. An fd
+    before a redirection is ASCII digits or a `{name}`. A separator fused to a redirection opens
+    the run as well, as in `echo x;>f eval`. The walk stops at the first other word, so each eval of
+    `echo eval eval ...` costs one step rather than a walk to the start of its run.
     `raw` is the quote-keeping tokens of `toks`, where known. A word is an assignment only where its
     name and `=` are unquoted, since `'FOO=1' eval` runs a command named `FOO=1`. Where `raw` is
     unknown a quoted one still reads as an assignment, a false deny rather than an unread eval.
@@ -3017,32 +3024,36 @@ def _runs_eval(toks, i, quoted=None, raw=None):
             if _is_redir_op(t) and not _opens_with_separator(t):
                 k -= 1
                 continue
-            break
-        if not q and t in _EVAL_RUNNERS:
+            return True
+        if t in _EVAL_RUNNER_BUILTINS or (not q and t in _EVAL_RUNNERS):
             k -= 1
             continue
-        if _ENV_ASSIGN_RE.match(t) and (raw is None or _ASSIGNMENT_WORD_RE.match(raw[k])):
+        if _EVAL_ASSIGNMENT_RE.match(t) and (raw is None or _EVAL_ASSIGNMENT_RE.match(raw[k])):
             k -= 1
             continue
-        if not q and t.isascii() and t.isdigit() and _is_redir_op(toks[k + 1]):
+        fd = (t.isascii() and t.isdigit()) or _NAMED_FD_RE.match(t)
+        if not q and fd and _is_redir_op(toks[k + 1]):
             k -= 1
             continue
         if k > 0 and _is_redir_op(toks[k - 1]) and not (quoted is not None and quoted[k - 1]):
             k -= 1
             continue
         j = k
-        while j >= 0 and _EVAL_RUNNER_OPTION_RE.match(toks[j]):
+        while j >= 0 and toks[j].startswith("-"):
             j -= 1
+        runner = toks[j] if j >= 0 else ""
+        runs = runner in _EVAL_RUNNER_BUILTINS or (
+            runner == "time" and not (quoted is not None and quoted[j])
+        )
         if (
             j < k
-            and j >= 0
-            and toks[j] in _EVAL_OPTION_RUNNERS
-            and not (quoted is not None and quoted[j])
+            and runs
+            and all(_EVAL_RUNNER_OPTIONS[runner].match(o) for o in toks[j + 1 : k + 1])
         ):
             k = j - 1
             continue
         return False
-    return _runs_as_command(toks, i, quoted)
+    return True
 
 
 def _eval_payload(toks, i, quoted=None):
@@ -5464,6 +5475,36 @@ _WAIT_CASES = [
         "command -v eval 'until false; do sleep 1; done'",
         "allow",
         "command -v only names the eval",
+    ),
+    (
+        "\"command\" eval 'until false; do sleep 1; done'",
+        "deny",
+        "a quoted command still finds the builtin and runs the eval",
+    ),
+    (
+        "builtin -p eval 'until false; do sleep 1; done'",
+        "allow",
+        "builtin takes no -p, so it runs nothing",
+    ),
+    (
+        "FOO+=1 eval 'until false; do sleep 1; done'",
+        "deny",
+        "an appending assignment still runs the eval",
+    ),
+    (
+        "a[0]=1 eval 'until false; do sleep 1; done'",
+        "deny",
+        "and so does an array element assignment",
+    ),
+    (
+        "{fd}>f eval 'until false; do sleep 1; done'",
+        "deny",
+        "a named fd before a redirection still runs the eval",
+    ),
+    (
+        "echo x;>f eval 'until false; do sleep 1; done'",
+        "deny",
+        "a separator fused to a redirection opens the eval's run",
     ),
     (
         "FOO='a b' eval 'until false; do sleep 1; done'",

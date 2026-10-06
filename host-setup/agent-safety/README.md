@@ -252,18 +252,6 @@ text says, because the harm it covers was never in the text.
    command with more readings than the rule builds is denied when it names both `sleep` and a loop
    keyword, since a wait needs both.
 
-   An `eval`'s arguments are read as a payload the way a `sh -c`/`bash -c` argument is, since bash
-   joins them with spaces and runs the result in the same shell. An `eval` is read only where it
-   runs, with nothing before it in its run but assignments, redirections, a reserved word such as
-   `do`, `if`, or `while`, a `{` or `!`, `coproc`, or `time`, `command`, or `builtin` with a `-p` or
-   `--` option. An external launcher such as `timeout` or `nohup` cannot run a builtin, so
-   `timeout 600 eval '<the loop>'` runs nothing, and only a bound on the shell holding the `eval`
-   reaches its loop. A redirection on the `eval` applies to the whole payload. Where the rule cannot
-   tell which words were quoted, the payload runs to the end of the `eval`'s line, since any
-   separator on it may be a quoted one. The payloads read for one command share a fixed budget, and
-   an `eval` met once it is spent is not read, which leaves its loop unseen, as a wait inside a
-   script file is.
-
    A `for` loop in its arithmetic form, `for ((;;))`, is reached too, since it runs forever exactly as
    `while true` does, while a `for x in <words>` is bounded by its own word list. The third is a `while` loop whose condition is a
    `read` drawing on an input redirect that binds descriptor 0, on that loop's own invocation,
@@ -285,6 +273,19 @@ text says, because the harm it covers was never in the text.
    literal compare of either. The target is normalized and the whole of both trees is denied,
    `/dev/null` included. Only an absolute target is read that way, since a relative one resolves
    against a working directory the rule does not model.
+
+   An `eval`'s arguments are read as a payload, the way a `sh -c`/`bash -c` argument is. Bash joins
+   them with spaces and runs the result in the same shell. An `eval` is read only where it runs.
+   Nothing may stand before it in its run but assignments, redirections, and runners. A runner is a
+   reserved word such as `do`, `if`, or `while`, a `{` or `!`, `coproc`, `time`, `command`, or
+   `builtin`. `time -p`, `command -p`, and a `--` after any of the last three still run the
+   `eval`, while `command -v` only names it. An external launcher such as `timeout` or `nohup`
+   cannot run a builtin. So `timeout 600 eval '<the loop>'` runs nothing, and only a bound on the
+   shell holding the `eval` reaches its loop. A redirection on the `eval` applies to the whole
+   payload. Where the rule cannot tell which words were quoted, any separator on the `eval`'s line
+   may be a quoted one. The payload then runs to the end of that line. The payloads read in one
+   pass over a command share a fixed budget. An `eval` met once it is spent is not read, which
+   leaves its loop unseen, as a wait inside a script file is.
 
    A command that forks work out of a `timeout`'s reach is bounded by nothing, whatever else it
    carries. Three shapes are recognized. A background operator lets the shell exit at once, so
