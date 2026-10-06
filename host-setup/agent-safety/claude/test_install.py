@@ -592,6 +592,10 @@ class TestWholeFileOwnership(StampCase):
 
     def test_a_local_path_under_a_file_is_refused_rather_than_skipped(self):
         """An XDG_CONFIG_HOME pointing at a file must not drop the configured local text."""
+        if os.name != "posix":
+            self.skipTest(
+                "Windows raises FileNotFoundError for a file parent, so it reads as absent"
+            )
         parent = self.home.parent / "a-file-not-a-directory"
         parent.write_text("", encoding="utf-8")
         env = dict(
