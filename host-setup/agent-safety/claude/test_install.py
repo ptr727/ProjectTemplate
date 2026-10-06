@@ -445,7 +445,7 @@ class TestWholeFileOwnership(StampCase):
         self.assertFalse(self.home.exists())
 
     def assert_refused_with_nothing_changed(self, r, reason):
-        """A refusal before any write leaves no hook, settings file, or stamp behind."""
+        """A refusal at the CLAUDE.md step leaves no hook, settings file, or stamp behind."""
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("Nothing was installed", r.stderr)
         self.assertIn(reason, r.stderr)
@@ -454,19 +454,23 @@ class TestWholeFileOwnership(StampCase):
         self.assertFalse((self.home / "settings.json").exists())
         self.assertFalse(self.stamp.exists())
 
+    def needs_posix_non_root(self):
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("needs a non-root POSIX user for a file mode to deny access")
+
     def test_a_claude_md_that_is_a_directory_stops_the_install_with_nothing_changed(self):
         """The write would raise after the hooks and settings were already replaced."""
         self.md.mkdir(parents=True)
-        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+        self.assert_refused_with_nothing_changed(run(self.home), "could not be rewritten")
 
     def test_a_claude_md_dangling_symlink_stops_the_install_with_nothing_changed(self):
-        """A dotfiles link whose repository is not cloned yet reads as absent to exists()."""
+        """A dotfiles link whose repository is not cloned yet has nowhere to write."""
         self.home.mkdir(parents=True)
         try:
             self.md.symlink_to(self.home.parent / "not-cloned" / "CLAUDE.md")
         except OSError:
             self.skipTest("this host cannot create a symlink")
-        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+        self.assert_refused_with_nothing_changed(run(self.home), "could not be rewritten")
 
     def test_a_claude_md_symlink_loop_stops_the_install_with_nothing_changed(self):
         self.home.mkdir(parents=True)
@@ -476,45 +480,69 @@ class TestWholeFileOwnership(StampCase):
             self.skipTest("this host cannot create a symlink")
         self.assert_refused_with_nothing_changed(run(self.home), str(self.md))
 
-    def test_a_read_only_claude_md_stops_the_install_with_nothing_changed(self):
-        if os.name != "posix" or os.geteuid() == 0:
-            self.skipTest("needs a non-root POSIX user for a file mode to deny access")
-        self.home.mkdir(parents=True)
-        self.md.write_text("A constructed note.\n", encoding="utf-8")
-        self.md.chmod(0o444)
-        self.addCleanup(self.md.chmod, 0o644)
-        self.assert_refused_with_nothing_changed(run(self.home), "is not writable")
-
     def test_an_unreadable_claude_md_stops_the_install_with_nothing_changed(self):
-        if os.name != "posix" or os.geteuid() == 0:
-            self.skipTest("needs a non-root POSIX user for a file mode to deny access")
+        self.needs_posix_non_root()
         self.home.mkdir(parents=True)
         self.md.write_text("A constructed note.\n", encoding="utf-8")
         self.md.chmod(0)
         self.addCleanup(self.md.chmod, 0o644)
         self.assert_refused_with_nothing_changed(run(self.home), "cannot be read")
 
-    def test_the_report_on_a_claude_md_directory_says_to_fix_it_first(self):
-        """Re-running is refused, so the report must not offer a re-run as the whole remedy."""
+    def test_a_read_only_edited_claude_md_is_refused_with_its_backup_kept(self):
+        """The backup lands before the write fails, and the refusal names where it is."""
+        self.needs_posix_non_root()
+        self.home.mkdir(parents=True)
+        self.md.write_text("A constructed note.\n", encoding="utf-8")
+        self.md.chmod(0o444)
+        self.addCleanup(self.md.chmod, 0o644)
+        r = run(self.home)
+        self.assert_refused_with_nothing_changed(r, "could not be rewritten")
+        self.assertIn("backed up at", r.stderr)
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_a_read_only_claude_md_that_is_current_still_installs_and_reports_current(self):
+        """Nothing would change, so the file is not written and its mode does not matter."""
+        self.needs_posix_non_root()
+        self.install()
+        self.md.chmod(0o444)
+        self.addCleanup(self.md.chmod, 0o644)
+        r = self.install()
+        self.assertIn("(already current)", r.stdout)
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_symlinked_claude_md_installs_through_the_link(self):
+        """The dotfiles case: the link stays a link and the kit lands in its target."""
+        self.home.mkdir(parents=True)
+        target = self.home.parent / "dotfiles-CLAUDE.md"
+        try:
+            self.md.symlink_to(target)
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        target.write_text("", encoding="utf-8")
+        self.install()
+        self.assertTrue(self.md.is_symlink())
+        self.assertIn("agent-safety", target.read_text(encoding="utf-8"))
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_the_report_on_a_claude_md_directory_names_it_rather_than_crashing(self):
         self.install()
         self.md.unlink()
         self.md.mkdir()
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
-        self.assertIn("is not a regular file", r.stdout)
-        self.assertIn(f"Fix {self.md} first", r.stdout)
+        self.assertIn("exists but is not a readable regular file", r.stdout)
+        self.assertIn("move it aside first", r.stdout)
 
     def test_the_report_on_an_unreadable_claude_md_gives_a_verdict_rather_than_crashing(self):
-        if os.name != "posix" or os.geteuid() == 0:
-            self.skipTest("needs a non-root POSIX user for a file mode to deny access")
+        self.needs_posix_non_root()
         self.install()
         self.md.chmod(0)
         self.addCleanup(self.md.chmod, 0o644)
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
-        self.assertIn("cannot be read", r.stdout)
+        self.assertIn("exists but is not a readable regular file", r.stdout)
 
     def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
         """A hand-edited stamp could otherwise carry a digest that skips the backup."""
