@@ -2996,7 +2996,7 @@ _EVAL_RUNNER_OPTIONS = {
     "builtin": re.compile(r"^--$"),
 }
 
-_EVAL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[.*\])?\+?=")
+_EVAL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[.*\])?\+?=", re.DOTALL)
 
 _NAMED_FD_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
@@ -3043,6 +3043,19 @@ def _runs_eval(toks, i, quoted=None, raw=None):
         ):
             k -= 2
             continue
+        j = k
+        while j >= 0 and toks[j].startswith("-"):
+            j -= 1
+        runner = toks[j] if j >= 0 else ""
+        is_time = runner == "time" and not (quoted is not None and quoted[j])
+        if (
+            j < k
+            and (is_time or (runner in _EVAL_RUNNER_BUILTINS and not reserved))
+            and all(_EVAL_RUNNER_OPTIONS[runner].match(o) for o in toks[j + 1 : k + 1])
+        ):
+            reserved = is_time
+            k = j - 1
+            continue
         if reserved:
             return False
         if t in _EVAL_RUNNER_BUILTINS:
@@ -3057,21 +3070,6 @@ def _runs_eval(toks, i, quoted=None, raw=None):
             continue
         if k > 0 and _is_redir_op(toks[k - 1]) and not (quoted is not None and quoted[k - 1]):
             k -= 1
-            continue
-        j = k
-        while j >= 0 and toks[j].startswith("-"):
-            j -= 1
-        runner = toks[j] if j >= 0 else ""
-        runs = runner in _EVAL_RUNNER_BUILTINS or (
-            runner == "time" and not (quoted is not None and quoted[j])
-        )
-        if (
-            j < k
-            and runs
-            and all(_EVAL_RUNNER_OPTIONS[runner].match(o) for o in toks[j + 1 : k + 1])
-        ):
-            reserved = runner == "time"
-            k = j - 1
             continue
         return False
     return True
@@ -5551,6 +5549,21 @@ _WAIT_CASES = [
         "a['k]']=1 eval 'until false; do sleep 1; done'",
         "deny",
         "a subscript holding a quoted ] is still an assignment",
+    ),
+    (
+        "time -p { eval 'until false; do sleep 1; done'; }",
+        "deny",
+        "time's options before a group still leave its eval running",
+    ),
+    (
+        "time -- ! eval 'until false; do sleep 1; done'",
+        "deny",
+        "and so does -- before a negation",
+    ),
+    (
+        "a[\"x\ny\"]=1 eval 'until false; do sleep 1; done'",
+        "deny",
+        "a subscript holding a quoted newline is still an assignment",
     ),
     (
         "FOO='a b' eval 'until false; do sleep 1; done'",
