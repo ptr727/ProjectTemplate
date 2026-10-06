@@ -219,9 +219,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. It also includes a fix that
    turns out to need an edit under the hub's `host-setup/agent-safety/`. "Auto-Resolvable" keeps
-   that tree out of an unattended run, so the worker parks before making the edit. No answer
-   recorded on the decision issue authorizes a later worker to make it. This step wins over
-   step 1, so the edit lands only in an attended session.
+   that tree out of an unattended run, so the worker parks before making the edit.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options in
