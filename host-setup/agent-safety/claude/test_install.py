@@ -411,7 +411,7 @@ class TestWholeFileOwnership(StampCase):
             self.skipTest("this host cannot create a symlink")
         r = run(self.home)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("cannot be read", r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
         self.assertFalse(self.home.exists())
 
     def test_a_local_file_in_a_directory_that_cannot_be_entered_stops_with_a_message(self):
@@ -570,11 +570,23 @@ class TestWholeFileOwnership(StampCase):
         self.install()
         self.assertEqual(len(self.backups()), 1)
 
+    def test_a_local_fifo_is_refused_rather_than_blocking_the_read(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.local.parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(self.local)
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
+        self.assertFalse(self.home.exists())
+        r = run(self.home, "--report")
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
         self.local.mkdir(parents=True)
         r = run(self.home)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("cannot be read", r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
         self.assertNotIn("UTF-8", r.stderr)
 
     def test_the_install_stamps_the_digest_it_rendered(self):

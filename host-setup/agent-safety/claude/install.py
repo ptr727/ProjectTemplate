@@ -440,6 +440,13 @@ def read_local_instructions(local_path):
         return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
+    # A FIFO or a device at the path would block the read, so only a regular file is read at all.
+    try:
+        regular = local_path.is_file()
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    if not regular:
+        return "", f"{local_path} is not a regular file, or is a link that leads to none"
     try:
         raw = local_path.read_bytes()
     except OSError as e:
@@ -488,8 +495,11 @@ def stamped_instructions_digest(claude_home):
     None covers a missing or unreadable stamp and one written before the field existed. Each of
     those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
     """
+    path = claude_home / "agent-safety-stamp.json"
     try:
-        stamp = json.loads((claude_home / "agent-safety-stamp.json").read_text(encoding="utf-8"))
+        if not path.is_file():
+            return None
+        stamp = json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return None
     # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
