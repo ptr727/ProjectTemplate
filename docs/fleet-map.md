@@ -75,7 +75,7 @@ flowchart TD
   upgrade --> tools["install-tools: the host toolchain, floors in spec/host-tools.json"]
   tools --> github["setup-github: identity, SSH signing, gh auth"]
   github --> skillsinstall["install-skills: fleet skills for the user"]
-  skillsinstall --> safety["agent-safety install: write guard + CLAUDE.md blocks"]
+  skillsinstall --> safety["agent-safety install: write guard + rendered CLAUDE.md"]
   safety --> verify["verify: host_gate + skills_install --report"]
   verify --> session["first agent session"]
 ```
