@@ -541,15 +541,29 @@ def payload_digest():
     return h.hexdigest()[:16]
 
 
+def read_claude_md(claude_md):
+    """CLAUDE.md's text, or None where it is absent, not a regular file, or unreadable.
+
+    One reader for every caller, so a file none of them can read gives each the same answer rather
+    than a traceback in whichever reads it first.
+    """
+    try:
+        if not claude_md.is_file():
+            return None
+        return claude_md.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def blocks_present(claude_md):
     """The marker version of each block actually in CLAUDE.md, by name.
 
     Read from the file rather than from what the installer meant to write, since the question the
     stamp answers is what is on the machine.
     """
-    if not claude_md.exists():
+    text = read_claude_md(claude_md)
+    if text is None:
         return {}
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     found = {}
     for marker in BLOCK_MARKERS:
         # A start marker alone is a half-written block, which a presence check reads as installed.
@@ -569,9 +583,9 @@ def marker_corruption(claude_md):
     CLAUDE.md records the same empty block set it reads, so the stamp and the file agree and the
     corruption reads as a match. Two wrong answers agreeing is the failure this exists to catch.
     """
-    if not claude_md.is_file():
+    text = read_claude_md(claude_md)
+    if text is None:
         return []
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     valid = blocks_present(claude_md)
     out = []
     for marker in BLOCK_MARKERS:
@@ -594,12 +608,13 @@ def installed_digest(claude_home):
     # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
     deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
-    if not all(f.is_file() for f in deployed) or not claude_md.is_file():
+    claude_text = read_claude_md(claude_md)
+    if not all(f.is_file() for f in deployed) or claude_text is None:
         return None
     h = hashlib.sha256()
     for f in deployed:
         h.update(normalized(f.read_bytes()))
-    text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+    text = normalized(claude_text)
     for marker in BLOCK_MARKERS:
         found = re.search(
             rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL
@@ -626,8 +641,8 @@ def build_stamp(claude_home, installed, instructions_digest=None):
         "blocks": blocks_present(claude_home / "CLAUDE.md"),
         "instructionsDigest": instructions_digest
         or (
-            text_digest((claude_home / "CLAUDE.md").read_text(encoding="utf-8", errors="replace"))
-            if (claude_home / "CLAUDE.md").is_file()
+            text_digest(claude_text)
+            if (claude_text := read_claude_md(claude_home / "CLAUDE.md")) is not None
             else None
         ),
         "installedUtc": installed,
@@ -909,7 +924,7 @@ def report(claude_home):
     live_installed = installed_digest(claude_home)
     if live_installed is None:
         problems.append(
-            "the deployed hook or CLAUDE.md is missing, so the kit is not fully installed"
+            "a deployed hook or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
         )
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
@@ -944,10 +959,14 @@ def report(claude_home):
     claude_md = claude_home / "CLAUDE.md"
     local_path = local_instructions_path()
     local_text, local_problem = read_local_instructions(local_path)
+    claude_text = read_claude_md(claude_md)
+    claude_unreadable = os.path.lexists(claude_md) and claude_text is None
     if local_problem:
         problems.append(local_problem)
-    elif claude_md.is_file():
-        live_text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+    if claude_unreadable:
+        problems.append(f"{claude_md} exists but is not a readable regular file")
+    elif not local_problem and claude_text is not None:
+        live_text = normalized(claude_text)
         if live_text != render_instructions(local_path, local_text):
             if text_digest(live_text) == stamp.get("instructionsDigest"):
                 problems.append(
@@ -975,6 +994,8 @@ def report(claude_home):
         # The installer refuses an unusable local file, so re-running first would only repeat the refusal.
         if local_problem:
             print(f"  Fix {local_path} first, since the installer refuses it as it stands.")
+        if claude_unreadable:
+            print(f"  If the re-run refuses {claude_md}, move it aside first.")
         print(
             "  Re-run the installer with no arguments. It is idempotent, and it backs up a "
             "CLAUDE.md edited since the last install before rewriting it."
@@ -1026,8 +1047,62 @@ def main():
     if local_problem:
         sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
         return 1
-
     print(f"Installing agent host-safety kit into: {claude_home}")
+    claude_home.mkdir(parents=True, exist_ok=True)
+
+    # 0. CLAUDE.md is rendered whole: a header, one marker block per snippet, then the host-local file.
+    # It goes first, so a file that cannot be read, backed up, or written stops the run before any hook or setting changes.
+    # Attempting the real read and write is the check, since a predicted one missed cases the write then raised on.
+    # The safety block states restrictions only.
+    # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
+    # A file whose digest matches the stamp is the one the last install wrote, so it is replaced silently.
+    # Anything else is a hand edit, or a file from before whole-file ownership, so it is backed up first.
+    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
+    # A file that is not valid UTF-8 still decodes for the comparison, and the backup keeps its raw bytes.
+    # A file already holding the render is left unwritten, so a read-only file that is current still installs.
+    rendered = render_instructions(local_path, local_text)
+    # Anything else at the path, a FIFO or a link to a device, would hang the write or swallow it.
+    # A dangling link is let through, so a dotfiles link whose target is not created yet still writes it.
+    try:
+        dangling = claude_md.is_symlink() and not os.path.exists(claude_md)
+        if os.path.lexists(claude_md) and not claude_md.is_file() and not dangling:
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} is not a regular file. Move it aside and re-run.\n"
+            )
+            return 1
+        raw = claude_md.read_bytes() if claude_md.is_file() else None
+    except OSError as e:
+        sys.stderr.write(
+            f"Nothing was installed: {claude_md} cannot be read ({e}). Move it aside and re-run.\n"
+        )
+        return 1
+    newline = "\r\n" if raw is not None and b"\r\n" in raw else "\n"
+    existing = None if raw is None else normalized(raw.decode("utf-8", errors="replace"))
+    backup = None
+    if existing == rendered:
+        action = "already current"
+    else:
+        try:
+            if existing is not None and text_digest(existing) != stamped_instructions_digest(
+                claude_home
+            ):
+                backup = write_backup(claude_md, raw)
+            claude_md.write_bytes(rendered.replace("\n", newline).encode("utf-8"))
+        except OSError as e:
+            kept = f" Its prior content is backed up at {backup}." if backup else ""
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
+                "Move it aside or make it writable, then re-run.\n"
+            )
+            return 1
+        if backup is not None:
+            action = f"rewritten, the edited prior file backed up to {backup}"
+        else:
+            action = "updated" if existing is not None else "written"
+    print(f"  CLAUDE.md -> {claude_md} ({action})")
+    if backup is not None:
+        print(f"    Move anything host-specific into {local_path}, then re-run to append it.")
+
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Stage every hook beside its live path, self-test each staged copy, and only then replace.
@@ -1044,7 +1119,7 @@ def main():
         except OSError as e:
             for _n, f in staged:
                 f.unlink(missing_ok=True)
-            sys.stderr.write(f"staging {src_name} failed ({e}); nothing was replaced.\n")
+            sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
             return 1
         try:
             os.chmod(tmp, 0o755)
@@ -1061,7 +1136,7 @@ def main():
             for _n, f in staged:
                 f.unlink(missing_ok=True)
             sys.stderr.write(
-                f"{src_name} self-test FAILED; nothing was replaced.\n" + r.stdout + r.stderr
+                f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
             )
             return 1
         print(f"  {src_name} self-test: PASS")
@@ -1240,33 +1315,6 @@ def main():
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     for line in done:
         print(f"  settings -> {settings} ({line})")
-
-    # 4. CLAUDE.md is rendered whole: a header, one marker block per snippet, then the host-local file.
-    # The safety block states restrictions only.
-    # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
-    # A file whose digest matches the stamp is the one the last install wrote, so it is replaced silently.
-    # Anything else is a hand edit, or a file from before whole-file ownership, so it is backed up first.
-    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
-    # A file that is not valid UTF-8 still decodes for the comparison, and the backup keeps its raw bytes.
-    rendered = render_instructions(local_path, local_text)
-    backup = None
-    if claude_md.exists():
-        raw = claude_md.read_bytes()
-        newline = "\r\n" if b"\r\n" in raw else "\n"
-        existing = normalized(raw.decode("utf-8", errors="replace"))
-        if existing == rendered:
-            action = "already current"
-        elif text_digest(existing) == stamped_instructions_digest(claude_home):
-            action = "updated"
-        else:
-            backup = write_backup(claude_md, raw)
-            action = f"rewritten, the edited prior file backed up to {backup}"
-    else:
-        newline, action = "\n", "written"
-    claude_md.write_bytes(rendered.replace("\n", newline).encode("utf-8"))
-    print(f"  CLAUDE.md -> {claude_md} ({action})")
-    if backup is not None:
-        print(f"    Move anything host-specific into {local_path}, then re-run to append it.")
 
     # 5. Stamp the machine, written last so it records a completed install rather than an attempted one.
     # The blocks are read back off disk here, so the stamp reports what CLAUDE.md holds rather than what was intended.
