@@ -181,8 +181,10 @@ Subcommands
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
            rather than failing. This takes a pull request number and words from the
-           finding, queries the id itself, and offers no argument an id fits in. Exit 0 =
-           done, 60 = no thread matched, 61 = more than one did, 62 = the reply returned
+           finding, queries the id itself, and offers no argument an id fits in. A finding
+           posted twice on one file, threads whose opening comments read the same, is
+           answered as one under --all-identical. Exit 0 = done, 60 = no thread matched,
+           61 = more than one did and the flag did not apply, 62 = the reply returned
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
@@ -272,6 +274,7 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import functools
 import html
 import io
@@ -522,6 +525,8 @@ TABLE_HEADER = re.compile(r"\s*\|\s*File\s*\|", re.IGNORECASE)
 # The alignment row under the header, which is punctuation rather than a file.
 TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
 TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
+TABLE_GLOB = frozenset("*?")
+TABLE_GAP = " ... "
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -668,10 +673,10 @@ STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
 # Anchored to a line for the reason the marker and the total above are.
-# Given a tag boundary as `DETAILS_TAG` already has, so a `<detailsfoo>` is not this tag.
+# Bounded as `DETAILS_TAG`'s opener is, so `<details/>` ends the preamble and `<detailsfoo>` does not.
 # Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
 # That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
-DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[\s>])", re.IGNORECASE | re.MULTILINE)
+DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[ \t\n\f\r]|/?>)", re.IGNORECASE | re.MULTILINE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -1917,10 +1922,12 @@ def stated_total(body: str) -> int | None:
     the shortfall rather than fabricating one.
 
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
-    shortfall rather than suppressing it.
+    shortfall rather than suppressing it. The opener is found where each code span is one
+    `MARKUP_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
     """
-    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
-    opener = DETAILS_OPEN.search(plain)
+    stripped = strip_fences(body or "")
+    plain = CODE_SPAN.sub(" ", stripped)
+    opener = DETAILS_OPEN.search(CODE_SPAN.sub(MARKUP_MASK, stripped))
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
     return max([t for t in totals if t is not None], default=None)
@@ -2015,6 +2022,87 @@ def bare_path(path: str) -> str:
     return "".join(c for c in path if unicodedata.category(c) != "Cf")
 
 
+def gap_fits(path: str, parts: list[str]) -> bool:
+    """Whether `path` holds `parts` in order, the first opening it, the last closing it.
+
+    At least one character stands between each part and the next. Each middle part is taken at
+    its leftmost place, which leaves the most room for the parts after it, so one pass decides it.
+    """
+    head, *middle, tail = parts
+    if not path.startswith(head) or not path.endswith(tail):
+        return False
+    at, end = len(head), len(path) - len(tail)
+    for part in middle:
+        found = path.find(part, at + 1, end - 1)
+        if found < 0:
+            return False
+        at = found + len(part)
+    return end - at >= 1
+
+
+def segment_fits(segment: str, pattern: str) -> bool:
+    """Whether one path segment matches one row segment, a `[` in either being a literal.
+
+    A segment holding a wildcard must also hold a letter or a digit, so a row of bare wildcards
+    such as `*/*` or `*.*` names nothing rather than every path at that depth.
+    """
+    if not TABLE_GLOB & set(pattern):
+        return segment == pattern
+    if not any(c.isalnum() for c in pattern):
+        return False
+    return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
+
+
+def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
+    """The changed paths one table row names, out of `diff`, and whether it names one at most.
+
+    A row names a path in one of three ways, and every claim here and in the digest that a table
+    names a set of paths counts all three. A row the diff carries names that path, whatever
+    characters it holds. Otherwise a row holding `TABLE_GAP` names every path `gap_fits`, its
+    other characters read literally, and since it shortens one path it names one at most.
+    Its text outside the gaps must hold a letter or a digit, so a gap between bare punctuation
+    names nothing rather than whichever path happens to fit.
+    Otherwise a row holding a wildcard names every path it matches one segment at a time, so a
+    `*` never crosses a `/`, per `segment_fits`.
+    """
+    if row in diff:
+        return [row], True
+    if TABLE_GAP in row:
+        parts = row.split(TABLE_GAP)
+        if not any(c.isalnum() for c in "".join(parts)):
+            return [], True
+        return sorted(p for p in diff if gap_fits(p, parts)), True
+    if TABLE_GLOB & set(row):
+        parts = row.split("/")
+        return sorted(
+            p
+            for p in diff
+            if len(segments := p.split("/")) == len(parts)
+            and all(map(segment_fits, segments, parts))
+        ), False
+    return [], True
+
+
+def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str], list[str]]:
+    """The changed paths no row names, the rows naming none, and the rows naming too many.
+
+    A row naming one path at most that matches several names none of them, since which one it
+    shortened is unknown. Each list is sorted, and the table stands in for coverage only where
+    all three are empty.
+    """
+    covered: set[str] = set()
+    invented, ambiguous = [], []
+    for row in dict.fromkeys(named):
+        paths, single = row_paths(row, diff)
+        if not paths:
+            invented.append(row)
+        elif single and len(paths) > 1:
+            ambiguous.append(row)
+        else:
+            covered.update(paths)
+    return sorted(diff - covered), sorted(invented), sorted(ambiguous)
+
+
 def file_table(body: str) -> list[str]:
     """The paths the round's own file summary table names, in the order it names them.
 
@@ -2098,6 +2186,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
     A path named that the diff does not carry is what disqualifies the naming arm, that typo
     being enough to drop a real file into the omissions and read it as the one nobody reviewed.
+    A shortened path matching several changed files disqualifies it for the same reason.
     """
     named = head_table(pr)
     if not named:
@@ -2105,12 +2194,12 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
         return (
-            f"the reviewer names {len(named)} files in its own table and the diff could not "
+            f"the reviewer names {len(named)} rows in its own table and the diff could not "
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    omitted = [p for p in changed if bare_path(p) not in named]
-    invented = [p for p in named if p not in {bare_path(c) for c in changed}]
+    left, invented, ambiguous = table_match(named, {bare_path(c) for c in changed})
+    omitted = [p for p in changed if bare_path(p) in left]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
         return (
@@ -2118,7 +2207,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"also does on rounds stating full coverage, so it corroborates nothing and "
             f"names no unread file"
         )
-    if len(omitted) == short and not invented:
+    if len(omitted) == short and not invented and not ambiguous:
         return (
             f"the reviewer's own file table omits exactly the {short} file"
             f"{'' if short == 1 else 's'} the counts leave unread, naming "
@@ -2126,9 +2215,11 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"list from the API, so that is a lead to check rather than a verdict"
         )
     return (
-        f"the reviewer's own file table names {len(named)} of the {len(changed)} changed "
+        f"the reviewer's own file table names {len(changed) - len(omitted)} of the "
+        f"{len(changed)} changed "
         f"files, omitting {len(omitted)} where the counts leave {short} unread"
         + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
+        + (f" and shortening {', '.join(ambiguous)} to fit several" if ambiguous else "")
         + ", so it tracks the counts nowhere and names no unread file"
     )
 
@@ -2265,15 +2356,17 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             "two changed paths differ only by a format character, so the table cannot tell "
             "them apart"
         )
-    omitted = sorted(diff - set(named))
-    invented = sorted(set(named) - diff)
-    if not omitted and not invented:
+    omitted, invented, ambiguous = table_match(named, diff)
+    if not omitted and not invented and not ambiguous:
         return ""
     return "the table " + ", and ".join(
         part
         for part in (
             f"leaves out {', '.join(omitted)}" if omitted else "",
             f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
+            f"shortens {', '.join(ambiguous)}, which matches more than one changed file"
+            if ambiguous
+            else "",
         )
         if part
     )
@@ -2316,8 +2409,8 @@ def table_reading(owner: str, repo: str, pr: dict) -> tuple[str, str]:
     or not, and the whole review history is in view. A pull request that ever had a partial
     round goes to the maintainer, since whether that partial still describes this diff is what
     a carry bound refusing, failing, or never reaching it cannot settle. A table naming a file
-    the diff does not carry, or leaving one out, is not this reading either, and neither is a
-    changed-file list the query cut short or returned malformed.
+    the diff does not carry, leaving one out, or shortening a path to fit several is not this
+    reading either, and neither is a changed-file list the query cut short or returned malformed.
 
     A table carries under the bound a statement does, the pull request changing exactly the same
     set of files at both commits, which `carry_holds` reads. Three pull requests in one session
@@ -2433,9 +2526,10 @@ def unrecognized_in(body: str) -> list[str]:
     # What is left of a drifted refusal is a body with no heading, which is the arm below.
     if refusal_of({"body": body}):
         return []
-    plain = CODE_SPAN.sub(" ", strip_fences(body or ""))
+    stripped = strip_fences(body or "")
+    plain = CODE_SPAN.sub(" ", stripped)
     headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    lines = mask_narrative(plain).splitlines()
+    lines = mask_narrative(plain, CODE_SPAN.sub(MARKUP_MASK, stripped)).splitlines()
     labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
     found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
     found += [
@@ -2851,7 +2945,37 @@ def heading_of(block: str) -> str:
 
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
-DETAILS_TAG = re.compile(r"<details(?:\s[^>]*)?>|</details>", re.IGNORECASE)
+DETAILS_TAG = re.compile(
+    r"(?P<open><details(?:[ \t\n\f\r][^<>]*|/)?>)"
+    r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
+    r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
+    r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
+    r"|[ \t]*)>",
+    re.IGNORECASE,
+)
+
+
+def details_tags(text: str) -> list[tuple[int, int, bool]]:
+    """Each `<details>` tag in `text` as `(start, end, opening)`, starting at its `<` past any lead.
+
+    A close is read anywhere bare. With more before its bracket, or its bracket on the next line, it
+    is read only where its own line opens an HTML block: up to three spaces in, behind any
+    blockquote markers, its tail allowed one line break where no marker leads it. Behind a marker
+    the next line carries its own container, so a tail crossing it would end the close inside
+    that line's markup or swallow a line outside the blockquote. Mid-line a next line opening on
+    `>` is a blockquote, which leaves the close as text, so a next-line bracket is not read there.
+    HTML still reads some closes these rules leave unread, such as one inside an HTML block already
+    open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
+    tag.
+
+    `text` is read as given, so a caller masks its code spans first, each to `MARKUP_MASK` rather
+    than to spaces. A span masked to spaces left the text after it looking indented, and a literal
+    mid-line then read as a tag.
+    """
+    return [
+        (max(m.start(), m.end("lead")), m.end(), m.group("open") is not None)
+        for m in DETAILS_TAG.finditer(text)
+    ]
 
 
 def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
@@ -2867,47 +2991,48 @@ def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int
     depth = 0
     region_start = 0
     cursor = 0
-    for m in DETAILS_TAG.finditer(body):
-        opening = not m.group().startswith("</")
+    for start, end, opening in details_tags(body):
         if opening:
             if depth == 0:
-                leftover.append((cursor, m.start()))
-                region_start = m.end()
+                leftover.append((cursor, start))
+                cursor = start
+                region_start = end
             depth += 1
         elif depth > 0:
             depth -= 1
             if depth == 0:
-                regions.append((region_start, m.start()))
-                cursor = m.end()
+                regions.append((region_start, start))
+                cursor = end
     leftover.append((cursor, len(body)))
     return regions, leftover
 
 
-def mask_narrative(text: str) -> str:
+def mask_narrative(text: str, tags: str | None = None) -> str:
     """The text with each narrative block's own content blanked, offsets and lines left alone.
 
     A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`. A block
     nested inside it keeps its content, and an unclosed block is never blanked, so a label it
-    holds is still read wherever it sits.
+    holds is still read wherever it sits. The tags are read from `tags` where given, the same text
+    with its code spans masked as `details_tags` needs, and everything else from `text`.
     """
     stack: list[tuple[int, int, list[tuple[int, int]]]] = []
     blank: list[tuple[int, int]] = []
-    for m in DETAILS_TAG.finditer(text):
-        if not m.group().startswith("</"):
-            stack.append((m.start(), m.end(), []))
+    for tag_at, tag_end, opening in details_tags(text if tags is None else tags):
+        if opening:
+            stack.append((tag_at, tag_end, []))
             continue
         if not stack:
             continue
         tag_start, start, children = stack.pop()
-        opener = SUMMARY.match(text[start : m.start()].lstrip())
+        opener = SUMMARY.match(text[start:tag_at].lstrip())
         if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
             cursor = start
             for child_start, child_end in children:
                 blank.append((cursor, child_start))
                 cursor = child_end
-            blank.append((cursor, m.start()))
+            blank.append((cursor, tag_at))
         if stack:
-            stack[-1][2].append((tag_start, m.end()))
+            stack[-1][2].append((tag_start, tag_end))
     masked = text
     for start, end in blank:
         masked = masked[:start] + QUOTED_CHAR.sub(" ", masked[start:end]) + masked[end:]
@@ -2923,8 +3048,10 @@ def mask_narrative(text: str) -> str:
 QUOTED_CHAR = re.compile("[^\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
-def mask_quotations(body: str) -> str:
+def mask_quotations(body: str, span: str = " ") -> str:
     """The body with every fenced block and inline code span blanked, offsets left alone.
+
+    A span's characters become `span`, which `details_tags` needs to be other than a space.
 
     A review quoting a section heading is not a review carrying that section, which is the reading
     every other reader in this file already takes and the one `marker_blocks` did not. This file's
@@ -2932,7 +3059,7 @@ def mask_quotations(body: str) -> str:
     its test data names as findings the round had raised.
     """
     return CODE_SPAN.sub(
-        lambda m: QUOTED_CHAR.sub(" ", m.group()),
+        lambda m: QUOTED_CHAR.sub(span, m.group()),
         strip_fences(body or "", lambda m: QUOTED_CHAR.sub(" ", m.group())),
     )
 
@@ -2955,7 +3082,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     # Found in the masked copy and taken from the body, which is what makes a quoted heading not a section.
     # The mask keeps every offset, so one set of spans addresses both.
     masked = mask_quotations(body)
-    region_spans, leftover_spans = details_spans(masked)
+    region_spans, leftover_spans = details_spans(mask_quotations(body, MARKUP_MASK))
     blocks = []
     for spans in [[s] for s in region_spans] + [leftover_spans]:
         raw_lines = "".join(body[a:b] for a, b in spans).splitlines()
@@ -3799,17 +3926,20 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     copied from that printed line still matches the raw body it was copied from, whether the
     whitespace the printed line flattened was a line break, a tab, or a run of spaces.
     """
-
-    def fold(text: str) -> str:
-        return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
-
-    needle = fold(match)
+    needle = fold_finding(match)
     return [
-        t
-        for t in threads
-        if needle in fold(first_comment(t).get("body") or "")
-        and (path is None or t.get("path") == path)
+        t for t in threads if needle in finding_text(t) and (path is None or t.get("path") == path)
     ]
+
+
+def fold_finding(text: str) -> str:
+    """The form `--match` compares in, as `matching_threads` describes."""
+    return " ".join(text.split()).translate(_TYPOGRAPHIC_FOLD).lower()
+
+
+def finding_text(thread: dict) -> str:
+    """A thread's opening comment in the form `--match` compares against."""
+    return fold_finding(first_comment(thread).get("body") or "")
 
 
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
@@ -4076,7 +4206,14 @@ def local_cover(pr: dict) -> bool:
 
 
 def reply_to_thread(
-    owner: str, repo: str, num: int, match: str, body: str, path: str | None, resolve: bool
+    owner: str,
+    repo: str,
+    num: int,
+    match: str,
+    body: str,
+    path: str | None,
+    resolve: bool,
+    all_identical: bool = False,
 ) -> int:
     """Answer the one thread `match` selects, and resolve it where asked. Returns an exit code.
 
@@ -4085,6 +4222,13 @@ def reply_to_thread(
     of those closes a finding while leaving it unanswered, which is the state a reviewer reads as
     addressed. A no-match names the unresolved count, since zero and several otherwise read the
     same without the reader counting the lines the refusal prints below it.
+
+    `all_identical` covers the one ambiguity no wording can narrow: a reviewer posting the same
+    finding as two threads. Their opening comments fold to the same text, so every pattern that
+    selects one selects the other, and the refusal left both open with no route to either. The
+    flag answers every candidate with the one body, and only when they all sit on one file and
+    fold identically, so two findings that merely share the quoted words still refuse, and the
+    same text on two files stays two findings that `--path` already tells apart.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -4105,17 +4249,56 @@ def reply_to_thread(
         for t in threads:
             print(f"  unresolved: {describe(t)}")
         return 60
-    if len(hits) > 1:
+    paths = {t.get("path") for t in hits}
+    identical = len(paths) == 1 and len({finding_text(t) for t in hits}) == 1
+    if len(hits) > 1 and not (all_identical and identical):
+        if len(paths) > 1:
+            hint = "The candidates sit on different files, so add --path to select one."
+        elif identical:
+            hint = (
+                "Every candidate opens with the same text, so no wording selects one: pass "
+                "--all-identical to answer each of them with this body."
+            )
+        elif all_identical:
+            hint = (
+                "--all-identical answers only candidates whose opening comments read the same, "
+                "and these differ, so quote more of the finding."
+            )
+        else:
+            hint = "Quote more of the finding, or add --path."
         print(
             f"status=AMBIGUOUS nothing was written: {len(hits)} unresolved threads carry "
             f"{match!r}, and picking one of them is the failure this avoids rather than a "
-            "default it can take. Quote more of the finding, or add --path."
+            f"default it can take. {hint}"
         )
         for t in hits:
             print(f"  candidate: {describe(t)}")
         return 61
 
-    target = hits[0]
+    for done, target in enumerate(hits):
+        code = answer_thread(target, body, resolve)
+        if code:
+            if len(hits) > 1:
+                replied = done + (code == 63)
+                print(
+                    f"  {replied} of {len(hits)} identical threads are confirmed to carry this reply, "
+                    "and none after this one was attempted."
+                )
+            return code
+
+    count = f" ({len(hits)} identical threads)" if len(hits) > 1 else ""
+    if not resolve:
+        print(
+            f"status=REPLIED{count} answered and left open, since --resolve was not given. "
+            "A decline is resolved only once its evidence is in the thread."
+        )
+        return 0
+    print(f"status=REPLIED_AND_RESOLVED{count}")
+    return 0
+
+
+def answer_thread(target: dict, body: str, resolve: bool) -> int:
+    """Reply to one selected thread and resolve it where asked. Returns 0, or an exit code."""
     print(f"answering: {describe(target)}")
     reply = (
         gh_graphql(M_REPLY, threadId=target["id"], body=body).get("addPullRequestReviewThreadReply")
@@ -4135,10 +4318,6 @@ def reply_to_thread(
     print(f"replied: {comment['url']}")
 
     if not resolve:
-        print(
-            "status=REPLIED the thread is answered and left open, since --resolve was not "
-            "given. A decline is resolved only once its evidence is in the thread."
-        )
         return 0
 
     thread = (gh_graphql(M_RESOLVE, threadId=target["id"]).get("resolveReviewThread") or {}).get(
@@ -4151,7 +4330,6 @@ def reply_to_thread(
         )
         print(f"  response: {json.dumps(thread)[:400]}")
         return 63
-    print("status=REPLIED_AND_RESOLVED")
     return 0
 
 
@@ -4426,6 +4604,12 @@ def main(argv: list[str] | None = None) -> int:
         help="reply: narrow --match to one file, for a file with several findings",
     )
     ap.add_argument(
+        "--all-identical",
+        action="store_true",
+        help="reply: where --match selects several threads whose opening comments read the "
+        "same, a finding posted twice, answer each of them with --body rather than refusing",
+    )
+    ap.add_argument(
         "--body",
         metavar="TEXT",
         help="comment or reply: the answer to post, carrying the fixing commit SHA or "
@@ -4450,6 +4634,7 @@ def main(argv: list[str] | None = None) -> int:
         "--match": a.match,
         "--path": a.path,
         "--resolve": a.resolve or None,
+        "--all-identical": a.all_identical or None,
     }
     if a.cmd != "reply":
         for flag, value in reply_only.items():
@@ -4510,7 +4695,9 @@ def main(argv: list[str] | None = None) -> int:
         return report_verdict(pr, owner, repo)
 
     if a.cmd == "reply":
-        return reply_to_thread(owner, repo, a.number, a.match, a.body, a.path, a.resolve)
+        return reply_to_thread(
+            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
+        )
 
     # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
     # The policy is that a cross-owner target is not touched at all, so the refusal precedes the reading half too.

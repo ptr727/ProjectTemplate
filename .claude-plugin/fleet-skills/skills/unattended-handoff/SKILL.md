@@ -148,15 +148,23 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 - **The fix stays inside this repository's tree.** It changes no repository setting, ruleset,
   visibility, secret, or release condition, and needs no credential, account, or host the session
   lacks.
+- **The fix edits nothing under the hub's `host-setup/agent-safety/`.** That tree is the agent's
+  own guard, and it is worked only in an attended session, so a human approves every change to it.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
   which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
   refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes.
-  No open pull request names it, and no pull request whose squash commit is in
-  `origin/main..origin/develop` names it anywhere in its body, since a fix merged to develop leaves
-  its issue open until it is promoted, whoever merged it. No open handoff on any track names it in
-  its next steps, and no comment on it claims it for a `backlog-burndown` group, since both mark
-  work that has no pull request yet.
+  No open pull request body names it in a fix-intent reference, and no body of a pull request whose
+  squash commit is in `origin/main..origin/develop` does. A fix merged to develop leaves its issue
+  open until it is promoted, whoever merged it. A fix-intent reference is `Closes on promotion:`,
+  `Addresses`, or any of GitHub's closing-keyword forms of `Closes`, `Fixes`, or `Resolves`. It
+  names each issue in the list directly after it, a list that ends at the first word other than an
+  issue reference or `and`. Any other mention, such as an issue the pull request filed along the
+  way, does not exclude the issue. The set is wider than the `Closes on promotion:` line a
+  promotion closes from. Excluding an issue not yet fixed only delays it until the pull request
+  naming it is promoted or closed, while taking a fixed one redoes finished work. No open handoff on
+  any track names it in its next steps, and no comment on it claims it for a `backlog-burndown`
+  group, since both mark work that has no pull request yet.
 
 ## The Picker
 

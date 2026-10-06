@@ -77,7 +77,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 - **The repository**, with its owner, name, and visibility.
 - **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
 - **The App secret values**, in the Actions and Dependabot stores both.
-- **Every publish credential and environment the repo's mechanisms declare** in [`spec/secrets.json`][secrets], including any environment a deploy gates on.
+- **Every publish credential and environment the repo uses.** Outside a site deploy, the repo's mechanisms in [`spec/secrets.json`][secrets] declare the publish credentials, and a mechanism's `workflowNeeds` names any environment its publish job binds. Step 1 records the environment names in the `environments` of the repo's [`registry/repos.json`][repos] entry. For a site deploy, the hub's [`.github/workflows/deploy-site-task.yml`][deploy-site-task] fixes both the environment names it accepts and the variable and secret names it reads. The maintainer supplies the values of the variables and secrets the repo uses.
 
 **A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo, so the one instrument that detects this condition is unavailable exactly while it holds.
 
@@ -213,7 +213,7 @@ For a **private** repo, confirm the owner-level toggle named `Dependabot on self
 
 ## 5. Verify: Run the Audit
 
-Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **operational** (every applicable check passes) or its residual deltas are tracked in `reports/<repo>/audit.md` plus an issue. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
+Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **operational** (every applicable check passes) or a hub-committed `reports/<repo>/audit.md` plus an issue tracks its residual deltas. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
 
 ## Onboarding a New Repo Type
 
@@ -244,6 +244,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [claude-md]: ./CLAUDE.md
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
+[deploy-site-task]: ./.github/workflows/deploy-site-task.yml
 [divergences]: ./spec/divergences.json
 [eol-lf-rollout]: ./docs/eol-lf-rollout.md
 [files]: ./spec/files.json

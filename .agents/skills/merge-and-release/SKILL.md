@@ -135,10 +135,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps rather than a checkout, and it holds what
    that bootstrap fetched, the commit `live.commit` names where it is not null, until
    `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again, which this step does not do.
+   From the same worktree, also run `python3 host-setup/agent-safety/claude/install.py --report`,
+   and report any result other than CURRENT to the maintainer. The host-safety kit, its rendered
+   `CLAUDE.md` included, is refreshed only by its own installer. That installer rewrites this
+   machine's hooks and settings, so this step reports it rather than running it.
    Then remove the worktree with
-   `git worktree remove <worktree>`, whatever the report said. Removing it leaves the snapshot and
-   its stamp unchanged, and a result that does not read current is reported to the maintainer.
-   `--report` exits on the snapshot alone. This step runs whether step 5
+   `git worktree remove <worktree>`, whatever either report said. Removing it leaves the skills
+   snapshot and its stamp unchanged, and a result that does not read current is reported to the
+   maintainer. The skills `--report` exits on the snapshot alone. This step runs whether step 5
    or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
    never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or

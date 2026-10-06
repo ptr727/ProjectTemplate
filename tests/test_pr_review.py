@@ -60,7 +60,7 @@ LATE = "2026-08-02T11:00:00Z"
 # The shape 28 of the 333 measured bodies carry: an overview, and no count of what was read.
 # A body of no text at all is not one of the shapes, and the reader now says so, correctly.
 OVERVIEW = "## Pull request overview\n\nThe change is narrow.\n"
-# The wall-clock ceiling the two backtracking cases read, stated once so they cannot drift apart.
+# The wall-clock ceiling the backtracking cases read, stated once so they cannot drift apart.
 # Each case sizes its own input so that a regression finishes and trips this rather than running long enough to hang the suite.
 # Three seconds against readings of microseconds and milliseconds, which is the margin that makes a loaded runner a non-issue rather than the clock being trusted.
 BACKTRACK_BOUND = 3.0
@@ -896,6 +896,17 @@ class TestSuppressed(GqlCase):
                 self.answer(payload([review(body=body)]))
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(f"suppressed={want}", out)
+
+    def test_a_section_before_an_unclosed_details_block_comes_back_once(self) -> None:
+        """A truncated body leaves its last block open, and the text before it was emitted twice."""
+        body = (
+            "### Suppressed comments (1)\n\n"
+            "- `a.py` line 3: a constructed finding.\n\n"
+            "<details><summary>Review details</summary>\n\nTruncated here."
+        )
+        blocks = pr_review.suppressed_blocks(body)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].count("a constructed finding"), 1)
 
     def test_a_block_on_a_review_with_no_commit_names_that_rather_than_an_empty_sha(self) -> None:
         """GraphQL returns a null commit for a pending review, and the sha is what traces it.
@@ -3270,6 +3281,169 @@ class TestSecondOverviewFormat(GqlCase):
             ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
         )
 
+    def test_a_label_also_in_the_narrative_is_listed_where_it_is_metadata(self) -> None:
+        """A narrative line is prose rather than metadata, so its position is not the label's."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Bbb:** x\n</details>\n\n- **Aaa:** x\n- **Bbb:** x\n"
+        )
+        self.assertEqual(
+            ["metadata label: Aaa", "metadata label: Bbb"], pr_review.unrecognized_in(body)
+        )
+
+    def test_an_unclosed_narrative_is_never_blanked(self) -> None:
+        """Blanked through to the end of the body, it would hide every label after its opener."""
+        body = self.narrated() + (
+            "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "- **Confidence:** high\n"
+        )
+        self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_narrative_closed_in_another_html_spelling_ends_there(self) -> None:
+        """Left unread, the close let the narrative pair with its parent's and blank a label."""
+        for close in (
+            "</details >",
+            "</DETAILS\t>",
+            "</details x>",
+            "</details/>",
+            "</details x/>",
+        ):
+            with self.subTest(close=close):
+                body = self.narrated() + (
+                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n{close}\n\n- **Confidence:** high\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_tag_html_shows_as_text_does_not_end_the_narrative(self) -> None:
+        """Markdown hands HTML only a well-formed tag, and an attributed close only at a line start."""
+        for prose in (
+            "Prose naming </details x> mid-line.",
+            "    </details x>",
+            "`a` </details x> mid-line.",
+            "Prose naming <details/x> mid-line.",
+            "</details/x>",
+        ):
+            with self.subTest(prose=prose):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"{prose}\n\n- **Gadget (#1):** x\n</details>\n"
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_self_closed_opener_in_the_narrative_still_opens_a_block(self) -> None:
+        """HTML ignores the slash on `<details/>`, so its close is its own rather than the parent's."""
+        for opener in ("<details/>", "<details />"):
+            with self.subTest(opener=opener):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n\n{opener}\n<summary>Review details</summary>\n\n"
+                    "- **Confidence:** high\n</details>\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_tag_is_bounded_by_html_s_own_syntax(self) -> None:
+        """A tail reaching past its next line or another tag swallowed the opener or heading after it."""
+        cases = {
+            "</details x <details>": ["<details>"],
+            "<details x <details>": ["<details>"],
+            "</details x\n### Suppressed comments (1)\n>": [],
+            "</details\v>": [],
+            "<details\v>": [],
+        }
+        for sep in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029":
+            cases[f"</details x{sep}>"] = [f"</details x{sep}>"] if sep in "\n\r" else []
+            cases[f"a{sep}</details x>"] = ["</details x>"] if sep in "\n\r" else []
+        for text, tags in cases.items():
+            with self.subTest(text=text):
+                found = [m.group() for m in pr_review.DETAILS_TAG.finditer(text)]
+                self.assertEqual(tags, found)
+
+    def test_a_close_behind_a_blockquote_marker_keeps_its_tail_on_its_own_line(self) -> None:
+        """The next line carries its own container, so a tail crossing it ended inside that markup."""
+        cases = {
+            "> </details x\n> ### H (1)": [],
+            "> </details x\nfoo>": [],
+            "> </details x>": ["</details x>"],
+            "  </details x\n>": ["</details x\n>"],
+        }
+        for text, tags in cases.items():
+            with self.subTest(text=text):
+                found = [text[a:b] for a, b, _ in pr_review.details_tags(text)]
+                self.assertEqual(tags, found)
+
+    def test_a_body_of_unclosed_openers_is_read_in_linear_time(self) -> None:
+        """An opener with no closing `>` ends its scan at the next `<`, so a body of such openers reads in linear time."""
+        body = "<details x\n" * 9000
+        start = time.monotonic()
+        self.assertEqual([], pr_review.details_spans(body)[0])
+        self.assertEqual(body, pr_review.mask_narrative(body))
+        pr_review.unrecognized_in(body)
+        self.assertEqual([], pr_review.marker_blocks(body, pr_review.SUPPRESSED))
+        self.assertLess(time.monotonic() - start, BACKTRACK_BOUND)
+
+    def test_a_region_ends_at_a_close_in_another_html_spelling(self) -> None:
+        """The section readers pair on the same tags, so their regions end where HTML ends them."""
+        body = "<details>\na\n</details >\nb\n<details>\nc\n</details>\n"
+        regions, _ = pr_review.details_spans(body)
+        self.assertEqual(["\na\n", "\nc\n"], [body[a:b] for a, b in regions])
+
+    def test_a_close_a_line_hands_to_html_ends_the_narrative(self) -> None:
+        """Indented, behind a blockquote, or with its bracket on the next line, it is still a close."""
+        for close in (
+            "  </details x>",
+            "   </details/>",
+            "> </details x>",
+            "> > </details x/>",
+            "</details\n>",
+            "</details x\n>",
+            "</details\nx>",
+        ):
+            with self.subTest(close=close):
+                body = self.narrated() + (
+                    "\n<details>\n<summary>Pull request overview</summary>\n\n<details>\n"
+                    "<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"- **Gadget (#1):** x\n{close}\n\n- **Confidence:** high\n</details>\n"
+                )
+                self.assertEqual(["metadata label: Confidence"], pr_review.unrecognized_in(body))
+
+    def test_a_region_ends_at_a_close_a_line_hands_to_html(self) -> None:
+        """The section readers read the same closes, so their regions end where HTML ends them."""
+        body = "<details>\na\n  </details x>\nb\n<details>\nc\n> </details/>\n"
+        regions, _ = pr_review.details_spans(body)
+        self.assertEqual(["\na\n  ", "\nc\n> "], [body[a:b] for a, b in regions])
+
+    def test_a_code_span_ahead_of_a_tag_does_not_put_it_at_a_line_start(self) -> None:
+        """Masked to spaces, a span left the literal after it looking indented, and it was paired."""
+        for prose in ("`a`</details x>", "`a` > </details x>", "`a`  </details/>"):
+            with self.subTest(prose=prose):
+                body = self.narrated() + (
+                    "\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+                    f"{prose}\n\n- **Gadget (#1):** x\n</details>\n"
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+        for prose in ("`a`</details x>", "`a`> </details x>"):
+            with self.subTest(prose=prose):
+                body = (
+                    "<details>\n<summary>Review details</summary>\n\n"
+                    f"### Suppressed comments (1)\n\n{prose}\n\n**a.py:12**\n"
+                    "* Validate the input.\n</details>\n"
+                )
+                blocks = pr_review.suppressed_blocks(body)
+                self.assertEqual(1, len(blocks))
+                self.assertIn("Validate the input.", blocks[0])
+
+    def test_a_close_mid_line_with_its_bracket_on_the_next_line_is_text(self) -> None:
+        """A next line opening on `>` is a blockquote, which ends the paragraph the close sits in."""
+        body = (
+            "<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n"
+            "Closed with </details\n> as shown.\n\n**a.py:12**\n* Validate the input.\n</details>\n"
+        )
+        blocks = pr_review.suppressed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertIn("Validate the input.", blocks[0])
+
     def test_an_unknown_section_in_the_format_still_stops_the_loop(self) -> None:
         """The vetted lists reach a section introduced as a heading or a `<summary>`.
 
@@ -3791,6 +3965,20 @@ class TestSecondOverviewFormat(GqlCase):
             5, pr_review.stated_total(f"{CCR_MARKER}\n\n<detailsfoo>\n\n**Findings:** 5\n")
         )
 
+    def test_the_preamble_ends_at_the_boundary_details_tag_reads(self) -> None:
+        """A boundary of its own let a section's total stand as the round's, or dropped the round's."""
+        self.assertEqual(
+            2,
+            pr_review.stated_total(
+                f"{CCR_MARKER}\n\n**Findings:** 2\n\n<details/>\n\n**Findings:** 9\n"
+            ),
+        )
+        for opener in ("<details\v>", "`a`<details>"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    5, pr_review.stated_total(f"{CCR_MARKER}\n\n{opener}\n\n**Findings:** 5\n")
+                )
+
     def test_a_total_indented_into_a_code_block_is_a_quotation(self) -> None:
         """Bounded to three spaces for the reason the marker is, a fourth making the line a code
         block. The largest total wins, so a quoted number beat the round's own."""
@@ -3949,6 +4137,109 @@ class TestCoverageExitCodes(GqlCase):
                 )
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_wildcard_row_covers_the_sibling_files_it_groups(self) -> None:
+        """The table can collapse sibling files into one glob row rather than naming each."""
+        body = self.balanced(["src/app.py", ".github/workflows/*.yml"])
+        files = ["src/app.py", *(f".github/workflows/{n}.yml" for n in "abc")]
+        self.answer(payload([review(body=body)], files=files))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_shortened_row_covers_the_one_long_path_it_shortens(self) -> None:
+        """The table can replace the middle of a long name with a gap.
+
+        The nested path carries the zero-width space the format writes after a slash.
+        """
+        long = "docs/notes/2020-01-01 - Sample Topic - A Rather Long Descriptive Name.md"
+        body = self.balanced(
+            ["a.md", "docs/\u200bnotes/\u200b2020-01-01 - ... Descriptive Name.md"]
+        )
+        self.answer(payload([review(body=body)], files=["a.md", long]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_row_carrying_a_glob_character_the_diff_carries_reads_literally(self) -> None:
+        body = self.balanced(["app/[id].tsx"])
+        self.answer(payload([review(body=body)], files=["app/[id].tsx"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+
+    def test_a_bracket_in_a_row_is_a_literal_rather_than_a_character_class(self) -> None:
+        """A bracketed directory is a route name, grouped under a wildcard and naming no other."""
+        files = ["app/[slug]/page.tsx", "app/[slug]/layout.tsx"]
+        pr = payload([review(body=self.balanced(["app/[slug]/*.tsx"]))], files=files)
+        self.assertEqual("", pr_review.table_shortfall(pr))
+        pr = payload([review(body=self.balanced(["app/[id]/*.tsx"]))], files=["app/i/page.tsx"])
+        self.assertIn("names app/[id]/*.tsx, which the diff", pr_review.table_shortfall(pr))
+        pr = payload([review(body=self.balanced(["app/[id]*.tsx"]))], files=["app/i.tsx"])
+        self.assertIn("names app/[id]*.tsx, which the diff", pr_review.table_shortfall(pr))
+
+    def test_a_shortened_row_reads_a_wildcard_in_its_text_literally(self) -> None:
+        """A long title can carry a `?`, and the gap is what shortened it."""
+        long = "docs/Why Not? - A Rather Long Descriptive Name.md"
+        pr = payload([review(body=self.balanced(["docs/Why Not? - ... Name.md"]))], files=[long])
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_row_of_bare_wildcards_names_nothing(self) -> None:
+        """A row like `*/*` carries no evidence that any file was read, so it covers none."""
+        for row, path in (
+            ("*", "a"),
+            ("*/*", "dir/a"),
+            ("dir/*", "dir/a"),
+            ("dir/?", "dir/a"),
+            ("*.*", "a.md"),
+        ):
+            with self.subTest(row=row):
+                pr = payload([review(body=self.balanced([row]))], files=[path])
+                self.assertIn(f"names {row}, which the diff", pr_review.table_shortfall(pr))
+
+    def test_a_gap_between_bare_punctuation_names_nothing(self) -> None:
+        """A row like `- ... -` carries no evidence that any file was read, so it covers none."""
+        pr = payload([review(body=self.balanced(["- ... -"]))], files=["-x-"])
+        self.assertIn("names - ... -, which the diff", pr_review.table_shortfall(pr))
+
+    def test_a_row_with_several_gaps_is_decided_in_one_pass(self) -> None:
+        """Each gap stands for at least one character, and a near miss returns at once."""
+        self.assertTrue(pr_review.gap_fits("a-x-b-y-c", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("ab-c", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("a-bc", ["a", "b", "c"]))
+        self.assertFalse(pr_review.gap_fits("ab", ["ab", "b"]))
+        started = time.monotonic()
+        self.assertFalse(pr_review.gap_fits("a" * 60 + "c", ["a"] * 12 + ["b", "c"]))
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_a_pattern_or_gap_row_matching_nothing_or_too_much_keeps_the_table_out(self) -> None:
+        """A pattern matching nothing, or a gap matching anything but one path, is a mismatch."""
+        for rows, files, reason in (
+            (
+                ["a.md", "lib/*.py"],
+                ["a.md"],
+                "names lib/*.py, which the diff does not carry",
+            ),
+            (
+                ["dir/*.yml"],
+                ["dir/sub/b.yml"],
+                "leaves out dir/sub/b.yml, and names dir/*.yml, which",
+            ),
+            (
+                ["a.md", "docs/x - ... z.md"],
+                ["a.md"],
+                "names docs/x - ... z.md, which the diff does not carry",
+            ),
+            (
+                ["docs/x - ... z.md"],
+                ["docs/x - one z.md", "docs/x - two z.md"],
+                "shortens docs/x - ... z.md, which matches more than one changed file",
+            ),
+            (
+                ["docs/x - ... z.md"],
+                ["docs/x -z.md"],
+                "names docs/x - ... z.md, which the diff does not carry",
+            ),
+        ):
+            with self.subTest(rows=rows, files=files):
+                pr = payload([review(body=self.balanced(rows))], files=files)
+                self.assertIn(reason, pr_review.table_shortfall(pr))
 
     def test_a_quoted_table_does_not_stand_in_for_coverage(self) -> None:
         """An indented block and a fence left unclosed quote a table rather than write one."""
@@ -4388,6 +4679,19 @@ class TestTheRoundsOwnFileTable(GqlCase):
         )
         self.assertIn("b.mb", out)
         self.assertIn("names no unread file", out)
+        self.assertNotIn("omits exactly", out)
+
+    def test_a_shortened_path_matching_several_files_disqualifies_the_naming(self) -> None:
+        """Which file a gap shortened is unknown, so both read as omitted.
+
+        The counts leave two unread, so only the gap keeps this from reading as a lead.
+        """
+        pr = payload(
+            [review(body=summarized(["a.py", "d - ... z.md"], covers=""))],
+            files=["a.py", "d - one z.md", "d - two z.md"],
+        )
+        out = pr_review.table_against_diff(pr, (1, 3))
+        self.assertIn("shortening d - ... z.md to fit several", out)
         self.assertNotIn("omits exactly", out)
 
     def test_a_table_short_by_more_than_the_counts_tracks_neither(self) -> None:
@@ -6569,6 +6873,122 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertEqual(0, self.run_reply("--resolve", "--path", "b.py"))
         self.assertIn("b.py:12", self.out.getvalue())
 
+    def test_a_finding_posted_twice_refuses_and_names_the_flag(self) -> None:
+        """No wording selects one of two identical threads, so the refusal names the way out."""
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(61, self.run_reply("--resolve"))
+        self.assertFalse(self.wrote())
+        self.assertIn("--all-identical", self.out.getvalue())
+
+    def test_all_identical_answers_and_resolves_every_copy(self) -> None:
+        ids = []
+
+        def capture(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1", line=118), rthread("t2", line=399)]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=capture):
+            self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn("REPLIED_AND_RESOLVED (2 identical threads)", self.out.getvalue())
+
+    def test_all_identical_without_resolve_names_the_count_and_leaves_both_open(self) -> None:
+        self.wire(page([rthread("t1", line=118), rthread("t2", line=399)]))
+        self.assertEqual(0, self.run_reply("--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn("status=REPLIED (2 identical threads)", self.out.getvalue())
+
+    def test_all_identical_refuses_the_same_text_on_two_files(self) -> None:
+        """Generic text on two files is two findings, and `--path` already selects between them."""
+        self.wire(page([rthread("t1", path="a.py"), rthread("t2", path="b.py")]))
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("add --path", self.out.getvalue())
+        self.assertNotIn("pass --all-identical", self.out.getvalue())
+
+    def test_all_identical_compares_in_the_folded_form_match_reads(self) -> None:
+        """Bodies differing only where `--match` cannot see are still one finding to it."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count\nis off \u2014 by one."),
+                    rthread("t2", body="The Retry Count is off - by one."),
+                ]
+            )
+        )
+        self.assertEqual(0, self.run_reply("--resolve", "--all-identical"))
+        self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
+
+    def test_all_identical_still_refuses_findings_that_only_share_words(self) -> None:
+        """Two findings quoting the same words are two findings, and one body answers neither."""
+        self.wire(
+            page(
+                [
+                    rthread("t1", body="The retry count is off by one."),
+                    rthread("t2", body="The retry count is never logged."),
+                ]
+            )
+        )
+        self.assertEqual(61, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.wrote())
+        self.assertIn("these differ", self.out.getvalue())
+
+    def test_all_identical_says_none_was_attempted_after_a_first_copy_fails(self) -> None:
+        """A failure on the first copy still leaves the others unanswered, and the output says so."""
+        self.wire(page([rthread("t1"), rthread("t2")]), reply={"id": "c1", "url": None, "body": ""})
+        self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertFalse(self.resolved_a_thread())
+        self.assertIn(
+            "0 of 2 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
+    def test_all_identical_stops_at_the_first_unconfirmed_reply(self) -> None:
+        """A later copy is not attempted past a failure, and the count says what already landed."""
+        replies = [LANDED, {"id": "c2", "url": None, "body": ""}]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": replies.pop(0)}}
+            return {"resolveReviewThread": {"thread": {"isResolved": True}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(62, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2"], ids)
+        self.assertIn(
+            "1 of 3 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
+    def test_all_identical_counts_the_reply_under_a_failed_resolve(self) -> None:
+        """A resolve that fails comes after its own reply landed, so that copy carries the answer."""
+        resolves = [True, False]
+        ids = []
+
+        def fake(query: str, **variables: object) -> dict:
+            if "reviewThreads" in query:
+                threads = [rthread("t1"), rthread("t2"), rthread("t3")]
+                return {"repository": {"pullRequest": {"reviewThreads": page(threads)}}}
+            ids.append(variables.get("threadId"))
+            if "addPullRequestReviewThreadReply" in query:
+                return {"addPullRequestReviewThreadReply": {"comment": LANDED}}
+            return {"resolveReviewThread": {"thread": {"isResolved": resolves.pop(0)}}}
+
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=fake):
+            self.assertEqual(63, self.run_reply("--resolve", "--all-identical"))
+        self.assertEqual(["t1", "t1", "t2", "t2"], ids)
+        self.assertIn(
+            "2 of 3 identical threads are confirmed to carry this reply", self.out.getvalue()
+        )
+
     def test_a_resolved_thread_is_not_a_candidate(self) -> None:
         """It is answered, and replying again reopens a conversation nobody is reading."""
         self.wire(page([rthread("t1", resolved=True)]))
@@ -6758,7 +7178,7 @@ class TestReplyArguments(unittest.TestCase):
                 self.assertIn("--body", self.err(["comment", "7", "--repo", "o/r", "--body", body]))
 
     def test_reply_only_options_are_rejected_on_comment(self) -> None:
-        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (["--match", "x"], ["--resolve"], ["--path", "a.py"], ["--all-identical"]):
             with self.subTest(flag=flag[0]):
                 self.assertIn(
                     flag[0],
@@ -6767,7 +7187,13 @@ class TestReplyArguments(unittest.TestCase):
 
     def test_a_writing_option_on_a_reading_command_is_an_error(self) -> None:
         """Silently ignored, it reads as an option that took effect on a run that wrote nothing."""
-        for flag in (["--body", "Fixed."], ["--match", "x"], ["--resolve"], ["--path", "a.py"]):
+        for flag in (
+            ["--body", "Fixed."],
+            ["--match", "x"],
+            ["--resolve"],
+            ["--path", "a.py"],
+            ["--all-identical"],
+        ):
             with self.subTest(flag=flag[0]):
                 self.assertIn(flag[0], self.err(["status", "7", "--repo", "o/r", *flag]))
 
