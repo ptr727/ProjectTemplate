@@ -2996,7 +2996,7 @@ _EVAL_RUNNER_OPTIONS = {
     "builtin": re.compile(r"^--$"),
 }
 
-_EVAL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+_EVAL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[.*\])?\+?=")
 
 _NAMED_FD_RE = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
@@ -3009,23 +3009,43 @@ def _runs_eval(toks, i, quoted=None, raw=None):
     a builtin and exits without running anything. A runner is an unquoted `_EVAL_RUNNERS` word,
     since a quoted one is no reserved word, or `command` or `builtin`, quoted or not, each with the
     options `_EVAL_RUNNER_OPTIONS` allows it, where `command -v eval` only names the eval. An fd
-    before a redirection is ASCII digits or a `{name}`. A separator fused to a redirection opens
-    the run as well, as in `echo x;>f eval`. The walk stops at the first other word, so each eval of
-    `echo eval eval ...` costs one step rather than a walk to the start of its run.
+    before a redirection is ASCII digits or a `{name}`. A reserved word is one only ahead of every
+    other prefix, so `FOO=1 time eval` runs `/usr/bin/time`, which cannot run the eval. The name
+    after `function` or `coproc` is skipped, as in `function f { eval`. A separator fused to a
+    redirection opens the run as well, as in `echo x;>f eval`. The walk stops at the first other
+    word, so each eval of `echo eval eval ...` costs one step rather than a walk to the start of
+    its run.
     `raw` is the quote-keeping tokens of `toks`, where known. A word is an assignment only where its
     name and `=` are unquoted, since `'FOO=1' eval` runs a command named `FOO=1`. Where `raw` is
     unknown a quoted one still reads as an assignment, a false deny rather than an unread eval.
     """
     k = i - 1
+    reserved = False
     while k >= 0:
         t = toks[k]
         q = quoted is not None and quoted[k]
         if not q and _is_shell_op(t):
             if _is_redir_op(t) and not _opens_with_separator(t):
+                if reserved:
+                    return False
                 k -= 1
                 continue
             return True
-        if t in _EVAL_RUNNER_BUILTINS or (not q and t in _EVAL_RUNNERS):
+        if not q and t in _EVAL_RUNNERS:
+            reserved = True
+            k -= 1
+            continue
+        if (
+            reserved
+            and k > 0
+            and toks[k - 1] in ("function", "coproc")
+            and not (quoted is not None and quoted[k - 1])
+        ):
+            k -= 2
+            continue
+        if reserved:
+            return False
+        if t in _EVAL_RUNNER_BUILTINS:
             k -= 1
             continue
         if _EVAL_ASSIGNMENT_RE.match(t) and (raw is None or _EVAL_ASSIGNMENT_RE.match(raw[k])):
@@ -3050,6 +3070,7 @@ def _runs_eval(toks, i, quoted=None, raw=None):
             and runs
             and all(_EVAL_RUNNER_OPTIONS[runner].match(o) for o in toks[j + 1 : k + 1])
         ):
+            reserved = runner == "time"
             k = j - 1
             continue
         return False
@@ -5505,6 +5526,31 @@ _WAIT_CASES = [
         "echo x;>f eval 'until false; do sleep 1; done'",
         "deny",
         "a separator fused to a redirection opens the eval's run",
+    ),
+    (
+        "function f { eval 'until false; do sleep 1; done'; }; f",
+        "deny",
+        "a function body's group runs the eval",
+    ),
+    (
+        "coproc NAME { eval 'until false; do sleep 1; done'; }",
+        "deny",
+        "and so does a named coprocess's group",
+    ),
+    (
+        "FOO=1 time eval 'until false; do sleep 1; done'",
+        "allow",
+        "time after an assignment is the external time, which cannot run the eval",
+    ),
+    (
+        "command time -p eval 'until false; do sleep 1; done'",
+        "allow",
+        "and so is time after command",
+    ),
+    (
+        "a['k]']=1 eval 'until false; do sleep 1; done'",
+        "deny",
+        "a subscript holding a quoted ] is still an assignment",
     ),
     (
         "FOO='a b' eval 'until false; do sleep 1; done'",

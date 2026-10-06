@@ -279,7 +279,9 @@ text says, because the harm it covers was never in the text.
    Nothing may stand before it in its run but assignments, redirections, and runners. A runner is a
    reserved word such as `do`, `if`, or `while`, a `{` or `!`, `coproc`, `time`, `command`, or
    `builtin`. `time -p`, `command -p`, and a `--` after any of the last three still run the
-   `eval`, while `command -v` only names it. An external launcher such as `timeout` or `nohup`
+   `eval`, while `command -v` only names it. A reserved word counts only ahead of every other
+   prefix, since bash reads it as a plain command name after one. The name a `function` or
+   `coproc` gives its group is skipped. An external launcher such as `timeout` or `nohup`
    cannot run a builtin. So `timeout 600 eval '<the loop>'` runs nothing, and only a bound on the
    shell holding the `eval` reaches its loop. A redirection on the `eval` applies to the whole
    payload. Where the rule cannot tell which words were quoted, any separator on the `eval`'s line
