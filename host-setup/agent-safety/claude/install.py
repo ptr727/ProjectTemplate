@@ -458,7 +458,8 @@ def read_local_instructions(local_path):
     # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
     try:
         info = os.lstat(local_path)
-    except (FileNotFoundError, NotADirectoryError):
+    # Only a missing path is absent, so a parent that is a file is refused rather than silently skipped.
+    except FileNotFoundError:
         return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
