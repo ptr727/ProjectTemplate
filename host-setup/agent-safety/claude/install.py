@@ -473,15 +473,18 @@ def write_regular_file(path, data, prior=None, before=None):
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
     Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
-    truncate and `prior` could not be put back, which leaves the file holding neither version.
+    truncate and `prior` could not be put back, or where the close after the truncate failed,
+    either of which can leave the file holding neither version.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(path, flags, 0o666)
+    truncated = False
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise NotRegularFile(f"{path} is not a regular file")
         if before is not None:
             before()
+        truncated = True
         try:
             _replace_contents(fd, data)
         except OSError as e:
@@ -494,8 +497,20 @@ def write_regular_file(path, data, prior=None, before=None):
                     f"{path} was left incomplete ({e}), and its prior content could not be put back"
                 ) from e
             raise
-    finally:
+    except BaseException as e:
+        try:
+            os.close(fd)
+        except OSError as close_error:
+            if truncated and not isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(
+                    f"{path} may be incomplete, since closing it failed ({close_error})"
+                ) from e
+        raise
+    # A network filesystem can report a quota or I/O error at the close rather than at the write.
+    try:
         os.close(fd)
+    except OSError as e:
+        raise IncompleteWrite(f"{path} may be incomplete, since closing it failed ({e})") from e
 
 
 def _replace_contents(fd, data):
@@ -1222,7 +1237,8 @@ def main():
                 kept = f"Its prior content is backed up at {backups[0]}."
             elif raw is not None:
                 kept = (
-                    "Its prior content was the last install's render, which a re-run writes again."
+                    "Its prior content was the last install's render, so nothing written by hand "
+                    "was lost, though a re-run backs up the partial file before rewriting it."
                 )
             else:
                 kept = "It did not exist before this run."
@@ -1473,9 +1489,14 @@ def main():
             settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"), prior=settings_raw
         )
     except IncompleteWrite as e:
+        remedy = (
+            "It did not exist before this run, so remove it"
+            if settings_raw is None
+            else "Put its prior content back from a copy, or remove it"
+        )
         sys.stderr.write(
-            f"{e}. Claude Code cannot parse it until it is restored, so fix what stopped the write "
-            "and re-run.\n"
+            f"{e}. Claude Code cannot parse it as it stands, and a re-run refuses it too. Fix what "
+            f"stopped the write. {remedy}, then re-run.\n"
         )
         return 1
     except OSError as e:

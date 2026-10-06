@@ -641,6 +641,45 @@ class TestWholeFileOwnership(StampCase):
         with self.assertRaises(OSError):
             os.fstat(opened[0])
 
+    def close_failing_once(self):
+        """os.close that closes the descriptor and then reports a quota error, as NFS can."""
+        real_close = os.close
+
+        def failing(fd):
+            real_close(fd)
+            raise OSError(122, "constructed: disk quota exceeded")
+
+        return mock.patch.object(install.os, "close", side_effect=failing)
+
+    def test_a_failed_close_after_the_write_is_named_as_incomplete(self):
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        with self.close_failing_once(), self.assertRaises(install.IncompleteWrite):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_failed_close_does_not_replace_an_incomplete_write_already_raised(self):
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            self.close_failing_once(),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaisesRegex(install.IncompleteWrite, "could not be put back"),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_failed_close_before_the_truncate_still_reads_as_unchanged(self):
+        """A refused open-time check never touched the file, so it stays a plain OSError."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        refused = OSError(13, "constructed: backup refused")
+        with self.close_failing_once(), self.assertRaises(OSError) as caught:
+            install.write_regular_file(
+                self.md, b"new\n", prior=b"prior\n", before=mock.Mock(side_effect=refused)
+            )
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertEqual(self.md.read_bytes(), b"prior\n")
+
     def test_a_local_path_under_a_file_is_refused_rather_than_skipped(self):
         """An XDG_CONFIG_HOME pointing at a file must not drop the configured local text."""
         if os.name != "posix":
