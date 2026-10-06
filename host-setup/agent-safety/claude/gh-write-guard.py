@@ -3014,11 +3014,14 @@ def _runs_eval(toks, i, quoted=None, raw=None):
     after `function` or `coproc` is skipped, as in `function f { eval`. A separator fused to a
     redirection opens the run as well, as in `echo x;>f eval`. The walk stops at the first other
     word, so each eval of `echo eval eval ...` costs one step rather than a walk to the start of
-    its run.
+    its run. An `eval` that is a redirection's target, as in `>eval`, is a file name and runs
+    nothing.
     `raw` is the quote-keeping tokens of `toks`, where known. A word is an assignment only where its
     name and `=` are unquoted, since `'FOO=1' eval` runs a command named `FOO=1`. Where `raw` is
     unknown a quoted one still reads as an assignment, a false deny rather than an unread eval.
     """
+    if i > 0 and _is_redir_op(toks[i - 1]) and not (quoted is not None and quoted[i - 1]):
+        return False
     k = i - 1
     reserved = False
     while k >= 0:
@@ -5566,6 +5569,16 @@ _WAIT_CASES = [
         "a subscript holding a quoted newline is still an assignment",
     ),
     (
+        ">eval 'until false; do sleep 1; done'",
+        "allow",
+        "an eval that is a redirection's target is a file name",
+    ),
+    (
+        "{ >eval 'until false; do sleep 1; done'; }",
+        "allow",
+        "and so is one inside a group",
+    ),
+    (
         "FOO='a b' eval 'until false; do sleep 1; done'",
         "deny",
         "an assignment whose value is quoted still runs the eval",
@@ -7415,6 +7428,12 @@ def _selftest():
             "an unknown-quoting wait-loop scan of ten evals on a 50 KB line",
             lambda: _unbounded_wait_loop(
                 'eval "a\'b"; ' * 10 + "y " * 25_000 + '\necho "$(echo "it\'s")"'
+            ),
+        ),
+        (
+            "a wait-loop scan of 4000 evals that are redirection targets",
+            lambda: _unbounded_wait_loop(
+                "echo " + ">eval " * 4000 + "; while true; do sleep 1; done"
             ),
         ),
         (
