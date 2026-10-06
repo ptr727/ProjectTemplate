@@ -31,6 +31,7 @@ import platform
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 
@@ -425,6 +426,27 @@ def local_instructions_path():
     return base / "agent-fleet" / "local.md"
 
 
+def read_regular_file(path):
+    """The bytes of `path` where it is a regular file, or None where it is anything else.
+
+    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
+    rather than hanging the read, and nothing can swap the path between the check and the read.
+    Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def read_local_instructions(local_path):
     """The host-local text, stripped, and why it cannot be used, or None where it can.
 
@@ -435,15 +457,22 @@ def read_local_instructions(local_path):
     # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
     # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
     try:
-        os.lstat(local_path)
+        info = os.lstat(local_path)
     except (FileNotFoundError, NotADirectoryError):
         return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
     try:
-        raw = local_path.read_bytes()
+        raw = read_regular_file(local_path)
+    except FileNotFoundError:
+        gone = (
+            "is a link that leads to nothing" if stat.S_ISLNK(info.st_mode) else "no longer exists"
+        )
+        return "", f"{local_path} {gone}"
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
+    if raw is None:
+        return "", f"{local_path} is not a regular file"
     try:
         text = normalized(raw.decode("utf-8")).strip()
     except UnicodeDecodeError as e:
