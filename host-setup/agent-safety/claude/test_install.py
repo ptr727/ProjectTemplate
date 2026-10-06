@@ -590,6 +590,33 @@ class TestWholeFileOwnership(StampCase):
         with self.assertRaises(OSError):
             os.fstat(opened[0])
 
+    def test_a_local_path_under_a_file_is_refused_rather_than_skipped(self):
+        """An XDG_CONFIG_HOME pointing at a file must not drop the configured local text."""
+        if os.name != "posix":
+            self.skipTest(
+                "Windows raises FileNotFoundError for a file parent, so it reads as absent"
+            )
+        parent = self.home.parent / "a-file-not-a-directory"
+        parent.write_text("", encoding="utf-8")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(parent / "local.md"),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="0",
+        )
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertFalse(self.home.exists())
+
     def test_a_local_fifo_is_refused_rather_than_blocking_the_read(self):
         if not hasattr(os, "mkfifo"):
             self.skipTest("this host has no FIFOs")
