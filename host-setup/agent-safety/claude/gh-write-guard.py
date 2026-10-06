@@ -2247,7 +2247,17 @@ def _quoted_mask(cmd, toks):
 
 
 def _quote_kept_mask(cmd, toks):
-    """The mask a quote-keeping lex gives, or None where it does not align with `toks`.
+    """The mask a quote-keeping lex gives, or None where it does not align with `toks`."""
+    raw = _quote_kept_tokens(cmd, toks)
+    return None if raw is None else [_is_quote_kept(r) for r in raw]
+
+
+def _is_quote_kept(raw_tok):
+    return any(c in raw_tok for c in "'\"\\")
+
+
+def _quote_kept_tokens(cmd, toks):
+    """The tokens of a quote-keeping lex of `cmd`, or None where they do not align with `toks`.
 
     Aligning means each quote-keeping token unquotes to its shell token, since that lex reads no escape.
     """
@@ -2257,14 +2267,13 @@ def _quote_kept_mask(cmd, toks):
         return None
     if len(raw) != len(toks):
         return None
-    mask = [any(c in r for c in "'\"\\") for r in raw]
-    for r, t, q in zip(raw, toks, mask):
+    for r, t in zip(raw, toks):
         try:
-            if (shlex.split(r) if q else [r]) != [t]:
+            if (shlex.split(r) if _is_quote_kept(r) else [r]) != [t]:
                 return None
         except ValueError:
             return None
-    return mask
+    return raw
 
 
 def _bound_in_condition(cond, quoted=None):
@@ -2647,18 +2656,15 @@ def _runs_as_command(toks, w, quoted=None):
     Whether a wrapper runs is a different question from whether it is bounded, and conflating them
     let `timeout 0 bash -c '<loop>'` skip its payload entirely: the zero is no bound, so a
     bound-shaped test refused to look inside a shell that really does run the loop.
-    A separator `quoted` marks is an argument, so `echo ";" bash -c '<loop>'` runs no shell.
     """
 
-    if _opens_command(toks, w) and not (quoted is not None and w > 0 and quoted[w - 1]):
+    if _opens_command(toks, w):
         return True
     start = w
     while start > 0 and not (
         _is_separator(toks[start - 1]) and not (quoted is not None and quoted[start - 1])
     ):
         start -= 1
-        if _opens_with_separator(toks[start]) and not (quoted is not None and quoted[start]):
-            break
     # A leading redirection and its target are not the run's command.
     # Stopping the walk at one made `> log bash -c '<loop>'` read as not executed, and it really leaks.
     while start < w and _is_redir_op(toks[start]):
@@ -2847,9 +2853,10 @@ def _opens_command(toks, i):
     return _is_separator(prev) or _is_command_prefix(prev)
 
 
-def _sleeps(toks, _depth=0, quoted=None, _budget=None):
+def _sleeps(toks, _depth=0, quoted=None, _budget=None, raw=None):
     """True if `toks` runs a `sleep`, including one inside a `sh -c`/`bash -c` or `eval` payload it
-    carries. `quoted` is the quote mask of `toks` where known, which `_eval_payload` reads.
+    carries. `quoted` is the quote mask of `toks` and `raw` its quote-keeping tokens, each where
+    known, which only the `eval` reading uses.
     `_budget` is what remains of `_EVAL_READ_BUDGET` for the command being judged.
     """
     if _depth > 4:
@@ -2861,13 +2868,15 @@ def _sleeps(toks, _depth=0, quoted=None, _budget=None):
         # `_runs_as_command` rather than `_opens_command`, since a launcher's options sit between it and what it runs.
         # `env -i sleep 30` and `sudo -u ci sleep 30` both sleep.
         # `grep -i sleep f` does not, its run's first command being no launcher.
-        if _is_sleep_exe(tok) and _runs_as_command(toks, k, quoted):
+        if _is_sleep_exe(tok) and _runs_as_command(toks, k):
             return True
-        if tok == "eval" and k >= args_end and _budget[0] > 0 and _runs_eval(toks, k, quoted):
+        if tok == "eval" and k >= args_end and _budget[0] > 0 and _runs_eval(toks, k, quoted, raw):
             payload, args_end = _eval_payload(toks, k, quoted)
             _budget[0] -= len(payload) + _EVAL_READ_COST
             ptoks = _shell_tokens(payload)
-            if _sleeps(ptoks, _depth + 1, _quote_kept_mask(payload, ptoks), _budget):
+            praw = _quote_kept_tokens(payload, ptoks)
+            pmask = None if praw is None else [_is_quote_kept(r) for r in praw]
+            if _sleeps(ptoks, _depth + 1, pmask, _budget, praw):
                 return True
         if not _is_shell_wrapper_exe(tok):
             continue
@@ -2884,16 +2893,12 @@ def _sleeps(toks, _depth=0, quoted=None, _budget=None):
         )
         # Recursed rather than scanned, so the payload gets the same command-position test: a
         # `pkill sleep` inside one names a sleep as an argument and does not run one.
-        if (
-            ci is not None
-            and ci + 1 < len(args)
-            and _sleeps(
-                _shell_tokens(args[ci + 1]),
-                _depth + 1,
-                _quote_kept_mask(args[ci + 1], _shell_tokens(args[ci + 1])),
-                _budget,
-            )
-        ):
+        if ci is None or ci + 1 >= len(args):
+            continue
+        ptoks = _shell_tokens(args[ci + 1])
+        praw = _quote_kept_tokens(args[ci + 1], ptoks)
+        pmask = None if praw is None else [_is_quote_kept(r) for r in praw]
+        if _sleeps(ptoks, _depth + 1, pmask, _budget, praw):
             return True
     return False
 
@@ -2969,18 +2974,41 @@ def _forks_out_of_reach(toks):
 _EVAL_READ_BUDGET = 256_000
 _EVAL_READ_COST = 1_000
 
-_EVAL_RUNNERS = {"do", "then", "else", "elif", "if", "{", "!", "time", "command", "builtin"}
+_EVAL_RUNNERS = {
+    "do",
+    "then",
+    "else",
+    "elif",
+    "if",
+    "while",
+    "until",
+    "{",
+    "!",
+    "time",
+    "command",
+    "builtin",
+    "coproc",
+}
+
+_EVAL_RUNNER_OPTION_RE = re.compile(r"^-(?:p+|-)$")
+_EVAL_OPTION_RUNNERS = {"time", "command", "builtin"}
+
+_ASSIGNMENT_WORD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _runs_eval(toks, i, quoted=None):
+def _runs_eval(toks, i, quoted=None, raw=None):
     """True if the `eval` at index i of `toks` runs.
 
     It runs where `_runs_as_command` says it does and nothing but `_EVAL_RUNNERS` words,
-    assignments, and redirections stand before it in its run, since an external launcher such as `timeout` or
-    `nohup` cannot run a builtin and exits without running anything.
+    assignments, and redirections stand before it in its run, since an external launcher such as
+    `timeout` or `nohup` cannot run a builtin and exits without running anything. A `-p` or `--`
+    after `time`, `command`, or `builtin` still runs it, where `command -v eval` only names it.
+    That walk runs first and stops at the first other word, so each eval of `echo eval eval ...`
+    costs one step rather than a walk to the start of its run.
+    `raw` is the quote-keeping tokens of `toks`, where known. A word is an assignment only where its
+    name and `=` are unquoted, since `'FOO=1' eval` runs a command named `FOO=1`. Where `raw` is
+    unknown a quoted one still reads as an assignment, a false deny rather than an unread eval.
     """
-    if not _runs_as_command(toks, i, quoted):
-        return False
     k = i - 1
     while k >= 0:
         t = toks[k]
@@ -2989,18 +3017,32 @@ def _runs_eval(toks, i, quoted=None):
             if _is_redir_op(t) and not _opens_with_separator(t):
                 k -= 1
                 continue
-            return True
-        if (not q and t in _EVAL_RUNNERS) or _ENV_ASSIGN_RE.match(t):
+            break
+        if not q and t in _EVAL_RUNNERS:
             k -= 1
             continue
-        if not q and t.isdigit() and _is_redir_op(toks[k + 1]):
+        if _ENV_ASSIGN_RE.match(t) and (raw is None or _ASSIGNMENT_WORD_RE.match(raw[k])):
+            k -= 1
+            continue
+        if not q and t.isascii() and t.isdigit() and _is_redir_op(toks[k + 1]):
             k -= 1
             continue
         if k > 0 and _is_redir_op(toks[k - 1]) and not (quoted is not None and quoted[k - 1]):
             k -= 1
             continue
+        j = k
+        while j >= 0 and _EVAL_RUNNER_OPTION_RE.match(toks[j]):
+            j -= 1
+        if (
+            j < k
+            and j >= 0
+            and toks[j] in _EVAL_OPTION_RUNNERS
+            and not (quoted is not None and quoted[j])
+        ):
+            k = j - 1
+            continue
         return False
-    return True
+    return _runs_as_command(toks, i, quoted)
 
 
 def _eval_payload(toks, i, quoted=None):
@@ -3099,6 +3141,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
         _budget = [_EVAL_READ_BUDGET]
     toks = _shell_tokens(cmd)
     mask = _quote_kept_mask(cmd, toks) if _depth else _quoted_mask(cmd, toks)
+    raw = _quote_kept_tokens(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     args_end = 0
     for i, tok in enumerate(toks):
@@ -3124,7 +3167,7 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
                 inner = _unbounded_wait_loop(args[ci + 1], bounded, _depth + 1, _budget)
                 if inner is not None:
                     return inner
-        elif tok == "eval" and i >= args_end and _budget[0] > 0 and _runs_eval(toks, i, mask):
+        elif tok == "eval" and i >= args_end and _budget[0] > 0 and _runs_eval(toks, i, mask, raw):
             payload, args_end = _eval_payload(toks, i, mask)
             _budget[0] -= len(payload) + _EVAL_READ_COST
             bounded = inherited_timeout and not forks_away
@@ -3140,8 +3183,16 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
             # Its condition sleeps as surely as a body does, and a sleep handed to `sh -c` is still one.
             do_at = i + 1 + len(cond)
             sleeps = _sleeps(
-                body, quoted=mask[do_at + 1 : done_at] if mask else None, _budget=_budget
-            ) or _sleeps(cond, quoted=mask[i + 1 : do_at] if mask else None, _budget=_budget)
+                body,
+                quoted=mask[do_at + 1 : done_at] if mask else None,
+                _budget=_budget,
+                raw=raw[do_at + 1 : done_at] if raw else None,
+            ) or _sleeps(
+                cond,
+                quoted=mask[i + 1 : do_at] if mask else None,
+                _budget=_budget,
+                raw=raw[i + 1 : do_at] if raw else None,
+            )
             # A backgrounded loop is not bounded by a `timeout` around the shell that started it.
             # The shell forks the loop and exits, so `timeout`'s own child is gone and it signals nothing.
             # Measured: the same leak as having written no bound at all.
@@ -5320,11 +5371,6 @@ _WAIT_CASES = [
         "a separator fused to a redirection ends an eval's arguments, so the eval after it is a command",
     ),
     (
-        "echo x;>/dev/null bash -c 'until false; do sleep 1; done'",
-        "deny",
-        "a separator fused to a redirection starts a new run, so the wrapper after it runs",
-    ),
-    (
         "eval echo &>/dev/null eval 'until false; do sleep 1; done'",
         "allow",
         "`&>` is a redirection whole, so the eval after it is an argument and its loop's quoting is gone",
@@ -5375,11 +5421,6 @@ _WAIT_CASES = [
         "a quoted separator just before eval leaves it an argument",
     ),
     (
-        "echo \";\" bash -c 'until false; do sleep 1; done'",
-        "allow",
-        "and leaves a shell wrapper an argument the same way",
-    ),
-    (
         'while [ -f x ]; do bash -c \'eval "$s"; logger "a; sleep 1"\'; done',
         "allow",
         "a wrapper payload's eval in a loop body is read with the payload's own quoting",
@@ -5390,11 +5431,6 @@ _WAIT_CASES = [
         "a quoted fused separator before an argument named sleep runs no sleep",
     ),
     (
-        'while [ -f x ]; do echo ";" sleep 1; done',
-        "allow",
-        "and neither does a quoted separator alone",
-    ),
-    (
         "timeout 60 eval 'until [ -f x ]; do sleep 5; done'",
         "allow",
         "an external launcher cannot run the eval builtin, so it runs nothing",
@@ -5403,6 +5439,56 @@ _WAIT_CASES = [
         "nohup eval 'until [ -f x ]; do sleep 5; done'",
         "allow",
         "and nohup cannot either",
+    ),
+    (
+        "while eval 'until false; do sleep 1; done' && [ \"$n\" -lt 3 ]; do n=$((n+1)); done",
+        "deny",
+        "an eval in a bounded loop's condition still runs its own unbounded loop",
+    ),
+    (
+        "coproc eval 'until false; do sleep 1; done'",
+        "deny",
+        "a coprocess runs the eval builtin",
+    ),
+    (
+        "time -p eval 'until false; do sleep 1; done'",
+        "deny",
+        "a runner's -p option still runs the eval",
+    ),
+    (
+        "command -p -- eval 'until false; do sleep 1; done'",
+        "deny",
+        "and so do command's -p and --",
+    ),
+    (
+        "command -v eval 'until false; do sleep 1; done'",
+        "allow",
+        "command -v only names the eval",
+    ),
+    (
+        "FOO='a b' eval 'until false; do sleep 1; done'",
+        "deny",
+        "an assignment whose value is quoted still runs the eval",
+    ),
+    (
+        "'FOO=1' eval 'until false; do sleep 1; done'",
+        "allow",
+        "a quoted assignment is a command named FOO=1, so the eval is its argument",
+    ),
+    (
+        "\u0662>f eval 'until false; do sleep 1; done'",
+        "allow",
+        "a non-ASCII digit is no fd, so it is the run's command",
+    ),
+    (
+        "GIT_PAGER=\"/bin/cat\" bash -lc 'until gh pr checks 5; do sleep 30; done'",
+        "deny",
+        "a quoted assignment value before a shell wrapper leaves the wrapper the command",
+    ),
+    (
+        "echo $(echo)>f bash -c 'until false; do sleep 1; done'",
+        "allow",
+        "a redirection after a substitution leaves echo the run's command",
     ),
     (
         "command eval 'until false; do sleep 1; done'",
@@ -7230,6 +7316,10 @@ def _selftest():
             lambda: _unbounded_wait_loop(
                 'eval "a\'b"; ' * 10 + "y " * 25_000 + '\necho "$(echo "it\'s")"'
             ),
+        ),
+        (
+            "a wait-loop scan of 16000 evals that are echo's arguments",
+            lambda: _unbounded_wait_loop("echo " + "eval " * 16000),
         ),
         (
             "an unknown-quoting sleep scan of a loop body of 30 evals that never sleeps",
