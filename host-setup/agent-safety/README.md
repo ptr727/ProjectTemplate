@@ -274,6 +274,21 @@ text says, because the harm it covers was never in the text.
    `/dev/null` included. Only an absolute target is read that way, since a relative one resolves
    against a working directory the rule does not model.
 
+   An `eval`'s arguments are read as a payload, the way a `sh -c`/`bash -c` argument is. Bash joins
+   them with spaces and runs the result in the same shell. An `eval` is read only where it runs.
+   Nothing may stand before it in its run but assignments, redirections, and runners. A runner is a
+   reserved word such as `do`, `if`, or `while`, a `{` or `!`, `coproc`, `time`, `command`, or
+   `builtin`. `time -p`, `command -p`, and a `--` after any of the last three still run the
+   `eval`, while `command -v` only names it. A reserved word counts only ahead of every other
+   prefix, since bash reads it as a plain command name after one. The name a `function` or
+   `coproc` gives its group is skipped. An external launcher such as `timeout` or `nohup`
+   cannot run a builtin. So `timeout 600 eval '<the loop>'` runs nothing, and only a bound on the
+   shell holding the `eval` reaches its loop. A redirection on the `eval` applies to the whole
+   payload. Where the rule cannot tell which words were quoted, any separator on the `eval`'s line
+   may be a quoted one. The payload then runs to the end of that line. The payloads read in one
+   pass over a command share a fixed budget. An `eval` met once it is spent is not read, which
+   leaves its loop unseen, as a wait inside a script file is.
+
    A command that forks work out of a `timeout`'s reach is bounded by nothing, whatever else it
    carries. Three shapes are recognized. A background operator lets the shell exit at once, so
    `timeout`'s own child is gone before it fires and it signals nothing, measurably the same leak as
