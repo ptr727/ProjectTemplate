@@ -2896,7 +2896,7 @@ def _sleeps(toks, _depth=0, quoted=None, _budget=None, raw=None):
         if ci is None or ci + 1 >= len(args):
             continue
         ptoks = _shell_tokens(args[ci + 1])
-        praw = _quote_kept_tokens(args[ci + 1], ptoks)
+        praw = _quote_kept_tokens(args[ci + 1], ptoks) if "eval" in ptoks else None
         pmask = None if praw is None else [_is_quote_kept(r) for r in praw]
         if _sleeps(ptoks, _depth + 1, pmask, _budget, praw):
             return True
@@ -3173,8 +3173,11 @@ def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
     if _budget is None:
         _budget = [_EVAL_READ_BUDGET]
     toks = _shell_tokens(cmd)
-    mask = _quote_kept_mask(cmd, toks) if _depth else _quoted_mask(cmd, toks)
-    raw = _quote_kept_tokens(cmd, toks)
+    raw = _quote_kept_tokens(cmd, toks) if _depth or "eval" in toks else None
+    if _depth:
+        mask = None if raw is None else [_is_quote_kept(r) for r in raw]
+    else:
+        mask = _quoted_mask(cmd, toks)
     forks_away = _forks_out_of_reach(toks)
     args_end = 0
     for i, tok in enumerate(toks):
@@ -7454,6 +7457,26 @@ def _selftest():
         if elapsed >= 5:
             ok = False
         print(f"  {mark} [wait ] {label} is fast ({elapsed:.2f}s)")
+    real_lex = _operator_lex
+    quote_kept_lexes = []
+
+    def counting_lex(text, posix=True):
+        if not posix:
+            quote_kept_lexes.append(text)
+        return real_lex(text, posix)
+
+    globals()["_operator_lex"] = counting_lex
+    try:
+        _unbounded_wait_loop("while [ -f x ]; do bash -c 'echo a'; done")
+    finally:
+        globals()["_operator_lex"] = real_lex
+    lexed_once = len(quote_kept_lexes) == 1
+    if not lexed_once:
+        ok = False
+    print(
+        f"  {'ok  ' if lexed_once else 'FAIL'} [wait ] a loop's bash -c payload holding no eval "
+        f"is lexed for its quoting once ({len(quote_kept_lexes)})"
+    )
     # The one case that spawns git rather than stubbing it, since what it covers is the decode inside that spawn.
     # A checkout whose path is not UTF-8 decoded strictly raised, which read as unresolvable, and the guard then allowed a mutating command in a primary checkout it had failed to recognize.
     got = _is_primary_checkout_selftest()
