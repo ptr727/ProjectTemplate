@@ -1061,7 +1061,15 @@ def main():
     # A file that is not valid UTF-8 still decodes for the comparison, and the backup keeps its raw bytes.
     # A file already holding the render is left unwritten, so a read-only file that is current still installs.
     rendered = render_instructions(local_path, local_text)
+    # Anything else at the path, a FIFO or a link to a device, would hang the write or swallow it.
+    # A dangling link is let through, so a dotfiles link whose target is not created yet still writes it.
     try:
+        dangling = claude_md.is_symlink() and not os.path.exists(claude_md)
+        if os.path.lexists(claude_md) and not claude_md.is_file() and not dangling:
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} is not a regular file. Move it aside and re-run.\n"
+            )
+            return 1
         raw = claude_md.read_bytes() if claude_md.is_file() else None
     except OSError as e:
         sys.stderr.write(
@@ -1111,7 +1119,7 @@ def main():
         except OSError as e:
             for _n, f in staged:
                 f.unlink(missing_ok=True)
-            sys.stderr.write(f"staging {src_name} failed ({e}); nothing was replaced.\n")
+            sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
             return 1
         try:
             os.chmod(tmp, 0o755)
@@ -1128,7 +1136,7 @@ def main():
             for _n, f in staged:
                 f.unlink(missing_ok=True)
             sys.stderr.write(
-                f"{src_name} self-test FAILED; nothing was replaced.\n" + r.stdout + r.stderr
+                f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
             )
             return 1
         print(f"  {src_name} self-test: PASS")

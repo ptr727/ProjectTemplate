@@ -461,7 +461,21 @@ class TestWholeFileOwnership(StampCase):
     def test_a_claude_md_that_is_a_directory_stops_the_install_with_nothing_changed(self):
         """The write would raise after the hooks and settings were already replaced."""
         self.md.mkdir(parents=True)
-        self.assert_refused_with_nothing_changed(run(self.home), "could not be rewritten")
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+
+    def test_a_claude_md_fifo_is_refused_rather_than_hanging_the_write(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.home.mkdir(parents=True)
+        os.mkfifo(self.md)
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+
+    def test_a_claude_md_link_to_a_device_is_refused_rather_than_written_into_nothing(self):
+        if not os.path.exists(os.devnull) or os.name != "posix":
+            self.skipTest("needs a POSIX null device")
+        self.home.mkdir(parents=True)
+        self.md.symlink_to(os.devnull)
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
 
     def test_a_claude_md_dangling_symlink_stops_the_install_with_nothing_changed(self):
         """A dotfiles link whose repository is not cloned yet has nowhere to write."""
