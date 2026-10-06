@@ -204,9 +204,9 @@ requirement, the per-agent `README.md` owns the how-to.
 The Claude Code safety kit is the first agent-specific control to deploy on a new system, and the
 only one implemented today. Install, verify, scope limits, and the cross-owner write grant
 mechanism are all in [`host-setup/agent-safety/claude/README.md`][agent-safety-claude]. This is a
-**host** control, not a repo one: the carried `GOVERNANCE.md` rules reach fleet repos only, while
-the hook and the `CLAUDE.md` block cover every session on the machine, including ad-hoc work in no
-project at all, which is where the incident behind the kit happened.
+**host** control, not a repo one. The carried `GOVERNANCE.md` rules reach fleet repos only. The
+hook and the `CLAUDE.md` it renders cover every session on the machine, including ad-hoc work in
+no project at all. That is where the incident behind the kit happened.
 
 ### Codex Host Safety
 
