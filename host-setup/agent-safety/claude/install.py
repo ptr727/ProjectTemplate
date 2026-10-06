@@ -435,10 +435,16 @@ def read_regular_file(path):
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(path, flags)
-    with os.fdopen(fd, "rb") as f:
-        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+    # Closed on every path here, since fdopen raises on a directory without closing what it was handed.
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        return f.read()
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 def read_local_instructions(local_path):
@@ -451,7 +457,7 @@ def read_local_instructions(local_path):
     # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
     # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
     try:
-        os.lstat(local_path)
+        info = os.lstat(local_path)
     except (FileNotFoundError, NotADirectoryError):
         return "", None
     except OSError as e:
@@ -459,7 +465,10 @@ def read_local_instructions(local_path):
     try:
         raw = read_regular_file(local_path)
     except FileNotFoundError:
-        return "", f"{local_path} is a link that leads to nothing"
+        gone = (
+            "is a link that leads to nothing" if stat.S_ISLNK(info.st_mode) else "no longer exists"
+        )
+        return "", f"{local_path} {gone}"
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
     if raw is None:

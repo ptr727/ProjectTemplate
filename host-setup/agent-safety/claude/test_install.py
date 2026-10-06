@@ -571,6 +571,25 @@ class TestWholeFileOwnership(StampCase):
         self.install()
         self.assertEqual(len(self.backups()), 1)
 
+    def test_reading_a_directory_closes_its_descriptor(self):
+        """fdopen raised on a directory without closing the descriptor it was handed."""
+        if os.name != "posix":
+            self.skipTest("only POSIX opens a directory for reading")
+        self.home.mkdir(parents=True)
+        opened = []
+        real_open = os.open
+
+        def spy(path, flags, *rest):
+            fd = real_open(path, flags, *rest)
+            opened.append(fd)
+            return fd
+
+        with mock.patch.object(install.os, "open", side_effect=spy):
+            self.assertIsNone(install.read_regular_file(self.home))
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+
     def test_a_local_fifo_is_refused_rather_than_blocking_the_read(self):
         if not hasattr(os, "mkfifo"):
             self.skipTest("this host has no FIFOs")
