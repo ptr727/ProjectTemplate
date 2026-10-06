@@ -30,7 +30,7 @@ import install
 REAL_WHICH = shutil.which
 
 
-def run(home, *args, dirty=False, contain=True):
+def run(home, *args, dirty=False, contain=True, timeout=None):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
@@ -58,6 +58,7 @@ def run(home, *args, dirty=False, contain=True):
         encoding="utf-8",
         env=env,
         check=False,
+        timeout=timeout,
     )
 
 
@@ -411,7 +412,7 @@ class TestWholeFileOwnership(StampCase):
             self.skipTest("this host cannot create a symlink")
         r = run(self.home)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("is not a regular file", r.stderr)
+        self.assertIn("is a link that leads to nothing", r.stderr)
         self.assertFalse(self.home.exists())
 
     def test_a_local_file_in_a_directory_that_cannot_be_entered_stops_with_a_message(self):
@@ -575,18 +576,26 @@ class TestWholeFileOwnership(StampCase):
             self.skipTest("this host has no FIFOs")
         self.local.parent.mkdir(parents=True, exist_ok=True)
         os.mkfifo(self.local)
-        r = run(self.home)
+        # Bounded, so a regression fails the case rather than hanging the suite.
+        r = run(self.home, timeout=60)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("is not a regular file", r.stderr)
         self.assertFalse(self.home.exists())
-        r = run(self.home, "--report")
-        self.assertNotIn("Traceback", r.stderr)
+
+    def test_the_report_names_a_local_fifo_rather_than_blocking(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.install()
+        os.mkfifo(self.local)
+        r = run(self.home, "--report", timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stdout)
 
     def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
         self.local.mkdir(parents=True)
         r = run(self.home)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("is not a regular file", r.stderr)
+        self.assertRegex(r.stderr, "is not a regular file|cannot be read")
         self.assertNotIn("UTF-8", r.stderr)
 
     def test_the_install_stamps_the_digest_it_rendered(self):

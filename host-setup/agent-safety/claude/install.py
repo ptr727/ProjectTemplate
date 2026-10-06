@@ -31,6 +31,7 @@ import platform
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 
@@ -425,6 +426,21 @@ def local_instructions_path():
     return base / "agent-fleet" / "local.md"
 
 
+def read_regular_file(path):
+    """The bytes of `path` where it is a regular file, or None where it is anything else.
+
+    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
+    rather than hanging the read, and nothing can swap the path between the check and the read.
+    Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            return None
+        return f.read()
+
+
 def read_local_instructions(local_path):
     """The host-local text, stripped, and why it cannot be used, or None where it can.
 
@@ -440,17 +456,14 @@ def read_local_instructions(local_path):
         return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
-    # A FIFO or a device at the path would block the read, so only a regular file is read at all.
     try:
-        regular = local_path.is_file()
+        raw = read_regular_file(local_path)
+    except FileNotFoundError:
+        return "", f"{local_path} is a link that leads to nothing"
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
-    if not regular:
-        return "", f"{local_path} is not a regular file, or is a link that leads to none"
-    try:
-        raw = local_path.read_bytes()
-    except OSError as e:
-        return "", f"{local_path} cannot be read ({e})"
+    if raw is None:
+        return "", f"{local_path} is not a regular file"
     try:
         text = normalized(raw.decode("utf-8")).strip()
     except UnicodeDecodeError as e:
@@ -495,11 +508,8 @@ def stamped_instructions_digest(claude_home):
     None covers a missing or unreadable stamp and one written before the field existed. Each of
     those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
     """
-    path = claude_home / "agent-safety-stamp.json"
     try:
-        if not path.is_file():
-            return None
-        stamp = json.loads(path.read_text(encoding="utf-8"))
+        stamp = json.loads((claude_home / "agent-safety-stamp.json").read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return None
     # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
