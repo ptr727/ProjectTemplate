@@ -435,7 +435,7 @@ def read_regular_file(path):
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(path, flags)
-    # Closed on every path here, since fdopen raises on a directory without closing what it was handed.
+    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
