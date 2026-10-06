@@ -434,7 +434,15 @@ def read_regular_file(path):
     Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags)
+    try:
+        fd = os.open(path, flags)
+    # Windows refuses to open a directory at all, and a directory is still not a regular file.
+    except FileNotFoundError:
+        raise
+    except OSError:
+        if os.path.isdir(path):
+            return None
+        raise
     # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -445,6 +453,58 @@ def read_regular_file(path):
         return b"".join(chunks)
     finally:
         os.close(fd)
+
+
+class NotRegularFile(OSError):
+    """A write target that exists and is not a regular file, refused before anything was written."""
+
+
+class IncompleteWrite(OSError):
+    """A write that failed after the file was truncated, so the file no longer holds what it did."""
+
+
+def write_regular_file(path, data, prior=None, before=None):
+    """Replace the contents of `path`, a regular file or absent, with `data`.
+
+    The open is the check: a file that cannot be opened for writing raises before anything changes,
+    so `before`, which backs the file up, runs only once the write is known to be possible.
+    Opened without blocking and judged on the descriptor, as `read_regular_file` reads, so a FIFO
+    or a device is refused rather than hanging or swallowing the write. Written in place rather than
+    replaced, so a dotfiles symlink stays a link and its target takes the content.
+
+    Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
+    truncate and `prior` could not be put back, which leaves the file holding neither version.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o666)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise NotRegularFile(f"{path} is not a regular file")
+        if before is not None:
+            before()
+        try:
+            _replace_contents(fd, data)
+        except OSError as e:
+            if prior is None:
+                raise IncompleteWrite(f"{path} was left incomplete ({e})") from e
+            try:
+                _replace_contents(fd, prior)
+            except OSError:
+                raise IncompleteWrite(
+                    f"{path} was left incomplete ({e}), and its prior content could not be put back"
+                ) from e
+            raise
+    finally:
+        os.close(fd)
+
+
+def _replace_contents(fd, data):
+    """Truncate the open file and write all of `data`, since one write may take only part of it."""
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
 
 
 def read_local_instructions(local_path):
@@ -459,7 +519,18 @@ def read_local_instructions(local_path):
     try:
         info = os.lstat(local_path)
     # Only a missing path is absent, so a parent that is a file is refused rather than silently skipped.
+    # Windows raises FileNotFoundError for a file parent too, so the nearest existing ancestor decides.
     except FileNotFoundError:
+        for parent in local_path.parents:
+            try:
+                parent_info = os.stat(parent)
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                return "", f"{local_path} cannot be read ({e})"
+            if not stat.S_ISDIR(parent_info.st_mode):
+                return "", f"{local_path} cannot be read, since {parent} is not a directory"
+            break
         return "", None
     except OSError as e:
         return "", f"{local_path} cannot be read ({e})"
@@ -519,8 +590,11 @@ def stamped_instructions_digest(claude_home):
     those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
     """
     try:
-        stamp = json.loads((claude_home / "agent-safety-stamp.json").read_text(encoding="utf-8"))
+        raw = read_regular_file(claude_home / "agent-safety-stamp.json")
+        stamp = None if raw is None else json.loads(raw.decode("utf-8"))
     except (ValueError, OSError):
+        return None
+    if stamp is None:
         return None
     # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
     if stamp_problems(stamp):
@@ -578,11 +652,10 @@ def read_claude_md(claude_md):
     than a traceback in whichever reads it first.
     """
     try:
-        if not claude_md.is_file():
-            return None
-        return claude_md.read_text(encoding="utf-8", errors="replace")
+        raw = read_regular_file(claude_md)
     except OSError:
         return None
+    return None if raw is None else raw.decode("utf-8", errors="replace")
 
 
 def blocks_present(claude_md):
@@ -639,11 +712,15 @@ def installed_digest(claude_home):
     deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
     claude_text = read_claude_md(claude_md)
-    if not all(f.is_file() for f in deployed) or claude_text is None:
+    try:
+        hooks = [read_regular_file(f) for f in deployed]
+    except OSError:
+        return None
+    if None in hooks or claude_text is None:
         return None
     h = hashlib.sha256()
-    for f in deployed:
-        h.update(normalized(f.read_bytes()))
+    for raw in hooks:
+        h.update(normalized(raw))
     text = normalized(claude_text)
     for marker in BLOCK_MARKERS:
         found = re.search(
@@ -721,14 +798,19 @@ def registration_problems(claude_home):
     removed from settings.json leaves a machine carrying a complete, current, and entirely inert
     kit, which every other check here reports as fine.
     """
-    settings = claude_home / "settings.json"
-    if not settings.is_file():
-        return ["settings.json is missing, so the hook is not registered"]
     try:
-        data = json.loads(settings.read_text(encoding="utf-8") or "{}")
+        raw = read_regular_file(claude_home / "settings.json")
+    except FileNotFoundError:
+        return ["settings.json is missing, so the hook is not registered"]
+    except OSError as e:
+        return [f"settings.json cannot be read ({e})"]
+    if raw is None:
+        return ["settings.json is not a regular file, so the hook is not registered"]
+    try:
+        data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
     # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
-    except (ValueError, OSError) as e:
+    except ValueError as e:
         return [f"settings.json cannot be read ({e})"]
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
@@ -921,12 +1003,20 @@ def report(claude_home):
     path = claude_home / "agent-safety-stamp.json"
     current = payload_digest()
     print(f"This checkout: payload {current}, hub {source_ref().get('commit', 'unknown')[:7]}")
-    if not path.exists():
+    try:
+        raw = read_regular_file(path)
+        if raw is None:
+            raise NotRegularFile(f"{path} is not a regular file")
+        stamp = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
         print(f"NOT INSTALLED: no stamp at {path}")
         print("  Run the installer with no arguments to install and stamp this machine.")
         return 2
-    try:
-        stamp = json.loads(path.read_text(encoding="utf-8"))
+    except NotRegularFile:
+        sys.stderr.write(
+            f"Stamp at {path} is not a regular file. Move it aside, then re-run the installer.\n"
+        )
+        return 2
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
     # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
     except (ValueError, OSError) as e:
@@ -961,7 +1051,8 @@ def report(claude_home):
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
     try:
-        settings_data = json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
+        settings_raw = read_regular_file(claude_home / "settings.json")
+        settings_data = None if settings_raw is None else json.loads(settings_raw.decode("utf-8"))
     except (ValueError, OSError):
         settings_data = None
     foreign = foreign_prefix(settings_data)
@@ -1092,15 +1183,16 @@ def main():
     # A file already holding the render is left unwritten, so a read-only file that is current still installs.
     rendered = render_instructions(local_path, local_text)
     # Anything else at the path, a FIFO or a link to a device, would hang the write or swallow it.
-    # A dangling link is let through, so a dotfiles link whose target is not created yet still writes it.
+    # A dangling link reads as absent, so a dotfiles link whose target is not created yet still writes it.
     try:
-        dangling = claude_md.is_symlink() and not os.path.exists(claude_md)
-        if os.path.lexists(claude_md) and not claude_md.is_file() and not dangling:
+        raw = read_regular_file(claude_md)
+        if raw is None:
             sys.stderr.write(
                 f"Nothing was installed: {claude_md} is not a regular file. Move it aside and re-run.\n"
             )
             return 1
-        raw = claude_md.read_bytes() if claude_md.is_file() else None
+    except FileNotFoundError:
+        raw = None
     except OSError as e:
         sys.stderr.write(
             f"Nothing was installed: {claude_md} cannot be read ({e}). Move it aside and re-run.\n"
@@ -1108,27 +1200,49 @@ def main():
         return 1
     newline = "\r\n" if raw is not None and b"\r\n" in raw else "\n"
     existing = None if raw is None else normalized(raw.decode("utf-8", errors="replace"))
-    backup = None
+    backups = []
     if existing == rendered:
         action = "already current"
     else:
+        # Backed up only once the open shows the write can happen, so a refused re-run leaves no backup.
+        needs_backup = existing is not None and text_digest(
+            existing
+        ) != stamped_instructions_digest(claude_home)
         try:
-            if existing is not None and text_digest(existing) != stamped_instructions_digest(
-                claude_home
-            ):
-                backup = write_backup(claude_md, raw)
-            claude_md.write_bytes(rendered.replace("\n", newline).encode("utf-8"))
-        except OSError as e:
-            kept = f" Its prior content is backed up at {backup}." if backup else ""
+            write_regular_file(
+                claude_md,
+                rendered.replace("\n", newline).encode("utf-8"),
+                prior=raw,
+                before=(lambda: backups.append(write_backup(claude_md, raw)))
+                if needs_backup
+                else None,
+            )
+        except IncompleteWrite as e:
+            if backups:
+                kept = f"Its prior content is backed up at {backups[0]}."
+            elif raw is not None:
+                kept = (
+                    "Its prior content was the last install's render, which a re-run writes again."
+                )
+            else:
+                kept = "It did not exist before this run."
             sys.stderr.write(
-                f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
-                "Move it aside or make it writable, then re-run.\n"
+                f"{e}. New sessions load that partial file until a re-run succeeds. {kept} "
+                "Fix what stopped the write, then re-run. No hook or setting was changed.\n"
             )
             return 1
-        if backup is not None:
-            action = f"rewritten, the edited prior file backed up to {backup}"
+        except OSError as e:
+            kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
+                "Fix what the error names, or move the file aside, then re-run.\n"
+            )
+            return 1
+        if backups:
+            action = f"rewritten, the edited prior file backed up to {backups[0]}"
         else:
             action = "updated" if existing is not None else "written"
+    backup = backups[0] if backups else None
     print(f"  CLAUDE.md -> {claude_md} ({action})")
     if backup is not None:
         print(f"    Move anything host-specific into {local_path}, then re-run to append it.")
@@ -1195,10 +1309,22 @@ def main():
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
     # Two reads can also disagree, since another process may write between them.
     data = {}
-    raw = settings.read_text(encoding="utf-8") if settings.exists() else ""
-    if raw.strip():
+    try:
+        settings_raw = read_regular_file(settings)
+        if settings_raw is None:
+            raise NotRegularFile(f"{settings} is not a regular file")
+        settings_text = settings_raw.decode("utf-8")
+    except FileNotFoundError:
+        settings_raw, settings_text = None, ""
+    except (ValueError, OSError) as e:
+        sys.stderr.write(
+            f"{settings} cannot be read ({e}). Fix or move it aside, then re-run. This file is "
+            "unchanged, so the hook is deployed but not registered.\n"
+        )
+        return 1
+    if settings_text.strip():
         try:
-            data = json.loads(raw)
+            data = json.loads(settings_text)
         except json.JSONDecodeError as e:
             sys.stderr.write(
                 f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
@@ -1342,7 +1468,22 @@ def main():
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.
-    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    try:
+        write_regular_file(
+            settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"), prior=settings_raw
+        )
+    except IncompleteWrite as e:
+        sys.stderr.write(
+            f"{e}. Claude Code cannot parse it until it is restored, so fix what stopped the write "
+            "and re-run.\n"
+        )
+        return 1
+    except OSError as e:
+        sys.stderr.write(
+            f"{settings} could not be written ({e}). This file is unchanged, so the hook is "
+            "deployed but not registered. Fix what the error names, then re-run.\n"
+        )
+        return 1
     for line in done:
         print(f"  settings -> {settings} ({line})")
 
@@ -1354,7 +1495,14 @@ def main():
         datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         text_digest(rendered),
     )
-    stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+    try:
+        write_regular_file(stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"))
+    except OSError as e:
+        sys.stderr.write(
+            f"The kit is installed and registered, but the stamp could not be written ({e}), so "
+            "--report cannot vouch for this machine. Fix what the error names, then re-run.\n"
+        )
+        return 1
     print(f"  stamp -> {stamp_path}")
 
     print("\nDone. This machine:")
