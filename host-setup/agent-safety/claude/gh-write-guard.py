@@ -1121,7 +1121,34 @@ def _expand_dir(value):
     if value is None:
         return None
     value = os.path.expanduser(value)
-    return _HOME_VAR_RE.sub(lambda _m: os.environ.get("HOME", ""), value)
+    return _msys_drive_path(_HOME_VAR_RE.sub(lambda _m: os.environ.get("HOME", ""), value))
+
+
+_MSYS_DRIVE_PATHS = os.name == "nt"
+_MSYS_DRIVE_RE = re.compile(r"^/([A-Za-z])(?=/|$)")
+
+
+def _msys_drive_path(value):
+    """Rewrite a leading `/<letter>` drive spelling as `<LETTER>:`, the way MSYS converts an
+    argument for a native program, so `/c/repos/x` reads as `C:/repos/x` and a bare `/c` as `C:/`.
+
+    Git Bash hands `git.exe` the converted path, and git refuses the unconverted one. Claude Code
+    also reports the hook's `cwd` in that spelling once a Bash `cd /c/...` has run, measured on
+    Windows 11. Read raw, either joins to a directory holding no repository, and rule 6 fails open
+    there. `classify` converts its `cwd` too, since the origin and push-branch lookups run git in
+    it directly. Only on Windows, since `/c/x` on Linux is an ordinary directory. The self-test
+    forces the conversion on, and passes no absolute `cwd` beside an absolute target there, since
+    Linux reads `C:/x` as relative and would join the two.
+
+    A rooted path with no drive segment, such as `/primary`, is left as is, since MSYS maps it under
+    the Git install root, which the guard cannot see without executing something.
+    """
+    if not _MSYS_DRIVE_PATHS or not value:
+        return value
+    m = _MSYS_DRIVE_RE.match(value)
+    if not m:
+        return value
+    return f"{m.group(1).upper()}:{value[m.end() :] or '/'}"
 
 
 def _join_relative(base, value):
@@ -3518,6 +3545,7 @@ def classify(
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
     cmd = re.sub(r"\\\r?\n", " ", cmd)
+    cwd = _msys_drive_path(cwd)
     # Rule 4 covers a git operation that would only succeed by bypassing an active branch rule.
     # It is checked before the gh-write gate below, since `git commit --no-verify` is a bypass yet not a GitHub write.
     dec, reason = _check_bypass_flags(cmd)
@@ -4977,9 +5005,9 @@ _PRIMARY_CHECKOUT_CASES = [
         ),
     ),
     (
-        "git -C /a -C /worktree reset --hard origin/main",
+        "git -C /aa -C /worktree reset --hard origin/main",
         "/primary",
-        {"/a": True, "/worktree": False},
+        {"/aa": True, "/worktree": False},
         None,
         "allow",
         "multiple -C options compose sequentially, the last (absolute) one replacing the running directory outright, matching real git's own repeated -C semantics",
@@ -7399,6 +7427,130 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    global _MSYS_DRIVE_PATHS
+    saved_msys = _MSYS_DRIVE_PATHS
+    _MSYS_DRIVE_PATHS = True
+    try:
+        for cmd, cwd, want, label in (
+            (
+                "git reset --hard",
+                "/c/repos/primary",
+                "deny",
+                "a Git Bash drive spelling of the hook's cwd",
+            ),
+            (
+                "git -C primary reset --hard",
+                "/c/repos",
+                "deny",
+                "a relative -C joined onto a Git Bash drive cwd",
+            ),
+            (
+                "git -C /c/repos/primary reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in -C",
+            ),
+            (
+                "cd /c/repos/primary && git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in a leading cd",
+            ),
+            (
+                "git --work-tree=/c/repos/primary reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in --work-tree",
+            ),
+            (
+                "GIT_WORK_TREE=/c/repos/primary git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in GIT_WORK_TREE=",
+            ),
+            (
+                "git --git-dir=/c/repos/primary/.git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in --git-dir",
+            ),
+            (
+                "GIT_DIR=/c/repos/primary/.git git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in GIT_DIR=",
+            ),
+            (
+                "export GIT_WORK_TREE=/c/repos/primary && git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in an exported GIT_WORK_TREE",
+            ),
+            (
+                "export GIT_DIR=/c/repos/primary/.git && git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in an exported GIT_DIR",
+            ),
+            (
+                "git -C /c/repos/worktree reset --hard",
+                None,
+                "allow",
+                "a Git Bash drive spelling of a linked worktree",
+            ),
+        ):
+            got, _ = classify(
+                cmd,
+                cwd=cwd,
+                origin=origin,
+                current_branch="feature/x",
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=_fixture_lookup(
+                    {
+                        "C:/repos/primary": True,
+                        "C:/repos/primary/.git": True,
+                        "C:/repos/worktree": False,
+                    }
+                ),
+            )
+            mark = "ok  " if got == want else "FAIL"
+            if got != want:
+                ok = False
+            print(f"  {mark} [{got:5}] want={want:5} {label}")
+        for raw, want in (
+            ("/c", "C:/"),
+            ("/d/x", "D:/x"),
+            ("/primary", "/primary"),
+            ("//c/x", "//c/x"),
+            ("c/x", "c/x"),
+        ):
+            got = _msys_drive_path(raw)
+            mark = "ok  " if got == want else "FAIL"
+            if got != want:
+                ok = False
+            print(f"  {mark} [msys ] {raw} reads as {want}")
+        seen = []
+        saved_branch = globals()["_current_push_branch"]
+        globals()["_current_push_branch"] = lambda d: seen.append(d) or "feature/x"
+        try:
+            classify(
+                "git push",
+                cwd="/c/repos/primary",
+                origin=origin,
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=lambda _d: False,
+            )
+        finally:
+            globals()["_current_push_branch"] = saved_branch
+        want = ["C:/repos/primary"]
+        mark = "ok  " if seen == want else "FAIL"
+        if seen != want:
+            ok = False
+        print(f"  {mark} [msys ] a bare push resolves its branch in the converted cwd, got {seen}")
+    finally:
+        _MSYS_DRIVE_PATHS = saved_msys
     for cmd, want, label in _CONTEXT_LEX_CASES:
         try:
             got = _context_lex(cmd)
