@@ -521,12 +521,11 @@ function Get-ToolStatus {
         if (-not $State.Available) { return 'unavailable' }
         return 'missing'
     }
-    if (-not $State.Installed) {
-        if (@($State.Rows | Where-Object { -not (Test-WingetVersion $_) }).Count -gt 0) { return 'unknown' }
-        return 'multiple'
-    }
+    $unread = @($State.Rows | Where-Object { -not (Test-WingetVersion $_) }).Count -gt 0
+    if (-not $State.Installed -and -not $unread) { return 'multiple' }
     if (-not $State.Available) { return 'unknown' }
     if ((Get-ExplicitUpgrade) -contains $State.Package) { return 'self-updating' }
+    if ($unread) { return 'unknown' }
     if ((Compare-HostVersion $State.Installed $State.Available) -ge 0) { return 'current' }
     return 'outdated'
 }
@@ -1111,7 +1110,7 @@ function Invoke-ToolApply {
     # Naming a scope the installed copy does not sit in would add a second copy beside it, so the removal is asked for rather than done on the way past.
     if ($script:WANT_SCOPE -and $state.Rows.Count -gt 0 -and $state.Scope.Count -gt 0 -and
         $state.Scope -notcontains $script:WANT_SCOPE -and $script:MODE -ne 'reinstall') {
-        die "${ToolName}: installed $($state.Scope -join ' and ') wide at $($state.Installed), and -Scope $($script:WANT_SCOPE) was given. Installing would add a second copy beside it. Remove the existing copy first with: install-tools.ps1 -Reinstall $ToolName -Scope $($script:WANT_SCOPE)"
+        die "${ToolName}: installed $($state.Scope -join ' and ') wide at $(if ($state.Installed) { $state.Installed } else { $state.Rows -join ', ' }), and -Scope $($script:WANT_SCOPE) was given. Installing would add a second copy beside it. Remove the existing copy first with: install-tools.ps1 -Reinstall $ToolName -Scope $($script:WANT_SCOPE)"
     }
 
     if ($script:MODE -eq 'reinstall') {
