@@ -129,7 +129,7 @@ Neither this tooling nor its Windows sibling installs `markdownlint`, `cspell`, 
 
 ## bootstrap.sh
 
-[`bootstrap.sh`][bootstrap] sits beside [`bootstrap.ps1`][bootstrap-ps1] at the top of [`host-setup/`][host-setup-readme] rather than here. Standing up a host with no git and no checkout is one concern across two platforms, not a fifth member of this directory. It needs only `curl` and `tar`, fetches this repository, and runs the scripts here from that tree.
+[`bootstrap.sh`][bootstrap] sits beside [`bootstrap.ps1`][bootstrap-ps1] at the top of [`host-setup/`][host-setup-readme] rather than here. Standing up a host with no git and no checkout is one concern across two platforms, not a fifth member of this directory. It needs only `curl`, `tar`, and `flock`, fetches this repository, and runs the scripts here from that tree.
 
 ## Differences From the Windows Tooling
 
