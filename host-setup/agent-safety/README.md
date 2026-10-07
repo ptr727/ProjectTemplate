@@ -172,7 +172,10 @@ text says, because the harm it covers was never in the text.
    itself does. `~`/`$HOME` is expanded throughout (a bare `$HOME` only when not immediately followed
    by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
    a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
-   the hook process's own OS-level cwd happens to be. Fail open (allow) when no git repository
+   the hook process's own OS-level cwd happens to be. On Windows, a Git Bash drive spelling such as
+   `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
+   the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
+   maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
    resolves at all, matching this requirement's own
    precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
    positively-identified primary checkout to fire on. Granted only by
