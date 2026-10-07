@@ -228,6 +228,28 @@ def overview_v2(
     )
 
 
+def overview_v2_revised(open_line: str = "**0 open findings**", resolved: int = 3) -> str:
+    """The second format's later revision, carrying the same marker under a different preamble.
+
+    It drops the overview heading, the effort line, and the `**Findings:**` total, states its
+    total as a bare bold `open findings` line instead, and opens its resolved section's summary on
+    the count rather than closing it on one. Titles and anchors are constructed, as `overview_v2`'s
+    are.
+    """
+    listed = "\n".join(
+        f"- [Fixed finding {i}](#discussion_r500000000{i})" for i in range(1, resolved + 1)
+    )
+    return (
+        f"{CCR_MARKER}\n\n### Needs a closer look\n\nOne reader still needs a look.\n\n"
+        f"{open_line}\n\n"
+        f"<details>\n<summary><strong>{resolved} resolved since last review</strong></summary>\n\n"
+        f"{listed}\n</details>\n\n"
+        "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+        "This pull request narrows one reader.\n\n**Changes:**\n- Narrow the reader.\n"
+        "</details>\n"
+    )
+
+
 def closer_look() -> str:
     """The findings verdict with stable coverage and nested review details."""
     return (
@@ -3587,6 +3609,43 @@ class TestSecondOverviewFormat(GqlCase):
         )
         self.assertEqual([], pr_review.unrecognized_in(body))
         self.assertEqual(0, pr_review.stated_total(body))
+
+    def test_the_revision_s_count_first_resolved_section_is_vetted(self) -> None:
+        """Its summary opens on the count, `3 resolved since last review`, and blocked at exit 43
+        although every entry under it links a thread an earlier round raised and is resolved."""
+        for resolved in (1, 3, 12):
+            with self.subTest(resolved=resolved):
+                self.assertEqual(
+                    [], pr_review.unrecognized_in(overview_v2_revised(resolved=resolved))
+                )
+
+    def test_a_summary_opening_on_a_count_is_still_vetted_by_its_wording(self) -> None:
+        """Normalizing the leading count must not vet every summary that happens to open on one."""
+        body = overview_v2_revised().replace("resolved since last review", "things changed")
+        self.assertEqual(["summary: (N) things changed"], pr_review.unrecognized_in(body))
+
+    def test_the_revision_s_open_findings_line_is_its_stated_total(self) -> None:
+        """The revision states its total only on this line, and unread it printed `?`.
+
+        The line anchor keeps prose naming a total from supplying one, and a total inside a
+        collapsed section is that section's own, as with `**Findings:**`. A body with CRLF line
+        endings states the same total, as every sibling pattern already reads it.
+        """
+        for line, total in (
+            ("**0 open findings**", 0),
+            ("**1 open finding**", 1),
+            ("**3 open findings**", 3),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(total, pr_review.stated_total(overview_v2_revised(line)))
+        crlf = overview_v2_revised("**2 open findings**").replace("\n", "\r\n")
+        self.assertEqual(2, pr_review.stated_total(crlf))
+        mid = overview_v2_revised("It had **4 open findings** before.")
+        self.assertIsNone(pr_review.stated_total(mid))
+        inside = overview_v2_revised("").replace(
+            "This pull request narrows one reader.", "**9 open findings**"
+        )
+        self.assertIsNone(pr_review.stated_total(inside))
 
     def test_a_total_split_across_severities_is_summed(self) -> None:
         """The format states a count per severity, so the first number alone undercounts.
