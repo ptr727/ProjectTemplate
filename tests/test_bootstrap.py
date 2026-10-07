@@ -591,11 +591,12 @@ class TestScriptPresence(unittest.TestCase):
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
         self.assertIn("Join-Path $env:SystemRoot 'System32\\tar.exe'", text)
         code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
-        command = re.compile(
-            r"""(?:^|[;|{(&]|Get-Command(?:\s+-Name)?)\s*['"]?tar(?:\.exe)?['"]?(?=[\s)]|$)""",
-            re.IGNORECASE,
+        token = r"""['"]?tar(?:\.exe)?['"]?(?=[\s);]|$)"""
+        command = re.compile(rf"(?:^|[;|{{(&])\s*{token}", re.IGNORECASE)
+        lookup = re.compile(
+            rf"\b(?:Get-Command|gcm|Start-Process)\b.*(?<![\w.\\/-]){token}", re.IGNORECASE
         )
-        bare = [line.strip() for line in code if command.search(line)]
+        bare = [line.strip() for line in code if command.search(line) or lookup.search(line)]
         self.assertEqual(bare, [], "bootstrap.ps1 resolves tar through PATH")
 
 
