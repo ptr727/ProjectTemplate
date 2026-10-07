@@ -593,7 +593,7 @@ class TestScriptPresence(unittest.TestCase):
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
         definition = "function Get-TarPath { Join-Path $env:SystemRoot 'System32\\tar.exe' }"
         self.assertIn(definition, text.splitlines())
-        names_tar = re.compile(r"\btar\b(?!\.gz)", re.IGNORECASE)
+        names_tar = re.compile(r"\btar\b(?!\.gz(?![\w.]))", re.IGNORECASE)
         message = re.compile(r"^die '[^']*'$")
         strays = [
             line.strip()
