@@ -582,23 +582,32 @@ class TestScriptPresence(unittest.TestCase):
             )
 
     def test_bootstrap_ps1_names_the_system32_tar(self) -> None:
-        """`bootstrap.ps1` reaches tar by its System32 path and never through `PATH`.
+        """`bootstrap.ps1` reaches tar only through `Get-TarPath`, which names the System32 copy.
 
         A pwsh launched from Git Bash finds MSYS tar first on `PATH`, and that tar reads the drive
         prefix of a Windows archive path as a remote host, so a bare `tar` makes the extraction
-        depend on the shell the loader was started from.
+        depend on the shell the loader was started from. A path to any other tar, Git's own
+        included, reaches the same MSYS tar without `PATH`. The check is an allow-list over every
+        code line that names tar, so it holds whatever form the invocation on such a line takes.
+        A `tar.gz` is not tar named only as an archive extension (`name.tar.gz`) or as a URL path
+        segment (`/tar.gz/`), neither of which can name an executable.
         """
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
-        self.assertIn("Join-Path $env:SystemRoot 'System32\\tar.exe'", text)
-        code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
-        token = r"""['"]?tar(?:\.exe)?['"]?(?=[\s);,]|$)"""
-        command = re.compile(rf"(?:^|[;|{{(&=,])\s*{token}", re.IGNORECASE)
-        lookup = re.compile(
-            rf"\b(?:Get-Command|gcm|Start-Process|start|saps)\b.*(?<![\w.\\/-]){token}",
-            re.IGNORECASE,
+        definition = "function Get-TarPath { Join-Path $env:SystemRoot 'System32\\tar.exe' }"
+        self.assertIn(definition, text.splitlines())
+        names_tar = re.compile(
+            r"(?<=\.)tar\b(?!\.gz(?![\w.]))|(?<!\.)\btar\b(?!\.gz/)", re.IGNORECASE
         )
-        bare = [line.strip() for line in code if command.search(line) or lookup.search(line)]
-        self.assertEqual(bare, [], "bootstrap.ps1 resolves tar through PATH")
+        message = re.compile(r"^die '[^']*'$")
+        strays = [
+            line.strip()
+            for line in text.splitlines()
+            if not line.lstrip().startswith("#")
+            and names_tar.search(line)
+            and line.strip() not in (definition, "")
+            and not message.match(line.strip())
+        ]
+        self.assertEqual(strays, [], "bootstrap.ps1 names a tar other than through Get-TarPath")
 
 
 def bootstrap_functions() -> str:
