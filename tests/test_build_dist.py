@@ -17,7 +17,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from host_capability import can_symlink, requires_symlink
+from host_capability import NO_SYMLINK, can_symlink, requires_symlink
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import build_dist
@@ -641,12 +641,18 @@ class IncludeCase(TreeCase):
         outside.write_text("## Alpha\n\nx\n", encoding="utf-8")
         self.github_skills.mkdir(parents=True, exist_ok=True)
         (self.github_skills / "gen.md").write_text("## Alpha\n\nx\n", encoding="utf-8")
-        sources = ["../outside.md", str(outside), ".github/skills/gen.md", "missing.md"]
         if can_symlink():
             (self.tmp / "link.md").symlink_to(outside)
-            sources.append("link.md")
-        for rel in sources:
+        for rel in (
+            "../outside.md",
+            str(outside),
+            "link.md",
+            ".github/skills/gen.md",
+            "missing.md",
+        ):
             with self.subTest(rel):
+                if rel == "link.md" and not can_symlink():
+                    self.skipTest(NO_SYMLINK)
                 self.make_skill("foo", self.region(f"{rel} > Alpha"))
                 with self.assertRaises(ValueError):
                     build_dist.regenerate()
@@ -823,16 +829,18 @@ class IncludeCase(TreeCase):
         outside.write_text("## A\n\na\n", encoding="utf-8")
         self.dist_plugin.mkdir(parents=True, exist_ok=True)
         (self.dist_plugin / "GEN.md").write_text("## A\n\na\n", encoding="utf-8")
+        if can_symlink():
+            (self.tmp / "link.md").symlink_to(outside)
         cases = {
             "missing": "docs/absent.md",
+            "through a symlink": "link.md",
             "under a generated tree": ".claude-plugin/fleet-skills/GEN.md",
             "outside the root": "../outside.md",
         }
-        if can_symlink():
-            (self.tmp / "link.md").symlink_to(outside)
-            cases["through a symlink"] = "link.md"
         for label, rel in cases.items():
             with self.subTest(label):
+                if rel == "link.md" and not can_symlink():
+                    self.skipTest(NO_SYMLINK)
                 self.declare_destinations(rel)
                 with self.assertRaises(ValueError) as caught:
                     build_dist.regenerate()
