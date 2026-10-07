@@ -41,6 +41,23 @@ For each candidate finding:
 3. Confirm that the repository does not already prevent it elsewhere.
 4. Prefer one root-cause finding over several symptoms of the same defect.
 5. Omit pure preferences that no repository rule or user-visible risk supports.
+6. Omit a hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort",
+   carried below, declines.
+
+<!-- include: GOVERNANCE.md > Trust Boundaries and Hardening Effort -->
+
+Hardening is spent where a failure can actually occur. A defense against a case that cannot happen still costs a review round, a test, and the upkeep of both. So the effort an input gets is set by where it comes from and what its failure would do.
+
+- **Every input is trusted or untrusted, and the class sets the effort.** Trusted input is the maintainer's and what the maintainer controls. That covers files, images, and data handed to a session, settings and secrets files the maintainer writes, and command-line arguments. It covers this repository's content and the hub's, and the maintainer's own hosts with the output read back from them. It covers state files the repository's own scripts write. Untrusted input arrives from outside. That covers a request from an internet client and every field it controls, and upstream release metadata and downloads. It covers a third-party API response, content from an outside contributor, and a bot-authored pull request.
+- **Against trusted input the only threat is a maintainer's mistake.** Guard a realistic mistake, such as a typo, CRLF line endings, a missing file, or a wrong unit. Guard it only where it would fail silently or destructively, with one check at the point of read that says what is wrong. Do not build a parser for adversarial shapes or test injection through a trusted file. Do not filter text read back from the maintainer's own hosts, or file an issue for an attack on trusted input.
+- **Untrusted input is validated once, at the boundary where it enters**, in proportion to what it can reach from there.
+- **Effort follows likelihood times consequence, for robustness as much as for trust.** A case earns a fix or an issue only where it can occur in the code's actual deployment. Its failure must also be silent or destructive. A case that cannot occur there, or an unlikely one that fails loudly, is declined with that reason, neither fixed nor filed. On a single-user host tool, that declines a concurrent writer and an interrupt landing between two cleanup steps.
+- **A review finding asking for hardening this section declines is itself declined**, citing this section, with no fix and no issue. This binds the reviewer as much as the author, so a reviewer does not raise such a finding. A review brief asks after races, coercions, and platform differences only where the code's deployment can produce one.
+- **A repository names its own boundaries where the classes above leave them unclear.** Its own documentation lists which concrete inputs are trusted and which are not. A session or a reviewer then applies this section without re-deriving it. A repository naming none uses the classes above.
+
+`GOVERNANCE.md` "Trust Boundaries and Hardening Effort" keeps the full rules, and the `fleet-code-review` Skill at `.agents/skills/fleet-code-review/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo, carries it whole as a generated include and surfaces it wherever a change is reviewed.
+
+<!-- /include -->
 
 Review carried fleet content by intent and fidelity. A byte-locked reference to a path that one
 downstream repository does not carry is not a broken link. A substantive defect in canonical

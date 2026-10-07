@@ -244,7 +244,10 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Disprove a wrong finding with the command and its output, the code path that makes it
    impossible, or the rule that governs it. A finding that is factually correct but not this
    repo's to fix (a verbatim-fidelity manifest entry byte-locking the section, ownership that
-   sits elsewhere) declines the same way: name the boundary and cite what proves it. Either shape
+   sits elsewhere) declines the same way: name the boundary and cite what proves it. A finding
+   asking for hardening that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" declines
+   declines the same way too, citing that section and the input or deployment that rules the
+   case out. Any of these shapes
    closes the thread on its own evidence, and the agent resolves such a thread itself rather than
    leaving it for the maintainer. What makes that safe is the evidence being checkable by anyone,
    a command and its output, the code path, the quoted rule, a byte-identical diff, so a decline
