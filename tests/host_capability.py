@@ -1,4 +1,4 @@
-"""Host capabilities a test needs and a Windows host may lack, probed once per run.
+"""Host capabilities a test needs and a Windows host may lack.
 
 A test that needs one of these skips with the reason when the host lacks it, rather than
 erroring on a precondition that has nothing to do with the code under test.
@@ -47,12 +47,16 @@ def bash_path() -> str | None:
     A bare "bash" passed to subprocess on Windows is resolved by CreateProcess, which searches
     System32 before PATH and so finds the WSL launcher. That launcher hands the script to a second
     shell that re-parses it, which mangles any quoting or expansion the script relies on, so the
-    PATH entry is named instead, passing over the launcher wherever PATH lists it. It is read on
-    every call rather than cached, since a test may change PATH for the duration of its run.
+    PATH entry is named instead, passing over the launcher wherever PATH lists it. On Windows it
+    also passes over a bash.cmd or bash.bat shim, which PATHEXT would otherwise admit and which
+    cmd.exe re-parses the same way. It is read on every call rather than cached, since a test may
+    change PATH for the duration of its run.
     """
     for directory in os.environ.get("PATH", "").split(os.pathsep):
         found = shutil.which("bash", path=directory) if directory else None
-        if found and not (os.name == "nt" and _is_wsl_launcher(found)):
+        if found and (
+            os.name != "nt" or (found.lower().endswith(".exe") and not _is_wsl_launcher(found))
+        ):
             return found
     return None
 

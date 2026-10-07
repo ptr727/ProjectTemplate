@@ -988,7 +988,7 @@ class ReceiptCase(RepoCase):
         genuine EPIPE on a descriptor, and the exit code being tested includes the one the
         interpreter produces during its own shutdown flush, which no in-process case can reach.
         """
-        script = f"python3 {SCRIPT} {' '.join(args)} {shell}"
+        script = f"python3 {shlex.quote(SCRIPT.as_posix())} {' '.join(args)} {shell}"
         proc = subprocess.run(
             [bash_or_skip(), "-c", f"{script}; exit ${{PIPESTATUS[0]}}"],
             cwd=str(self.tmp),
