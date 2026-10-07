@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
@@ -350,6 +351,20 @@ class CarryManifestTests(unittest.TestCase):
                 capture_output=True,
             )
             carry.verify_target(standalone, {"url": str(remote)}, [standalone / "owned"])
+
+            git = carry.git
+
+            def respelled_worktree_rows(root: pathlib.Path, *args: str) -> str:
+                output = git(root, *args)
+                if args != ("worktree", "list", "--porcelain"):
+                    return output
+                return "\n".join(
+                    f"{row}/." if row.endswith(f"/{worktree.name}") else row
+                    for row in output.splitlines()
+                )
+
+            with mock.patch.object(carry, "git", respelled_worktree_rows):
+                carry.verify_target(worktree, {"url": str(remote)}, [owned])
 
             with self.assertRaisesRegex(carry.CarryError, "origin does not match"):
                 carry.verify_target(worktree, {"url": str(root / "other.git")}, [owned])

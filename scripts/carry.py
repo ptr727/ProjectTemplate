@@ -156,7 +156,7 @@ def apply_tree(
             if relative in required_directories:
                 return
             directory.rmdir()
-            changes.append(f"remove {directory.relative_to(repository_root)}")
+            changes.append(f"remove {directory.relative_to(repository_root).as_posix()}")
             directory = directory.parent
 
     created_roots = []
@@ -166,21 +166,22 @@ def apply_tree(
         current = current.parent
     target_root.mkdir(parents=True, exist_ok=True)
     changes.extend(
-        f"create {directory.relative_to(repository_root)}" for directory in reversed(created_roots)
+        f"create {directory.relative_to(repository_root).as_posix()}"
+        for directory in reversed(created_roots)
     )
     for relative in result["missingDirectories"]:
         destination = target_root / relative
         destination.mkdir(parents=True, exist_ok=True)
-        changes.append(f"create {destination.relative_to(repository_root)}")
+        changes.append(f"create {destination.relative_to(repository_root).as_posix()}")
     for relative in [*result["missing"], *result["modified"]]:
         destination = target_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(source.files[relative])
-        changes.append(f"write {destination.relative_to(repository_root)}")
+        changes.append(f"write {destination.relative_to(repository_root).as_posix()}")
     for relative in result["extra"]:
         destination = target_root / relative
         destination.unlink()
-        changes.append(f"remove {destination.relative_to(repository_root)}")
+        changes.append(f"remove {destination.relative_to(repository_root).as_posix()}")
         remove_empty_ancestors(destination.parent)
     for relative in sorted(
         result["extraDirectories"],
@@ -190,7 +191,7 @@ def apply_tree(
         directory = target_root / relative
         if directory.exists() and not any(directory.iterdir()):
             directory.rmdir()
-            changes.append(f"remove {directory.relative_to(repository_root)}")
+            changes.append(f"remove {directory.relative_to(repository_root).as_posix()}")
             remove_empty_ancestors(directory.parent)
     return changes
 
@@ -365,7 +366,12 @@ def verify_target(
     if not git_is_ancestor(target, "origin/develop", "HEAD"):
         raise CarryError("target branch must contain the current origin/develop head")
     worktree_rows = git(target, "worktree", "list", "--porcelain").splitlines()
-    if sum(row == f"worktree {target.resolve()}" for row in worktree_rows) != 1:
+    registered = [
+        pathlib.Path(row.removeprefix("worktree ")).resolve()
+        for row in worktree_rows
+        if row.startswith("worktree ")
+    ]
+    if registered.count(target.resolve()) != 1:
         raise CarryError("target is not a registered git worktree")
     dirty = []
     for relative in git_status_paths(target):
