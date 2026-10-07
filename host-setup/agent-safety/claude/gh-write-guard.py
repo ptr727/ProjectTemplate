@@ -7481,6 +7481,18 @@ def _selftest():
                 "a Git Bash drive spelling in GIT_DIR=",
             ),
             (
+                "export GIT_WORK_TREE=/c/repos/primary && git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in an exported GIT_WORK_TREE",
+            ),
+            (
+                "export GIT_DIR=/c/repos/primary/.git && git reset --hard",
+                None,
+                "deny",
+                "a Git Bash drive spelling in an exported GIT_DIR",
+            ),
+            (
                 "git -C /c/repos/worktree reset --hard",
                 None,
                 "allow",
