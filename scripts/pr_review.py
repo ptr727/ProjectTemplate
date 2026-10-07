@@ -627,7 +627,7 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
 CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
 CCR_OPEN_FINDINGS = re.compile(
-    r"^ {0,3}\*\*(\d+) open findings?\*\*[ \t]*$", re.MULTILINE | re.IGNORECASE
+    r"^ {0,3}\*\*(\d+) open findings?\*\*[ \t]*\r?$", re.MULTILINE | re.IGNORECASE
 )
 # The markup the format writes a count beside, replaced by one sentinel before a count is read.
 # Masked rather than matched around, because a badge carries digits of its own in its attributes.

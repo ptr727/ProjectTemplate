@@ -3628,7 +3628,8 @@ class TestSecondOverviewFormat(GqlCase):
         """The revision states its total only on this line, and unread it printed `?`.
 
         The line anchor keeps prose naming a total from supplying one, and a total inside a
-        collapsed section is that section's own, as with `**Findings:**`.
+        collapsed section is that section's own, as with `**Findings:**`. A body with CRLF line
+        endings states the same total, as every sibling pattern already reads it.
         """
         for line, total in (
             ("**0 open findings**", 0),
@@ -3637,6 +3638,8 @@ class TestSecondOverviewFormat(GqlCase):
         ):
             with self.subTest(line=line):
                 self.assertEqual(total, pr_review.stated_total(overview_v2_revised(line)))
+        crlf = overview_v2_revised("**2 open findings**").replace("\n", "\r\n")
+        self.assertEqual(2, pr_review.stated_total(crlf))
         mid = overview_v2_revised("It had **4 open findings** before.")
         self.assertIsNone(pr_review.stated_total(mid))
         inside = overview_v2_revised("").replace(
