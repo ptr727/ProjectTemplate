@@ -1242,7 +1242,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         holder = self.hold_lock()
         result = self.run_loader("Lock-Directory")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Another bootstrap run is using", result.stderr)
+        self.assertIn("Another bootstrap run using", result.stderr)
         holder.communicate(input="\n", timeout=60)
         self.assertEqual(holder.returncode, 0, holder.stderr)
         result = self.run_loader("Lock-Directory")
@@ -1255,7 +1255,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.addCleanup(handle.close)
         result = self.run_loader("Lock-Directory")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Another bootstrap run is using", result.stderr)
+        self.assertIn("Another bootstrap run using", result.stderr)
 
     def test_an_empty_directory_at_a_managed_name_is_removed_rather_than_refused(self) -> None:
         """What a removal leaves where only the directory itself would not go, its marker already gone."""

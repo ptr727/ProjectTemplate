@@ -246,12 +246,12 @@ function Test-Ownership {
     param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
-    if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
+    if (-not ($item -and $item.PSIsContainer)) { return $false }
     # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
     # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
-    # A directory that cannot be listed is not known to be empty, so it stays somebody else's.
-    if (-not ($item -and $item.PSIsContainer)) { return $false }
+    # A directory that cannot be read is not known to be either, so it stays somebody else's, which on Linux includes the marker check itself throwing.
     try {
+        if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
         return -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
     } catch {
         return $false
@@ -268,9 +268,10 @@ function Lock-Directory {
         $script:LOCK = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
     } catch [System.Management.Automation.MethodInvocationException] {
         # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
+        # A file system error .NET maps to no subclass, a read-only mount or a full disk, is a plain IOException too, so the message names the reason rather than asserting the cause.
         $reason = $_.Exception.InnerException
         if ($reason.GetType() -eq [IO.IOException]) {
-            die "Another bootstrap run is using $script:DIR, so this one stops rather than replace its trees. Let it finish, then run this again: $($reason.Message)"
+            die "Could not lock ${lock}: $($reason.Message) Another bootstrap run using $script:DIR is the usual cause, so let it finish, then run this again."
         }
         die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
     }
