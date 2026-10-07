@@ -577,7 +577,7 @@ class TestWholeFileOwnership(StampCase):
         report = run(self.home, "--report")
         self.assertEqual(report.returncode, 1, report.stdout + report.stderr)
         self.assertNotIn("was edited since the last install", report.stdout)
-        self.assertIn("is this installer's own output rather than a hand edit", report.stdout)
+        self.assertIn("left when its write of the file failed", report.stdout)
         self.install()
         self.assertEqual(self.backups(), [])
         self.assertEqual(run(self.home, "--report").returncode, 0)
@@ -638,7 +638,15 @@ class TestWholeFileOwnership(StampCase):
     def test_a_failed_check_before_the_write_removes_the_file_it_created(self):
         """The create already happened when fstat fails, and the empty file it made is removed."""
         self.home.mkdir(parents=True)
-        refused = OSError(5, "constructed: I/O error")
+        real_fstat = os.fstat
+        calls = []
+
+        def refused(fd):
+            calls.append(fd)
+            if len(calls) == 1:
+                return real_fstat(fd)
+            raise OSError(5, "constructed: I/O error")
+
         with (
             mock.patch.object(install.os, "fstat", side_effect=refused),
             self.assertRaises(OSError) as caught,
@@ -704,6 +712,23 @@ class TestWholeFileOwnership(StampCase):
         install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
         self.assertEqual(self.stamp.read_bytes(), before)
 
+    def test_a_stamp_written_whole_before_its_close_failed_needs_no_note(self):
+        """The stamp read back holds the digest, so the re-run replaces the leftover silently."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        real_write = install.write_regular_file
+
+        def close_failed(path, data, prior=None, before=None):
+            real_write(path, data, prior=prior, before=before)
+            raise install.IncompleteWrite(f"{path} may be incomplete, since closing it failed")
+
+        with mock.patch.object(install, "write_regular_file", side_effect=close_failed):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(note, "")
+        self.assertEqual(
+            install.stamped_instructions_digest(self.home), install.text_digest("A partial")
+        )
+
     def test_a_stamp_write_cut_short_is_named(self):
         """A stamp left incomplete no longer vouches for the leftover, and the note says what follows."""
         self.install()
@@ -713,6 +738,23 @@ class TestWholeFileOwnership(StampCase):
             note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
         self.assertIn("agent-safety-stamp.json was left incomplete", note)
         self.assertIn("backs CLAUDE.md up as a hand edit", note)
+
+    def test_a_failed_write_keeps_a_file_put_at_the_path_meanwhile(self):
+        """Another writer's file at the path is not the one this call created, so it stays."""
+        self.home.mkdir(parents=True)
+        other = self.home / "other"
+
+        def replaced(fd, data):
+            other.write_bytes(b"another writer's file\n")
+            os.replace(other, self.md)
+            raise OSError(27, "constructed: file too large")
+
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=replaced),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"another writer's file\n")
 
     def test_a_failed_write_keeps_a_file_it_found(self):
         """Only a file this call created is removed, so a found one stays to hold what is left."""

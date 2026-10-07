@@ -474,7 +474,8 @@ def write_regular_file(path, data, prior=None, before=None):
 
     The open is tried exclusively first, so a file this call created is told from one it found, and
     a path that is a link always counts as found, so its target is kept. A created file is removed
-    again when the write fails, leaving the path absent as it was found.
+    again when the write fails, where the path still holds that same file, leaving it absent as it
+    was found.
 
     Raises OSError where the file is unchanged or the created file was removed. Raises
     IncompleteWrite where a write failed after the truncate and `prior` could not be put back,
@@ -493,10 +494,14 @@ def write_regular_file(path, data, prior=None, before=None):
         _write_open_file(path, fd, data, prior, before)
         return
     try:
+        made = os.fstat(fd)
+    except OSError:
+        made = None
+    try:
         _write_open_file(path, fd, data, prior, before)
     except BaseException as e:
         try:
-            os.unlink(path)
+            _remove_if_same_file(path, made)
         except OSError as unlink_error:
             if not isinstance(e, IncompleteWrite):
                 raise IncompleteWrite(
@@ -509,6 +514,20 @@ def write_regular_file(path, data, prior=None, before=None):
                     f"{path} could not be written, so the file this run created was removed ({e})"
                 ) from e
         raise
+
+
+def _remove_if_same_file(path, made):
+    """Remove `path` where it is still the file `made` describes, and raise OSError where it is not.
+
+    Compared rather than removed by name, since something else may have put its own file at the
+    path once the descriptor closed, and removing that would delete a file this run never wrote.
+    """
+    if made is None:
+        raise OSError(f"{path} could not be identified as the file this run created")
+    now = os.lstat(path)
+    if (now.st_dev, now.st_ino) != (made.st_dev, made.st_ino):
+        raise OSError(f"{path} is no longer the file this run created")
+    os.unlink(path)
 
 
 def _write_open_file(path, fd, data, prior, before):
@@ -655,36 +674,42 @@ def stamped_instructions_digest(claude_home):
 
 
 def record_leftover_instructions(claude_home, claude_md, written):
-    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note on any failure.
+    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where it could not.
 
     `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
     one of them is the run's own output, and replacing it loses nothing, since the prior content is
     a render, a backup, or absent. Anything else read back is a write by something other than this
-    run, so it is not stamped, and the next run backs it up. Without this record the next run backs
-    the leftover up as a hand edit and the report calls it one. Only a stamp passing its shape
-    check is updated, since one failing it vouches for nothing either way.
+    run, so it is not stamped, no note is returned, and the next run backs it up. Without this
+    record the next run backs the run's own leftover up as a hand edit and the report calls it
+    one, so the note says so where the stamp read back does not hold the leftover's digest. Only a
+    stamp passing its shape check is updated, since one failing it vouches for nothing either way.
     """
+    try:
+        left = read_regular_file(claude_md)
+    except OSError:
+        return ""
+    if left is None or not any(w is not None and w.startswith(left) for w in written):
+        return ""
+    digest = text_digest(left.decode("utf-8", errors="replace"))
     stamp_path = claude_home / "agent-safety-stamp.json"
+    why = ""
     try:
         stamp_raw = read_regular_file(stamp_path)
         stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
-        left = read_regular_file(claude_md)
-    except (ValueError, OSError):
+        if stamp is not None and not stamp_problems(stamp):
+            stamp["instructionsDigest"] = digest
+            stamp["instructionsLeftover"] = True
+            write_regular_file(
+                stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
+            )
+    except (ValueError, OSError) as e:
+        why = f" ({e})"
+    if stamped_instructions_digest(claude_home) == digest:
         return ""
-    if stamp is None or left is None or stamp_problems(stamp):
-        return ""
-    if not any(w is not None and w.startswith(left) for w in written):
-        return ""
-    stamp["instructionsDigest"] = text_digest(left.decode("utf-8", errors="replace"))
-    try:
-        write_regular_file(
-            stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
-        )
-    except IncompleteWrite as e:
-        return f" {e}, so the re-run backs CLAUDE.md up as a hand edit."
-    except OSError:
-        return ""
-    return ""
+    return (
+        f" The stamp could not record what was left{why}, so the re-run backs CLAUDE.md up as a "
+        "hand edit."
+    )
 
 
 def write_backup(claude_md, raw):
@@ -1172,16 +1197,21 @@ def report(claude_home):
     elif not local_problem and claude_text is not None:
         live_text = normalized(claude_text)
         if live_text != render_instructions(local_path, local_text):
-            if text_digest(live_text) == stamp.get("instructionsDigest"):
-                problems.append(
-                    "CLAUDE.md is this installer's own output rather than a hand edit, and "
-                    f"this checkout and {local_path} now render a different one"
-                )
-            else:
+            if text_digest(live_text) != stamp.get("instructionsDigest"):
                 problems.append(
                     "CLAUDE.md was edited since the last install, or predates whole-file "
                     "ownership, so a re-run backs it up before rewriting it. Move host-specific "
                     f"content into {local_path}"
+                )
+            elif stamp.get("instructionsLeftover") is True:
+                problems.append(
+                    "CLAUDE.md holds what an install left when its write of the file failed, so a "
+                    "re-run rewrites it without a backup"
+                )
+            else:
+                problems.append(
+                    "CLAUDE.md is this installer's own output rather than a hand edit, and "
+                    f"this checkout and {local_path} now render a different one"
                 )
     if live != stamp.get("blocks"):
         problems.append(
