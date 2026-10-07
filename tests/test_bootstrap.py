@@ -1020,6 +1020,9 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("System.IO.DirectoryNotFoundException", result.stderr)
 
+    @unittest.skipUnless(
+        sys.platform == "win32", "only Windows has a path that is rooted but not fully qualified"
+    )
     def test_a_dir_that_is_rooted_but_not_fully_qualified_is_refused(self) -> None:
         """A drive-relative or root-relative path resolves against a directory nothing else reads."""
         for given in ("C:hs", "\\hs"):
