@@ -966,6 +966,12 @@ class TestDegradedEnvironments(StampCase):
 class TestRegistration(StampCase):
     """Correct bytes on disk are not a running guard. These are the inert-kit cases."""
 
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _settings(self):
         return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
 
