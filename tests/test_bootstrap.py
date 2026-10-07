@@ -589,11 +589,15 @@ class TestScriptPresence(unittest.TestCase):
         depend on the shell the loader was started from. A path to any other tar, Git's own
         included, reaches the same MSYS tar without `PATH`. The check is an allow-list over every
         code line that names tar, so it holds whatever form the invocation on such a line takes.
+        A `tar.gz` is not tar named only as an archive extension (`name.tar.gz`) or as a URL path
+        segment (`/tar.gz/`), neither of which can name an executable.
         """
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
         definition = "function Get-TarPath { Join-Path $env:SystemRoot 'System32\\tar.exe' }"
         self.assertIn(definition, text.splitlines())
-        names_tar = re.compile(r"\btar\b(?!\.gz(?![\w.]))", re.IGNORECASE)
+        names_tar = re.compile(
+            r"(?<=\.)tar\b(?!\.gz(?![\w.]))|(?<!\.)\btar\b(?!\.gz/)", re.IGNORECASE
+        )
         message = re.compile(r"^die '[^']*'$")
         strays = [
             line.strip()
