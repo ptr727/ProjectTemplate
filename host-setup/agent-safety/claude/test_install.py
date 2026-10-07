@@ -488,7 +488,7 @@ class TestWholeFileOwnership(StampCase):
             self.md.symlink_to(self.home.parent / "not-cloned" / "CLAUDE.md")
         except OSError:
             self.skipTest("this host cannot create a symlink")
-        self.assert_refused_with_nothing_changed(run(self.home), "could not be rewritten")
+        self.assert_refused_with_nothing_changed(run(self.home), "could not be written")
 
     def test_a_claude_md_symlink_loop_stops_the_install_with_nothing_changed(self):
         self.home.mkdir(parents=True)
@@ -642,7 +642,7 @@ class TestWholeFileOwnership(StampCase):
         r = self.run_with_file_size_limit(4096)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stderr)
-        self.assertIn("Nothing was installed", r.stderr)
+        self.assertIn("could not be written (its write failed", r.stderr)
         self.assertNotIn("left incomplete", r.stderr)
         self.assertNotIn("move the file aside", r.stderr)
         self.assertFalse(os.path.lexists(self.md))

@@ -513,8 +513,8 @@ def write_regular_file(path, data, prior=None, before=None):
         else:
             if isinstance(e, IncompleteWrite):
                 raise OSError(
-                    f"{path} could not be written, and the file this run created no longer "
-                    f"exists ({e.__cause__ or e})"
+                    f"its write failed, and the file this run created no longer exists "
+                    f"({e.__cause__ or e})"
                 ) from e
         raise
 
@@ -682,14 +682,15 @@ def stamped_instructions_digest(claude_home):
 
 
 def record_leftover_instructions(claude_home, claude_md, written):
-    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where it could not.
+    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where that failed.
 
     `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
     one of them is the run's own output, and replacing it loses nothing, since the prior content is
     a render, a backup, or absent. Anything else read back is a write by something other than this
     run, so it is not stamped, no note is returned, and the next run backs it up. Without this
     record the next run backs the run's own leftover up as a hand edit and the report calls it
-    one, so the note says so where the stamp read back does not hold the leftover's digest. Only a
+    one, so the note says so where the stamp read back does not hold the leftover's digest. A
+    leftover that cannot be read back is not known to be the run's own, so it gets no note. Only a
     stamp passing its shape check is updated, since one failing it vouches for nothing either way.
     """
     try:
@@ -1350,8 +1351,9 @@ def main():
         except OSError as e:
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             aside = ", or move the file aside" if os.path.lexists(claude_md) else ""
+            verb = "rewritten" if raw is not None else "written"
             sys.stderr.write(
-                f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
+                f"Nothing was installed: {claude_md} could not be {verb} ({e}).{kept} "
                 f"Fix what the error names{aside}, then re-run.\n"
             )
             return 1
