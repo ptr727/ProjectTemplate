@@ -495,7 +495,7 @@ function Test-Prerequisite {
 # An absolute path, and never a drive root, since everything below it is created and removed under it.
 function Resolve-Directory {
     if (-not $script:Dir) { return (Join-Path $env:LOCALAPPDATA 'host-setup') }
-    if (-not [IO.Path]::IsPathRooted($script:Dir)) { die "-Dir takes an absolute path, and `"$($script:Dir)`" is relative" }
+    if (-not [IO.Path]::IsPathFullyQualified($script:Dir)) { die "-Dir takes an absolute path, and `"$($script:Dir)`" is relative" }
     $trimmed = $script:Dir.TrimEnd('\', '/')
     if ((-not $trimmed) -or ($trimmed -match '^[A-Za-z]:$')) { die '-Dir may not be a drive root' }
     return $trimmed

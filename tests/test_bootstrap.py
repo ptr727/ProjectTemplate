@@ -789,7 +789,8 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($Loader, [ref]$
 $wanted = @(
     'log', 'info', 'step', 'warn', 'die',
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
-    'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup'
+    'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
+    'Resolve-Directory'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -815,6 +816,13 @@ function Lock-Entry {
     } else {
         & chmod 555 $locked
     }
+}
+# Holds one file directly in a tree open, which only Windows can do without also locking the tree's own entries, the marker among them.
+function Hold-File {
+    param([string]$Name, [string]$File)
+    $path = Join-Path (Get-Named $Name) $File
+    New-Item -ItemType File -Path $path -Force | Out-Null
+    $script:HELD.Add([IO.File]::Open($path, 'Open', 'Read', 'None'))
 }
 # A link at a tree's name, a junction on Windows since a symbolic link there needs a privilege a test host may not hold.
 function New-Link {
@@ -899,12 +907,18 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
     def content(self, name: str) -> str:
         return (self.dir / name / "content").read_text(encoding="utf-8")
 
+    @unittest.skipUnless(
+        sys.platform == "win32",
+        "a plain recursive removal reaches the marker before a held entry only where a lone file can be held",
+    )
     def test_a_removal_that_stops_part_way_keeps_the_ownership_marker(self) -> None:
+        """A held file sorting after the marker, which a plain recursive removal would reach second."""
         self.owned_tree("skills-tree.new", "new")
         result = self.run_loader(
-            f"{self.lock('skills-tree.new')}\nRemove-Tree -Path (Get-Named 'skills-tree.new')"
+            "Hold-File 'skills-tree.new' 'zz-held'\nRemove-Tree -Path (Get-Named 'skills-tree.new')"
         )
         self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.dir / "skills-tree.new" / "content").exists(), result.stderr)
         self.assertTrue((self.dir / "skills-tree.new" / ".bootstrap-owned").exists())
 
     def test_a_link_to_an_owned_tree_is_not_ours_and_is_refused(self) -> None:
@@ -969,6 +983,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.owned_tree("skills-tree.old", "old")
         result = self.run_loader(f"{self.lock('skills-tree.new')}\nInvoke-Cleanup")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Could not remove the extracted tree", result.stderr)
         self.assertEqual(self.content("skills-tree"), "old")
 
     def test_cleanup_warns_where_a_leftover_old_tree_will_not_go(self) -> None:
@@ -996,6 +1011,22 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("Invoke-Cleanup")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.content("skills-tree"), "old")
+
+    def test_a_failed_move_surfaces_the_file_system_error_rather_than_its_wrapper(self) -> None:
+        result = self.run_loader(
+            "try { Move-Tree -Path (Get-Named 'missing') -Destination (Get-Named 'skills-tree') }"
+            " catch { [Console]::Error.WriteLine($_.Exception.GetType().FullName) }"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("System.IO.DirectoryNotFoundException", result.stderr)
+
+    def test_a_dir_that_is_rooted_but_not_fully_qualified_is_refused(self) -> None:
+        """A drive-relative or root-relative path resolves against a directory nothing else reads."""
+        for given in ("C:hs", "\\hs"):
+            with self.subTest(given=given):
+                result = self.run_loader(f"$script:Dir = '{given}'\nResolve-Directory")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("-Dir takes an absolute path", result.stderr)
 
     def fetch(self, tar: str) -> str:
         """Harness lines that stand in for the download and the extract, then run a kept-tree fetch and its cleanup."""
