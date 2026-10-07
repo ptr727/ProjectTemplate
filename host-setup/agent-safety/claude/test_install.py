@@ -8,8 +8,10 @@ Standard library only, matching the rest of the gates, so CI needs no install st
 """
 
 import contextlib
+import importlib.util
 import io
 import json
+import ntpath
 import os
 import pathlib
 import re
@@ -17,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -1782,6 +1785,38 @@ class TestStampContent(StampCase):
         line = install.stamp_line(stamp)
         self.assertIn(stamp["host"]["hostname"], line)
         self.assertIn(stamp["payloadDigest"], line)
+
+
+class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
+    """The guard's own self-test with Windows path semantics, the check the installer runs on a
+    Windows host before it replaces any hook. The fixtures spell directories POSIX-style, and
+    `ntpath.normpath` rewrites `/` to `\\`, so a fixture lookup that compares exact strings passes
+    here and fails there.
+
+    Only the guard's own `os` takes Windows path semantics, since patching the shared module breaks
+    `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
+    the one the fixture table expanded `~` against at import. The one case that spawns git creates
+    a real checkout, so this test skips it, and only `--selftest` run with the host's own paths
+    covers it.
+    """
+
+    def test_selftest_passes_with_ntpath(self):
+        spec = importlib.util.spec_from_file_location("guard_ntpath", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        windows_os = types.SimpleNamespace(**{**vars(os), "path": ntpath})
+        out = io.StringIO()
+        with (
+            mock.patch.object(guard, "os", windows_os),
+            mock.patch.dict(os.environ, {"USERPROFILE": os.path.expanduser("~")}),
+            mock.patch.object(guard, "_is_primary_checkout_selftest", return_value="skip"),
+            contextlib.redirect_stdout(out),
+        ):
+            status = guard._selftest()
+        fails = [line for line in out.getvalue().splitlines() if "FAIL" in line]
+        self.assertEqual(status, 0, "\n".join(fails))
 
 
 if __name__ == "__main__":

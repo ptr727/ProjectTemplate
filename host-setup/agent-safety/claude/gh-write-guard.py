@@ -7166,6 +7166,24 @@ _CONTEXT_LEX_CASES = [
 ]
 
 
+def _fixture_lookup(table):
+    """A lookup over a fixture table keyed by POSIX-spelled directories, matching a key and a
+    queried directory with every `\\` read as `/`. On Windows the rule's own relative join runs
+    through `ntpath.normpath`, which rewrites `/` to `\\`, so an exact-string lookup misses there.
+    Only the separator is folded, so collapsing `..` stays the rule's job and a case still fails
+    where the rule stops doing it.
+    """
+    folded = {_fixture_dir(k): v for k, v in table.items()}
+    return lambda d: folded.get(_fixture_dir(d))
+
+
+def _fixture_dir(key):
+    """Fold the separators in a fixture key, which is a directory or a `(directory, ref)` pair."""
+    if isinstance(key, tuple):
+        return (_fixture_dir(key[0]), *key[1:])
+    return key.replace("\\", "/") if key else key
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -7244,7 +7262,8 @@ def _selftest():
         if refmap is None:
             ref_resolver = lambda _d, _r: True
         else:
-            ref_resolver = lambda d, r, _m=refmap: _m.get((d, r), True)
+            lookup = _fixture_lookup(refmap)
+            ref_resolver = lambda d, r, _f=lookup: _f((d, r)) is not False
         got, _ = classify(
             cmd,
             cwd=cwd,
@@ -7252,7 +7271,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ={},
-            primary_checkout_lookup=lambda d, _m=pmap: _m.get(d),
+            primary_checkout_lookup=_fixture_lookup(pmap),
             ref_resolver=ref_resolver,
             # No persisted alias resolves for any of these cases; only the dedicated alias table below exercises `_config_alias`.
             config_lookup=lambda _d, _n: None,
@@ -7340,7 +7359,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ={},
-            primary_checkout_lookup=lambda d, _m=pmap: _m.get(d),
+            primary_checkout_lookup=_fixture_lookup(pmap),
             config_lookup=lambda _d, n, _m=config_map: _m.get(n),
         )
         mark = "ok  " if got == want else "FAIL"
@@ -7374,7 +7393,7 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
-            primary_checkout_lookup=lambda d: {"/primary": True}.get(d),
+            primary_checkout_lookup=_fixture_lookup({"/primary": True}),
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
