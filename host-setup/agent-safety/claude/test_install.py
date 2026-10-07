@@ -1796,7 +1796,8 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
     Only the guard's own `os` takes Windows path semantics, since patching the shared module breaks
     `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
     the one the fixture table expanded `~` against at import. The one case that spawns git creates
-    a real checkout, so it runs in the native check rather than under emulated paths.
+    a real checkout, so this test skips it, and only `--selftest` run with the host's own paths
+    covers it.
     """
 
     def test_selftest_passes_with_ntpath(self):
