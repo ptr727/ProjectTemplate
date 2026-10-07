@@ -474,10 +474,37 @@ def write_regular_file(path, data, prior=None, before=None):
 
     Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
     truncate and `prior` could not be put back, or where the close after the truncate failed,
-    either of which can leave the file holding neither version.
+    either of which can leave the file holding neither version. The open is tried exclusively
+    first, so a file this call created is told from one it found and is removed again when the
+    write fails, leaving the path absent as it was found. A dangling link fails that exclusive
+    open, so its target is written, and kept, as a file found.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o666)
+    try:
+        fd = os.open(path, flags | os.O_EXCL, 0o666)
+    except FileExistsError:
+        _write_open_file(path, os.open(path, flags, 0o666), data, prior, before)
+        return
+    try:
+        _write_open_file(path, fd, data, prior, before)
+    except BaseException as e:
+        try:
+            os.unlink(path)
+        except OSError as unlink_error:
+            if isinstance(e, IncompleteWrite):
+                raise
+            raise IncompleteWrite(
+                f"{path} was created and left incomplete, and could not be removed ({unlink_error})"
+            ) from e
+        if isinstance(e, IncompleteWrite):
+            raise OSError(
+                f"{path} could not be written, so the file this run created was removed ({e})"
+            ) from e
+        raise
+
+
+def _write_open_file(path, fd, data, prior, before):
+    """The body of `write_regular_file` on its open descriptor, which this closes."""
     truncated = False
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -617,6 +644,32 @@ def stamped_instructions_digest(claude_home):
         return None
     value = stamp.get("instructionsDigest")
     return value if isinstance(value, str) else None
+
+
+def record_leftover_instructions(claude_home, claude_md):
+    """Stamp the digest of what a cut-short CLAUDE.md write left, where the stamp can carry it.
+
+    Its prior content was a render the stamp vouched for, a backup this run wrote, or nothing, so
+    no byte of the leftover was written by hand. Without this record the next run backs it up as a
+    hand edit and the report calls it one. Only a stamp passing its shape check is updated, since
+    one failing it vouches for nothing either way.
+    """
+    stamp_path = claude_home / "agent-safety-stamp.json"
+    try:
+        stamp_raw = read_regular_file(stamp_path)
+        stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
+        left = read_regular_file(claude_md)
+    except (ValueError, OSError):
+        return
+    if stamp is None or left is None or stamp_problems(stamp):
+        return
+    stamp["instructionsDigest"] = text_digest(left.decode("utf-8", errors="replace"))
+    try:
+        write_regular_file(
+            stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
+        )
+    except OSError:
+        return
 
 
 def write_backup(claude_md, raw):
@@ -1234,6 +1287,7 @@ def main():
                 else None,
             )
         except IncompleteWrite as e:
+            record_leftover_instructions(claude_home, claude_md)
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             sys.stderr.write(
                 f"{e}.{kept} Fix what the error names, then re-run. No hook or setting was changed.\n"
