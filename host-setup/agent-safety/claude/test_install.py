@@ -598,7 +598,7 @@ class TestWholeFileOwnership(StampCase):
             if len(calls) > 2:
                 return real_replace(fd, data)
             if len(calls) == 1:
-                real_replace(fd, b"A partial render")
+                real_replace(fd, data[:100])
             raise OSError(27, "constructed: file too large")
 
         env = {
@@ -617,7 +617,7 @@ class TestWholeFileOwnership(StampCase):
         ):
             self.assertEqual(install.main(), 1)
         self.assertIn("was left incomplete", stderr.getvalue())
-        self.assertEqual(self.md.read_bytes(), b"A partial render")
+        self.assertEqual(self.md.read_bytes(), calls[0][:100])
         self.assertEqual(len(self.backups()), 1)
         self.install()
         self.assertEqual(len(self.backups()), 1)
@@ -664,6 +664,55 @@ class TestWholeFileOwnership(StampCase):
         ):
             install.write_regular_file(self.md, b"new\n")
         self.assertEqual(self.md.read_bytes(), b"partial")
+
+    def test_a_failed_write_keeps_a_file_created_through_a_link(self):
+        """Where an exclusive open follows a link, as Windows may, the link's target is a file found."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install.os.path, "islink", return_value=True),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertTrue(self.md.exists())
+
+    def leftover_stamped(self, left, written):
+        """Install, leave `left` in CLAUDE.md, and say whether the stamp now vouches for it."""
+        self.install()
+        self.md.write_bytes(left)
+        note = install.record_leftover_instructions(self.home, self.md, written)
+        self.assertEqual(note, "")
+        return install.stamped_instructions_digest(self.home) == install.text_digest(
+            left.decode("utf-8")
+        )
+
+    def test_a_leftover_this_run_wrote_is_stamped(self):
+        self.assertTrue(self.leftover_stamped(b"A partial", (b"A partial render", None)))
+
+    def test_a_leftover_this_run_did_not_write_is_not_stamped(self):
+        """A save landing after the failed write is someone's edit, so the next run backs it up."""
+        self.assertFalse(self.leftover_stamped(b"An edit saved meanwhile", (b"A render", b"prior")))
+
+    def test_a_stamp_failing_its_shape_check_is_not_updated(self):
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        before = self.stamp.read_bytes()
+        self.md.write_bytes(b"A partial")
+        install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(self.stamp.read_bytes(), before)
+
+    def test_a_stamp_write_cut_short_is_named(self):
+        """A stamp left incomplete no longer vouches for the leftover, and the note says what follows."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        cut_short = OSError(27, "constructed: file too large")
+        with mock.patch.object(install, "_replace_contents", side_effect=cut_short):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertIn("agent-safety-stamp.json was left incomplete", note)
+        self.assertIn("backs CLAUDE.md up as a hand edit", note)
 
     def test_a_failed_write_keeps_a_file_it_found(self):
         """Only a file this call created is removed, so a found one stays to hold what is left."""

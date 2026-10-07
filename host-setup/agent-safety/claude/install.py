@@ -472,12 +472,14 @@ def write_regular_file(path, data, prior=None, before=None):
     or a device is refused rather than hanging or swallowing the write. Written in place rather than
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
-    Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
-    truncate and `prior` could not be put back, or where the close after the truncate failed,
-    either of which can leave the file holding neither version. The open is tried exclusively
-    first, so a file this call created is told from one it found, and a path that is a link always
-    counts as found, so its target is kept. A created file is removed again when the write fails,
-    leaving the path absent as it was found.
+    The open is tried exclusively first, so a file this call created is told from one it found, and
+    a path that is a link always counts as found, so its target is kept. A created file is removed
+    again when the write fails, leaving the path absent as it was found.
+
+    Raises OSError where the file is unchanged or the created file was removed. Raises
+    IncompleteWrite where a write failed after the truncate and `prior` could not be put back,
+    where the close after the truncate failed, or where a created file could not be removed, any
+    of which can leave the file holding neither version.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
@@ -633,7 +635,7 @@ def text_digest(text):
 
 
 def stamped_instructions_digest(claude_home):
-    """The digest of the instruction file the last install wrote, or None where none is recorded.
+    """The digest of the instruction file the installer last wrote or left, or None where none is.
 
     None covers a missing or unreadable stamp and one written before the field existed. Each of
     those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
@@ -652,13 +654,15 @@ def stamped_instructions_digest(claude_home):
     return value if isinstance(value, str) else None
 
 
-def record_leftover_instructions(claude_home, claude_md):
-    """Stamp the digest of what a cut-short CLAUDE.md write left, where the stamp can carry it.
+def record_leftover_instructions(claude_home, claude_md, written):
+    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note on any failure.
 
-    What the file held before was a render the stamp vouched for, an edit this run backed up, or
-    nothing, so replacing the leftover loses nothing. Without this record the next run backs it up
-    as a hand edit and the report calls it one. Only a stamp passing its shape check is updated, since
-    one failing it vouches for nothing either way.
+    `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
+    one of them is the run's own output, and replacing it loses nothing, since the prior content is
+    a render, a backup, or absent. Anything else read back is a write by something other than this
+    run, so it is not stamped, and the next run backs it up. Without this record the next run backs
+    the leftover up as a hand edit and the report calls it one. Only a stamp passing its shape
+    check is updated, since one failing it vouches for nothing either way.
     """
     stamp_path = claude_home / "agent-safety-stamp.json"
     try:
@@ -666,16 +670,21 @@ def record_leftover_instructions(claude_home, claude_md):
         stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
         left = read_regular_file(claude_md)
     except (ValueError, OSError):
-        return
+        return ""
     if stamp is None or left is None or stamp_problems(stamp):
-        return
+        return ""
+    if not any(w is not None and w.startswith(left) for w in written):
+        return ""
     stamp["instructionsDigest"] = text_digest(left.decode("utf-8", errors="replace"))
     try:
         write_regular_file(
             stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
         )
+    except IncompleteWrite as e:
+        return f" {e}, so the re-run backs CLAUDE.md up as a hand edit."
     except OSError:
-        return
+        return ""
+    return ""
 
 
 def write_backup(claude_md, raw):
@@ -1151,7 +1160,6 @@ def report(claude_home):
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
     # The whole file is compared too, since content outside the blocks is drift no block check sees.
-    # The stamp's digest of the file it wrote says which kind: an earlier render, or a hand edit.
     claude_md = claude_home / "CLAUDE.md"
     local_path = local_instructions_path()
     local_text, local_problem = read_local_instructions(local_path)
@@ -1283,20 +1291,22 @@ def main():
         needs_backup = existing is not None and text_digest(
             existing
         ) != stamped_instructions_digest(claude_home)
+        encoded = rendered.replace("\n", newline).encode("utf-8")
         try:
             write_regular_file(
                 claude_md,
-                rendered.replace("\n", newline).encode("utf-8"),
+                encoded,
                 prior=raw,
                 before=(lambda: backups.append(write_backup(claude_md, raw)))
                 if needs_backup
                 else None,
             )
         except IncompleteWrite as e:
-            record_leftover_instructions(claude_home, claude_md)
+            stamp_note = record_leftover_instructions(claude_home, claude_md, (encoded, raw))
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             sys.stderr.write(
-                f"{e}.{kept} Fix what the error names, then re-run. No hook or setting was changed.\n"
+                f"{e}.{kept}{stamp_note} Fix what the error names, then re-run. "
+                "No hook or setting was changed.\n"
             )
             return 1
         except OSError as e:
