@@ -587,8 +587,8 @@ class TestScriptPresence(unittest.TestCase):
         A pwsh launched from Git Bash finds MSYS tar first on `PATH`, and that tar reads the drive
         prefix of a Windows archive path as a remote host, so a bare `tar` makes the extraction
         depend on the shell the loader was started from. A path to any other tar, Git's own
-        included, reaches the same MSYS tar without `PATH`. The check is an allow-list rather than
-        a list of invocation forms, so a spelling nobody enumerated still fails it.
+        included, reaches the same MSYS tar without `PATH`. The check is an allow-list over every
+        code line that names tar, so it holds whatever form the invocation on such a line takes.
         """
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
         definition = "function Get-TarPath { Join-Path $env:SystemRoot 'System32\\tar.exe' }"
