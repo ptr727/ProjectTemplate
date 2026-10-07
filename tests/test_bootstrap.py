@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -750,6 +751,326 @@ class TestKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("cleanup")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "old")
+
+    def test_a_swap_that_cannot_land_the_new_tree_puts_the_live_one_back(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader(
+            'mv() { [[ $1 == *.new ]] && return 1; command mv "$@"; }\nswap_in'
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not move the extracted tree into place", result.stderr)
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "live")
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
+    def test_a_swap_that_cannot_put_the_live_tree_back_names_where_it_is(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader(
+            'mv() { [[ $1 == *.new || $1 == *.old ]] && return 1; command mv "$@"; }\nswap_in'
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"could not put the previous tree back from {self.dir / 'skills-tree.old'}",
+            result.stderr,
+        )
+        self.assertEqual(
+            (self.dir / "skills-tree.old" / "content").read_text(encoding="utf-8"), "live"
+        )
+
+
+POWERSHELL_TREE_HARNESS = r"""
+param([string]$Loader, [string]$Dir, [string]$BodyFile)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Loader, [ref]$tokens, [ref]$errors)
+$wanted = @(
+    'log', 'info', 'step', 'warn', 'die',
+    'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
+    'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup'
+)
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$script:DIR = $Dir
+$script:MODE = 'skills'
+$script:DRY_RUN = $false
+$script:KEEP = $false
+$script:REPO = 'ptr727/ProjectTemplate'
+$script:REF = 'main'
+$script:RESOLVED = ''
+$script:TREE = ''
+$script:HELD = [Collections.Generic.List[object]]::new()
+function Get-Named { param([string]$Name) Join-Path $script:DIR $Name }
+# Holds an entry the way a process using the tree does: an open handle on Windows, where that alone stops a rename and a delete, and a read-only directory elsewhere, where only the delete stops.
+function Lock-Entry {
+    param([string]$Name)
+    $locked = Join-Path (Get-Named $Name) 'locked'
+    New-Item -ItemType Directory -Path $locked -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $locked 'file') -Force | Out-Null
+    if ($IsWindows) {
+        $script:HELD.Add([IO.File]::Open((Join-Path $locked 'file'), 'Open', 'Read', 'None'))
+    } else {
+        & chmod 555 $locked
+    }
+}
+# A link at a tree's name, a junction on Windows since a symbolic link there needs a privilege a test host may not hold.
+function New-Link {
+    param([string]$Name, [string]$Target)
+    $type = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+    New-Item -ItemType $type -Path (Get-Named $Name) -Target (Get-Named $Target) | Out-Null
+}
+# Fails the move of any tree whose name ends in one of $Suffixes, and moves every other one as the loader does.
+function Set-MoveFailure {
+    param([string[]]$Suffixes)
+    $script:FAIL_MOVE = $Suffixes
+    function script:Move-Tree {
+        param([string]$Path, [string]$Destination)
+        foreach ($suffix in $script:FAIL_MOVE) { if ($Path.EndsWith($suffix)) { throw "refused to move $Path" } }
+        [IO.Directory]::Move($Path, $Destination)
+    }
+}
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath $BodyFile)))
+"""
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows loader's own functions")
+class TestPowerShellKeptTreeHandling(unittest.TestCase):
+    """The Windows loader's removal and swap of the trees it owns, driven through its own functions.
+
+    Each case runs `bootstrap.ps1`'s own functions, extracted by AST, against a scratch directory.
+    An entry a case locks is held for real, by an open handle on Windows, so the rename and delete
+    failures the loader is shaped around are the host's own rather than a stub's.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.addCleanup(self._unlock_all)
+
+    def _unlock_all(self) -> None:
+        if sys.platform == "win32":
+            return
+        for path in self.dir.rglob("*"):
+            if path.is_dir() and not path.is_symlink():
+                path.chmod(0o755)
+
+    def run_loader(self, body: str) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = Path(directory, "harness.ps1")
+            harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
+            body_file = Path(directory, "body.ps1")
+            body_file.write_text(body, encoding="utf-8")
+            return subprocess.run(
+                [
+                    "pwsh",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File",
+                    str(harness),
+                    "-Loader",
+                    str(BOOTSTRAP_PS),
+                    "-Dir",
+                    str(self.dir),
+                    "-BodyFile",
+                    str(body_file),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=120,
+            )
+
+    def owned_tree(self, name: str, content: str) -> Path:
+        tree = self.dir / name
+        tree.mkdir()
+        (tree / ".bootstrap-owned").touch()
+        (tree / "content").write_text(content, encoding="utf-8")
+        return tree
+
+    def lock(self, name: str) -> str:
+        """The harness line that holds an entry in the tree `name`, skipped where nothing can."""
+        if sys.platform != "win32" and os.geteuid() == 0:
+            self.skipTest("root removes a read-only directory's entries regardless of its mode")
+        return f"Lock-Entry '{name}'"
+
+    def content(self, name: str) -> str:
+        return (self.dir / name / "content").read_text(encoding="utf-8")
+
+    def test_a_removal_that_stops_part_way_keeps_the_ownership_marker(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        result = self.run_loader(
+            f"{self.lock('skills-tree.new')}\nRemove-Tree -Path (Get-Named 'skills-tree.new')"
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.dir / "skills-tree.new" / ".bootstrap-owned").exists())
+
+    def test_a_link_to_an_owned_tree_is_not_ours_and_is_refused(self) -> None:
+        self.owned_tree("elsewhere", "kept")
+        result = self.run_loader(
+            "New-Link 'skills-tree.new' 'elsewhere'\nRemove-Owned -Path (Get-StagingPath)"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("this loader did not create it", result.stderr)
+        self.assertEqual(self.content("elsewhere"), "kept")
+
+    def test_an_old_tree_beside_an_empty_name_does_not_stop_the_new_one_landing(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader(f"{self.lock('skills-tree.old')}\nInvoke-SwapIn")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree"), "new")
+        self.assertIn("Could not remove the previous tree", result.stderr)
+
+    def test_a_leftover_old_tree_that_will_not_go_stops_the_swap_naming_its_path(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader(f"{self.lock('skills-tree.old')}\nInvoke-SwapIn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"Could not remove the previous tree at {self.dir / 'skills-tree.old'}", result.stderr
+        )
+        self.assertEqual(self.content("skills-tree"), "live")
+
+    def test_a_swap_that_cannot_land_the_new_tree_puts_the_live_one_back(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader("Set-MoveFailure '.new'\nInvoke-SwapIn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not move the extracted tree into place", result.stderr)
+        self.assertEqual(self.content("skills-tree"), "live")
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
+    def test_a_swap_that_cannot_put_the_live_tree_back_names_where_it_is(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader("Set-MoveFailure '.new', '.old'\nInvoke-SwapIn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"could not put the previous tree back from {self.dir / 'skills-tree.old'}",
+            result.stderr,
+        )
+        self.assertEqual(self.content("skills-tree.old"), "live")
+
+    def test_a_failed_swap_never_moves_a_foreign_old_tree_into_place(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        foreign = self.dir / "skills-tree.old"
+        foreign.mkdir()
+        result = self.run_loader("Set-MoveFailure '.new'\nInvoke-SwapIn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(foreign.is_dir())
+        self.assertFalse((self.dir / "skills-tree").exists())
+
+    def test_cleanup_restores_the_old_tree_even_where_the_staging_tree_will_not_go(self) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader(f"{self.lock('skills-tree.new')}\nInvoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree"), "old")
+
+    def test_cleanup_warns_where_a_leftover_old_tree_will_not_go(self) -> None:
+        self.owned_tree("skills-tree", "live")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader(f"{self.lock('skills-tree.old')}\nInvoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Could not remove the previous tree", result.stderr)
+
+    def test_a_transient_tree_that_will_not_go_does_not_fail_a_successful_run(self) -> None:
+        self.owned_tree("tree", "fetched")
+        result = self.run_loader(f"$script:MODE = 'report'\n{self.lock('tree')}\nInvoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Could not remove the fetched tree", result.stderr)
+
+    def test_cleanup_keeps_the_old_tree_where_the_name_holds_something_not_ours(self) -> None:
+        self.owned_tree("elsewhere", "kept")
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader("New-Link 'skills-tree' 'elsewhere'\nInvoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree.old"), "old")
+
+    def test_cleanup_puts_the_old_tree_back_where_a_swap_left_the_name_empty(self) -> None:
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader("Invoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree"), "old")
+
+    def fetch(self, tar: str) -> str:
+        """Harness lines that stand in for the download and the extract, then run a kept-tree fetch and its cleanup."""
+        return (
+            "function Invoke-WebRequest { param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile, [int]$TimeoutSec) Set-Content -LiteralPath $OutFile -Value 'archive' }\n"
+            f"function Invoke-FakeTar {{ {tar} }}\n"
+            "function Get-TarPath { 'Invoke-FakeTar' }\n"
+            "$script:RESOLVED = '0123456789abcdef0123456789abcdef01234567'\n"
+            "try { Get-Tree; Invoke-SwapIn } finally { Invoke-Cleanup }"
+        )
+
+    def test_a_kept_tree_fetch_swaps_the_new_tree_in_and_records_its_commit(self) -> None:
+        self.owned_tree("skills-tree", "live")
+        extract = (
+            "$into = $args[[array]::IndexOf($args, '-C') + 1]; "
+            "Set-Content -LiteralPath (Join-Path $into 'content') -Value 'new' -NoNewline; "
+            "$global:LASTEXITCODE = 0"
+        )
+        result = self.run_loader(self.fetch(extract))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree"), "new")
+        self.assertTrue((self.dir / "skills-tree" / ".bootstrap-owned").exists())
+        self.assertEqual(
+            (self.dir / "skills-tree" / ".bootstrap-commit").read_text(encoding="ascii").strip(),
+            "0123456789abcdef0123456789abcdef01234567",
+        )
+        self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
+
+    def test_a_failed_extract_leaves_the_kept_tree_as_it_was(self) -> None:
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader(self.fetch("$global:LASTEXITCODE = 2"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not extract the downloaded archive", result.stderr)
+        self.assertEqual(self.content("skills-tree"), "live")
+        self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
+
+    def test_a_staging_tree_that_is_not_ours_stops_the_fetch_before_it_extracts(self) -> None:
+        self.owned_tree("skills-tree", "live")
+        foreign = self.dir / "skills-tree.new"
+        foreign.mkdir()
+        (foreign / "theirs").write_text("theirs", encoding="utf-8")
+        result = self.run_loader(self.fetch("throw 'extracted over a tree that is not ours'"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("this loader did not create it", result.stderr)
+        self.assertTrue((foreign / "theirs").exists())
+        self.assertEqual(self.content("skills-tree"), "live")
+
+    @unittest.skipUnless(
+        sys.platform == "win32", "only Windows refuses to rename a directory holding an open file"
+    )
+    def test_a_held_file_in_the_live_tree_leaves_it_whole_where_the_swap_cannot_move_it(
+        self,
+    ) -> None:
+        self.owned_tree("skills-tree.new", "new")
+        self.owned_tree("skills-tree", "live")
+        result = self.run_loader(f"{self.lock('skills-tree')}\nInvoke-SwapIn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not move the previous tree", result.stderr)
+        self.assertEqual(self.content("skills-tree"), "live")
+        self.assertTrue((self.dir / "skills-tree" / ".bootstrap-owned").exists())
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
+    @unittest.skipUnless(
+        sys.platform == "win32", "only Windows refuses to rename a directory holding an open file"
+    )
+    def test_a_held_file_in_the_old_tree_leaves_it_whole_where_cleanup_cannot_restore_it(
+        self,
+    ) -> None:
+        self.owned_tree("skills-tree.old", "old")
+        result = self.run_loader(f"{self.lock('skills-tree.old')}\nInvoke-Cleanup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Could not put the previous tree back", result.stderr)
+        self.assertEqual(self.content("skills-tree.old"), "old")
+        self.assertTrue((self.dir / "skills-tree.old" / ".bootstrap-owned").exists())
+        self.assertFalse((self.dir / "skills-tree").exists())
 
 
 def menu_functions() -> str:

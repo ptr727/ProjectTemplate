@@ -292,6 +292,16 @@ function Remove-Tree {
     Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
+# Renames a tree whole or not at all, which Move-Item does not: where a held file stops the rename, it moves the tree entry by entry instead, marker included.
+function Move-Tree {
+    param([string]$Path, [string]$Destination)
+    try {
+        [IO.Directory]::Move($Path, $Destination)
+    } catch [System.Management.Automation.MethodInvocationException] {
+        throw $_.Exception.InnerException
+    }
+}
+
 # Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
 # A rename of a directory in use fails whole on Windows, where a delete fails part way, which is why the old tree is renamed rather than deleted in place.
 function Invoke-SwapIn {
@@ -311,19 +321,19 @@ function Invoke-SwapIn {
             }
         }
         try {
-            Move-Item -LiteralPath $tree -Destination $retired
+            Move-Tree -Path $tree -Destination $retired
             $moved = $true
         } catch {
             die "Could not move the previous tree at $tree aside, which a process holding a file in it causes: $($_.Exception.Message)"
         }
     }
     try {
-        Move-Item -LiteralPath $staging -Destination $tree
+        Move-Tree -Path $staging -Destination $tree
     } catch {
         $reason = $_.Exception.Message
         if ($moved) {
             try {
-                Move-Item -LiteralPath $retired -Destination $tree
+                Move-Tree -Path $retired -Destination $tree
             } catch {
                 die "Could not move the extracted tree into place at ${tree} ($reason), and could not put the previous tree back from ${retired}: $($_.Exception.Message)"
             }
@@ -353,7 +363,7 @@ function Invoke-Cleanup {
     if (Test-Ownership -Path $retired) {
         if (-not (Test-Path -LiteralPath (Get-TreePath))) {
             try {
-                Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+                Move-Tree -Path $retired -Destination (Get-TreePath)
             } catch {
                 if (Test-KeepsTree) { warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)" }
             }
