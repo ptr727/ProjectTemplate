@@ -249,7 +249,13 @@ function Test-Ownership {
     if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
     # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
     # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
-    return [bool]($item -and $item.PSIsContainer -and -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1))
+    # A directory that cannot be listed is not known to be empty, so it stays somebody else's.
+    if (-not ($item -and $item.PSIsContainer)) { return $false }
+    try {
+        return -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
+    } catch {
+        return $false
+    }
 }
 
 # Two runs sharing a -Dir use the same fixed names, so without this one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
@@ -261,11 +267,12 @@ function Lock-Directory {
     try {
         $script:LOCK = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
     } catch [System.Management.Automation.MethodInvocationException] {
+        # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
         $reason = $_.Exception.InnerException
-        if ($reason -is [UnauthorizedAccessException] -or $reason -is [IO.DirectoryNotFoundException]) {
-            die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
+        if ($reason.GetType() -eq [IO.IOException]) {
+            die "Another bootstrap run is using $script:DIR, so this one stops rather than replace its trees. Let it finish, then run this again: $($reason.Message)"
         }
-        die "Another bootstrap run is using $script:DIR, so this one stops rather than replace its trees. Let it finish, then run this again: $($reason.Message)"
+        die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
     }
 }
 

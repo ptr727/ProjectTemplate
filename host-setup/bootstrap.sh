@@ -144,7 +144,7 @@ lock_dir() {
     lock=$(lock_path)
     mkdir -p "$DIR"
     if ! exec {LOCK_FD}>>"$lock"; then
-        die "Could not open $lock for locking. Check that $DIR is writable."
+        die "Could not open $lock for locking, which a $DIR that is not writable causes, or under WSL a Windows bootstrap run holding the same file. Let any such run finish, then run this again."
     fi
     flock -n "$LOCK_FD" || die "Another bootstrap run is using $DIR, so this one stops rather than replace its trees. Let it finish, then run this again."
 }
@@ -153,9 +153,14 @@ lock_dir() {
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
 # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
 # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
+# A directory that cannot be listed is not known to be empty, so it stays somebody else's.
 is_ours() {
+    local entries
     [[ ! -L $1 ]] || return 1
-    [[ -e $1/.bootstrap-owned ]] || [[ -d $1 && -z $(find "$1" -mindepth 1 -maxdepth 1 -print -quit) ]]
+    [[ -e $1/.bootstrap-owned ]] && return 0
+    [[ -d $1 ]] || return 1
+    entries=$(find "$1" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || return 1
+    [[ -z $entries ]]
 }
 
 exists() { [[ -e $1 || -L $1 ]]; }

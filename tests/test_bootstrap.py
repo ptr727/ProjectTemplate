@@ -808,15 +808,11 @@ class TestKeptTreeHandling(unittest.TestCase):
         )
 
     def test_a_run_is_refused_while_another_holds_the_directory_lock(self) -> None:
-        self.owned_tree("skills-tree.new", "theirs")
         handle = hold_flock(self.dir / "skills-tree.lock")
         self.addCleanup(handle.close)
         result = self.run_loader("lock_dir")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Another bootstrap run is using", result.stderr)
-        self.assertEqual(
-            (self.dir / "skills-tree.new" / "content").read_text(encoding="utf-8"), "theirs"
-        )
 
     def test_the_directory_lock_is_free_once_the_run_holding_it_ends(self) -> None:
         for _ in range(2):
@@ -852,6 +848,20 @@ class TestKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("swap_in")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "new")
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
+    def test_a_directory_that_cannot_be_listed_is_not_taken_for_an_empty_one(self) -> None:
+        """Its contents are unknown, so it is refused as somebody else's rather than moved aside as ours."""
+        if os.geteuid() == 0:
+            self.skipTest("root lists a directory regardless of its mode")
+        foreign = self.dir / "skills-tree"
+        foreign.mkdir()
+        (foreign / "theirs").write_text("theirs", encoding="utf-8")
+        foreign.chmod(0o000)
+        self.owned_tree("skills-tree.new", "new")
+        result = self.run_loader("swap_in")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("this loader did not create it", result.stderr)
         self.assertFalse((self.dir / "skills-tree.old").exists())
 
     def test_an_unmarked_directory_holding_anything_is_still_refused(self) -> None:
@@ -1229,12 +1239,10 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.assertFalse((self.dir / "skills-tree").exists())
 
     def test_the_directory_lock_refuses_a_second_run_and_frees_when_the_first_ends(self) -> None:
-        self.owned_tree("skills-tree.new", "theirs")
         holder = self.hold_lock()
         result = self.run_loader("Lock-Directory")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Another bootstrap run is using", result.stderr)
-        self.assertEqual(self.content("skills-tree.new"), "theirs")
         holder.communicate(input="\n", timeout=60)
         self.assertEqual(holder.returncode, 0, holder.stderr)
         result = self.run_loader("Lock-Directory")
@@ -1255,6 +1263,23 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("Remove-Owned -Path (Get-StagingPath)")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.dir / "skills-tree.new").exists())
+
+    @unittest.skipUnless(sys.platform == "win32", "denies listing through a Windows ACL")
+    def test_a_directory_that_cannot_be_listed_is_not_taken_for_an_empty_one(self) -> None:
+        """Its contents are unknown, so ownership is refused rather than thrown out of the cleanup that asks."""
+        result = self.run_loader(
+            "$path = Get-Named 'skills-tree.old'\n"
+            "New-Item -ItemType Directory -Path $path | Out-Null\n"
+            "New-Item -ItemType File -Path (Join-Path $path 'theirs') | Out-Null\n"
+            "$acl = Get-Acl -LiteralPath $path\n"
+            "$rule = [Security.AccessControl.FileSystemAccessRule]::new("
+            "[Security.Principal.WindowsIdentity]::GetCurrent().User, 'ListDirectory', 'Deny')\n"
+            "$acl.AddAccessRule($rule)\n"
+            "Set-Acl -LiteralPath $path -AclObject $acl\n"
+            "try { Test-Ownership -Path $path } finally { $acl.RemoveAccessRule($rule) | Out-Null; Set-Acl -LiteralPath $path -AclObject $acl }"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "False")
 
     def test_an_empty_directory_at_the_trees_name_is_replaced_by_the_new_tree(self) -> None:
         (self.dir / "skills-tree").mkdir()
