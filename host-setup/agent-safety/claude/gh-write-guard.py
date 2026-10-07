@@ -5005,9 +5005,9 @@ _PRIMARY_CHECKOUT_CASES = [
         ),
     ),
     (
-        "git -C /a -C /worktree reset --hard origin/main",
+        "git -C /aa -C /worktree reset --hard origin/main",
         "/primary",
-        {"/a": True, "/worktree": False},
+        {"/aa": True, "/worktree": False},
         None,
         "allow",
         "multiple -C options compose sequentially, the last (absolute) one replacing the running directory outright, matching real git's own repeated -C semantics",
@@ -7518,6 +7518,25 @@ def _selftest():
             if got != want:
                 ok = False
             print(f"  {mark} [msys ] {raw} reads as {want}")
+        seen = []
+        saved_branch = globals()["_current_push_branch"]
+        globals()["_current_push_branch"] = lambda d: seen.append(d) or "feature/x"
+        try:
+            classify(
+                "git push",
+                cwd="/c/repos/primary",
+                origin=origin,
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=lambda _d: False,
+            )
+        finally:
+            globals()["_current_push_branch"] = saved_branch
+        want = ["C:/repos/primary"]
+        mark = "ok  " if seen == want else "FAIL"
+        if seen != want:
+            ok = False
+        print(f"  {mark} [msys ] a bare push resolves its branch in the converted cwd, got {seen}")
     finally:
         _MSYS_DRIVE_PATHS = saved_msys
     for cmd, want, label in _CONTEXT_LEX_CASES:
