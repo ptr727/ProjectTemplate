@@ -15,6 +15,8 @@ from pathlib import Path
 from subprocess import run
 from typing import NamedTuple
 
+from host_capability import bash_or_skip
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -288,7 +290,7 @@ class ReleaseGuardCase(unittest.TestCase):
                 env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2}
                 env["GITHUB_OUTPUT"] = str(output)
                 verdict = run(
-                    ["bash", "-c", script],
+                    [bash_or_skip(), "-c", script],
                     env=env,
                     capture_output=True,
                     text=True,
@@ -321,7 +323,7 @@ class ReleaseGuardCase(unittest.TestCase):
                     env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
                     env["GITHUB_OUTPUT"] = str(output)
                     verdict = run(
-                        ["bash", "-c", script],
+                        [bash_or_skip(), "-c", script],
                         env=env,
                         capture_output=True,
                         text=True,
@@ -340,7 +342,7 @@ class ReleaseGuardCase(unittest.TestCase):
             env = {**os.environ, "BRANCH": injected, "SEMVER2": "1.2.34"}
             env["GITHUB_OUTPUT"] = str(output)
             verdict = run(
-                ["bash", "-c", script],
+                [bash_or_skip(), "-c", script],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -487,7 +489,7 @@ class ReleaseGuardCase(unittest.TestCase):
                 head_sha = git(work, "rev-parse", "HEAD")
                 activity.write_text(json.dumps(pushes(built_sha, head_sha)), encoding="utf-8")
                 verdict = run(
-                    ["bash", "-c", script],
+                    [bash_or_skip(), "-c", script],
                     cwd=built,
                     env={
                         **env,
@@ -573,7 +575,7 @@ class ReleaseGuardCase(unittest.TestCase):
         def gate(branch: str, semver2: str, smoke: str = "false") -> tuple[int, str]:
             env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2, "SMOKE": smoke}
             verdict = run(
-                ["bash", "-c", script],
+                [bash_or_skip(), "-c", script],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -1014,7 +1016,7 @@ class ReleaseGuardCase(unittest.TestCase):
             # Naming the subTest must not be what fails when the document is what is wrong.
             with self.subTest(block=(source.splitlines() or [""])[0][:60]):
                 parsed = run(
-                    ["bash", "-n", "-c", source],
+                    [bash_or_skip(), "-n", "-c", source],
                     check=False,
                     capture_output=True,
                     text=True,
@@ -1047,17 +1049,17 @@ gh() {
 """
 
         success = run(
-            ["bash", "-c", f"{fake_api}\n{probe}"],
+            [bash_or_skip(), "-c", f"{fake_api}\n{probe}"],
             check=False,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
-        failure = run(["bash", "-c", f"gh() {{ return 17; }}\n{probe}"], check=False)
+        failure = run([bash_or_skip(), "-c", f"gh() {{ return 17; }}\n{probe}"], check=False)
         # One read failing is the fail-open the "every read fails" case above cannot see.
         one_read_fails = run(
             [
-                "bash",
+                bash_or_skip(),
                 "-c",
                 f"{fake_api.replace('''repos/*/contents/.github\\?*) printf''', 'repos/*/contents/.github\\?*) return 17 ;; repos/*/never\\?*) printf')}\n{probe}",
             ],
@@ -1074,7 +1076,7 @@ gh() {
             """printf '%s\\n' '# - package-ecosystem: devcontainers' '  - package-ecosystem: \"github-actions2\"'""",
         )
         missing = run(
-            ["bash", "-c", f"{missing_api}\n{probe}"],
+            [bash_or_skip(), "-c", f"{missing_api}\n{probe}"],
             check=False,
             capture_output=True,
             text=True,
@@ -1165,7 +1167,7 @@ gh() {
         if not extra_env or "UV_PYTHON" not in extra_env:
             env.pop("UV_PYTHON", None)
         result = run(
-            ["bash", "-c", script],
+            [bash_or_skip(), "-c", script],
             cwd=work,
             env=env,
             capture_output=True,
@@ -1674,7 +1676,7 @@ gh() {
                     "<coverage/>", encoding="utf-8"
                 )
                 verdict = run(
-                    ["bash", "-c", script],
+                    [bash_or_skip(), "-c", script],
                     cwd=work,
                     env={
                         **os.environ,
@@ -1754,7 +1756,7 @@ gh() {
         for value, expected in cases.items():
             with self.subTest(value=value):
                 verdict = run(
-                    ["bash", "-c", script],
+                    [bash_or_skip(), "-c", script],
                     env={**os.environ, "PYTHON_VERSIONS": value},
                     capture_output=True,
                     text=True,
@@ -1767,7 +1769,7 @@ gh() {
         # The runner reads a workflow command off any line starting with one, so an unescaped newline starts a second.
         injected = '["3.13"]\n::error::injected'
         verdict = run(
-            ["bash", "-c", script],
+            [bash_or_skip(), "-c", script],
             env={**os.environ, "PYTHON_VERSIONS": injected},
             capture_output=True,
             text=True,
@@ -1781,7 +1783,7 @@ gh() {
 
         # A carriage return is the third escape, and without this nothing here would notice its removal.
         verdict = run(
-            ["bash", "-c", script],
+            [bash_or_skip(), "-c", script],
             env={**os.environ, "PYTHON_VERSIONS": "x\ry"},
             capture_output=True,
             text=True,
@@ -1795,7 +1797,7 @@ gh() {
         # Their order is what the %0A assertion above covers instead, not this one.
         # Substituting the percent last renders a newline %250A, which fails there and passes here.
         verdict = run(
-            ["bash", "-c", script],
+            [bash_or_skip(), "-c", script],
             env={**os.environ, "PYTHON_VERSIONS": "%"},
             capture_output=True,
             text=True,

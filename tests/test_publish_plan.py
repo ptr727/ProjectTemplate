@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import bash_or_skip
+
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO / ".github" / "workflows" / "publish-plan-task.yml"
 
@@ -47,7 +49,7 @@ class PublishPlanCase(unittest.TestCase):
             }
         )
         result = subprocess.run(
-            ["bash", "-c", decision_script()],
+            [bash_or_skip(), "-c", decision_script()],
             check=False,
             capture_output=True,
             env=env,

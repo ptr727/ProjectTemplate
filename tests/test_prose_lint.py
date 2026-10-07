@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import ClassVar
 from unittest import mock
 
+from host_capability import bash_or_skip
+
 try:
     import resource  # POSIX only, absent on Windows entirely rather than merely restricted
 except ImportError:
@@ -70,7 +72,7 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
         | extra
     )
     return subprocess.run(
-        ["bash", "-c", "\n".join(script_lines)],
+        [bash_or_skip(), "-c", "\n".join(script_lines)],
         cwd=root,
         env=env,
         text=True,
@@ -118,7 +120,7 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
             "PAYLOAD_LABELED": payload,
         }
         result = subprocess.run(
-            ["bash", "-c", "\n".join(script_lines)],
+            [bash_or_skip(), "-c", "\n".join(script_lines)],
             env=env,
             text=True,
             encoding="utf-8",
@@ -4072,7 +4074,7 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         env |= {"BASE": "HEAD", "PATHS": ".", "GITHUB_ACTION_PATH": str(stub_dir)}
         env |= extra
         r = subprocess.run(
-            ["bash", "-c", "\n".join(lines)],
+            [bash_or_skip(), "-c", "\n".join(lines)],
             cwd=str(root),
             capture_output=True,
             text=True,

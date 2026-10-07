@@ -27,6 +27,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from host_capability import bash_or_skip, requires_symlink
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "local_review.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import local_review
@@ -370,14 +372,12 @@ class ContentKeyCase(RepoCase):
         other = local_review.content_digest("0" * 40, marks)
         self.assertNotEqual(digest, other)
 
+    @requires_symlink
     def test_a_symlink_is_keyed_as_a_link_not_as_its_pointee(self) -> None:
         """git stores a link as its target path, so the key must not follow it out of the tree."""
         outside = self.outside / "outside.txt"
         outside.write_text("secret\n", encoding="utf-8")
-        try:
-            (self.tmp / "link").symlink_to(outside)
-        except (OSError, NotImplementedError):
-            self.skipTest("this platform does not permit creating a symlink")
+        (self.tmp / "link").symlink_to(outside)
         mark = self.marks().get("link", "")
         if "120000:" not in mark:
             self.skipTest(f"this checkout does not store links as links: {mark}")
@@ -990,7 +990,7 @@ class ReceiptCase(RepoCase):
         """
         script = f"python3 {SCRIPT} {' '.join(args)} {shell}"
         proc = subprocess.run(
-            ["bash", "-c", f"{script}; exit ${{PIPESTATUS[0]}}"],
+            [bash_or_skip(), "-c", f"{script}; exit ${{PIPESTATUS[0]}}"],
             cwd=str(self.tmp),
             capture_output=True,
             text=True,

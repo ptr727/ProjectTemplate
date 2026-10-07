@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import bash_or_skip
+
 CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
 
@@ -40,7 +42,7 @@ def require(*tools: str) -> str:
     for tool in tools:
         if shutil.which(tool) is None:
             raise unittest.SkipTest(f"no {tool} on PATH, so the script's own lines cannot be run")
-    return str(shutil.which("bash"))
+    return bash_or_skip()
 
 
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:

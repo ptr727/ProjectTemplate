@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from host_capability import requires_symlink
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import docker_lint
 
@@ -165,6 +167,7 @@ class DockerLintCase(unittest.TestCase):
             docker_lint.tracked_files(self.root, linter),
         )
 
+    @requires_symlink
     def test_extensionless_symlink_is_never_followed(self) -> None:
         secret = self.outside / "secret"
         secret.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -173,6 +176,7 @@ class DockerLintCase(unittest.TestCase):
         with mock.patch.object(Path, "open", side_effect=AssertionError("symlink target opened")):
             self.assertEqual([], docker_lint.tracked_files(self.root, linter))
 
+    @requires_symlink
     def test_has_shell_shebang_reports_false_for_a_symlink_without_reading_it(self) -> None:
         secret = self.outside / "secret"
         secret.write_text("#!/usr/bin/env bash\n", encoding="utf-8")

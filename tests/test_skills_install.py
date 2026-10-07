@@ -19,6 +19,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from host_capability import requires_symlink
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import skills_install
 
@@ -216,6 +218,7 @@ class MaterializeCase(unittest.TestCase):
         self.assertFalse((target / "bar").exists())
         self.assertTrue((target / "foo").is_dir())
 
+    @requires_symlink
     def test_a_symlinked_directory_in_the_cleanup_scan_is_skipped_not_crashed_on(self) -> None:
         """is_dir() alone follows a symlink, and shutil.rmtree() refuses a top-level symlink
         with an uncaught OSError. A stray symlink under the shared target, even one whose real
@@ -265,6 +268,7 @@ class MaterializeCase(unittest.TestCase):
         skills_install.materialize_global_skills(target)
         self.assertFalse((target / "not-a-skill").exists())
 
+    @requires_symlink
     def test_a_symlink_in_a_skill_directory_is_rejected(self) -> None:
         """shutil.copytree() follows a symlink by default, which would silently pull content
         from outside .agents/skills/ into the shared, machine-wide skills directory."""

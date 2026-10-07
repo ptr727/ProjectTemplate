@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import can_symlink, requires_symlink
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import build_dist
 
@@ -86,6 +88,7 @@ class TreeCase(unittest.TestCase):
 class RegenerateCase(TreeCase):
     """Regeneration and staleness detection over the generated trees."""
 
+    @requires_symlink
     def test_a_symlink_in_a_skill_directory_is_rejected_by_regenerate(self) -> None:
         """shutil.copytree() follows a symlink by default, which would silently pull content
         from outside .agents/skills/ into the generated, published plugin."""
@@ -94,12 +97,14 @@ class RegenerateCase(TreeCase):
         with self.assertRaises(ValueError):
             build_dist.regenerate()
 
+    @requires_symlink
     def test_a_symlink_in_a_skill_directory_is_rejected_by_skill_digest(self) -> None:
         self.make_skill("foo")
         (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
         with self.assertRaises(ValueError):
             build_dist.skill_digest("foo")
 
+    @requires_symlink
     def test_a_skill_directory_that_is_itself_a_symlink_is_rejected(self) -> None:
         """rglob("*") only yields paths inside the directory it walks, so a skill directory that
         is itself a symlink to another tree would otherwise walk straight into that tree without
@@ -299,6 +304,7 @@ class RegenerateCase(TreeCase):
         (build_dist.DIGEST_DIR / "foo").unlink()
         self.assertTrue(build_dist.is_stale())
 
+    @requires_symlink
     def test_a_stamp_replaced_by_a_symlink_reports_stale(self) -> None:
         """is_file() follows a symlink, so a stamp pointing outside the tree would otherwise
         read as current whenever its target happens to hold the right digest."""
@@ -351,6 +357,7 @@ class RegenerateCase(TreeCase):
         self.assertEqual(names, ["foo"])
         self.assertFalse((self.dist_plugin / "skills" / "bar").exists())
 
+    @requires_symlink
     def test_main_reports_a_symlink_cleanly_instead_of_a_raw_traceback(self) -> None:
         self.make_skill("foo")
         (self.skills_src / "foo" / "escape").symlink_to(self.tmp)
@@ -360,6 +367,7 @@ class RegenerateCase(TreeCase):
             exit_code = build_dist.main()
         self.assertEqual(exit_code, 1)
 
+    @requires_symlink
     def test_check_reports_a_symlink_as_2_not_1(self) -> None:
         """1 is --check's own documented "stale" result, so a caller reading the exit code (host-setup/menu.sh among them) needs a different code to tell a real failure apart from that finding.
 
@@ -631,16 +639,13 @@ class IncludeCase(TreeCase):
     def test_a_source_outside_the_root_or_under_a_generated_tree_is_refused(self) -> None:
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
         outside.write_text("## Alpha\n\nx\n", encoding="utf-8")
-        (self.tmp / "link.md").symlink_to(outside)
         self.github_skills.mkdir(parents=True, exist_ok=True)
         (self.github_skills / "gen.md").write_text("## Alpha\n\nx\n", encoding="utf-8")
-        for rel in (
-            "../outside.md",
-            str(outside),
-            "link.md",
-            ".github/skills/gen.md",
-            "missing.md",
-        ):
+        sources = ["../outside.md", str(outside), ".github/skills/gen.md", "missing.md"]
+        if can_symlink():
+            (self.tmp / "link.md").symlink_to(outside)
+            sources.append("link.md")
+        for rel in sources:
             with self.subTest(rel):
                 self.make_skill("foo", self.region(f"{rel} > Alpha"))
                 with self.assertRaises(ValueError):
@@ -694,6 +699,7 @@ class IncludeCase(TreeCase):
         self.assertEqual(self.skill_text(), body)
         self.assertFalse(build_dist.is_stale())
 
+    @requires_symlink
     def test_a_symlinked_skill_directory_is_refused_before_any_fill(self) -> None:
         """The fill writes through whatever the walk found, so the symlink check has to run before it."""
         target = self.tmp / "elsewhere"
@@ -706,6 +712,7 @@ class IncludeCase(TreeCase):
             build_dist.regenerate()
         self.assertEqual((target / "SKILL.md").read_text(encoding="utf-8"), original)
 
+    @requires_symlink
     def test_a_directory_symlink_on_the_way_is_refused(self) -> None:
         """A symlink inside the root can still alias a generated tree or the including file itself."""
         self.github_skills.mkdir(parents=True, exist_ok=True)
@@ -814,15 +821,16 @@ class IncludeCase(TreeCase):
         self.make_skill("foo", self.region("RULES.md > Alpha"))
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())) / "outside.md"
         outside.write_text("## A\n\na\n", encoding="utf-8")
-        (self.tmp / "link.md").symlink_to(outside)
         self.dist_plugin.mkdir(parents=True, exist_ok=True)
         (self.dist_plugin / "GEN.md").write_text("## A\n\na\n", encoding="utf-8")
         cases = {
             "missing": "docs/absent.md",
-            "through a symlink": "link.md",
             "under a generated tree": ".claude-plugin/fleet-skills/GEN.md",
             "outside the root": "../outside.md",
         }
+        if can_symlink():
+            (self.tmp / "link.md").symlink_to(outside)
+            cases["through a symlink"] = "link.md"
         for label, rel in cases.items():
             with self.subTest(label):
                 self.declare_destinations(rel)
