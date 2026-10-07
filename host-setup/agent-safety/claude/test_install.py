@@ -633,7 +633,44 @@ class TestWholeFileOwnership(StampCase):
         ):
             install.write_regular_file(self.md, b"new\n")
         self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertNotIn("left incomplete", str(caught.exception))
         self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_created_claude_md_cut_short_leaves_nothing_to_move_aside(self):
+        """The file the run created is gone, so the message neither calls it incomplete nor asks for a move."""
+        self.home.mkdir(parents=True)
+        r = self.run_with_file_size_limit(4096)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("Nothing was installed", r.stderr)
+        self.assertNotIn("left incomplete", r.stderr)
+        self.assertNotIn("move the file aside", r.stderr)
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_an_interrupt_stays_an_interrupt_when_the_created_file_cannot_be_removed(self):
+        self.home.mkdir(parents=True)
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            mock.patch.object(install.os, "unlink", side_effect=PermissionError(13, "in use")),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+
+    def test_a_created_file_already_gone_reads_as_removed(self):
+        """Something else removed it first, so the error says it no longer exists."""
+        self.home.mkdir(parents=True)
+
+        def gone(fd, data):
+            os.unlink(self.md)
+            raise OSError(27, "constructed: file too large")
+
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=gone),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertIn("no longer exists", str(caught.exception))
 
     def test_a_failed_check_before_the_write_removes_the_file_it_created(self):
         """The create already happened when fstat fails, and the empty file it made is removed."""
@@ -654,6 +691,41 @@ class TestWholeFileOwnership(StampCase):
             install.write_regular_file(self.md, b"new\n")
         self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
         self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_restore_cut_short_is_not_backed_up_again(self):
+        """A leftover of the prior content alone, not of the render, is still the run's own output."""
+        self.install()
+        edited = "A line added by hand.\n" + self.md.read_text(encoding="utf-8")
+        self.md.write_text(edited, encoding="utf-8")
+        real_replace = install._replace_contents
+        calls = []
+
+        def cut_short(fd, data):
+            calls.append(data)
+            if len(calls) > 2:
+                return real_replace(fd, data)
+            if len(calls) == 2:
+                real_replace(fd, data[:100])
+            raise OSError(27, "constructed: file too large")
+
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 1)
+        self.assertFalse(calls[0].startswith(self.md.read_bytes()))
+        self.assertEqual(len(self.backups()), 1)
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
 
     def test_a_created_file_that_cannot_be_removed_is_named_as_incomplete(self):
         """The partial file stays, so the error is the write's own rather than the removal's."""

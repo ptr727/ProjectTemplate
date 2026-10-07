@@ -460,7 +460,7 @@ class NotRegularFile(OSError):
 
 
 class IncompleteWrite(OSError):
-    """A write that failed after the file was truncated, so the file no longer holds what it did."""
+    """A failed write that may leave the file holding neither its prior content nor the new."""
 
 
 def write_regular_file(path, data, prior=None, before=None):
@@ -503,7 +503,7 @@ def write_regular_file(path, data, prior=None, before=None):
         try:
             _remove_if_same_file(path, made)
         except OSError as unlink_error:
-            if not isinstance(e, IncompleteWrite):
+            if isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
                 raise IncompleteWrite(
                     f"{path} was created and left incomplete, and could not be removed "
                     f"({unlink_error})"
@@ -511,7 +511,8 @@ def write_regular_file(path, data, prior=None, before=None):
         else:
             if isinstance(e, IncompleteWrite):
                 raise OSError(
-                    f"{path} could not be written, so the file this run created was removed ({e})"
+                    f"{path} could not be written, and the file this run created no longer "
+                    f"exists ({e.__cause__ or e})"
                 ) from e
         raise
 
@@ -520,11 +521,16 @@ def _remove_if_same_file(path, made):
     """Remove `path` where it is still the file `made` describes, and raise OSError where it is not.
 
     Compared rather than removed by name, since something else may have put its own file at the
-    path once the descriptor closed, and removing that would delete a file this run never wrote.
+    path once the descriptor closed. The comparison narrows the time in which such a file could be
+    removed to the moment between it and the removal, rather than closing it. A path already gone
+    is left gone.
     """
     if made is None:
         raise OSError(f"{path} could not be identified as the file this run created")
-    now = os.lstat(path)
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return
     if (now.st_dev, now.st_ino) != (made.st_dev, made.st_ino):
         raise OSError(f"{path} is no longer the file this run created")
     os.unlink(path)
@@ -1341,9 +1347,10 @@ def main():
             return 1
         except OSError as e:
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
+            aside = ", or move the file aside" if os.path.lexists(claude_md) else ""
             sys.stderr.write(
                 f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
-                "Fix what the error names, or move the file aside, then re-run.\n"
+                f"Fix what the error names{aside}, then re-run.\n"
             )
             return 1
         if backups:
