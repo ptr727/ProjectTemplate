@@ -351,7 +351,7 @@ class TestWholeFileOwnership(StampCase):
         self.local.write_text("A note that changes the render.\n", encoding="utf-8")
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("the file the last install wrote", r.stdout)
+        self.assertIn("is this installer's own output rather than a hand edit", r.stdout)
 
     def test_the_report_names_a_hand_edit(self):
         self.install()
@@ -577,7 +577,7 @@ class TestWholeFileOwnership(StampCase):
         report = run(self.home, "--report")
         self.assertEqual(report.returncode, 1, report.stdout + report.stderr)
         self.assertNotIn("was edited since the last install", report.stdout)
-        self.assertIn("is the file the last install wrote", report.stdout)
+        self.assertIn("is this installer's own output rather than a hand edit", report.stdout)
         self.install()
         self.assertEqual(self.backups(), [])
         self.assertEqual(run(self.home, "--report").returncode, 0)
@@ -646,6 +646,24 @@ class TestWholeFileOwnership(StampCase):
             install.write_regular_file(self.md, b"new\n")
         self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
         self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_created_file_that_cannot_be_removed_is_named_as_incomplete(self):
+        """The partial file stays, so the error is the write's own rather than the removal's."""
+        self.home.mkdir(parents=True)
+        real_replace = install._replace_contents
+
+        def cut_short(fd, data):
+            real_replace(fd, b"partial")
+            raise OSError(27, "constructed: file too large")
+
+        in_use = PermissionError(13, "constructed: in use")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            mock.patch.object(install.os, "unlink", side_effect=in_use),
+            self.assertRaisesRegex(install.IncompleteWrite, "was left incomplete"),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"partial")
 
     def test_a_failed_write_keeps_a_file_it_found(self):
         """Only a file this call created is removed, so a found one stays to hold what is left."""

@@ -475,15 +475,20 @@ def write_regular_file(path, data, prior=None, before=None):
     Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
     truncate and `prior` could not be put back, or where the close after the truncate failed,
     either of which can leave the file holding neither version. The open is tried exclusively
-    first, so a file this call created is told from one it found and is removed again when the
-    write fails, leaving the path absent as it was found. A dangling link fails that exclusive
-    open, so its target is written, and kept, as a file found.
+    first, so a file this call created is told from one it found, and a path that is a link always
+    counts as found, so its target is kept. A created file is removed again when the write fails,
+    leaving the path absent as it was found.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
         fd = os.open(path, flags | os.O_EXCL, 0o666)
     except FileExistsError:
-        _write_open_file(path, os.open(path, flags, 0o666), data, prior, before)
+        fd = os.open(path, flags, 0o666)
+        created = False
+    else:
+        created = not os.path.islink(path)
+    if not created:
+        _write_open_file(path, fd, data, prior, before)
         return
     try:
         _write_open_file(path, fd, data, prior, before)
@@ -491,15 +496,16 @@ def write_regular_file(path, data, prior=None, before=None):
         try:
             os.unlink(path)
         except OSError as unlink_error:
+            if not isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(
+                    f"{path} was created and left incomplete, and could not be removed "
+                    f"({unlink_error})"
+                ) from e
+        else:
             if isinstance(e, IncompleteWrite):
-                raise
-            raise IncompleteWrite(
-                f"{path} was created and left incomplete, and could not be removed ({unlink_error})"
-            ) from e
-        if isinstance(e, IncompleteWrite):
-            raise OSError(
-                f"{path} could not be written, so the file this run created was removed ({e})"
-            ) from e
+                raise OSError(
+                    f"{path} could not be written, so the file this run created was removed ({e})"
+                ) from e
         raise
 
 
@@ -649,9 +655,9 @@ def stamped_instructions_digest(claude_home):
 def record_leftover_instructions(claude_home, claude_md):
     """Stamp the digest of what a cut-short CLAUDE.md write left, where the stamp can carry it.
 
-    Its prior content was a render the stamp vouched for, a backup this run wrote, or nothing, so
-    no byte of the leftover was written by hand. Without this record the next run backs it up as a
-    hand edit and the report calls it one. Only a stamp passing its shape check is updated, since
+    What the file held before was a render the stamp vouched for, an edit this run backed up, or
+    nothing, so replacing the leftover loses nothing. Without this record the next run backs it up
+    as a hand edit and the report calls it one. Only a stamp passing its shape check is updated, since
     one failing it vouches for nothing either way.
     """
     stamp_path = claude_home / "agent-safety-stamp.json"
@@ -1160,8 +1166,8 @@ def report(claude_home):
         if live_text != render_instructions(local_path, local_text):
             if text_digest(live_text) == stamp.get("instructionsDigest"):
                 problems.append(
-                    f"CLAUDE.md is the file the last install wrote, and this checkout and "
-                    f"{local_path} now render a different one"
+                    "CLAUDE.md is this installer's own output rather than a hand edit, and "
+                    f"this checkout and {local_path} now render a different one"
                 )
             else:
                 problems.append(
