@@ -23,6 +23,8 @@ DRY_RUN=false
 ASSUME_YES=false
 RESOLVED=""
 TREE=""
+# Global rather than local, since the lock it holds lasts until this process ends.
+LOCK_FD=""
 
 # --- Output ---
 
@@ -132,10 +134,34 @@ tree_path() { printf '%s\n' "$DIR/$(tree_name)"; }
 staging_path() { printf '%s\n' "$DIR/$(tree_name).new"; }
 retired_path() { printf '%s\n' "$DIR/$(tree_name).old"; }
 archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
+lock_path() { printf '%s\n' "$DIR/$(tree_name).lock"; }
+
+# Two runs sharing a --dir use the same fixed names, so without this one run's removal of its staging tree, or its exit cleanup, can delete a tree the other is still extracting into.
+# The lock is the kernel's rather than a file whose presence is the lock, so a run that dies releases it, and bootstrap.ps1 opens the same file with FileShare.None, which .NET implements as a flock on Linux.
+# The file is left in place, since removing it while another run holds it open would let a third run lock a new file under the same name.
+lock_dir() {
+    local lock
+    lock=$(lock_path)
+    mkdir -p "$DIR"
+    if ! exec {LOCK_FD}>>"$lock"; then
+        die "Could not open $lock for locking, which a $DIR that is not writable causes, or under WSL a Windows bootstrap run holding the same file. Let any such run finish, then run this again."
+    fi
+    flock -n "$LOCK_FD" || die "Another bootstrap run is using $DIR, so this one stops rather than replace its trees. Let it finish, then run this again."
+}
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-is_ours() { [[ ! -L $1 && -e $1/.bootstrap-owned ]]; }
+# An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
+# It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
+# A directory that cannot be listed is not known to be empty, so it stays somebody else's.
+is_ours() {
+    local entries
+    [[ ! -L $1 ]] || return 1
+    [[ -e $1/.bootstrap-owned ]] && return 0
+    [[ -d $1 ]] || return 1
+    entries=$(find "$1" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || return 1
+    [[ -z $entries ]]
+}
 
 exists() { [[ -e $1 || -L $1 ]]; }
 
@@ -251,7 +277,8 @@ run_tool() {
     [[ $ASSUME_YES == true ]] && flags+=(--yes)
     [[ $DRY_RUN == true ]] && flags+=(--dry-run)
 
-    "$path" "$@" "${flags[@]}"
+    # The lock's descriptor is closed for the tool, so a daemon it starts cannot inherit the lock and hold it past this run.
+    "$path" "$@" "${flags[@]}" {LOCK_FD}>&-
 }
 
 report() {
@@ -386,6 +413,8 @@ main() {
     command -v curl >/dev/null ||
         die "curl is required to fetch the tooling. Install it with this host's package manager, then run this again."
     command -v tar >/dev/null || die "tar is required to unpack the tooling"
+    command -v flock >/dev/null ||
+        die "flock is required to keep two runs from replacing each other's trees. Install util-linux with this host's package manager, then run this again."
 
     # A run with no action and no terminal reports rather than guessing, which is what a pipe into a shell is.
     # The remedy is printed rather than assumed, since somebody reaching this has just pasted a one-line install.
@@ -405,6 +434,8 @@ main() {
     [[ -n $DIR ]] || DIR=$(default_dir)
     [[ $DIR == /* ]] || DIR="./$DIR"
 
+    # Taken before the exit trap is set, so a run refused here leaves the trees of the run holding the lock alone.
+    lock_dir
     trap cleanup EXIT
     resolve_ref
     download_tree

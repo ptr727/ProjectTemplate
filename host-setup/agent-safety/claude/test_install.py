@@ -351,7 +351,7 @@ class TestWholeFileOwnership(StampCase):
         self.local.write_text("A note that changes the render.\n", encoding="utf-8")
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("the file the last install wrote", r.stdout)
+        self.assertIn("is this installer's own output rather than a hand edit", r.stdout)
 
     def test_the_report_names_a_hand_edit(self):
         self.install()
@@ -488,7 +488,7 @@ class TestWholeFileOwnership(StampCase):
             self.md.symlink_to(self.home.parent / "not-cloned" / "CLAUDE.md")
         except OSError:
             self.skipTest("this host cannot create a symlink")
-        self.assert_refused_with_nothing_changed(run(self.home), "could not be rewritten")
+        self.assert_refused_with_nothing_changed(run(self.home), "could not be written")
 
     def test_a_claude_md_symlink_loop_stops_the_install_with_nothing_changed(self):
         self.home.mkdir(parents=True)
@@ -567,6 +567,305 @@ class TestWholeFileOwnership(StampCase):
         self.assertIn("backed up at", r.stderr)
         self.assertEqual(self.md.read_text(encoding="utf-8"), "A constructed note.\n")
         self.assertEqual(len(self.backups()), 1)
+
+    def test_a_write_cut_short_is_not_read_back_as_a_hand_edit(self):
+        """The leftover is the installer's own bytes, so neither the report nor the re-run calls it edited."""
+        self.install()
+        self.local.write_text("A constructed note that changes the render.\n", encoding="utf-8")
+        r = self.run_with_file_size_limit(4096)
+        self.assertIn("was left incomplete", r.stderr)
+        report = run(self.home, "--report")
+        self.assertEqual(report.returncode, 1, report.stdout + report.stderr)
+        self.assertNotIn("was edited since the last install", report.stdout)
+        self.assertIn("left when its write of the file failed", report.stdout)
+        self.install()
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_hand_edit_cut_short_is_backed_up_once(self):
+        """The first run backs the edit up, so the leftover it writes is not backed up again.
+
+        Cut short in process, since a size limit that refuses the restore refuses the backup too.
+        """
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        real_replace = install._replace_contents
+        calls = []
+
+        def cut_short(fd, data):
+            calls.append(data)
+            if len(calls) > 2:
+                return real_replace(fd, data)
+            if len(calls) == 1:
+                real_replace(fd, data[:100])
+            raise OSError(27, "constructed: file too large")
+
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1",
+        }
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(install.main(), 1)
+        self.assertIn("was left incomplete", stderr.getvalue())
+        self.assertEqual(self.md.read_bytes(), calls[0][:100])
+        self.assertEqual(len(self.backups()), 1)
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+        self.assertEqual(self.backups()[0].read_text(encoding="utf-8"), edited)
+
+    def test_a_failed_write_removes_the_file_it_created(self):
+        """The path held nothing, so a write cut short leaves nothing rather than a partial file."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertNotIn("left incomplete", str(caught.exception))
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_created_claude_md_cut_short_leaves_nothing_to_move_aside(self):
+        """The file the run created is gone, so the message neither calls it incomplete nor asks for a move."""
+        self.home.mkdir(parents=True)
+        r = self.run_with_file_size_limit(4096)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("could not be written (its write failed", r.stderr)
+        self.assertNotIn("left incomplete", r.stderr)
+        self.assertNotIn("move the file aside", r.stderr)
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_an_interrupt_stays_an_interrupt_when_the_created_file_cannot_be_removed(self):
+        self.home.mkdir(parents=True)
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            mock.patch.object(install.os, "unlink", side_effect=PermissionError(13, "in use")),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+
+    def after_close(self, action):
+        """os.close that runs `action` once the descriptor is closed, where a cleanup next reads the path.
+
+        Run after the close rather than during the write, since Windows refuses to replace or remove
+        a file this process still holds open.
+        """
+        real_close = os.close
+        pending = [action]
+
+        def closing(fd):
+            real_close(fd)
+            while pending:
+                pending.pop()()
+
+        return mock.patch.object(install.os, "close", side_effect=closing)
+
+    def test_a_created_file_already_gone_reads_as_removed(self):
+        """Something else removed it first, so the error says it no longer exists."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(lambda: os.unlink(self.md)),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertIn("no longer exists", str(caught.exception))
+
+    def test_a_failed_check_before_the_write_removes_the_file_it_created(self):
+        """The create already happened when fstat fails, and the empty file it made is removed."""
+        self.home.mkdir(parents=True)
+        real_fstat = os.fstat
+        calls = []
+
+        def refused(fd):
+            calls.append(fd)
+            if len(calls) == 1:
+                return real_fstat(fd)
+            raise OSError(5, "constructed: I/O error")
+
+        with (
+            mock.patch.object(install.os, "fstat", side_effect=refused),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_restore_cut_short_is_not_backed_up_again(self):
+        """A leftover of the prior content alone, not of the render, is still the run's own output."""
+        self.install()
+        edited = "A line added by hand.\n" + self.md.read_text(encoding="utf-8")
+        self.md.write_text(edited, encoding="utf-8")
+        real_replace = install._replace_contents
+        calls = []
+
+        def cut_short(fd, data):
+            calls.append(data)
+            if len(calls) > 2:
+                return real_replace(fd, data)
+            if len(calls) == 2:
+                real_replace(fd, data[:100])
+            raise OSError(27, "constructed: file too large")
+
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 1)
+        self.assertFalse(calls[0].startswith(self.md.read_bytes()))
+        self.assertEqual(len(self.backups()), 1)
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_an_interrupt_stays_an_interrupt_when_the_close_also_fails(self):
+        """A failed close is reported only for an error, so an interrupt is never turned into one."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            self.close_failing_once(),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_created_file_that_cannot_be_removed_is_named_as_incomplete(self):
+        """The partial file stays, so the error is the write's own rather than the removal's."""
+        self.home.mkdir(parents=True)
+        real_replace = install._replace_contents
+
+        def cut_short(fd, data):
+            real_replace(fd, b"partial")
+            raise OSError(27, "constructed: file too large")
+
+        in_use = PermissionError(13, "constructed: in use")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            mock.patch.object(install.os, "unlink", side_effect=in_use),
+            self.assertRaisesRegex(install.IncompleteWrite, "was left incomplete"),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"partial")
+
+    def test_a_failed_write_keeps_a_file_created_through_a_link(self):
+        """Where an exclusive open follows a link, as Windows may, the link's target is a file found."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install.os.path, "islink", return_value=True),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertTrue(self.md.exists())
+
+    def leftover_stamped(self, left, written):
+        """Install, leave `left` in CLAUDE.md, and say whether the stamp now vouches for it."""
+        self.install()
+        self.md.write_bytes(left)
+        note = install.record_leftover_instructions(self.home, self.md, written)
+        self.assertEqual(note, "")
+        return install.stamped_instructions_digest(self.home) == install.text_digest(
+            left.decode("utf-8")
+        )
+
+    def test_a_leftover_this_run_wrote_is_stamped(self):
+        self.assertTrue(self.leftover_stamped(b"A partial", (b"A partial render", None)))
+
+    def test_a_leftover_this_run_did_not_write_is_not_stamped(self):
+        """A save landing after the failed write is someone's edit, so the next run backs it up."""
+        self.assertFalse(self.leftover_stamped(b"An edit saved meanwhile", (b"A render", b"prior")))
+
+    def test_a_stamp_failing_its_shape_check_is_not_updated(self):
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        before = self.stamp.read_bytes()
+        self.md.write_bytes(b"A partial")
+        install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(self.stamp.read_bytes(), before)
+
+    def test_a_stamp_written_whole_before_its_close_failed_needs_no_note(self):
+        """The stamp read back holds the digest, so the re-run replaces the leftover silently."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        real_write = install.write_regular_file
+
+        def close_failed(path, data, prior=None, before=None):
+            real_write(path, data, prior=prior, before=before)
+            raise install.IncompleteWrite(f"{path} may be incomplete, since closing it failed")
+
+        with mock.patch.object(install, "write_regular_file", side_effect=close_failed):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(note, "")
+        self.assertEqual(
+            install.stamped_instructions_digest(self.home), install.text_digest("A partial")
+        )
+
+    def test_a_stamp_write_cut_short_is_named(self):
+        """A stamp left incomplete no longer vouches for the leftover, and the note says what follows."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        cut_short = OSError(27, "constructed: file too large")
+        with mock.patch.object(install, "_replace_contents", side_effect=cut_short):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertIn("agent-safety-stamp.json was left incomplete", note)
+        self.assertIn("backs CLAUDE.md up as a hand edit", note)
+
+    def test_a_failed_write_keeps_a_file_put_at_the_path_meanwhile(self):
+        """Another writer's file at the path is not the one this call created, so it stays."""
+        self.home.mkdir(parents=True)
+        other = self.home / "other"
+
+        def replaced():
+            other.write_bytes(b"another writer's file\n")
+            os.replace(other, self.md)
+
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(replaced),
+            self.assertRaisesRegex(
+                install.IncompleteWrite, "is no longer the file this run created"
+            ),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"another writer's file\n")
+
+    def test_a_failed_write_keeps_a_file_it_found(self):
+        """Only a file this call created is removed, so a found one stays to hold what is left."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+        self.assertTrue(self.md.exists())
 
     def test_a_read_only_claude_md_that_is_current_still_installs_and_reports_current(self):
         """Nothing would change, so the file is not written and its mode does not matter."""

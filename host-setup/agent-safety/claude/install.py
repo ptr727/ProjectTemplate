@@ -460,7 +460,7 @@ class NotRegularFile(OSError):
 
 
 class IncompleteWrite(OSError):
-    """A write that failed after the file was truncated, so the file no longer holds what it did."""
+    """A failed write that may leave the file holding neither its prior content nor the new."""
 
 
 def write_regular_file(path, data, prior=None, before=None):
@@ -472,12 +472,74 @@ def write_regular_file(path, data, prior=None, before=None):
     or a device is refused rather than hanging or swallowing the write. Written in place rather than
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
-    Raises OSError where the file is unchanged, and IncompleteWrite where a write failed after the
-    truncate and `prior` could not be put back, or where the close after the truncate failed,
-    either of which can leave the file holding neither version.
+    The open is tried exclusively first, so a file this call created is told from one it found, and
+    a path that is a link always counts as found, so its target is kept. A created file is removed
+    again when the write fails, where the path still holds that same file, leaving it absent as it
+    was found.
+
+    Raises OSError where the file is unchanged or the created file was removed. Raises
+    IncompleteWrite where a write failed after the truncate and `prior` could not be put back,
+    where the close after the truncate failed, or where a created file could not be removed, any
+    of which can leave the file holding neither version.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o666)
+    try:
+        fd = os.open(path, flags | os.O_EXCL, 0o666)
+    except FileExistsError:
+        fd = os.open(path, flags, 0o666)
+        created = False
+    else:
+        created = not os.path.islink(path)
+    if not created:
+        _write_open_file(path, fd, data, prior, before)
+        return
+    try:
+        made = os.fstat(fd)
+    except OSError:
+        made = None
+    try:
+        _write_open_file(path, fd, data, prior, before)
+    except BaseException as e:
+        try:
+            _remove_if_same_file(path, made)
+        except OSError as unlink_error:
+            if isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(f"{e}, and removing it failed ({unlink_error})") from e
+            if isinstance(e, Exception):
+                raise IncompleteWrite(
+                    f"{path} was created and left incomplete, and could not be removed "
+                    f"({unlink_error})"
+                ) from e
+        else:
+            if isinstance(e, IncompleteWrite):
+                raise OSError(
+                    f"its write failed, and the file this run created no longer exists "
+                    f"({e.__cause__ or e})"
+                ) from e
+        raise
+
+
+def _remove_if_same_file(path, made):
+    """Remove `path` where it is still the file `made` describes, and raise OSError where it is not.
+
+    Compared rather than removed by name, since something else may have put its own file at the
+    path once the descriptor closed. The comparison narrows the time in which such a file could be
+    removed to the moment between it and the removal, rather than closing it. A path already gone
+    is left gone.
+    """
+    if made is None:
+        raise OSError(f"{path} could not be identified as the file this run created")
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if (now.st_dev, now.st_ino) != (made.st_dev, made.st_ino):
+        raise OSError(f"{path} is no longer the file this run created")
+    os.unlink(path)
+
+
+def _write_open_file(path, fd, data, prior, before):
+    """The body of `write_regular_file` on its open descriptor, which this closes."""
     truncated = False
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -502,7 +564,7 @@ def write_regular_file(path, data, prior=None, before=None):
         try:
             os.close(fd)
         except OSError as close_error:
-            if truncated and not isinstance(e, IncompleteWrite):
+            if truncated and isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
                 raise IncompleteWrite(
                     f"{path} may be incomplete, since closing it failed ({close_error})"
                 ) from e
@@ -600,7 +662,7 @@ def text_digest(text):
 
 
 def stamped_instructions_digest(claude_home):
-    """The digest of the instruction file the last install wrote, or None where none is recorded.
+    """The digest of the instruction file the installer last wrote or left, or None where none is.
 
     None covers a missing or unreadable stamp and one written before the field existed. Each of
     those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
@@ -617,6 +679,46 @@ def stamped_instructions_digest(claude_home):
         return None
     value = stamp.get("instructionsDigest")
     return value if isinstance(value, str) else None
+
+
+def record_leftover_instructions(claude_home, claude_md, written):
+    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where that failed.
+
+    `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
+    one of them is the run's own output, and replacing it loses nothing, since the prior content is
+    a render, a backup, or absent. Anything else read back is a write by something other than this
+    run, so it is not stamped, no note is returned, and the next run backs it up. Without this
+    record the next run backs the run's own leftover up as a hand edit and the report calls it
+    one, so the note says so where the stamp read back does not hold the leftover's digest. A
+    leftover that cannot be read back is not known to be the run's own, so it gets no note. Only a
+    stamp passing its shape check is updated, since one failing it vouches for nothing either way.
+    """
+    try:
+        left = read_regular_file(claude_md)
+    except OSError:
+        return ""
+    if left is None or not any(w is not None and w.startswith(left) for w in written):
+        return ""
+    digest = text_digest(left.decode("utf-8", errors="replace"))
+    stamp_path = claude_home / "agent-safety-stamp.json"
+    why = ""
+    try:
+        stamp_raw = read_regular_file(stamp_path)
+        stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
+        if stamp is not None and not stamp_problems(stamp):
+            stamp["instructionsDigest"] = digest
+            stamp["instructionsLeftover"] = True
+            write_regular_file(
+                stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
+            )
+    except (ValueError, OSError) as e:
+        why = f" ({e})"
+    if stamped_instructions_digest(claude_home) == digest:
+        return ""
+    return (
+        f" The stamp could not record what was left{why}, so the re-run backs CLAUDE.md up as a "
+        "hand edit."
+    )
 
 
 def write_backup(claude_md, raw):
@@ -1092,7 +1194,6 @@ def report(claude_home):
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
     # The whole file is compared too, since content outside the blocks is drift no block check sees.
-    # The stamp's digest of the file it wrote says which kind: an earlier render, or a hand edit.
     claude_md = claude_home / "CLAUDE.md"
     local_path = local_instructions_path()
     local_text, local_problem = read_local_instructions(local_path)
@@ -1105,16 +1206,21 @@ def report(claude_home):
     elif not local_problem and claude_text is not None:
         live_text = normalized(claude_text)
         if live_text != render_instructions(local_path, local_text):
-            if text_digest(live_text) == stamp.get("instructionsDigest"):
-                problems.append(
-                    f"CLAUDE.md is the file the last install wrote, and this checkout and "
-                    f"{local_path} now render a different one"
-                )
-            else:
+            if text_digest(live_text) != stamp.get("instructionsDigest"):
                 problems.append(
                     "CLAUDE.md was edited since the last install, or predates whole-file "
                     "ownership, so a re-run backs it up before rewriting it. Move host-specific "
                     f"content into {local_path}"
+                )
+            elif stamp.get("instructionsLeftover") is True:
+                problems.append(
+                    "CLAUDE.md holds what an install left when its write of the file failed, so a "
+                    "re-run rewrites it without a backup"
+                )
+            else:
+                problems.append(
+                    "CLAUDE.md is this installer's own output rather than a hand edit, and "
+                    f"this checkout and {local_path} now render a different one"
                 )
     if live != stamp.get("blocks"):
         problems.append(
@@ -1224,26 +1330,31 @@ def main():
         needs_backup = existing is not None and text_digest(
             existing
         ) != stamped_instructions_digest(claude_home)
+        encoded = rendered.replace("\n", newline).encode("utf-8")
         try:
             write_regular_file(
                 claude_md,
-                rendered.replace("\n", newline).encode("utf-8"),
+                encoded,
                 prior=raw,
                 before=(lambda: backups.append(write_backup(claude_md, raw)))
                 if needs_backup
                 else None,
             )
         except IncompleteWrite as e:
+            stamp_note = record_leftover_instructions(claude_home, claude_md, (encoded, raw))
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             sys.stderr.write(
-                f"{e}.{kept} Fix what the error names, then re-run. No hook or setting was changed.\n"
+                f"{e}.{kept}{stamp_note} Fix what the error names, then re-run. "
+                "No hook or setting was changed.\n"
             )
             return 1
         except OSError as e:
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
+            aside = ", or move the file aside" if os.path.lexists(claude_md) else ""
+            verb = "rewritten" if raw is not None else "written"
             sys.stderr.write(
-                f"Nothing was installed: {claude_md} could not be rewritten ({e}).{kept} "
-                "Fix what the error names, or move the file aside, then re-run.\n"
+                f"Nothing was installed: {claude_md} could not be {verb} ({e}).{kept} "
+                f"Fix what the error names{aside}, then re-run.\n"
             )
             return 1
         if backups:

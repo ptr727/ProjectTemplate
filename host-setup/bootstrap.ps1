@@ -81,6 +81,8 @@ $MODE = ''
 $RESOLVED = ''
 $TREE = ''
 $PWSH_PATH = ''
+# Held rather than disposed, since the lock it carries lasts until this process ends.
+$LOCK = $null
 
 function usage {
     # The closing marker of a here-string has to sit at column 0, so this block is deliberately unindented.
@@ -235,6 +237,7 @@ function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
 function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
 function Get-RetiredPath { Join-Path $script:DIR "$(Get-TreeName).old" }
 function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
+function Get-LockPath { Join-Path $script:DIR "$(Get-TreeName).lock" }
 function Get-TarPath { Join-Path $env:SystemRoot 'System32\tar.exe' }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
@@ -243,7 +246,35 @@ function Test-Ownership {
     param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
-    Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')
+    if (-not ($item -and $item.PSIsContainer)) { return $false }
+    # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
+    # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
+    # A directory that cannot be read is not known to be either, so it stays somebody else's, which on Linux includes the marker check itself throwing.
+    try {
+        if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
+        return -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
+    } catch {
+        return $false
+    }
+}
+
+# Two runs sharing a -Dir use the same fixed names, so without this one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
+# The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it, and FileShare.None is the share mode .NET implements as a flock on Linux, which is the lock bootstrap.sh takes on the same file.
+# The file is left in place, since removing it while another run holds it open would let a third run lock a new file under the same name.
+function Lock-Directory {
+    $lock = Get-LockPath
+    New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
+    try {
+        $script:LOCK = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
+    } catch [System.Management.Automation.MethodInvocationException] {
+        # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
+        # A file system error .NET maps to no subclass, a read-only mount or a full disk, is a plain IOException too, so the message names the reason rather than asserting the cause.
+        $reason = $_.Exception.InnerException
+        if ($reason.GetType() -eq [IO.IOException]) {
+            die "Could not lock ${lock}: $($reason.Message) Another bootstrap run using $script:DIR is the usual cause, so let it finish, then run this again."
+        }
+        die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
+    }
 }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
@@ -553,6 +584,8 @@ function main {
         }
     }
 
+    # Taken before the try, so a run refused here never reaches the cleanup that would remove the trees of the run holding the lock.
+    Lock-Directory
     try {
         Resolve-Ref
         # The commit the resolve produced is handed to the skills installer, since the tarball tree it runs from has no .git to answer for it.
