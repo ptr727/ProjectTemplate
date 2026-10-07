@@ -41,21 +41,20 @@ def _is_wsl_launcher(path: str) -> bool:
     return resolved.is_relative_to(windows) or resolved.parent == apps.resolve()
 
 
-@functools.cache
 def bash_path() -> str | None:
-    """The bash on PATH that a workflow step's script can run under, or None where there is none.
+    """The first bash on PATH that a workflow step's script can run under, or None.
 
     A bare "bash" passed to subprocess on Windows is resolved by CreateProcess, which searches
     System32 before PATH and so finds the WSL launcher. That launcher hands the script to a second
     shell that re-parses it, which mangles any quoting or expansion the script relies on, so the
-    PATH entry is named instead. Where PATH itself puts the launcher first, as a PowerShell PATH
-    does, Git Bash's own sed and jq are off PATH too, so the step's script could not run under it
-    even if it were found.
+    PATH entry is named instead, passing over the launcher wherever PATH lists it. It is read on
+    every call rather than cached, since a test may change PATH for the duration of its run.
     """
-    found = shutil.which("bash")
-    if found and os.name == "nt" and _is_wsl_launcher(found):
-        return None
-    return found
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        found = shutil.which("bash", path=directory) if directory else None
+        if found and not (os.name == "nt" and _is_wsl_launcher(found)):
+            return found
+    return None
 
 
 def bash_or_skip() -> str:
