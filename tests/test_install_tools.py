@@ -332,5 +332,162 @@ class TestWindowsJsonReport(unittest.TestCase):
                 self.assertIn("-Json", result.stderr)
 
 
+WINGET_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Read-WingetTable', 'Test-WingetVersion', 'Resolve-InstalledVersion', 'Get-VersionKey', 'Compare-HostVersion', 'Get-ToolStatus')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$script:EXPLICIT = @()
+function Get-ExplicitUpgrade { return $script:EXPLICIT }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $script:EXPLICIT = @(if ($case.Value.PSObject.Properties['explicit']) { $case.Value.explicit })
+    $rows = Read-WingetTable -Text $case.Value.table -Id 'jqlang.jq'
+    $installed = Resolve-InstalledVersion -Version $rows
+    $state = @{ Readable = $true; Rows = $rows; Installed = $installed; Available = '1.8.2'; Package = 'jqlang.jq' }
+    $status = Get-ToolStatus -Tool @{ Name = 'jq'; Probe = 'jq' } -State $state
+    $results[$case.Name] = [ordered]@{ rows = @($rows); installed = $installed; status = $status }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+UNREAD_APPLY_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Show-Report', 'Invoke-ToolApply', 'Get-NoteText', 'note')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function log { param([string]$Message = '') Write-Host "LOG $Message" }
+function info { param([string]$Message) Write-Host "INFO $Message" }
+function warn { param([string]$Message) Write-Host "WARN $Message" }
+function die { param([string]$Message) throw $Message }
+function Get-Tool { param([string]$Name) @{ Name = $Name; Package = 'jqlang.jq'; Probe = 'jq'; Optional = @() } }
+function Get-ToolState {
+    param([hashtable]$Tool)
+    return @{ Package = 'jqlang.jq'; Installed = $null; Rows = @('Unknown'); Readable = $true; Available = '1.8.2'; Scope = @('user'); Status = 'unknown' }
+}
+function Add-ToolNote { param([hashtable]$Tool, [hashtable]$State) }
+function Invoke-WingetInstall { param([string]$Id) Write-Host "INSTALL $Id"; return 0 }
+function Invoke-WingetUpgrade { param([string]$Id) Write-Host "UPGRADE $Id"; return 0 }
+$NOTES = @()
+$NOTE_TEXTS = @()
+$JSON_OUTPUT = $false
+$ELEVATED = $true
+$SELECTED = @('jq')
+$FAILED = @()
+$WANT_SCOPE = $null
+$WITH_OPTIONAL = $false
+$MODE = 'install'
+Show-Report
+Invoke-ToolApply -ToolName 'jq'
+"""
+
+
+def winget_list(*versions: str) -> str:
+    """A `winget list` table carrying one row per version for the id the harness asks about."""
+    lines = [
+        "Name   Id         Version  Available Source",
+        "-------------------------------------------",
+        *(f"jq     jqlang.jq  {version:<8} 1.8.2     winget" for version in versions),
+    ]
+    return "\n".join(lines)
+
+
+def run_pwsh_harness(harness_text: str, cases: object) -> subprocess.CompletedProcess[str]:
+    """Run a harness against the Windows installer, handing it `cases` as a JSON file."""
+    with tempfile.TemporaryDirectory() as directory:
+        harness = Path(directory, "harness.ps1")
+        harness.write_text(harness_text, encoding="utf-8")
+        data = Path(directory, "cases.json")
+        data.write_text(json.dumps(cases), encoding="utf-8")
+        return subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(harness),
+                "-Installer",
+                str(WINDOWS_INSTALLER),
+                "-Cases",
+                str(data),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=120,
+        )
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsInstalledVersion(unittest.TestCase):
+    """A Version column token that is not a version leaves the installed version unread."""
+
+    def test_a_non_version_token_is_unread_rather_than_installed(self) -> None:
+        cases = {
+            "unknown": {"table": winget_list("Unknown")},
+            "below": {"table": winget_list("<")},
+            "above": {"table": winget_list(">")},
+            "unknown beside a version": {"table": winget_list("Unknown", "1.8.1")},
+            "unknown and self-updating": {
+                "table": winget_list("Unknown"),
+                "explicit": ["jqlang.jq"],
+            },
+            "one version": {"table": winget_list("1.8.1")},
+            "majors differ": {"table": winget_list("1.8.1", "2.0.0")},
+        }
+        result = run_pwsh_harness(WINGET_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {
+                "unknown": {"rows": ["Unknown"], "installed": None, "status": "unknown"},
+                "below": {"rows": ["<"], "installed": None, "status": "unknown"},
+                "above": {"rows": [">"], "installed": None, "status": "unknown"},
+                "unknown beside a version": {
+                    "rows": ["Unknown", "1.8.1"],
+                    "installed": None,
+                    "status": "unknown",
+                },
+                "unknown and self-updating": {
+                    "rows": ["Unknown"],
+                    "installed": None,
+                    "status": "self-updating",
+                },
+                "one version": {"rows": ["1.8.1"], "installed": "1.8.1", "status": "outdated"},
+                "majors differ": {
+                    "rows": ["1.8.1", "2.0.0"],
+                    "installed": None,
+                    "status": "multiple",
+                },
+            },
+        )
+
+    def test_the_report_prints_the_row_and_install_leaves_the_tool_alone(self) -> None:
+        result = run_pwsh_harness(UNREAD_APPLY_HARNESS, {})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reported = [
+            line.split() for line in result.stdout.splitlines() if line.startswith("LOG jq ")
+        ]
+        self.assertEqual([row[:3] for row in reported], [["LOG", "jq", "Unknown"]], result.stdout)
+        self.assertIn("no version comparison is possible", result.stdout)
+        self.assertNotIn("INSTALL ", result.stdout)
+        self.assertNotIn("UPGRADE ", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
