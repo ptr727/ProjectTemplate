@@ -235,6 +235,7 @@ function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
 function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
 function Get-RetiredPath { Join-Path $script:DIR "$(Get-TreeName).old" }
 function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
+function Get-TarPath { Join-Path $env:SystemRoot 'System32\tar.exe' }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
@@ -273,7 +274,7 @@ function Get-Tree {
     Remove-Owned -Path $staging
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $staging '.bootstrap-owned') -Force | Out-Null
-    & tar -xzf $archive -C $staging --strip-components=1
+    & (Get-TarPath) -xzf $archive -C $staging --strip-components=1
     if ($LASTEXITCODE -ne 0) { die 'Could not extract the downloaded archive' }
     Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
     # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
@@ -476,7 +477,7 @@ function Show-Menu {
 # Windows has shipped tar.exe under %SystemRoot%\System32 since Windows 10 1803 and Windows Server 2019, and it reads a .tar.gz archive directly.
 # That is why this loader does not reach for Expand-Archive, which cannot.
 function Test-Prerequisite {
-    if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath (Get-TarPath) -PathType Leaf)) {
         die 'tar.exe not found under %SystemRoot%\System32. This assumes Windows 10 1803, Windows Server 2019, or later, all of which ship it.'
     }
 }
