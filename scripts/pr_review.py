@@ -556,7 +556,7 @@ COVERAGE_FIELD = {
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 10 summaries and 4 labels.
+# The lists are small because the output is regular: 10 headings, 11 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
@@ -579,6 +579,7 @@ VETTED_SUMMARIES = {
     "Pull request overview",
     "Open (N)",
     "Resolved since last review (N)",
+    "(N) resolved since last review",
     NARRATIVE_SUMMARY,
     "Show a summary per file",
     "File summaries",
@@ -625,6 +626,9 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The rest of the line is taken whole rather than its first number.
 # The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
 CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
+CCR_OPEN_FINDINGS = re.compile(
+    r"^ {0,3}\*\*(\d+) open findings?\*\*[ \t]*$", re.MULTILINE | re.IGNORECASE
+)
 # The markup the format writes a count beside, replaced by one sentinel before a count is read.
 # Masked rather than matched around, because a badge carries digits of its own in its attributes.
 # `2 <img src="b.svg" width="62" height="18">` read `18` as a severity count on that reasoning.
@@ -1924,12 +1928,17 @@ def stated_total(body: str) -> int | None:
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it. The opener is found where each code span is one
     `MARKUP_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
+
+    A later revision of the format drops the `**Findings:**` line and states its total as a bare
+    `**0 open findings**` line, read here the same way, since left unread it printed `?` and
+    suppressed the shortfall the total is compared for.
     """
     stripped = strip_fences(body or "")
     plain = CODE_SPAN.sub(" ", stripped)
     opener = DETAILS_OPEN.search(CODE_SPAN.sub(MARKUP_MASK, stripped))
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
+    totals += [counted(m.group(1)) for m in CCR_OPEN_FINDINGS.finditer(preamble)]
     return max([t for t in totals if t is not None], default=None)
 
 
@@ -2476,10 +2485,14 @@ def normal(text: str) -> str:
     A severity badge is reduced to its own `alt` text for the same reason and one more: the markup
     around that text is a pair of versioned icon URLs, so a marker carrying one drifts whenever the
     icon set is rebuilt, and the text it carries is the only part a reader wants.
+
+    A count opening the marker is rewritten the same way, since a later revision of the second
+    format writes `3 resolved since last review` where it once closed the summary on `(3)`.
     """
     unbadged = SEVERITY_BADGE.sub(badge_text, text)
     ascii_only = "".join(c for c in EMPHASIS.sub("", unbadged) if ord(c) < 128)
-    return re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
+    spaced = re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
+    return re.sub(r"^\d+(?= )", "(N)", spaced)
 
 
 def finding_entry(marker: str) -> bool:
