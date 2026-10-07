@@ -581,6 +581,19 @@ class TestScriptPresence(unittest.TestCase):
                 "`.gitattributes` pin for",
             )
 
+    def test_bootstrap_ps1_names_the_system32_tar(self) -> None:
+        """`bootstrap.ps1` reaches tar by its System32 path and never through `PATH`.
+
+        A pwsh launched from Git Bash finds MSYS tar first on `PATH`, and that tar reads the drive
+        prefix of a Windows archive path as a remote host, so a bare `tar` makes the extraction
+        depend on the shell the loader was started from.
+        """
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        self.assertIn("Join-Path $env:SystemRoot 'System32\\tar.exe'", text)
+        code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+        bare = [line.strip() for line in code if re.search(r"(&|Get-Command)\s+tar\b", line)]
+        self.assertEqual(bare, [], "bootstrap.ps1 resolves tar through PATH")
+
 
 def bootstrap_functions() -> str:
     """`bootstrap.sh` without its closing `main "$@"`, so a test can source its functions alone."""
