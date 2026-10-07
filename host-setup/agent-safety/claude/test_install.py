@@ -656,16 +656,29 @@ class TestWholeFileOwnership(StampCase):
         ):
             install.write_regular_file(self.md, b"new\n")
 
+    def after_close(self, action):
+        """os.close that runs `action` once the descriptor is closed, where a cleanup next reads the path.
+
+        Run after the close rather than during the write, since Windows refuses to replace or remove
+        a file this process still holds open.
+        """
+        real_close = os.close
+        pending = [action]
+
+        def closing(fd):
+            real_close(fd)
+            while pending:
+                pending.pop()()
+
+        return mock.patch.object(install.os, "close", side_effect=closing)
+
     def test_a_created_file_already_gone_reads_as_removed(self):
         """Something else removed it first, so the error says it no longer exists."""
         self.home.mkdir(parents=True)
-
-        def gone(fd, data):
-            os.unlink(self.md)
-            raise OSError(27, "constructed: file too large")
-
+        cut_short = OSError(27, "constructed: file too large")
         with (
-            mock.patch.object(install, "_replace_contents", side_effect=gone),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(lambda: os.unlink(self.md)),
             self.assertRaises(OSError) as caught,
         ):
             install.write_regular_file(self.md, b"new\n")
@@ -726,6 +739,17 @@ class TestWholeFileOwnership(StampCase):
         self.assertEqual(len(self.backups()), 1)
         self.install()
         self.assertEqual(len(self.backups()), 1)
+
+    def test_an_interrupt_stays_an_interrupt_when_the_close_also_fails(self):
+        """A failed close is reported only for an error, so an interrupt is never turned into one."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            self.close_failing_once(),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
 
     def test_a_created_file_that_cannot_be_removed_is_named_as_incomplete(self):
         """The partial file stays, so the error is the write's own rather than the removal's."""
@@ -816,14 +840,17 @@ class TestWholeFileOwnership(StampCase):
         self.home.mkdir(parents=True)
         other = self.home / "other"
 
-        def replaced(fd, data):
+        def replaced():
             other.write_bytes(b"another writer's file\n")
             os.replace(other, self.md)
-            raise OSError(27, "constructed: file too large")
 
+        cut_short = OSError(27, "constructed: file too large")
         with (
-            mock.patch.object(install, "_replace_contents", side_effect=replaced),
-            self.assertRaises(install.IncompleteWrite),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(replaced),
+            self.assertRaisesRegex(
+                install.IncompleteWrite, "is no longer the file this run created"
+            ),
         ):
             install.write_regular_file(self.md, b"new\n")
         self.assertEqual(self.md.read_bytes(), b"another writer's file\n")

@@ -503,7 +503,9 @@ def write_regular_file(path, data, prior=None, before=None):
         try:
             _remove_if_same_file(path, made)
         except OSError as unlink_error:
-            if isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
+            if isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(f"{e}, and removing it failed ({unlink_error})") from e
+            if isinstance(e, Exception):
                 raise IncompleteWrite(
                     f"{path} was created and left incomplete, and could not be removed "
                     f"({unlink_error})"
@@ -562,7 +564,7 @@ def _write_open_file(path, fd, data, prior, before):
         try:
             os.close(fd)
         except OSError as close_error:
-            if truncated and not isinstance(e, IncompleteWrite):
+            if truncated and isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
                 raise IncompleteWrite(
                     f"{path} may be incomplete, since closing it failed ({close_error})"
                 ) from e
