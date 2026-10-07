@@ -248,12 +248,19 @@ function Get-WingetInstalled {
     return , (Read-WingetTable -Text $text -Id $Id)
 }
 
-# One version for a package winget lists more than once, or nothing where the rows do not describe one product.
+# Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none or the bare < or > its range forms leave.
+function Test-WingetVersion {
+    param([string]$Token)
+    return $Token -match '^\d'
+}
+
+# One version for a package winget lists more than once, or nothing where the rows do not describe one product or one of them carries no version.
 # Rows sharing a major version are side by side builds of one product and the newest is the answer, which is what a dotnet SDK line looks like.
 # Rows whose majors differ are two products sharing an id, which is what the legacy WSL installer looks like beside WSL itself, and there no single version compares.
 function Resolve-InstalledVersion {
     param([string[]]$Version)
     if (-not $Version -or $Version.Count -eq 0) { return $null }
+    if (@($Version | Where-Object { -not (Test-WingetVersion $_) }).Count -gt 0) { return $null }
     if ($Version.Count -eq 1) { return $Version[0] }
     $majors = @($Version | ForEach-Object { ($_ -split '\.')[0] } | Sort-Object -Unique)
     if ($majors.Count -ne 1) { return $null }
@@ -514,7 +521,10 @@ function Get-ToolStatus {
         if (-not $State.Available) { return 'unavailable' }
         return 'missing'
     }
-    if (-not $State.Installed) { return 'multiple' }
+    if (-not $State.Installed) {
+        if (@($State.Rows | Where-Object { -not (Test-WingetVersion $_) }).Count -gt 0) { return 'unknown' }
+        return 'multiple'
+    }
     if (-not $State.Available) { return 'unknown' }
     if ((Get-ExplicitUpgrade) -contains $State.Package) { return 'self-updating' }
     if ((Compare-HostVersion $State.Installed $State.Available) -ge 0) { return 'current' }
@@ -1036,7 +1046,7 @@ function Show-Report {
         $state = Get-ToolState -Tool $record
         # Every row is printed only where they did not resolve to one version, since a dotnet line carrying three side by side builds resolves cleanly and listing all three would overflow the column for nothing.
         if (-not $script:JSON_OUTPUT) {
-            $installed = if ($state.Status -eq 'multiple') { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { '-' }
+            $installed = if (-not $state.Installed -and $state.Rows.Count -gt 0) { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { '-' }
             $available = if ($state.Available) { $state.Available } else { '-' }
             $scope = if ($state.Scope.Count -gt 0) { $state.Scope -join '+' } else { '-' }
             log ($format -f $record.Name, $installed, $available, $state.Package, $scope, $state.Status)
@@ -1139,6 +1149,9 @@ function Invoke-ToolApply {
         return
     } elseif ($script:MODE -eq 'install' -and $state.Status -eq 'outdated') {
         log "${ToolName}: at $($state.Installed), the source carries $($state.Available), -Upgrade moves it"
+        return
+    } elseif ($script:MODE -eq 'install' -and $state.Status -eq 'unknown' -and $state.Rows.Count -gt 0) {
+        log "${ToolName}: winget lists $($state.Rows -join ', ') and no version comparison is possible, -Upgrade or -Reinstall acts on it"
         return
     }
 

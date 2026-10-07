@@ -332,5 +332,99 @@ class TestWindowsJsonReport(unittest.TestCase):
                 self.assertIn("-Json", result.stderr)
 
 
+WINGET_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Read-WingetTable', 'Test-WingetVersion', 'Resolve-InstalledVersion', 'Get-VersionKey', 'Compare-HostVersion', 'Get-ToolStatus')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function Get-ExplicitUpgrade { return @() }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $rows = Read-WingetTable -Text $case.Value -Id 'jqlang.jq'
+    $installed = Resolve-InstalledVersion -Version $rows
+    $state = @{ Readable = $true; Rows = $rows; Installed = $installed; Available = '1.8.2'; Package = 'jqlang.jq' }
+    $status = Get-ToolStatus -Tool @{ Name = 'jq'; Probe = 'jq' } -State $state
+    $results[$case.Name] = [ordered]@{ rows = @($rows); installed = $installed; status = $status }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+def winget_list(*versions: str) -> str:
+    """A `winget list` table carrying one row per version for the id the harness asks about."""
+    lines = [
+        "Name   Id         Version  Available Source",
+        "-------------------------------------------",
+        *(f"jq     jqlang.jq  {version:<8} 1.8.2     winget" for version in versions),
+    ]
+    return "\n".join(lines)
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsInstalledVersion(unittest.TestCase):
+    """A Version column token that is not a version leaves the installed version unread."""
+
+    def test_a_non_version_token_is_unread_rather_than_installed(self) -> None:
+        cases = {
+            "unknown": winget_list("Unknown"),
+            "below": winget_list("<"),
+            "above": winget_list(">"),
+            "unknown beside a version": winget_list("Unknown", "1.8.1"),
+            "one version": winget_list("1.8.1"),
+            "majors differ": winget_list("1.8.1", "2.0.0"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            harness = Path(directory, "harness.ps1")
+            harness.write_text(WINGET_HARNESS, encoding="utf-8")
+            data = Path(directory, "cases.json")
+            data.write_text(json.dumps(cases), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "pwsh",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File",
+                    str(harness),
+                    "-Installer",
+                    str(WINDOWS_INSTALLER),
+                    "-Cases",
+                    str(data),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=120,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {
+                "unknown": {"rows": ["Unknown"], "installed": None, "status": "unknown"},
+                "below": {"rows": ["<"], "installed": None, "status": "unknown"},
+                "above": {"rows": [">"], "installed": None, "status": "unknown"},
+                "unknown beside a version": {
+                    "rows": ["Unknown", "1.8.1"],
+                    "installed": None,
+                    "status": "unknown",
+                },
+                "one version": {"rows": ["1.8.1"], "installed": "1.8.1", "status": "outdated"},
+                "majors differ": {
+                    "rows": ["1.8.1", "2.0.0"],
+                    "installed": None,
+                    "status": "multiple",
+                },
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
