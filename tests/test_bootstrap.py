@@ -31,8 +31,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from typing import TextIO
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
@@ -629,6 +631,33 @@ def bootstrap_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
+class TestDirectoryLockOrder(unittest.TestCase):
+    """A run refused the directory lock stops before anything that removes a tree.
+
+    Each loader's cleanup removes trees by their fixed names, so a refused run that reached it would
+    delete the trees of the very run holding the lock.
+    """
+
+    def test_the_linux_loader_locks_before_setting_its_exit_trap(self) -> None:
+        text = BOOTSTRAP.read_text(encoding="utf-8")
+        main = text[text.index("\nmain() {") :]
+        self.assertLess(main.index("\n    lock_dir\n"), main.index("trap cleanup EXIT"))
+
+    def test_the_windows_loader_locks_before_the_try_its_cleanup_runs_from(self) -> None:
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        main = text[text.index("\nfunction main {") :]
+        self.assertLess(main.index("\n    Lock-Directory\n"), main.index("\n    try {\n"))
+
+
+def hold_flock(path: Path) -> TextIO:
+    """Holds `path` the way `bootstrap.sh` does, through the flock(2) its flock command takes."""
+    import fcntl
+
+    handle = path.open("a", encoding="utf-8")
+    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return handle
+
+
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux loader's own functions")
 class TestKeptTreeHandling(unittest.TestCase):
     """The Linux loader's removal and swap of the trees it owns, driven through its own functions."""
@@ -778,6 +807,62 @@ class TestKeptTreeHandling(unittest.TestCase):
             (self.dir / "skills-tree.old" / "content").read_text(encoding="utf-8"), "live"
         )
 
+    def test_a_run_is_refused_while_another_holds_the_directory_lock(self) -> None:
+        self.owned_tree("skills-tree.new", "theirs")
+        handle = hold_flock(self.dir / "skills-tree.lock")
+        self.addCleanup(handle.close)
+        result = self.run_loader("lock_dir")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another bootstrap run is using", result.stderr)
+        self.assertEqual(
+            (self.dir / "skills-tree.new" / "content").read_text(encoding="utf-8"), "theirs"
+        )
+
+    def test_the_directory_lock_is_free_once_the_run_holding_it_ends(self) -> None:
+        for _ in range(2):
+            result = self.run_loader("lock_dir")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        hold_flock(self.dir / "skills-tree.lock").close()
+
+    def test_a_tool_the_loader_runs_does_not_inherit_the_lock(self) -> None:
+        """A daemon a tool starts would otherwise hold the lock, and refuse every later run, long after this one."""
+        tool = self.dir / "tree" / "host-setup" / "linux" / "probe.sh"
+        tool.parent.mkdir(parents=True)
+        tool.write_text(
+            "#!/usr/bin/env bash\nif [[ -e /proc/self/fd/$1 ]]; then echo inherited; else echo closed; fi\n",
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+        result = self.run_loader(
+            f'lock_dir\nTREE="{self.dir / "tree"}"\nrun_tool probe.sh "$LOCK_FD"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "closed")
+
+    def test_an_empty_directory_at_a_managed_name_is_removed_rather_than_refused(self) -> None:
+        """What a removal leaves where only the directory itself would not go, its marker already gone."""
+        (self.dir / "skills-tree.new").mkdir()
+        result = self.run_loader('remove_owned "$(staging_path)"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.dir / "skills-tree.new").exists())
+
+    def test_an_empty_directory_at_the_trees_name_is_replaced_by_the_new_tree(self) -> None:
+        (self.dir / "skills-tree").mkdir()
+        self.owned_tree("skills-tree.new", "new")
+        result = self.run_loader("swap_in")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dir / "skills-tree" / "content").read_text(encoding="utf-8"), "new")
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
+    def test_an_unmarked_directory_holding_anything_is_still_refused(self) -> None:
+        foreign = self.dir / "skills-tree.new"
+        foreign.mkdir()
+        (foreign / "theirs").write_text("theirs", encoding="utf-8")
+        result = self.run_loader('remove_owned "$(staging_path)"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("this loader did not create it", result.stderr)
+        self.assertTrue((foreign / "theirs").exists())
+
 
 POWERSHELL_TREE_HARNESS = r"""
 param([string]$Loader, [string]$Dir, [string]$BodyFile)
@@ -789,7 +874,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($Loader, [ref]$
 $wanted = @(
     'log', 'info', 'step', 'warn', 'die',
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
-    'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
+    'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
@@ -803,6 +888,7 @@ $script:REPO = 'ptr727/ProjectTemplate'
 $script:REF = 'main'
 $script:RESOLVED = ''
 $script:TREE = ''
+$script:LOCK = $null
 $script:HELD = [Collections.Generic.List[object]]::new()
 function Get-Named { param([string]$Name) Join-Path $script:DIR $Name }
 # Holds an entry the way a process using the tree does: an open handle on Windows, where that alone stops a rename and a delete, and a read-only directory elsewhere, where only the delete stops.
@@ -864,32 +950,68 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
             if path.is_dir() and not path.is_symlink():
                 path.chmod(0o755)
 
+    def loader_command(self, directory: Path, body: str) -> list[str]:
+        harness = directory / "harness.ps1"
+        harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
+        body_file = directory / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        return [
+            "pwsh",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(harness),
+            "-Loader",
+            str(BOOTSTRAP_PS),
+            "-Dir",
+            str(self.dir),
+            "-BodyFile",
+            str(body_file),
+        ]
+
     def run_loader(self, body: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
-            harness = Path(directory, "harness.ps1")
-            harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
-            body_file = Path(directory, "body.ps1")
-            body_file.write_text(body, encoding="utf-8")
             return subprocess.run(
-                [
-                    "pwsh",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-File",
-                    str(harness),
-                    "-Loader",
-                    str(BOOTSTRAP_PS),
-                    "-Dir",
-                    str(self.dir),
-                    "-BodyFile",
-                    str(body_file),
-                ],
+                self.loader_command(Path(directory), body),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 check=False,
                 timeout=120,
             )
+
+    def hold_lock(self) -> subprocess.Popen[str]:
+        """A second pwsh holding the directory lock through the loader's own Lock-Directory, until its input closes."""
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        holder = subprocess.Popen(
+            self.loader_command(
+                directory,
+                "Lock-Directory\n[Console]::Out.WriteLine('held')\n[void][Console]::In.ReadLine()",
+            ),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        self.addCleanup(self._end_holder, holder)
+        output = holder.stdout
+        assert output is not None
+        lines: list[str] = []
+        reader = threading.Thread(target=lambda: lines.append(output.readline()))
+        reader.start()
+        reader.join(timeout=60)
+        if reader.is_alive() or lines != ["held\n"]:
+            holder.kill()
+            reader.join(timeout=10)
+            self.fail(f"the holder never took the lock: {lines!r}")
+        return holder
+
+    @staticmethod
+    def _end_holder(holder: subprocess.Popen[str]) -> None:
+        if holder.poll() is None:
+            holder.kill()
+        holder.communicate(timeout=60)
 
     def owned_tree(self, name: str, content: str) -> Path:
         tree = self.dir / name
@@ -1105,6 +1227,42 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.assertEqual(self.content("skills-tree.old"), "old")
         self.assertTrue((self.dir / "skills-tree.old" / ".bootstrap-owned").exists())
         self.assertFalse((self.dir / "skills-tree").exists())
+
+    def test_the_directory_lock_refuses_a_second_run_and_frees_when_the_first_ends(self) -> None:
+        self.owned_tree("skills-tree.new", "theirs")
+        holder = self.hold_lock()
+        result = self.run_loader("Lock-Directory")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another bootstrap run is using", result.stderr)
+        self.assertEqual(self.content("skills-tree.new"), "theirs")
+        holder.communicate(input="\n", timeout=60)
+        self.assertEqual(holder.returncode, 0, holder.stderr)
+        result = self.run_loader("Lock-Directory")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(sys.platform == "linux", "the lock bootstrap.sh takes is a Linux flock")
+    def test_a_lock_bootstrap_sh_holds_refuses_this_loader(self) -> None:
+        """FileShare.None is a flock on Linux, which is the one thing that makes the two loaders' locks one lock."""
+        handle = hold_flock(self.dir / "skills-tree.lock")
+        self.addCleanup(handle.close)
+        result = self.run_loader("Lock-Directory")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another bootstrap run is using", result.stderr)
+
+    def test_an_empty_directory_at_a_managed_name_is_removed_rather_than_refused(self) -> None:
+        """What a removal leaves where only the directory itself would not go, its marker already gone."""
+        (self.dir / "skills-tree.new").mkdir()
+        result = self.run_loader("Remove-Owned -Path (Get-StagingPath)")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.dir / "skills-tree.new").exists())
+
+    def test_an_empty_directory_at_the_trees_name_is_replaced_by_the_new_tree(self) -> None:
+        (self.dir / "skills-tree").mkdir()
+        self.owned_tree("skills-tree.new", "new")
+        result = self.run_loader("Invoke-SwapIn")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.content("skills-tree"), "new")
+        self.assertFalse((self.dir / "skills-tree.old").exists())
 
 
 def menu_functions() -> str:
