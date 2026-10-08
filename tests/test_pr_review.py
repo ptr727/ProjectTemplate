@@ -3103,9 +3103,15 @@ class TestFileTableCarriesForward(CarryCase):
             ],
             files=["a.py", "b.py"],
         )
+        self.assertTrue(pr_review.second_format(first))
+        self.assertTrue(pr_review.second_format(lite))
+        self.assertEqual(["a.py", "b.py"], pr_review.file_table(first))
+        self.assertEqual([], pr_review.file_table(lite))
         with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
             code, out = self.verdict(pr)
         self.assertEqual(0, code)
+        self.assertIn("effort=lite ", out)
+        self.assertIn("overview=0/0 ", out)
         self.assertIn("coverage=carried:table ", out)
         self.assertNotIn("NO FILE TABLE STANDS IN", out)
 
