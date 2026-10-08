@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
@@ -970,6 +972,20 @@ class RegistryEntryGateCase(unittest.TestCase):
             "name and url disagree, the url naming repo 'Fixture'",
             self.run_against(self.entry(name=zero_width)),
         )
+
+    def test_a_name_outside_the_console_code_page_is_reported_as_utf8(self) -> None:
+        """A Windows console defaults to an ANSI code page, which cannot encode every character a name may carry.
+
+        The child is given cp1252 on every host, so removing the entry point's UTF-8 reconfigure fails this on Linux
+        too, where the streams are otherwise UTF-8 already and no other case here would notice.
+        """
+        console = {
+            k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")
+        }
+        console["PYTHONIOENCODING"] = "cp1252"
+        with unittest.mock.patch.dict(os.environ, console, clear=True):
+            output = self.run_against(self.entry(name="Fixture\u200b"))
+        self.assertIn("Fixture\u200b", output)
 
     def test_a_non_boolean_has_develop_is_refused(self) -> None:
         """spec/audit.py coerces it, so "no" reads as true and [] reads as false while the DRIFT line prints the raw value."""

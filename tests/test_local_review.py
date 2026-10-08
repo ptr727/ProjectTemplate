@@ -608,6 +608,7 @@ class DanglingRemoteTrackingCase(RepoCase):
         blob = run(self.tmp, "hash-object", "-w", str(content)).strip()
         run(self.tmp, "update-ref", "refs/remotes/upstream/main", blob)
         loose = local_review.objects_dir(self.tmp) / blob[:2] / blob[2:]
+        loose.chmod(0o644)
         loose.unlink()
         self.shadow_with_a_local_branch()
         with self.assertRaisesRegex(local_review.CannotRun, "exists but does not resolve"):
@@ -987,8 +988,11 @@ class ReceiptCase(RepoCase):
         Driven through a shell rather than in process, because the failure being tested is a
         genuine EPIPE on a descriptor, and the exit code being tested includes the one the
         interpreter produces during its own shutdown flush, which no in-process case can reach.
+        The suite's own interpreter is named rather than a bare `python3`, which the shell could
+        resolve to a different one.
         """
-        script = f"python3 {shlex.quote(SCRIPT.as_posix())} {' '.join(args)} {shell}"
+        python = shlex.quote(Path(sys.executable).as_posix())
+        script = f"{python} {shlex.quote(SCRIPT.as_posix())} {' '.join(args)} {shell}"
         proc = subprocess.run(
             [bash_or_skip(), "-c", f"{script}; exit ${{PIPESTATUS[0]}}"],
             cwd=str(self.tmp),
@@ -1231,13 +1235,18 @@ class BackendCase(RepoCase):
     ) -> None:
         bin_dir = self.outside / "fakebin"
         bin_dir.mkdir(exist_ok=True)
-        script = bin_dir / "coderabbit"
         body = "#!/usr/bin/env python3\nimport sys\n"
         if argv_log is not None:
             body += f"open({str(argv_log)!r}, 'w').write(chr(10).join(sys.argv[1:]))\n"
         if also:
             body += also + "\n"
         body += f"sys.stdout.write({stdout!r})\nsys.exit({code})\n"
+        if os.name == "nt":
+            script = bin_dir / "coderabbit.py"
+            wrapper = f'@"{sys.executable}" "{script}" %*\r\n@exit /b %ERRORLEVEL%\r\n'
+            (bin_dir / "coderabbit.cmd").write_text(wrapper, encoding="utf-8", newline="")
+        else:
+            script = bin_dir / "coderabbit"
         script.write_text(body, encoding="utf-8")
         script.chmod(0o755)
         prev = os.environ.get("PATH", "")
