@@ -50,9 +50,16 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 _TOOL_UNIT = "claude-tool"
 _TREE_UNIT = "claude-tree"
+
+# How many times the tree's ended scopes are judged and stopped, each stop able to end an agent nested a level deeper.
+_TREE_ROUNDS = 4
+
+# The share of the hook's timeout the tree may take, leaving the rest for the report-only phase after it.
+_TREE_SECONDS = 20
 
 ROOT_VAR = "AGENT_CONTAINMENT_ROOT"
 
@@ -490,22 +497,20 @@ def _gone_label(props):
     return lambda u: f"session {scope_session(u)}, agent pid {scope_agent(props[u])} gone"
 
 
-def reap_tree(session_ids, env, table, runner=_systemctl, read=None):
+def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None, deadline=None):
     """Stop the scopes this session's tree holds for sessions that have ended, returning the report.
 
-    The tree is the inherited root's, or this session's own where it is the root. Only the root stops
-    the slice itself, and only once nothing is left in it, since a nested session ending says nothing
-    about the rest of the tree. `table` is None where the process table could not be read, which says
-    nothing about which agents run, so nothing is stopped then.
+    The tree is the inherited root's, or this session's own where it is the root. Stopping an ended
+    session's scope can end an agent nested deeper, so the process table is read again after each
+    stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows, since
+    the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
+    and only once nothing is left in it. `table` is None where the process table could not be read,
+    which says nothing about which agents run, so nothing is stopped then.
     """
+    reader = reader or _read_process_table
     own = sorted({t for t in map(session_token, session_ids) if t})
     inherited = session_token(env.get(ROOT_VAR, ""))
     roots = [inherited] if inherited else own
-    if roots and table is None:
-        return (
-            "agent-safety: could not read the process table, so no command scope in this session's "
-            f"tree was checked. Check with: python3 {os.path.abspath(__file__)} --orphans"
-        )
     lines = []
     for root in roots:
         name = tree_slice(root)
@@ -519,29 +524,63 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None):
             )
             continue
         members, slice_props, props = listed
-        gone, _unrecorded = orphaned(members, props, table)
-        if gone:
-            pids = scope_pids(gone, runner, read)
+        described, pids, stopped, stuck = dict(props), {}, [], []
+        # Each scope is named from the table read before its stop, since the stop ends what it held.
+        named = dict(table or {})
+        for round_ in range(_TREE_ROUNDS + 1):
+            if table is None:
+                lines.append(
+                    "agent-safety: could not read the process table, so the command scopes in this "
+                    f"session's tree were not all checked. Check with: python3 "
+                    f"{os.path.abspath(__file__)} --orphans"
+                )
+                break
+            gone = [u for u in orphaned(members, props, table)[0] if u not in stuck]
+            if not gone:
+                break
+            if round_ == _TREE_ROUNDS or (deadline is not None and time.monotonic() > deadline):
+                lines.append(
+                    f"agent-safety: {len(gone)} command scope(s) in this session's tree outlived their "
+                    f"session and were left running, for want of time. End them with:\n"
+                    f"  systemctl --user stop {' '.join(gone)}"
+                )
+                break
+            pids.update(scope_pids(gone, runner, read))
             runner("stop", "--", *gone)
             # Re-listed whatever the stop returned, since a scope collected between the list and the stop fails it.
             after = _tree_members(name, runner)
-            left = gone if after is None else [u for u in after[0] if u in gone]
-            stopped = [u for u in gone if u not in left]
-            if stopped:
-                noun = "scope" if len(stopped) == 1 else "scopes"
-                lines.append(
-                    f"agent-safety: stopped {len(stopped)} command {noun} in this session's tree "
-                    "left by a session that had ended without stopping them."
-                )
-            lines += _scope_lines(stopped, pids, table, _gone_label(props))
-            if left:
-                lines.append(
-                    f"agent-safety: {len(left)} orphaned command scope(s) did not stop. End them with:\n"
-                    f"  systemctl --user kill --signal=SIGKILL {' '.join(left)}"
-                )
-            members = members if after is None else after[0]
+            if after is None:
+                stuck += gone
+                break
+            members, props = after[0], after[2]
+            described.update(props)
+            stuck += [u for u in members if u in gone]
+            stopped += [u for u in gone if u not in members]
+            table = reader()
+            named = {**(table or {}), **named}
+        if stopped:
+            noun = "scope" if len(stopped) == 1 else "scopes"
+            lines.append(
+                f"agent-safety: stopped {len(stopped)} command {noun} in this session's tree "
+                "that a session which has since ended left running."
+            )
+        lines += _scope_lines(stopped, pids, named, _gone_label(described))
+        if stuck:
+            lines.append(
+                f"agent-safety: {len(stuck)} orphaned command scope(s) did not stop. End them with:\n"
+                f"  systemctl --user kill --signal=SIGKILL {' '.join(stuck)}"
+            )
         # Only the root ends the tree, and only an empty one, since a scope whose agent runs is a live session's.
-        if (inherited and inherited not in own) or members:
+        if inherited:
+            continue
+        others = [u for u in members if scope_session(u) not in own and u not in stuck]
+        if others:
+            lines.append(
+                f"agent-safety: {len(others)} command scope(s) in this session's tree belong to a "
+                f"session still running, so the tree {name} and its ceiling are left in place:"
+            )
+            lines += [f"  {u}  session {scope_session(u)}" for u in others]
+        if members:
             continue
         if slice_props.get("ActiveState") == "active" and runner("stop", "--", name)[0] != 0:
             lines.append(f"agent-safety: could not stop this session's tree {name}.")
@@ -594,6 +633,7 @@ def orphan_report(table, runner=_systemctl):
 
 
 def main():
+    started = time.monotonic()
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except (ValueError, OSError):
@@ -619,7 +659,13 @@ def main():
         )
         if runtime:
             # Read after the stop above, which is what ended any nested agent that ran in those scopes.
-            tree = reap_tree(session_ids, os.environ, _read_process_table(), runner=runner)
+            tree = reap_tree(
+                session_ids,
+                os.environ,
+                _read_process_table(),
+                runner=runner,
+                deadline=started + _TREE_SECONDS,
+            )
             reaped = "\n".join(t for t in (reaped, tree) if t)
     if reaped:
         print(reaped, file=sys.stderr)
@@ -854,7 +900,8 @@ def _selftest():
     reused = f"{_TOOL_UNIT}-5e6f-7a8b-730-dd.scope"
     older = f"{_TOOL_UNIT}-0a1b-2c3d-740-ee.scope"
     outsider = f"{_TOOL_UNIT}-1f2e-750-ff.scope"
-    agents = {nested: 250, deeper: 260, alive: 200, reused: 300, outsider: 270}
+    sibling = f"{_TOOL_UNIT}-7d7d-760-ab.scope"
+    agents = {nested: 250, deeper: 260, alive: 200, reused: 300, outsider: 270, sibling: 200}
 
     def world(members, slice_state="active", outside=(outsider,)):
         state = {"members": set(members), "slice": slice_state, "dropins": True, "calls": []}
@@ -904,11 +951,34 @@ def _selftest():
         )
     )
     root_world, root_run = world([nested, deeper])
-    root_text = reap_tree([sid], {}, tree_table, root_run, read=lambda p: tree_procs.get(p, ""))
+
+    def same():
+        return tree_table
+
+    root_text = reap_tree(
+        [sid],
+        {},
+        tree_table,
+        root_run,
+        read=lambda p: tree_procs.get(p, ""),
+        reader=lambda: _parse_process_table("\n".join(rows)),
+    )
     live_world, live_run = world([nested, alive, older])
-    live_text = reap_tree([sid], {}, tree_table, live_run)
+    live_text = reap_tree([sid], {}, tree_table, live_run, reader=same)
     inner_world, inner_run = world([deeper])
-    inner_text = reap_tree(["5e6f-7a8b"], {ROOT_VAR: "0a1b-2c3d"}, tree_table, inner_run)
+    inner_text = reap_tree(
+        ["5e6f-7a8b"], {ROOT_VAR: "0a1b-2c3d"}, tree_table, inner_run, reader=same
+    )
+    # Agent 260 still runs when the sweep starts, and ends only when the scope holding it is stopped.
+    deep_table = _parse_process_table("\n".join([*rows, "260 1 260 30 claude -p"]))
+    deep_world, deep_run = world([nested, deeper])
+    deep_text = reap_tree([sid], {}, deep_table, deep_run, reader=same)
+    sibling_world, sibling_run = world([sibling])
+    sibling_text = reap_tree([sid], {}, tree_table, sibling_run, reader=same)
+    late_world, late_run = world([nested])
+    late_text = reap_tree([sid], {}, tree_table, late_run, reader=same, deadline=0)
+    posing_world, posing_run = world([])
+    reap_tree([sid], {ROOT_VAR: sid}, tree_table, posing_run, reader=same)
     blind_world, blind_run = world([nested])
     blind_text = reap_tree([sid], {}, None, blind_run)
     unlisted_world, listed_run = world([nested])
@@ -979,6 +1049,29 @@ def _selftest():
             and "could not read the process table" in blind_text
             and not any(c[0] == "stop" for c in blind_world["calls"]),
             "an unreadable process table stops nothing, since it cannot say which agents run",
+        ),
+        (
+            not deep_world["members"]
+            and "stopped 2 command scopes" in deep_text
+            and deep_world["slice"] == "inactive",
+            "a scope whose agent ends only when a shallower orphan is stopped is stopped too",
+        ),
+        (
+            sibling_world["members"] == {sibling}
+            and sibling_world["slice"] == "active"
+            and f"{sibling}  session 7d7d" in sibling_text
+            and "left in place" in sibling_text,
+            "the root names another session's live scope in its tree, and leaves the tree for it",
+        ),
+        (
+            late_world["members"] == {nested}
+            and "for want of time" in late_text
+            and f"systemctl --user stop {nested}" in late_text,
+            "past its share of the hook's time the sweep stops nothing more, and hands over the line",
+        ),
+        (
+            posing_world["slice"] == "active" and posing_world["dropins"],
+            "a session handed a root never ends that tree, even one naming its own id",
         ),
         (
             "could not list" in reap_tree([sid], {}, tree_table, lambda *a: (1, ""))
