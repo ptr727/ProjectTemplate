@@ -24,6 +24,8 @@ import unittest.mock
 from pathlib import Path
 from typing import Any
 
+from host_capability import requires_symlink
+
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS.parent / "spec"))
@@ -756,19 +758,14 @@ class BoundaryCase(RepoCase):
 
 
 class CarriedPathCase(RepoCase):
+    @requires_symlink
     def test_a_symlinked_carried_path_is_refused(self) -> None:
         """carry.py refuses a symlink anywhere in a carried tree, and reading one here would follow
         it out of the repository the manifest describes."""
         target = self.outside / "elsewhere.md"
         target.write_bytes(b"## Alpha\n\nnot ours\n")
         (self.tmp / "DOC.md").unlink()
-        try:
-            (self.tmp / "DOC.md").symlink_to(target)
-        except OSError as unprivileged:
-            # Windows refuses a symlink without the privilege or Developer Mode.
-            # That is an execution boundary rather than this guard failing.
-            (self.tmp / "DOC.md").write_bytes(b"## Alpha\n\nown\n")
-            raise unittest.SkipTest(f"this host cannot create a symlink: {unprivileged}") from None
+        (self.tmp / "DOC.md").symlink_to(target)
         with self.assertRaises(cr.CannotRun) as caught:
             cr.units(self.tmp)
         self.assertIn("DOC.md", str(caught.exception))

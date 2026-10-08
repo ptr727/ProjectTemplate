@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import bash_or_skip
+
 CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
 
@@ -40,7 +42,7 @@ def require(*tools: str) -> str:
     for tool in tools:
         if shutil.which(tool) is None:
             raise unittest.SkipTest(f"no {tool} on PATH, so the script's own lines cannot be run")
-    return str(shutil.which("bash"))
+    return bash_or_skip()
 
 
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
@@ -132,7 +134,7 @@ class ArchivedRepositoryCase(unittest.TestCase):
             stub.chmod(0o755)
             registry = self.registry(tmp, [{"name": "Fixture", "status": "archived"}])
             script = (
-                f"PATH={shlex.quote(str(bin_dir))}:$PATH\n"
+                f'PATH="$(cd {shlex.quote(str(bin_dir))} && pwd):$PATH"\n'
                 f"registry={shlex.quote(str(registry))}\nname=Fixture\ncmd=check\nrepo=owner/Fixture\n"
                 f"{ARCHIVED_EXEMPTION}echo REACHED_NEXT\n"
             )
@@ -165,7 +167,9 @@ class EndToEndCase(unittest.TestCase):
                 encoding="utf-8",
             )
             gh_stub.chmod(0o755)
-            env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ.get('PATH', os.defpath)}")
+            env = dict(
+                os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
+            )
             return subprocess.run(
                 [bash, str(root / "repo-config" / "configure.sh"), cmd, "owner/Fixture"],
                 capture_output=True,

@@ -12,6 +12,8 @@ import unittest
 from collections.abc import Callable
 from unittest import mock
 
+from host_capability import requires_symlink
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
@@ -79,6 +81,7 @@ class CarryInventoryTests(unittest.TestCase):
 
         self.assertNotEqual(left_inventory.digest, right_inventory.digest)
 
+    @requires_symlink
     def test_inventory_rejects_source_and_target_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -303,6 +306,7 @@ class CarryManifestTests(unittest.TestCase):
                 ):
                     carry.relative_root(pathlib.Path(temp), value)
 
+    @requires_symlink
     def test_rejects_symlinked_declared_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
