@@ -190,9 +190,11 @@ class TestCheck(unittest.TestCase):
     def test_a_host_setup_remedy_resolves_against_this_checkout(self):
         """The data stays repo-relative and the printed command is runnable from any directory."""
         resolved = host_gate.resolve_remedy("host-setup/linux/install-tools.sh --upgrade gh")
-        script = host_gate.SPEC.parent.parent / "host-setup/linux/install-tools.sh"
-        self.assertIn(str(script), resolved)
-        self.assertTrue(resolved.endswith(" --upgrade gh"))
+        script = host_gate.quote_argument(
+            str(host_gate.SPEC.parent.parent / "host-setup/linux/install-tools.sh")
+        )
+        prefix = f"& {script}" if host_gate.platform_key() == "windows" else script
+        self.assertEqual(f"{prefix} --upgrade gh", resolved)
         self.assertEqual(host_gate.resolve_remedy("brew upgrade gh"), "brew upgrade gh")
 
     def test_a_checkout_path_needing_quoting_is_quoted(self):
