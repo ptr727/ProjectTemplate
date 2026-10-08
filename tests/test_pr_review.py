@@ -4235,6 +4235,19 @@ class TestOverviewSections(GqlCase):
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
         self.assertIn("and 1 of the entries its open section lists links no thread", out)
 
+    def test_a_second_link_on_one_entry_does_not_cover_an_unlinked_entry(self) -> None:
+        """An entry linking a thread beside its own is still one entry, so the unlinked one counts."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}, see [earlier](#discussion_r4000000007)\n- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_an_entry_linking_no_thread_is_counted_where_the_totals_balance(self) -> None:
         """The round opened as many threads as it states, and one entry links none of them, so
         the totals alone pass a finding named only in the body."""
