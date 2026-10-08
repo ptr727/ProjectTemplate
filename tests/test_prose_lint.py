@@ -5206,7 +5206,11 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         self.assertIn("landed.py:1: comment-added", result.stdout)
 
     def test_a_checkout_that_is_no_merge_commit_keeps_the_events_base(self) -> None:
+        """A second commit keeps HEAD^1 off the event's base, so an unguarded first parent fails."""
         self.git("checkout", "-q", "feature")
+        (self.root / "tool.py").write_text("value = 3\n", encoding="utf-8")
+        self.git("commit", "-qam", "second change")
+        self.assertNotEqual(self.event_base, self.rev("HEAD^1"))
         self.assertEqual(self.event_base, self.resolve_base())
 
     def test_the_gate_reads_the_resolved_base(self) -> None:
