@@ -489,5 +489,183 @@ class TestWindowsInstalledVersion(unittest.TestCase):
         self.assertNotIn("UPGRADE ", result.stdout)
 
 
+DOTNET_SDK_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Read-DotnetSdkList', 'Get-UntrackedDotnetSdk', 'Get-VersionKey', 'Compare-HostVersion')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $sdk = Read-DotnetSdkList -Line @($case.Value.listing)
+    $results[$case.Name] = [ordered]@{ sdk = $sdk; untracked = (Get-UntrackedDotnetSdk -Installed $case.Value.installed -Sdk $sdk) }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+def dotnet_sdks(*versions: str) -> list[str]:
+    """The lines `dotnet --list-sdks` prints, one per version, each beside a made-up sdk directory."""
+    return [f"{version} [X:\\dotnet\\sdk]" for version in versions]
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsUntrackedDotnetSdk(unittest.TestCase):
+    """An SDK newer than the one winget installed is named, whoever installed it."""
+
+    def test_only_an_sdk_newer_than_winget_s_copy_is_named(self) -> None:
+        cases = {
+            "preview ahead of winget": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("9.0.205", "10.0.303", "10.0.400-preview.0.1", "8.0.319"),
+            },
+            "newest of several ahead": {
+                "installed": "10.0.111",
+                "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.204", "10.0.303"),
+            },
+            "a release beside its own preview": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.400"),
+            },
+            "a release listed ahead of its own preview": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("10.0.400", "10.0.400-preview.0.1"),
+            },
+            "the later of two prereleases": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.400-rc.2.1"),
+            },
+            "winget holds the newest": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("8.0.319", "10.0.204", "10.0.303"),
+            },
+            "a preview of winget's own release": {
+                "installed": "10.0.400",
+                "listing": dotnet_sdks("10.0.400-rc.1.2", "10.0.400"),
+            },
+            "winget version unread": {
+                "installed": "",
+                "listing": dotnet_sdks("10.0.400"),
+            },
+            "listing carries no sdk": {
+                "installed": "10.0.303",
+                "listing": ["", "No .NET SDKs were found."],
+            },
+        }
+        result = run_pwsh_harness(DOTNET_SDK_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {name: value["untracked"] for name, value in json.loads(result.stdout).items()},
+            {
+                "preview ahead of winget": "10.0.400-preview.0.1",
+                "newest of several ahead": "10.0.400-preview.0.1",
+                "a release beside its own preview": "10.0.400",
+                "a release listed ahead of its own preview": "10.0.400",
+                "the later of two prereleases": "10.0.400-rc.2.1",
+                "winget holds the newest": None,
+                "a preview of winget's own release": None,
+                "winget version unread": None,
+                "listing carries no sdk": None,
+            },
+        )
+
+    def test_the_listing_is_read_down_to_its_versions(self) -> None:
+        cases = {"listing": {"installed": "", "listing": dotnet_sdks("8.0.319", "10.0.100-rc.1")}}
+        result = run_pwsh_harness(DOTNET_SDK_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["listing"]["sdk"], ["8.0.319", "10.0.100-rc.1"])
+
+
+DOTNET_NOTE_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$PSNativeCommandUseErrorActionPreference = $false
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Add-ToolNote', 'note', 'Get-DotnetSdk', 'Read-DotnetSdkList', 'Get-UntrackedDotnetSdk', 'Get-VersionKey', 'Compare-HostVersion')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$WITH_OPTIONAL = $true
+$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @() }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $env:PATH = $case.Value.path
+    $NOTES = @()
+    $NOTE_TEXTS = @()
+    $state = @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $case.Value.installed; Rows = @(); Scope = @(); Status = 'current' }
+    Add-ToolNote -Tool $tool -State $state
+    $results[$case.Name] = @($NOTES)
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+def write_dotnet_stub(directory: Path, exit_code: int, *versions: str) -> None:
+    """A `dotnet` on `directory` that prints `versions` as `--list-sdks` does, then exits `exit_code`.
+
+    Any other argument exits 9 printing nothing, so a caller asking for the wrong listing reads none.
+    """
+    if sys.platform == "win32":
+        lines = [
+            "@echo off",
+            'if not "%~1"=="--list-sdks" exit /b 9',
+            *(f"echo {version} [X:\\dotnet\\sdk]" for version in versions),
+        ]
+        Path(directory, "dotnet.cmd").write_text(
+            "\r\n".join([*lines, f"exit /b {exit_code}", ""]), encoding="ascii"
+        )
+    else:
+        lines = [
+            "#!/bin/sh",
+            '[ "$1" = --list-sdks ] || exit 9',
+            *(f"echo '{version} [/dotnet/sdk]'" for version in versions),
+        ]
+        stub = Path(directory, "dotnet")
+        stub.write_text("\n".join([*lines, f"exit {exit_code}", ""]), encoding="ascii")
+        stub.chmod(0o755)
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsUntrackedDotnetNote(unittest.TestCase):
+    """The dotnet row's note, driven through `Add-ToolNote` with a stub `dotnet` alone on PATH."""
+
+    def test_the_note_follows_what_dotnet_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {name: Path(directory, name) for name in ("newer", "failing", "absent")}
+            for path in paths.values():
+                path.mkdir()
+            write_dotnet_stub(paths["newer"], 0, "10.0.303", "10.0.400-preview.0.1", "10.0.400")
+            write_dotnet_stub(paths["failing"], 3, "10.0.400")
+            cases = {
+                "newer": {"path": str(paths["newer"]), "installed": "10.0.303"},
+                "failing": {"path": str(paths["failing"]), "installed": "10.0.303"},
+                "absent": {"path": str(paths["absent"]), "installed": "10.0.303"},
+                "unread": {"path": str(paths["newer"]), "installed": ""},
+            }
+            result = run_pwsh_harness(DOTNET_NOTE_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        notes = json.loads(result.stdout)
+        self.assertEqual(len(notes["newer"]), 1, notes)
+        self.assertTrue(notes["newer"][0].startswith("dotnet: dotnet --list-sdks holds 10.0.400,"))
+        self.assertIn("newer than the 10.0.303 winget installed", notes["newer"][0])
+        self.assertIn("other than Microsoft.DotNet.SDK.10", notes["newer"][0])
+        self.assertEqual(
+            {name: notes[name] for name in ("failing", "absent", "unread")},
+            {"failing": [], "absent": [], "unread": []},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

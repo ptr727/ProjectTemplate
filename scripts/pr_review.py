@@ -635,8 +635,9 @@ LABEL_LINE = re.compile(r"\s*[-*]\s+\*\*([^*]+):\*\*")
 # The first states it as a `Review details` bullet.
 # The second has no `Review details` section and states it as a bare bold line.
 # Reading the first alone printed `effort=unknown` over a body stating the level outright.
+# A later revision opens the second on an emoji, a non-ASCII run excluding whitespace so `\s*` cannot overlap it.
 EFFORT_LINE = re.compile(
-    r"\s*(?:[-*]\s+)?\*\*Review effort(?: level)?:\*\*\s*"
+    r"\s*(?:[-*]\s+)?(?:[^\x00-\x7f\s]+\s*)?\*\*Review effort(?: level)?:\*\*\s*"
     r"(?:(Default)\s*\(\s*(Lite|Balanced|Max)\s*\)|(Lite|Balanced|Max))\s*$",
     re.IGNORECASE,
 )
