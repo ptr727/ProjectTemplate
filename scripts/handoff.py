@@ -1211,6 +1211,11 @@ def cmd_link(a: argparse.Namespace) -> int:
             if str(row["number"]) not in after and row["marker"]["previous"] in after:
                 after.add(str(row["number"]))
                 grew = True
+    if str(previous["number"]) in after:
+        raise Refusal(
+            f"#{previous['number']} already descends from #{new['number']}, so pointing "
+            f"#{new['number']} at it would close the chain into a cycle."
+        )
     rest = lane._replace(links=[r for r in lane.links if str(r["number"]) not in after])
     doubts = head_doubts({"number": previous["number"], "marker": before}, rest)
     if doubts:
