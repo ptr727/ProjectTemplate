@@ -4016,6 +4016,7 @@ class TestSecondOverviewFormat(GqlCase):
         """
         self.assertIn("reviews(last:100){ nodes{ id ", pr_review.Q_FULL)
         self.assertIn("pullRequestReview{ id }", pr_review.Q_FULL)
+        self.assertIn("fullDatabaseId", pr_review.Q_FULL)
 
     def test_a_details_tag_named_in_the_preamble_prose_does_not_end_it(self) -> None:
         """The opener is a tag on a line of its own, for the reason the marker and the total are.

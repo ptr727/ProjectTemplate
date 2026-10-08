@@ -135,9 +135,9 @@ Subcommands
            spot-verify against `gh pr diff` rather than trusting it outright.
            `overview=T/M` reads the second Copilot review-body format's own finding total, `T`,
            beside the number of review threads that round actually opened, `M`. `T` reads `?`
-           where no total is found in the overview preamble, which covers a round stating none, a
-           round stating one only after its first collapsed section, and a round stating one as a
-           bullet, that last blocking at exit 43 as an unvetted metadata label. None of them says
+           where no total is found in the overview preamble or in a count-first open-findings
+           section, which covers a round stating none, a round stating one only after its first
+           collapsed section anywhere else, and a round stating one as a bullet, that last blocking at exit 43 as an unvetted metadata label. None of them says
            the round withheld nothing, and a `?` is a reason to read the body. Present
            only where the round covering the head is written in that format, which reached this
            repository after every round the vetted marker lists below were measured over.
