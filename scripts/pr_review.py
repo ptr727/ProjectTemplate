@@ -81,7 +81,8 @@ Subcommands
            50 = the round covering the head opens on a verdict other than the clean one, while it
            states no open finding, opened no thread, collapsed no suppressed or previously-missed
            finding, and no reviewer's thread is open, so what it flags is named in its headline
-           alone, printed under `VERDICT WITH NO COUNTED FINDING`. Ranked under 42, 43, and 45.
+           alone, printed under `VERDICT WITH NO COUNTED FINDING`. Ranked under 42, 43, and 45,
+           and over `wait`'s 44.
            The headline is owed the triage a suppressed finding gets, and the code repeats on that
            head after it is answered, since nothing here reads an answer.
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
@@ -223,9 +224,11 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
-           42, 43, 45, and 50 = the review landed and `status`'s readings apply to it,
-           since a wait ending on a round that covered half the diff, or on output nothing here
-           can read, has ended on something other than a review of this pull request. A 42 can
+           42, 43, 45, and 50 = the review landed and `status`'s readings apply to it.
+           A wait ending on a round that covered half the diff, or on output nothing here can
+           read, has ended on something other than a review of this pull request, and one ending
+           on a 50 has ended on a review whose finding no count carries. 50 outranks 44, so on a
+           head carrying a 50 a stuck check shows only in the digest. A 42 can
            be decided by an earlier round whose partial coverage carries to a head stating none,
            in which case the round the wait ended on is not the round the code came from.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
@@ -1950,7 +1953,8 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     `OVERVIEW_SECTIONS`, or one verdict in its set, rather than another reader.
 
     The verdict is the first verdict heading ahead of the first collapsed section, and the headline
-    is the prose under it up to the next heading or bold line. Each section is a top-level
+    is the prose under it up to the next heading or bold line, taken from the body unmasked so a
+    code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, and the thread id each of its entries links, which is the database id of that
     thread's first comment. Quotations are masked first, so a body quoting a section is not read
@@ -1964,8 +1968,9 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     masked = mask_quotations(body or "")
     tags = mask_quotations(body or "", MARKUP_MASK)
     opener = DETAILS_OPEN.search(tags)
+    end = opener.start() if opener else len(masked)
     verdict, headline = "", []
-    for line in (masked[: opener.start()] if opener else masked).splitlines():
+    for line, raw in zip(masked[:end].splitlines(), (body or "")[:end].splitlines()):
         if MARKDOWN_HEADING.match(line):
             if verdict:
                 break
@@ -1974,7 +1979,7 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         elif verdict and line.lstrip().startswith("**"):
             break
         elif verdict and line.strip():
-            headline.append(line.strip())
+            headline.append(raw.strip())
     roles = {k.casefold(): v for k, v in OVERVIEW_SECTIONS.items()}
     sections: list[OverviewSection] = []
     for start, end in details_spans(tags)[0]:
@@ -2042,10 +2047,10 @@ def round_threads(pr: dict, review: dict) -> int:
     and this round left open, its total counts findings whose threads belong to that earlier round,
     and this undercounts by exactly those, printing a standing shortfall.
 
-    What would settle it is a round whose `Open (N)` count exceeds the threads it opened while the
-    body plainly accounts for the difference, and no round read here has shown that yet. Until one
-    does, a shortfall is reported and read in the body rather than acted on, which is what the
-    digest and every reader-facing surface say.
+    It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
+    was measured over, which is why that section's count is not read as a total. A shortfall is
+    therefore reported and read in the body rather than acted on, which is what the digest and
+    every reader-facing surface say.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
@@ -2104,10 +2109,9 @@ def unthreaded_entries(pr: dict) -> int:
     if newest is None:
         return 0
     known = {
-        str(comment["fullDatabaseId"])
+        str(first_comment(thread)["fullDatabaseId"])
         for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
-        for comment in (((thread.get("comments") or {}).get("nodes") or [])[:1])
-        if comment.get("fullDatabaseId") is not None
+        if first_comment(thread).get("fullDatabaseId") is not None
     }
     sections = read_overview(newest.get("body") or "")[2]
     return len({i for role, _, ids in sections if role != RESOLVED for i in ids} - known)
@@ -2116,8 +2120,9 @@ def unthreaded_entries(pr: dict) -> int:
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
     """The head round's verdict and headline, where the verdict flags what nothing counts.
 
-    A round opening on a flagging verdict that states no open finding, opens no thread, and
-    collapses no suppressed or previously-missed finding names whatever it flags in its headline
+    A round opening on a flagging verdict that states no open finding, lists none in an open
+    section, opens no thread, and collapses no suppressed or previously-missed finding names
+    whatever it flags in its headline
     alone, which every count here reads as a clean pass. Measured over the rounds in this format,
     the headline named a finding in most such rounds and a caution about the change in the rest,
     and only reading it tells the two apart.
@@ -2129,10 +2134,11 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
     if newest is None:
         return None
     body = newest.get("body") or ""
-    verdict, headline, _ = read_overview(body)
+    verdict, headline, sections = read_overview(body)
     if not verdict or unvetted(verdict, FLAGGING_VERDICTS):
         return None
-    if stated_total(body) or round_threads(pr, newest) or unthreaded_entries(pr):
+    listed = any(role != RESOLVED and (count or ids) for role, count, ids in sections)
+    if listed or stated_total(body) or round_threads(pr, newest):
         return None
     if suppressed_blocks(body) or previously_missed_blocks(body):
         return None

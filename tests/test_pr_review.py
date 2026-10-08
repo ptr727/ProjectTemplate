@@ -4230,6 +4230,39 @@ class TestOverviewSections(GqlCase):
         pr = payload([rd], [thread("T1", resolved=True, rid="PRR_head", cid="6000000001")])
         self.assertIsNone(pr_review.uncounted_verdict(pr))
 
+    def test_an_open_list_carrying_an_earlier_round_s_thread_is_not_this_reading(self) -> None:
+        """`Open (N)` can list a thread an earlier round raised, with no total stated anywhere."""
+        body = overview_v2(findings="", entries=1)
+        earlier = thread("T1", resolved=True, rid="PRR_old", cid="4000000001")
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [earlier])))
+
+    def test_the_headline_keeps_the_code_span_it_names(self) -> None:
+        """Masking a quotation finds the verdict, and the reader still needs what the span says."""
+        body = self.headline().replace(
+            "Resolve the two outstanding parser-retry and timeout-handling findings.",
+            "The new `retry_loop()` never terminates on `None`.",
+        )
+        flagged = pr_review.uncounted_verdict(payload([review(body=body)]))
+        self.assertIsNotNone(flagged)
+        assert flagged is not None
+        self.assertEqual("The new `retry_loop()` never terminates on `None`.", flagged[1])
+
+    def test_a_badged_open_list_under_an_emoji_verdict_reads_whole(self) -> None:
+        """The shape a downstream repository's pull request showed: an emoji verdict, an open
+        list of a high and a medium entry each ending on a middle dot and `New`, and a narrative
+        section after it."""
+        ids = ("7000000001", "7000000002")
+        block = open_section(ids).replace("medium", "high", 2).replace("Medium", "High", 1)
+        body = revised_with(block, "### \U0001f7e1 Changes recommended")
+        self.assertIn('alt="High severity"', body)
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        rd = review(body=body, rid="PRR_head")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        pr = payload([rd], threads)
+        self.assertEqual((2, 2), pr_review.head_overview(pr))
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.assertIsNone(pr_review.uncounted_verdict(pr))
+
     def test_an_open_thread_defers_the_reading_until_it_is_resolved(self) -> None:
         """The headline may name that thread, which the loop already waits on."""
         body = self.headline()
