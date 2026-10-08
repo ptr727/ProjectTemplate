@@ -1965,12 +1965,12 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     is the prose under it up to the next heading or bold line, taken from the body unmasked so a
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
-    summary states, the thread id each of its entries links, which is the database id of that
-    thread's first comment, and its linked entry count, the bullets at its margin carrying a link
-    this reader recognizes, outside any block collapsed within it. One entry can link a thread
-    beside its own, hold an indented back-reference, or collapse a list of its own, so a section's
-    links overstate its linked entries. Quotations are masked first, so a body quoting a section
-    is not read as carrying one.
+    summary states, the thread ids its entries link, each the database id of that thread's first
+    comment, and how many of its entries carry such a link. An entry is a bullet at the section's
+    margin, outside any block collapsed within it, so an indented back-reference or a list an
+    entry collapses is read as neither an entry nor a link. One entry can still link a thread
+    beside its own, so a section's links can outnumber its linked entries. Quotations are masked
+    first, so a body quoting a section is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -2003,12 +2003,10 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         count = counted(digits.group()) if digits else None
         text = masked[start:end]
         own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
-        linked = sum(
-            1
-            for line in own.splitlines()
-            if ENTRY_LINE.match(line) and DISCUSSION_LINK.search(line)
-        )
-        sections.append((role, count, DISCUSSION_LINK.findall(text), linked))
+        entries = [line for line in own.splitlines() if ENTRY_LINE.match(line)]
+        ids = [i for line in entries for i in DISCUSSION_LINK.findall(line)]
+        linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
+        sections.append((role, count, ids, linked))
     return verdict, " ".join(headline), sections
 
 

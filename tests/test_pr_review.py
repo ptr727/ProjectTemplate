@@ -4278,6 +4278,22 @@ class TestOverviewSections(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
+    def test_a_collapsed_back_reference_to_no_thread_is_not_a_second_finding(self) -> None:
+        """A link inside a block collapsed within the section is no entry's, so it adds none."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        nested = (
+            "<details><summary>Related</summary>\n\n"
+            "- see [earlier](#discussion_r4000000009)\n\n</details>\n"
+        )
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n{nested}- Finding 2 New"
+        )
+        self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_more_linked_entries_than_counted_cancel_no_unthreaded_entry(self) -> None:
         """A section counting fewer entries than it links still counts an id no thread carries."""
         linked = "- [Finding 1](#discussion_r4000000001) New"
