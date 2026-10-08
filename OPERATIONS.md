@@ -139,3 +139,4 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
+- `read_regular_file()` and `write_regular_file()` in [host-setup/agent-safety/claude/install.py](./host-setup/agent-safety/claude/install.py) are the installer's shared primitives for reading and writing a file that may not be a regular file. A new read or write there goes through them rather than a check of its own.

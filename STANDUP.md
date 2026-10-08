@@ -180,7 +180,7 @@ Carry `AGENTS.md`'s skill-dependency pointer paragraph, the one naming `scripts/
 
 **A repo whose own stacks or scripts read local runtime credentials from disk documents that under `OPERATIONS.md`'s `Configuration Layout` heading**, and the directory follows the repo-scoped secrets convention in [GOVERNANCE.md][governance-repo-scoped-secrets] rather than an ad hoc layout invented per repo.
 
-**`OPERATIONS.md`'s `Configuration Layout` heading also names the repo's trust boundaries and its shared primitives, where it has them.** The first is which concrete inputs are trusted and which are not, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". The second is the helper owning each class of operation the repo has consolidated, such as file I/O or reading a secret, per `GOVERNANCE.md` "Design Before Code". A session then finds the primitive there rather than searching for it.
+**`OPERATIONS.md`'s `Configuration Layout` heading also names the repo's trust boundaries and its shared primitives, where it has them.** The first is which concrete inputs are trusted and which are not, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". The second is the helper owning each class of operation the repo has consolidated, such as file I/O or reading a secret, per `GOVERNANCE.md` "Design Before Code". A session then starts its search for a primitive there.
 
 Choose the destination while scaffolding rather than after. Repo-specific content left in a carried file is drift, which the audit lists as an undeclared section to reconcile, and reconciling it later means moving prose that downstream readers have already started trusting in the wrong place.
 
