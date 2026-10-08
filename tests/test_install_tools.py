@@ -583,5 +583,78 @@ class TestWindowsUntrackedDotnetSdk(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["listing"]["sdk"], ["8.0.319", "10.0.100-rc.1"])
 
 
+DOTNET_NOTE_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$PSNativeCommandUseErrorActionPreference = $false
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Add-ToolNote', 'note', 'Get-DotnetSdk', 'Read-DotnetSdkList', 'Get-UntrackedDotnetSdk', 'Get-VersionKey', 'Compare-HostVersion')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$WITH_OPTIONAL = $true
+$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @() }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $env:PATH = $case.Value.path
+    $NOTES = @()
+    $NOTE_TEXTS = @()
+    $state = @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $case.Value.installed; Rows = @(); Scope = @(); Status = 'current' }
+    Add-ToolNote -Tool $tool -State $state
+    $results[$case.Name] = @($NOTES)
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+def write_dotnet_stub(directory: Path, exit_code: int, *versions: str) -> None:
+    """A `dotnet` on `directory` that prints `versions` as `--list-sdks` does, then exits `exit_code`."""
+    if sys.platform == "win32":
+        lines = ["@echo off", *(f"echo {version} [X:\\dotnet\\sdk]" for version in versions)]
+        Path(directory, "dotnet.cmd").write_text(
+            "\r\n".join([*lines, f"exit /b {exit_code}", ""]), encoding="ascii"
+        )
+    else:
+        lines = ["#!/bin/sh", *(f"echo '{version} [/dotnet/sdk]'" for version in versions)]
+        stub = Path(directory, "dotnet")
+        stub.write_text("\n".join([*lines, f"exit {exit_code}", ""]), encoding="ascii")
+        stub.chmod(0o755)
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsUntrackedDotnetNote(unittest.TestCase):
+    """The dotnet row's note, driven through `Add-ToolNote` with a stub `dotnet` alone on PATH."""
+
+    def test_the_note_follows_what_dotnet_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {name: Path(directory, name) for name in ("newer", "failing", "absent")}
+            for path in paths.values():
+                path.mkdir()
+            write_dotnet_stub(paths["newer"], 0, "10.0.303", "10.0.400-preview.0.1", "10.0.400")
+            write_dotnet_stub(paths["failing"], 3, "10.0.400")
+            cases = {
+                "newer": {"path": str(paths["newer"]), "installed": "10.0.303"},
+                "failing": {"path": str(paths["failing"]), "installed": "10.0.303"},
+                "absent": {"path": str(paths["absent"]), "installed": "10.0.303"},
+                "unread": {"path": str(paths["newer"]), "installed": ""},
+            }
+            result = run_pwsh_harness(DOTNET_NOTE_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        notes = json.loads(result.stdout)
+        self.assertEqual(len(notes["newer"]), 1, notes)
+        self.assertTrue(notes["newer"][0].startswith("dotnet: dotnet --list-sdks holds 10.0.400,"))
+        self.assertIn("newer than the 10.0.303 winget installed", notes["newer"][0])
+        self.assertIn("other than Microsoft.DotNet.SDK.10", notes["newer"][0])
+        self.assertEqual(
+            {name: notes[name] for name in ("failing", "absent", "unread")},
+            {"failing": [], "absent": [], "unread": []},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
