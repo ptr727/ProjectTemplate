@@ -79,7 +79,7 @@ PATH=$host_path
         result = self.run_bash(body, AWKWARD)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["schema"], 1)
+        self.assertEqual(report["schema"], 2)
         self.assertEqual(report["platform"], "linux")
         self.assertEqual(
             report["tools"],
@@ -91,6 +91,7 @@ PATH=$host_path
                     "source": "jqlang/jq",
                     "mechanism": "binary",
                     "status": "missing",
+                    "pending_packages": [],
                     "notes": [AWKWARD],
                 },
                 {
@@ -100,12 +101,95 @@ PATH=$host_path
                     "source": "apt:extra-package",
                     "mechanism": "apt",
                     "status": "current",
+                    "pending_packages": [],
                     "notes": [],
                 },
             ],
         )
         self.assertEqual(len(report["notes"]), 1)
         self.assertIn("curl is not installed", report["notes"][0])
+
+    def report_rows(self, body: str) -> dict[str, dict[str, object]]:
+        """The JSON report's rows by tool, with every host read the body names stubbed and every note silenced."""
+        result = self.run_bash(f"JSON_OUTPUT=true\ntool_note() {{ :; }}\n{body}\nreport")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return {row["tool"]: row for row in json.loads(result.stdout)["tools"]}
+
+    def test_a_tool_not_installed_without_its_upstream_repository_reads_unmanaged(self) -> None:
+        """Neither tool is installed and the distro carries both, but only node's upstream repository is configured."""
+        rows = self.report_rows("""
+SELECTED=(gh node)
+tool_configured() { [[ $1 != gh ]]; }
+apt_installed_version() { :; }
+apt_candidate_version() { printf '2.0.0-1'; }
+""")
+        self.assertEqual(rows["gh"]["installed"], None)
+        self.assertEqual(rows["gh"]["status"], "unmanaged")
+        self.assertEqual(rows["node"]["installed"], None)
+        self.assertEqual(rows["node"]["status"], "missing")
+
+    def test_an_unconfigured_upstream_reads_unmanaged_whatever_the_versions(self) -> None:
+        cases = (("", "2.0"), ("", ""), ("2.0", "2.0"), ("1.0", "2.0"), ("2.0", ""))
+        for installed, target in cases:
+            with self.subTest(installed=installed, target=target):
+                result = self.run_bash(
+                    f'tool_configured() {{ return 1; }}\ntool_effective_status gh "$1" "{target}"',
+                    installed,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "unmanaged")
+
+    def test_installing_an_unmanaged_tool_that_is_not_installed_says_so(self) -> None:
+        result = self.run_bash("""
+MODE=upgrade
+tool_configured() { return 1; }
+tool_unshadow() { :; }
+apt_installed_version() { :; }
+apt_candidate_version() { printf '2.0.0-1'; }
+gh_install() { :; }
+apply_tool gh
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gh: not installed, installing it from cli.github.com", result.stdout)
+        self.assertNotIn("2.0.0-1", result.stdout)
+
+    def test_a_part_installed_package_set_is_pending_and_not_current(self) -> None:
+        """A current python3 whose required set is part installed has pending work, and so is not current."""
+        stubs = """
+SELECTED=(python)
+apt_installed_version() { printf "$INSTALLED"; }
+apt_candidate_version() { printf '3.13.5-1'; }
+package_installed() { [[ " $ABSENT " != *" $1 "* ]]; }
+"""
+        cases: tuple[tuple[str, str, str, list[str]], ...] = (
+            ("3.13.5-1", "python3-venv python3-pip", "incomplete", ["python3-venv", "python3-pip"]),
+            ("3.13.5-1", "", "current", []),
+            ("3.13.4-1", "python3-venv", "outdated", ["python3-venv"]),
+        )
+        for installed, absent, status, pending in cases:
+            with self.subTest(installed=installed, absent=absent):
+                rows = self.report_rows(f"INSTALLED='{installed}'\nABSENT='{absent}'\n{stubs}")
+                self.assertEqual(rows["python"]["status"], status)
+                self.assertEqual(rows["python"]["pending_packages"], pending)
+
+    def test_dotnet_s_other_sdk_lines_are_pending_only_under_optional(self) -> None:
+        """The newest SDK line is installed and current, and the two older lines are not installed."""
+        stubs = """
+SELECTED=(dotnet)
+dotnet_sdk_packages() { printf '%s\\n' dotnet-sdk-8.0 dotnet-sdk-9.0 dotnet-sdk-10.0; }
+apt_installed_version() { printf '10.0.100-1'; }
+apt_candidate_version() { printf '10.0.100-1'; }
+package_installed() { [[ $1 == dotnet-sdk-10.0 ]]; }
+"""
+        cases: tuple[tuple[str, str, list[str]], ...] = (
+            ("true", "incomplete", ["dotnet-sdk-8.0", "dotnet-sdk-9.0"]),
+            ("false", "current", []),
+        )
+        for optional, status, pending in cases:
+            with self.subTest(optional=optional):
+                rows = self.report_rows(f"WITH_OPTIONAL={optional}\n{stubs}")
+                self.assertEqual(rows["dotnet"]["status"], status)
+                self.assertEqual(rows["dotnet"]["pending_packages"], pending)
 
     def test_bin_dir_joins_a_path_that_leaves_it_out(self) -> None:
         result = self.run_bash('PATH=/usr/bin:/bin\nensure_bin_dir_on_path\nprintf "%s" "$PATH"')

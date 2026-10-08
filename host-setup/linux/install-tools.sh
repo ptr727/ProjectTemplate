@@ -142,6 +142,17 @@ json_value() {
     fi
 }
 
+json_array() {
+    local item sep=""
+    printf '['
+    for item in "$@"; do
+        printf '%s' "$sep"
+        json_string "$item"
+        sep=", "
+    done
+    printf ']'
+}
+
 json_notes() {
     local i sep=""
     printf '['
@@ -181,10 +192,13 @@ Versions read as apt versions for an apt-managed tool and as upstream versions f
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
 not refresh it, so an available version is as current as the last apt update.
 
---json writes one object carrying the same rows: "schema" (1), "platform" ("linux"), "tools", one
-entry per tool with "tool", "installed", "available", "source", "mechanism", "status" and that
-tool's own "notes", and a top-level "notes" for what belongs to no tool. A version that was not
-read is null. Like "source", "mechanism" names how this script manages the tool rather than where
+--json writes one object carrying the same rows: "schema" (2), "platform" ("linux"), "tools", one
+entry per tool with "tool", "installed", "available", "source", "mechanism", "status",
+"pending_packages" and that tool's own "notes", and a top-level "notes" for what belongs to no
+tool. A version that was not read is null. "pending_packages" lists what an install or upgrade
+would add from the tool's package set, and a tool otherwise current reads "incomplete" while it is
+not empty. "unmanaged" marks a tool whose upstream repository is not configured, installed or not,
+and its "available" is the distro's version rather than the one an install or upgrade would take. Like "source", "mechanism" names how this script manages the tool rather than where
 the installed copy came from: "apt", which any apt upgrade moves, "binary", which only this script
 moves, or "docker-desktop" for docker inside a WSL distribution, which it leaves to Docker Desktop.
 
@@ -972,12 +986,11 @@ tool_configured() {
 }
 
 tool_effective_status() {
-    local tool="$1" status
-    status=$(tool_status "$2" "$3")
-    if [[ $status == "current" || $status == "outdated" ]] && ! tool_configured "$tool"; then
-        status="unmanaged"
+    if ! tool_configured "$1"; then
+        printf 'unmanaged'
+        return 0
     fi
-    printf '%s' "$status"
+    tool_status "$2" "$3"
 }
 
 tool_status() {
@@ -1117,6 +1130,29 @@ tool_note() {
     return 0
 }
 
+tool_pending_packages() {
+    local tool="$1"
+    local -a packages=()
+
+    case "$tool" in
+    python)
+        readarray -t packages < <(python_packages)
+        ;;
+    dotnet)
+        [[ $WITH_OPTIONAL == true ]] || return 0
+        local latest package
+        latest=$(dotnet_sdk_latest)
+        while read -r package; do
+            [[ $package == "$latest" ]] || packages+=("$package")
+        done < <(dotnet_sdk_packages)
+        ;;
+    *) ;;
+    esac
+
+    [[ ${#packages[@]} -eq 0 ]] || apt_missing "${packages[@]}"
+    return 0
+}
+
 tool_mechanism() {
     case "$1" in
     jq | uv | git-restore-mtime) printf 'binary' ;;
@@ -1146,8 +1182,10 @@ report() {
     local report_notes=${#NOTES[@]}
 
     local tool installed target source mechanism status first
+    local -a pending_packages
     for tool in "${SELECTED[@]}"; do
         first=${#NOTES[@]}
+        pending_packages=()
         if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
             installed=$(apt_installed_version "${REPO_PACKAGES[$tool]}")
             target=$(apt_candidate_version "${REPO_PACKAGES[$tool]}")
@@ -1160,6 +1198,10 @@ report() {
             source=$("$(tool_function "$tool" source)")
             mechanism=$(tool_mechanism "$tool")
             status=$(tool_effective_status "$tool" "$installed" "$target")
+            readarray -t pending_packages < <(tool_pending_packages "$tool")
+            if [[ $status == "current" && ${#pending_packages[@]} -gt 0 ]]; then
+                status="incomplete"
+            fi
         fi
         if [[ $JSON_OUTPUT == false ]]; then
             # shellcheck disable=SC2059  # Format string is a constant defined above.
@@ -1167,15 +1209,16 @@ report() {
         fi
         [[ -n ${REPO_PACKAGES[$tool]:-} ]] || tool_note "$tool"
         if [[ $JSON_OUTPUT == true ]]; then
-            rows+=("$(printf '{"tool": %s, "installed": %s, "available": %s, "source": %s, "mechanism": %s, "status": %s, "notes": %s}' \
+            rows+=("$(printf '{"tool": %s, "installed": %s, "available": %s, "source": %s, "mechanism": %s, "status": %s, "pending_packages": %s, "notes": %s}' \
                 "$(json_string "$tool")" "$(json_value "$installed")" "$(json_value "$target")" "$(json_string "$source")" \
-                "$(json_string "$mechanism")" "$(json_string "$status")" "$(json_notes "$first" "${#NOTES[@]}")")")
+                "$(json_string "$mechanism")" "$(json_string "$status")" "$(json_array "${pending_packages[@]}")" \
+                "$(json_notes "$first" "${#NOTES[@]}")")")
         fi
     done
 
     if [[ $JSON_OUTPUT == true ]]; then
         local i sep=""
-        printf '{\n  "schema": 1,\n  "platform": "linux",\n  "tools": ['
+        printf '{\n  "schema": 2,\n  "platform": "linux",\n  "tools": ['
         for ((i = 0; i < ${#rows[@]}; i++)); do
             printf '%s\n    %s' "$sep" "${rows[i]}"
             sep=","
@@ -1299,7 +1342,11 @@ apply_tool() {
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is the distro's until the upstream repository is read, so quoting it here would name the wrong upstream.
-        log "$tool: installed from the distro, moving it to $("$(tool_function "$tool" source)")"
+        if [[ -n $installed ]]; then
+            log "$tool: installed from the distro, moving it to $("$(tool_function "$tool" source)")"
+        else
+            log "$tool: not installed, installing it from $("$(tool_function "$tool" source)")"
+        fi
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
     fi
