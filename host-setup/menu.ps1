@@ -190,10 +190,12 @@ function Lock-Hub {
         try {
             return [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
         } catch [System.Management.Automation.MethodInvocationException] {
-            # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
+            # A held lock is a sharing or lock violation on Windows and the flock's EWOULDBLOCK on Linux, each carried in the HResult, where a full disk or a read-only mount is a plain IOException too and would otherwise be waited on forever.
             # The open does not block on either platform, so a held lock is waited out by retrying it.
             $reason = $_.Exception.InnerException
-            if ($reason.GetType() -ne [IO.IOException]) {
+            $code = $reason.HResult -band 0xFFFF
+            $held = if ($IsWindows) { $code -in 32, 33 } else { $code -eq 11 }
+            if (-not $held) {
                 fail "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
                 return $null
             }
@@ -212,11 +214,12 @@ function Invoke-WithHubLock {
     # That trade is not always brief: Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade, so a second session waiting here can wait as long as that run takes, not just for a quick read.
     # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
     # A span already holding the lock runs the scriptblock as it is, since Invoke-FetchHub is reached from inside one through Confirm-HubRoot, and a second open of the file would wait on this session's own lock forever.
+    # -DryRun runs it unlocked too, matching menu.sh, since a dry run never fetches or reads $DIR\hub, and it must not create $DIR or a lock file where neither existed.
     # A lock that cannot be taken at all returns $Failed without running the scriptblock, the value each caller already returns for its own task failing, since a $false would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site, where a bare closure reads as an unused parameter to it, since the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
     param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @(), [object]$Failed = 1)
-    if ($script:HUB_LOCK) { return (& $ScriptBlock @ArgumentList) }
+    if ($script:HUB_LOCK -or $script:DRY_RUN) { return (& $ScriptBlock @ArgumentList) }
     $script:HUB_LOCK = Lock-Hub
     if (-not $script:HUB_LOCK) { return $Failed }
     try {

@@ -1370,6 +1370,7 @@ foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management
 }
 $script:DIR = $Dir
 $script:HUB_LOCK = $null
+$script:DRY_RUN = $false
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $BodyFile)))
 """
 
@@ -1381,7 +1382,7 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
-    def start(self, body: str) -> subprocess.Popen[str]:
+    def start(self, body: str, cache: Path | None = None) -> subprocess.Popen[str]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         harness = directory / "harness.ps1"
         harness.write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
@@ -1397,7 +1398,7 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
                 "-Menu",
                 str(MENU_PS),
                 "-Dir",
-                str(self.dir),
+                str(cache or self.dir),
                 "-BodyFile",
                 str(body_file),
             ],
@@ -1453,6 +1454,28 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
             holder.communicate(input="\n", timeout=60)
 
         self.assert_waits_then_runs(release)
+
+    def test_a_dry_run_runs_unlocked_and_creates_no_cache_directory(self) -> None:
+        cache = self.dir / "absent"
+        dry = self.start(
+            "$script:DRY_RUN = $true\nInvoke-WithHubLock { [Console]::Out.WriteLine('ran') }", cache
+        )
+        stdout, stderr = dry.communicate(timeout=60)
+        self.assertEqual(dry.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "ran")
+        self.assertFalse(cache.exists())
+
+    def test_a_lock_that_cannot_be_opened_returns_the_failure_value_without_running(self) -> None:
+        """A directory at the lock's name is a failure to open rather than a lock to wait on."""
+        (self.dir / "hub.lock").mkdir()
+        failed = self.start(
+            "$rc = Invoke-WithHubLock -Failed 7 { [Console]::Out.WriteLine('ran') }\n"
+            '[Console]::Out.WriteLine("rc=$rc")'
+        )
+        stdout, stderr = failed.communicate(timeout=60)
+        self.assertEqual(failed.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "rc=7")
+        self.assertIn("Could not open", stderr)
 
     def test_a_span_already_holding_the_lock_runs_a_nested_one_without_waiting_on_itself(
         self,
