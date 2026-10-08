@@ -162,10 +162,11 @@ Subcommands
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
            the pull request is counted in that same block whatever the totals say. So is each
-           entry an `Open (N)` section counts beyond those it lists with a link. Where the
-           open-findings section supplied `T`, the block is measured against its entries rather
-           than against `M`, so an entry linking an earlier round's thread is no finding without
-           one, while a finding that section's count names and no entry links is still counted.
+           entry an `Open (N)` section counts beyond its linked entries, the bullets at its
+           margin carrying a link this script reads. Where the open-findings section supplied
+           `T`, the block is measured against its entries rather than against `M`, so an entry
+           linking an earlier round's thread is no finding without one, while a finding that
+           section's count names and no entry links is still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -1965,9 +1966,10 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, the thread id each of its entries links, which is the database id of that
     thread's first comment, and its linked entry count, the bullets at its margin carrying a link
-    this reader recognizes. One entry can link a thread beside its own or hold an indented
-    back-reference, so a section's links overstate its linked entries. Quotations are masked
-    first, so a body quoting a section is not read as carrying one.
+    this reader recognizes, outside any block collapsed within it. One entry can link a thread
+    beside its own, hold an indented back-reference, or collapse a list of its own, so a section's
+    links overstate its linked entries. Quotations are masked first, so a body quoting a section
+    is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -1999,9 +2001,10 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         digits = re.search(r"\d+", EMPHASIS.sub("", summary))
         count = counted(digits.group()) if digits else None
         text = masked[start:end]
+        own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
         linked = sum(
             1
-            for line in text.splitlines()
+            for line in own.splitlines()
             if ENTRY_LINE.match(line) and DISCUSSION_LINK.search(line)
         )
         sections.append((role, count, DISCUSSION_LINK.findall(text), linked))

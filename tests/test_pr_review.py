@@ -4261,6 +4261,45 @@ class TestOverviewSections(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
+    def test_a_bullet_collapsed_within_an_entry_does_not_cover_an_unlinked_entry(self) -> None:
+        """A list collapsed inside an entry holds back-references rather than entries."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        nested = (
+            "<details><summary>Related</summary>\n\n"
+            "- see [earlier](#discussion_r4000000007)\n\n</details>\n"
+        )
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n{nested}- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_more_linked_entries_than_counted_cancel_no_unthreaded_entry(self) -> None:
+        """A section counting fewer entries than it links still counts an id no thread carries."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace(linked, f"{linked}\n- [Finding 7](#discussion_r4000000007) New")
+        self.answer(payload([review(body=body)], [thread("T7", cid="4000000007")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_every_bullet_marker_reads_as_a_linked_entry(self) -> None:
+        """`*` and `+` open an entry as `-` does, so a list in either is fully linked."""
+        for marker in ("*", "+"):
+            with self.subTest(marker=marker):
+                linked = "- [Finding 1](#discussion_r4000000001) New"
+                body = overview_v2(findings="", entries=1)
+                self.assertIn(linked, body)
+                body = body.replace(linked, f"{marker}{linked[1:]}")
+                self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
     def test_an_entry_linking_no_thread_is_counted_where_the_totals_balance(self) -> None:
         """The round opened as many threads as it states, and one entry links none of them, so
         the totals alone pass a finding named only in the body."""
