@@ -214,14 +214,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    issue develop fixes, assembled per `backlog-burndown` "Assembling the Promotion Body", and hand
    it to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
    Every Merge Gate item other than the permission still has to hold. **A blocked promotion narrows
-   the round to develop.** Before promoting, read the open `decision` issues with `gh issue list
-   --repo "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`
-   under picker step 1's full-page check. One may block the open develop -> main pull request,
-   stating so in its body or in a comment, as "Parking" step 2 has it state. While it stays
-   open, merge or release no promotion and open no other. Amend that promotion's body with this
-   issue's `Fixes` line, per `backlog-burndown` "Assembling the Promotion Body", so the issue
-   closes when it merges. Then close the lane out, naming the decision issue in the close-out
-   comment.
+   the round to develop.** Before promoting, read the open `decision` issues under picker step 1's
+   full-page check, with `gh issue list --repo "<owner>/<repo>" --label decision --state open
+   --limit 100 --json number,body,comments`. Where one of them states, in its body or in a comment,
+   that it blocks the open develop -> main pull request, as "Parking" step 2 has it state, the
+   worker merges, opens, and releases no promotion while that decision issue is open. It instead
+   adds `Fixes #<issue>` to that promotion's body, per `backlog-burndown` "Assembling the Promotion
+   Body", so `#<issue>` closes when the promotion merges. It then closes the lane out, naming the
+   decision issue in the close-out comment.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
