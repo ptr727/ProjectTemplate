@@ -1025,7 +1025,10 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
             str(body_file),
         ]
 
-    def run_loader(self, body: str) -> subprocess.CompletedProcess[str]:
+    def run_loader(
+        self, body: str, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs `body` in the harness, `env` reaching it as environment so a path is never quoted into the script."""
         with tempfile.TemporaryDirectory() as directory:
             return subprocess.run(
                 self.loader_command(Path(directory), body),
@@ -1034,6 +1037,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
                 encoding="utf-8",
                 check=False,
                 timeout=120,
+                env={**os.environ, **(env or {})},
             )
 
     def hold_lock(self) -> subprocess.Popen[str]:
@@ -1243,12 +1247,12 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         record = work / "registered"
         extract = (
             "$into = $args[[array]::IndexOf($args, '-C') + 1]; "
-            f"Copy-Item -Path (Join-Path '{source}' '*') -Destination $into -Recurse; "
+            "Copy-Item -Path (Join-Path $env:FIXTURE_SOURCE '*') -Destination $into -Recurse; "
             "$global:LASTEXITCODE = 0"
         )
         result = self.run_loader(
-            f"$env:REGISTERED_RECORD = '{record}'\n"
-            + self.fetch(extract, then="Invoke-SkillsInstall")
+            self.fetch(extract, then="Invoke-SkillsInstall"),
+            env={"FIXTURE_SOURCE": str(source), "REGISTERED_RECORD": str(record)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         registered = Path(record.read_text(encoding="utf-8"))
