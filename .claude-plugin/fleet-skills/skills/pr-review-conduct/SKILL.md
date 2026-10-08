@@ -290,8 +290,9 @@ never against its confidence label. Classify before responding:
   a test it says not to write. Decline it under outcome 2, even where it reads as missing coverage.
 - **Design finding that `GOVERNANCE.md` "Design Before Code" backs**, such as logic an existing
   helper provides or a per-site fix for a class seen elsewhere. It is not an architectural
-  opinion. Fix it, extending the existing helper wherever it lives, and move the class's sites in
-  the touched files onto it. File the other sites as one issue naming each.
+  opinion. Fix it, extending the existing helper where this repository holds it, and move the
+  class's sites in the touched files onto it. File the other sites as one issue naming each, and
+  an extension a helper in another repository needs as an issue in that repository.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**, and take it to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.
