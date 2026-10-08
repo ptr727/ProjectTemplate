@@ -1580,7 +1580,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Confirm-HubRoot')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -1836,6 +1836,212 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=60,
+        )
+
+
+class HubRefFreshnessCases:
+    """Whether a menu reuses the cached hub tree for its session's own ref, the same cases for both menus.
+
+    Each run is one session sharing the cache directory, cloning from a local origin whose `main`
+    and `develop` sit on different commits, reached through `insteadOf` so the menus' own hub URL
+    resolves to it.
+    """
+
+    dir: Path
+    work: Path
+    env: dict[str, str]
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        raise NotImplementedError
+
+    def fetch_body(self, ref: str) -> str:
+        """The menu's lines fetching the hub at the given ref."""
+        raise NotImplementedError
+
+    def check_body(self, ref: str) -> str:
+        """The menu's lines confirming the cached tree for the given ref, printing which way it went.
+
+        `fresh` where the tree is reused, and `refetched` where the menu would fetch again.
+        """
+        raise NotImplementedError
+
+    def make_origin(self, root: Path) -> None:
+        self.work = root / "work"
+        origin = root / "origin.git"
+        self.git("init", "--quiet", "--initial-branch=main", str(self.work), cwd=root)
+        self.commit("main")
+        self.git("checkout", "--quiet", "-b", "develop")
+        self.commit("develop")
+        self.git("clone", "--quiet", "--bare", str(self.work), str(origin), cwd=root)
+        self.git("remote", "add", "origin", str(origin))
+        self.env = {
+            **os.environ,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{origin.as_posix()}.insteadOf",
+            "GIT_CONFIG_VALUE_0": "https://github.com/ptr727/ProjectTemplate",
+        }
+
+    def git(self, *args: str, cwd: Path | None = None) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd or self.work,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+
+    def commit(self, message: str) -> None:
+        self.git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            message,
+        )
+
+    def assert_check(self, ref: str, expected: str) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(self.check_body(ref))
+        test.assertEqual(result.returncode, 0, result.stderr)
+        test.assertEqual(result.stdout.strip().splitlines()[-1:], [expected], result.stderr)
+
+    def fetch(self, ref: str) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(self.fetch_body(ref))
+        test.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_tree_fetched_at_main_is_reused_by_a_main_session(self) -> None:
+        self.fetch("main")
+        self.assert_check("main", "fresh")
+
+    def test_a_tree_fetched_at_another_ref_is_reused_by_a_session_on_that_ref(self) -> None:
+        """Compared against main alone, it read as stale and was cloned again on every task."""
+        self.fetch("develop")
+        self.assert_check("develop", "fresh")
+
+    def test_a_tree_another_session_replaced_with_main_is_stale_for_another_ref(self) -> None:
+        """Compared against main alone, the session ran its next task from main without saying so."""
+        self.fetch("develop")
+        self.fetch("main")
+        self.assert_check("develop", "refetched")
+
+    def test_a_tree_fetched_at_another_ref_is_stale_for_a_main_session(self) -> None:
+        self.fetch("develop")
+        self.assert_check("main", "refetched")
+
+    def test_a_tree_whose_ref_moved_on_origin_since_its_fetch_is_stale(self) -> None:
+        self.fetch("develop")
+        self.commit("develop again")
+        self.git("push", "--quiet", "origin", "develop")
+        self.assert_check("develop", "refetched")
+
+
+class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
+    """`menu.sh`'s `ensure_hub_root`, with `flock` stubbed, since its lock is covered on Linux alone."""
+
+    def setUp(self) -> None:
+        self.bash = bash_or_skip()
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.dir = root / "cache"
+        self.dir.mkdir()
+        self.scripts = root / "scripts"
+        self.scripts.mkdir()
+        (self.scripts / "functions.sh").write_text(menu_functions(), encoding="utf-8", newline="\n")
+        self.make_origin(root)
+
+    def fetch_body(self, ref: str) -> str:
+        return f"REF={ref}\nfetch_hub_locked\n"
+
+    def check_body(self, ref: str) -> str:
+        return (
+            f'REF={ref}\nHUB_ROOT="$DIR/hub"\n'
+            "fetch_hub() { echo refetched; return 1; }\n"
+            "if ensure_hub_root; then echo fresh; fi\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = self.scripts / "body.sh"
+        script.write_text(
+            f'source "{(self.scripts / "functions.sh").as_posix()}"\n'
+            "flock() { return 0; }\n"
+            f'DIR="{self.dir.as_posix()}"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        return subprocess.run(
+            [self.bash, str(script)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
+            timeout=60,
+        )
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
+class TestPowerShellMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
+    """`menu.ps1`'s `Confirm-HubRoot`, driven through its own functions."""
+
+    SETUP = (
+        "$script:HUB_REPO = 'ptr727/ProjectTemplate'\n"
+        "$script:HUB_URL = 'https://github.com/ptr727/ProjectTemplate'\n"
+        "$script:DEFAULT_REF = 'main'\n$script:HUB_ROOT = ''\n"
+        "function step { param([string]$Message) }\n"
+    )
+
+    def setUp(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.dir = root / "cache"
+        self.dir.mkdir()
+        self.scripts = root / "scripts"
+        self.scripts.mkdir()
+        (self.scripts / "harness.ps1").write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
+        self.make_origin(root)
+
+    def fetch_body(self, ref: str) -> str:
+        return (
+            self.SETUP
+            + f"$script:REF = '{ref}'\n"
+            + "if (-not (Invoke-FetchHubLocked)) { exit 1 }\n"
+        )
+
+    def check_body(self, ref: str) -> str:
+        return (
+            self.SETUP + f"$script:REF = '{ref}'\n$script:HUB_ROOT = Join-Path $script:DIR 'hub'\n"
+            "function Invoke-FetchHub { [Console]::Out.WriteLine('refetched'); return $false }\n"
+            "if (Confirm-HubRoot) { [Console]::Out.WriteLine('fresh') }\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        body_file = self.scripts / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        return subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(self.scripts / "harness.ps1"),
+                "-Menu",
+                str(MENU_PS),
+                "-Dir",
+                str(self.dir),
+                "-BodyFile",
+                str(body_file),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
             timeout=60,
         )
 

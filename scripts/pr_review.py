@@ -78,6 +78,13 @@ Subcommands
            comparison could not be read, run `status` again. Past those,
            hand the state to the maintainer rather than retrying into it, since a round
            re-requested on the same head states coverage or carries a table only by chance.
+           50 = the round covering the head opens on a verdict other than the clean one, while it
+           states no open finding, opened no thread, collapsed no suppressed or previously-missed
+           finding, and no reviewer's thread is open, so what it flags is named in its headline
+           alone, printed under `VERDICT WITH NO COUNTED FINDING`. Ranked under 42, 43, and 45,
+           and over `wait`'s 44.
+           The headline is owed the triage a suppressed finding gets, and the code repeats on that
+           head after it is answered, since nothing here reads an answer.
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
            covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
            `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
@@ -128,9 +135,10 @@ Subcommands
            spot-verify against `gh pr diff` rather than trusting it outright.
            `overview=T/M` reads the second Copilot review-body format's own finding total, `T`,
            beside the number of review threads that round actually opened, `M`. `T` reads `?`
-           where no total is found in the overview preamble, which covers a round stating none, a
-           round stating one only after its first collapsed section, and a round stating one as a
-           bullet, that last blocking at exit 43 as an unvetted metadata label. None of them says
+           where no total is found in the overview preamble or in a count-first open-findings
+           section, which covers a round stating none, a round stating one only after its first
+           collapsed section anywhere else, and a round stating one as a bullet, that last
+           blocking at exit 43 as an unvetted metadata label. None of them says
            the round withheld nothing, and a `?` is a reason to read the body. Present
            only where the round covering the head is written in that format, which reached this
            repository after every round the vetted marker lists below were measured over.
@@ -141,7 +149,8 @@ Subcommands
            shortfall by counting something that was not an entry, telling those apart needing a
            Markdown parser rather than a line scan.
            A total larger than the thread count is findings the round raised that polling threads
-           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall. Two
+           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall, except
+           where a count-first open section supplied the total, as stated below. Two
            things overstate that shortfall rather than hiding it, so it is confirmed against the
            body rather than acted on from the number. One is a thread past the hundred
            `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
@@ -149,6 +158,16 @@ Subcommands
            findings earlier rounds raised, whose total `M` undercounts. A withheld finding is owed
            the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
            `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
+           Where the preamble states no total, the count opening the open-findings section is
+           `T`, since that format's later revision writes the bare zero line only for a zero.
+           Each entry an open section lists links its thread, and an entry linking no thread on
+           the pull request is counted in that same block whatever the totals say. So is each
+           entry an `Open (N)` section counts beyond its linked entries, the bullets at its
+           margin carrying a link this script reads, outside any block collapsed within it.
+           Where the open-findings section supplied `T`, the block is measured against its
+           entries rather than against `M`, so an entry linking an earlier round's thread is no
+           finding without one, while a finding that section's count names and no entry links is
+           still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -213,9 +232,11 @@ Subcommands
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
            41 = the review carrying the head says it did not review, so it covers nothing.
-           42, 43, and 45 = the review landed and `status`'s blocking readings apply to it,
-           since a wait ending on a round that covered half the diff, or on output nothing here
-           can read, has ended on something other than a review of this pull request. A 42 can
+           42, 43, 45, and 50 = the review landed and `status`'s readings apply to it.
+           A wait ending on a round that covered half the diff, or on output nothing here can
+           read, has ended on something other than a review of this pull request, and one ending
+           on a 50 has ended on a review whose finding no count carries. 50 outranks 44, so on a
+           head carrying a 50 a stuck check shows only in the digest. A 42 can
            be decided by an earlier round whose partial coverage carries to a head stating none,
            in which case the round the wait ended on is not the round the code came from.
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
@@ -244,7 +265,7 @@ Subcommands
            a request already pending is still polled for. Pass --ignore-quota-signal to request and
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
-           this pull request outranks 47 whenever both would otherwise apply.
+           this pull request outranks 47 whenever both would otherwise apply, and so does a 50.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -254,7 +275,7 @@ Subcommands
            read and clearing the set and requesting again changed nothing. It is decided one
            poll interval after the request, and the rest of the poll is skipped, since no
            request exists to answer. It cannot meet 46 or 47, since neither sends a request,
-           and ranks under 0/40/41/42/43/44/45. `status` cannot report it, since a request that
+           and ranks under 0/40/41/42/43/44/45/50. `status` cannot report it, since a request that
            recorded nothing leaves nothing for a later read to find.
            49 = no Copilot round covers this head and none was requested, the pull request merging
            into a branch other than the default after Copilot's first round, and no attestation
@@ -556,30 +577,40 @@ COVERAGE_FIELD = {
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 11 summaries and 4 labels.
+# The lists are small because the output is regular: 10 headings, 13 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
 # The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
 # Dropping it also keeps this file inside the charset rule that governs the repository.
-VETTED_HEADINGS = {
-    "## Pull request overview",
-    "## Copilot review overview",
-    "### Reviewed changes",
-    "### Approval recommended",
-    "### Ready to approve",
+CLEAN_VERDICTS = {"### Approval recommended", "### Ready to approve"}
+FLAGGING_VERDICTS = {
     "### Changes recommended",
     "### Needs a closer look",
     "### Not ready to approve",
     "### Human review recommended",
-    "### Suppressed comments (N)",
 }
+VETTED_HEADINGS = (
+    {
+        "## Pull request overview",
+        "## Copilot review overview",
+        "### Reviewed changes",
+        "### Suppressed comments (N)",
+    }
+    | CLEAN_VERDICTS
+    | FLAGGING_VERDICTS
+)
 NARRATIVE_SUMMARY = "What changed in this PR"
-VETTED_SUMMARIES = {
+TOTAL, OPEN, RESOLVED = "total", "open", "resolved"
+OVERVIEW_SECTIONS = {
+    "Open (N)": OPEN,
+    "(N) open findings": TOTAL,
+    "(N) open finding": TOTAL,
+    "Resolved since last review (N)": RESOLVED,
+    "(N) resolved since last review": RESOLVED,
+}
+VETTED_SUMMARIES = set(OVERVIEW_SECTIONS) | {
     "Pull request overview",
-    "Open (N)",
-    "Resolved since last review (N)",
-    "(N) resolved since last review",
     NARRATIVE_SUMMARY,
     "Show a summary per file",
     "File summaries",
@@ -805,7 +836,7 @@ query($o:String!,$r:String!,$n:Int!){
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
-      comments(first:1){ nodes{ author{login} path line body pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
+      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
@@ -1917,13 +1948,76 @@ def findings_on(tail: str) -> int | None:
     return sum(counts) if counts else None
 
 
-def stated_total(body: str) -> int | None:
+DISCUSSION_LINK = re.compile(r"\]\(#discussion_r(\d+)\)")
+ENTRY_LINE = re.compile(r"[-*+]\s")
+OverviewSection = tuple[str, int | None, list[str], int]
+
+
+def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
+    """The verdict, its headline, and the counted sections of one second-format body.
+
+    One reader for every overview section, because each section this format added arrived as a
+    spelling nothing here read, and three rounds parked on exit 43 over sections a reader beside
+    the others would have answered one at a time. A new spelling is one row in
+    `OVERVIEW_SECTIONS`, or one verdict in its set, rather than another reader.
+
+    The verdict is the first verdict heading ahead of the first collapsed section, and the headline
+    is the prose under it up to the next heading or bold line, taken from the body unmasked so a
+    code span the headline names survives. Each section is a top-level
+    `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
+    summary states, the thread ids its entries link, each the database id of that thread's first
+    comment, and how many of its entries carry such a link. An entry is a bullet at the section's
+    margin, outside any block collapsed within it, so an indented back-reference or a list an
+    entry collapses is read as neither an entry nor a link. One entry can still link a thread
+    beside its own, so a section's links can outnumber its linked entries. Quotations are masked
+    first, so a body quoting a section is not read as carrying one.
+
+    An open section's entries are findings, each checked against the threads, and a resolved
+    section's are threads an earlier round raised. The count-first open section also states the
+    round's total, having listed that round's own threads in all 17 rounds measured, where
+    `Open (N)` listed an earlier round's thread in 2 of 41, so its count is not read as one.
+    """
+    masked = mask_quotations(body or "")
+    tags = mask_quotations(body or "", MARKUP_MASK)
+    opener = DETAILS_OPEN.search(tags)
+    end = opener.start() if opener else len(masked)
+    verdict, headline = "", []
+    for line, raw in zip(masked[:end].splitlines(), (body or "")[:end].splitlines()):
+        if MARKDOWN_HEADING.match(line):
+            if verdict:
+                break
+            if not unvetted(normal(line), CLEAN_VERDICTS | FLAGGING_VERDICTS):
+                verdict = normal(line)
+        elif verdict and line.lstrip().startswith("**"):
+            break
+        elif verdict and line.strip():
+            headline.append(raw.strip())
+    roles = {k.casefold(): v for k, v in OVERVIEW_SECTIONS.items()}
+    sections: list[OverviewSection] = []
+    for start, end in details_spans(tags)[0]:
+        summary = heading_of(masked[start:end])
+        role = roles.get(normal(summary).casefold())
+        if role is None:
+            continue
+        digits = re.search(r"\d+", EMPHASIS.sub("", summary))
+        count = counted(digits.group()) if digits else None
+        text = masked[start:end]
+        own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
+        entries = [line for line in own.splitlines() if ENTRY_LINE.match(line)]
+        ids = [i for line in entries for i in DISCUSSION_LINK.findall(line)]
+        linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
+        sections.append((role, count, ids, linked))
+    return verdict, " ".join(headline), sections
+
+
+def stated_total(body: str, preamble_only: bool = False) -> int | None:
     """The finding total this round states for itself, or None where its overview states none.
 
     Read from the overview preamble, the text ahead of the first section opener, because a total
-    inside a collapsed section is that section's own. A total stated only after that opener reads
-    as none stated, which prints `?` and no shortfall, so the reading that is missing suppresses
-    the shortfall rather than fabricating one.
+    inside a collapsed section is that section's own, the count-first open-findings section below
+    being the one exception. Any other total stated only after that opener reads as none stated,
+    which prints `?` and no shortfall, so the reading that is missing suppresses the shortfall
+    rather than fabricating one.
 
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it. The opener is found where each code span is one
@@ -1932,6 +2026,11 @@ def stated_total(body: str) -> int | None:
     A later revision of the format drops the `**Findings:**` line and states its total as a bare
     `**0 open findings**` line, read here the same way, since left unread it printed `?` and
     suppressed the shortfall the total is compared for.
+
+    That revision writes the bare line only for a zero, measured over every body carrying it, and
+    states any other total as the count opening its open-findings section, so where the preamble
+    states no total, the round's open section states it. `preamble_only` leaves that section out,
+    which is how a caller tells which of the two supplied the total.
     """
     stripped = strip_fences(body or "")
     plain = CODE_SPAN.sub(" ", stripped)
@@ -1939,7 +2038,10 @@ def stated_total(body: str) -> int | None:
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
     totals += [counted(m.group(1)) for m in CCR_OPEN_FINDINGS.finditer(preamble)]
-    return max([t for t in totals if t is not None], default=None)
+    found = [t for t in totals if t is not None]
+    if not found and not preamble_only:
+        found = [c for role, c, *_ in read_overview(body)[2] if role == TOTAL and c is not None]
+    return max(found, default=None)
 
 
 def round_threads(pr: dict, review: dict) -> int:
@@ -1964,10 +2066,10 @@ def round_threads(pr: dict, review: dict) -> int:
     and this round left open, its total counts findings whose threads belong to that earlier round,
     and this undercounts by exactly those, printing a standing shortfall.
 
-    What would settle it is a round whose `Open (N)` count exceeds the threads it opened while the
-    body plainly accounts for the difference, and no round read here has shown that yet. Until one
-    does, a shortfall is reported and read in the body rather than acted on, which is what the
-    digest and every reader-facing surface say.
+    It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
+    was measured over, which is why that section's count is not read as a total. A shortfall is
+    therefore reported and read in the body rather than acted on, which is what the digest and
+    every reader-facing surface say.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
@@ -2000,10 +2102,94 @@ def head_overview(pr: dict) -> tuple[int | None, int] | None:
     format instead reports a superseded total as current, and a re-request during the rollout can
     land a round in either format on one commit.
     """
+    newest = second_format_head(pr)
+    if newest is None:
+        return None
+    return (stated_total(newest.get("body") or ""), round_threads(pr, newest))
+
+
+def second_format_head(pr: dict) -> dict | None:
+    """The newest round covering the head, where it is written in the second format."""
     newest = newest_of(head_reviews(pr))
     if newest is None or not second_format(newest.get("body") or ""):
         return None
-    return (stated_total(newest.get("body") or ""), round_threads(pr, newest))
+    return newest
+
+
+def unthreaded_entries(pr: dict) -> int:
+    """How many findings the head round's open sections link to no thread on this pull request.
+
+    Each entry links the database id of its thread's first comment, so an id no thread carries is
+    a finding named only in the review body, which no thread poll reaches. Distinct ids are
+    counted, and a resolved section's entries are not, being threads an earlier round raised. A
+    thread past the hundred the query reads counts here too, overstating rather than hiding.
+    An `Open (N)` section counting more entries than it has linked entries adds the difference.
+    An entry carrying a link this reader does not recognize lands there too, overstating rather
+    than hiding.
+    """
+    known = {
+        str(first_comment(thread)["fullDatabaseId"])
+        for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
+        if first_comment(thread).get("fullDatabaseId") is not None
+    }
+    return len(open_entry_ids(pr) - known) + unlinked_open_entries(pr)
+
+
+def unlinked_open_entries(pr: dict) -> int:
+    """How many entries the head round's `Open (N)` sections count beyond their linked entries."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    sections = read_overview(newest.get("body") or "")[2]
+    return sum(
+        max(count - linked, 0)
+        for role, count, _, linked in sections
+        if role == OPEN and count is not None
+    )
+
+
+def open_entry_ids(pr: dict) -> set[str]:
+    """The distinct thread ids the head round's open sections link, resolved sections left out."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return set()
+    sections = read_overview(newest.get("body") or "")[2]
+    return {i for role, _, ids, _ in sections if role != RESOLVED for i in ids}
+
+
+def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
+    """The head round's verdict and headline, where the verdict flags what nothing counts.
+
+    A round opening on a flagging verdict that states no open finding, lists none in an open
+    section, opens no thread, and collapses no suppressed or previously-missed finding names
+    whatever it flags in its headline
+    alone, which every count here reads as a clean pass. Measured over the rounds in this format,
+    the headline named a finding in most such rounds and a caution about the change in the rest,
+    and only reading it tells the two apart.
+
+    An open thread defers the reading rather than cancelling it, since the headline may name that
+    thread and the loop already waits on it, and once it is resolved the reading returns.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return None
+    body = newest.get("body") or ""
+    verdict, headline, sections = read_overview(body)
+    if not verdict or unvetted(verdict, FLAGGING_VERDICTS):
+        return None
+    listed = any(role != RESOLVED and (count or ids) for role, count, ids, _ in sections)
+    if listed or stated_total(body) or round_threads(pr, newest):
+        return None
+    if suppressed_blocks(body) or previously_missed_blocks(body):
+        return None
+    if open_reviewer_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
+        return None
+    return verdict, headline
+
+
+def open_reviewer_threads(threads: list[dict]) -> list[dict]:
+    """The unresolved threads a known reviewer opened, which block a ruleset-gated merge."""
+    return [t for t in threads if not t.get("isResolved") and thread_author(t) in KNOWN_REVIEWERS]
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
@@ -2701,6 +2887,19 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45
+    if flagged := uncounted_verdict(pr):
+        print(
+            f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
+            f"`{flagged[0]}`, a verdict that is not the clean one, while it states no open "
+            f"finding, opened no thread, and collapsed no finding, so what it flags is named in "
+            f"its headline alone, printed above under VERDICT WITH NO COUNTED FINDING. Give the "
+            f"headline the triage a suppressed finding gets: fix what it names and push, or "
+            f"answer it on the pull request with `comment`, saying so where it names a caution "
+            f"rather than a finding. The answer satisfies this reading, and this code still "
+            f"repeats on this head, since nothing here reads an answer, so a caller holding one "
+            f"goes on to the other readings"
+        )
+        return 50
     return 0
 
 
@@ -3350,7 +3549,7 @@ def digest(
     # Any known reviewer's own thread, not only Copilot's.
     # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one.
     # `thread_author` carries the deleted-account default this needs.
-    unresolved = [t for t in threads if not t["isResolved"] and thread_author(t) in KNOWN_REVIEWERS]
+    unresolved = open_reviewer_threads(threads)
     # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
     # A single reviewer's own count is what `unresolved=N` already meant before this generalized.
     # Printing one name beside its own total says nothing the number did not already say.
@@ -3388,7 +3587,16 @@ def digest(
     # The field below is therefore printed only where there is a round in that format to read.
     manifest = head_overview(pr)
     stated, listed = manifest if manifest else (None, 0)
-    unlisted = unlisted_findings(manifest)
+    unthreaded = unthreaded_entries(pr)
+    newest_body = (second_format_head(pr) or {}).get("body") or ""
+    sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
+    linked = open_entry_ids(pr)
+    unlisted = (
+        max((stated or 0) - len(linked), 0) + unthreaded
+        if sectional
+        else max(unlisted_findings(manifest), unthreaded)
+    )
+    flagged = uncounted_verdict(pr)
 
     answer = answered_outside_review(pr)
     refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
@@ -3549,13 +3757,32 @@ def digest(
         # What the finding says is in the review body, which is where this sends the reader.
         lines.append(
             f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
-            f"{stated} finding{'' if stated == 1 else 's'} and opened {listed} thread"
-            f"{'' if listed == 1 else 's'}, so {unlisted} "
+            + ("no total" if stated is None else f"{stated} finding{'' if stated == 1 else 's'}")
+            + (
+                f", its open section linking {len(linked)}"
+                if sectional
+                else f" and opened {listed} thread{'' if listed == 1 else 's'}"
+            )
+            + (
+                f", and {unthreaded} of the entries its open sections count "
+                f"{'carries' if unthreaded == 1 else 'carry'} no link this script reads to a "
+                "thread on this pull request"
+                if unthreaded
+                else ""
+            )
+            + f", so {unlisted} "
             f"{'finding is' if unlisted == 1 else 'findings are'} raised where polling threads "
             "cannot see them. Read the review body itself and give each the triage a suppressed "
             "finding gets, before closing the review loop. A thread past the hundred this reads "
             "would count here too, and `threads=` carries a trailing `+` where that page was cut"
         )
+    if flagged:
+        lines.append(
+            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
+            f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
+            "flags is named. Give the headline the triage a suppressed finding gets"
+        )
+        lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
     if carried is not None:
         # Printed whatever the carried state is, the provenance being the same question either way.
         # A carried partial then prints its own block under this one.
