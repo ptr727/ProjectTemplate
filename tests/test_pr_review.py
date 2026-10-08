@@ -4223,6 +4223,18 @@ class TestOverviewSections(GqlCase):
             out,
         )
 
+    def test_an_open_list_entry_carrying_no_link_is_counted(self) -> None:
+        """`Open (N)` is not a total, so an entry it counts with no thread link is counted here."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        self.assertIn("Open (1)", body)
+        body = body.replace("Open (1)", "Open (2)").replace(linked, f"{linked}\n- Finding 2 New")
+        self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("and 1 of the entries its open section lists links no thread", out)
+
     def test_an_entry_linking_no_thread_is_counted_where_the_totals_balance(self) -> None:
         """The round opened as many threads as it states, and one entry links none of them, so
         the totals alone pass a finding named only in the body."""

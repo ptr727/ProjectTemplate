@@ -2111,13 +2111,28 @@ def unthreaded_entries(pr: dict) -> int:
     a finding named only in the review body, which no thread poll reaches. Distinct ids are
     counted, and a resolved section's entries are not, being threads an earlier round raised. A
     thread past the hundred the query reads counts here too, overstating rather than hiding.
+    An `Open (N)` section counting more entries than it links adds the difference, since an entry
+    carrying no link, or one this reader cannot recognize, links no thread either.
     """
     known = {
         str(first_comment(thread)["fullDatabaseId"])
         for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
         if first_comment(thread).get("fullDatabaseId") is not None
     }
-    return len(open_entry_ids(pr) - known)
+    return len(open_entry_ids(pr) - known) + unlinked_open_entries(pr)
+
+
+def unlinked_open_entries(pr: dict) -> int:
+    """How many entries the head round's `Open (N)` sections count beyond the links they carry."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    sections = read_overview(newest.get("body") or "")[2]
+    return sum(
+        max(count - len(ids), 0)
+        for role, count, ids in sections
+        if role == OPEN and count is not None
+    )
 
 
 def open_entry_ids(pr: dict) -> set[str]:
