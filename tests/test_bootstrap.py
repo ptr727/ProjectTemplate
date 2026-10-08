@@ -1365,6 +1365,7 @@ class HubCleanupCases:
     """
 
     TOKEN = "0123456789abcdef0123456789abcdef"
+    LINE_BREAK = "\n"
 
     dir: Path
 
@@ -1408,8 +1409,8 @@ class HubCleanupCases:
         self.make_cache(self.TOKEN)
         self.assert_cleaned(self.TOKEN, removed=True)
 
-    def test_a_marker_written_with_the_other_menus_trailing_newline_still_matches(self) -> None:
-        self.make_cache(f"{self.TOKEN}\n")
+    def test_a_marker_ending_in_the_line_break_its_menu_writes_still_matches(self) -> None:
+        self.make_cache(f"{self.TOKEN}{self.LINE_BREAK}")
         self.assert_cleaned(self.TOKEN, removed=True)
 
     def test_a_tree_another_session_fetched_since_is_left_in_place(self) -> None:
@@ -1641,7 +1642,9 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
 class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
-    """`menu.ps1`'s `Invoke-Cleanup`, under its real lock."""
+    """`menu.ps1`'s `Invoke-Cleanup`, under its real lock, its marker ending CRLF as on Windows."""
+
+    LINE_BREAK = "\r\n"
 
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
