@@ -123,17 +123,19 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 | --- | --- | --- |
 | picker | `PICK #<n> track=<track> tier=<tier>` | work handoff `#<n>` on that model tier |
 | picker | `NONE <reason>` | nothing left that needs no decision |
-| worker | `DONE #<n> <pull request numbers>` | merged as far as the scope allows, lane closed out |
+| worker | `DONE #<n> <pull request numbers>` | merged as far as the scope and any decision blocking the promotion allow, lane closed out |
 | worker | `PARKED #<n> decision #<d>` | parked on decision issue `#<d>` |
 | either | `STOP <reason>` | a condition no later round can clear, so the run ends |
 
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
-an exhausted reviewer quota, a push the executor refuses, or a promotion pull request already
-waiting on an open `decision` issue, since every later round would meet that same decision.
+an exhausted reviewer quota, or a push the executor refuses. A promotion pull request waiting on an
+open `decision` issue is not one, since a round can still merge its own work to develop, per "The
+Worker" step 3.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
-Under `main` or `release` every round promotes, so each one ordinarily carries one fix, and a change
-another session merged to develop meanwhile rides along with it. Naming the scope accepts that.
+Under `main` or `release` every round promotes unless a decision blocks the promotion, so each one
+ordinarily carries one fix, and a change another session merged to develop meanwhile rides along
+with it. Naming the scope accepts that.
 
 ## Auto-Resolvable
 
@@ -168,35 +170,29 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Picker
 
-1. **Check the promotion first** under `main` or `release`. Where an open `decision` issue states,
-   in its body or in a comment on it, that it blocks the open develop -> main pull request, as
-   "Parking" step 2 has it state, return `STOP` before picking anything, since every worker
-   this run dispatched would meet that same decision after merging its own work to develop. Read
-   them with `gh issue list --repo "<owner>/<repo>" --label decision --state open --limit 100
-   --json number,body,comments` under step 2's full-page check.
-2. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
+1. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
    --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py
    tracks` prints neither. Where it returns as many rows as the limit, the list may be truncated, so
    raise the limit and read again until it returns fewer, rather than ranking a partial list. Reach
    `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the Chain".
-3. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
+2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
    lanes and are never picked. A picker never takes `blocked` off a handoff, even where the decision
    issue it names has been answered, since an attended session may be working that lane and only
    the session handing the lane back removes the label, per `GOVERNANCE.md` "Durable Knowledge and
    Self-Improvement".
-4. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
+3. **Otherwise pick from the backlog.** Rank the open issues by `backlog-burndown`'s "Ranking"
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with `gh issue list
    --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it returns 30 rows unless
-   told otherwise, and apply step 2's full-page check to it.
-5. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
+   told otherwise, and apply step 1's full-page check to it.
+4. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
    adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the Chain"
    shows, and `--dry-run` first. The body carries the sections `session-handoff` "What Goes in the
    Body" names, with the next steps naming the issue and what done looks like. That skill's rules on
    the body bind it.
-6. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
-7. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
+5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
+6. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
    where a read it needs cannot run.
 
 ## The Worker
@@ -217,13 +213,23 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    `release`, continue to the promotion pull request, its body carrying a `Fixes` line for every
    issue develop fixes, assembled per `backlog-burndown` "Assembling the Promotion Body", and hand
    it to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
-   Every Merge Gate item other than the permission still has to hold.
+   Every Merge Gate item other than the permission still has to hold. **A blocked promotion narrows
+   the round to develop.** Before promoting, read the open `decision` issues with `gh issue list
+   --repo "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`
+   under picker step 1's full-page check. Where one states, in its body or in a comment on it, that
+   it blocks the open develop -> main pull request, as "Parking" step 2 has it state, open, merge,
+   or release no promotion while it stays open. Close the lane out once the develop merge lands,
+   naming that decision issue in the close-out comment, and leave the issue to close when the
+   promotion merges.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
-   retry, which is parked as ready to merge rather than routed around.
+   retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
+   only on a choice only the maintainer can make, and anything with a determined outcome is
+   applied or handed to the pull request's review instead, as `local-strict-review` "Disposing of
+   Findings" hands it a spent edit budget's remaining findings.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options in
@@ -251,8 +257,8 @@ interruption part way leaves the work findable rather than lost.
    the User". It states the question, the choices as its options in the form that section sets for
    any choice put to the maintainer, what each choice would do to the parked work, the handoff it
    belongs to, and every pull request the decision blocks, the open promotion included where it
-   blocks that, which is what lets a picker find a promotion already waiting on one. Where an open
-   `decision` issue already asks the same question about the same pull request, name that one
+   blocks that, which is what lets a later worker find a promotion already waiting on one. Where an
+   open `decision` issue already asks the same question about the same pull request, name that one
    instead of filing another, commenting onto it this handoff, the effect on its work, and every
    pull request the decision now blocks. It holds nothing but the question, so it closes once
    answered.
