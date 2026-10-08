@@ -16,6 +16,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import bash_or_skip
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGURE = ROOT / "repo-config" / "configure.sh"
 
@@ -45,9 +47,9 @@ class LiveSettingsCase(unittest.TestCase):
     """A 2xx settings response that is not a JSON object reports one FAIL and does not abort."""
 
     def run_check(self, live: str) -> subprocess.CompletedProcess[str]:
-        bash = shutil.which("bash")
-        if bash is None or shutil.which("jq") is None:
-            raise unittest.SkipTest("no bash or jq on PATH")
+        bash = bash_or_skip()
+        if shutil.which("jq") is None:
+            raise unittest.SkipTest("no jq on PATH")
         with tempfile.TemporaryDirectory() as tmp:
             settings = Path(tmp) / "settings.json"
             settings.write_text(json.dumps({"delete_branch_on_merge": True}), encoding="utf-8")

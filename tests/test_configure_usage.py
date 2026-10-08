@@ -15,6 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from host_capability import bash_or_skip
+
 CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
 
@@ -22,9 +24,7 @@ class UsageCase(unittest.TestCase):
     """Help exits 0 and a usage error exits 1, each before any `gh` call."""
 
     def run_configure(self, *args: str) -> tuple[subprocess.CompletedProcess[str], str]:
-        bash = shutil.which("bash")
-        if bash is None:
-            raise unittest.SkipTest("no bash on PATH, so the script cannot be run")
+        bash = bash_or_skip()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "repo-config").mkdir()
@@ -37,7 +37,9 @@ class UsageCase(unittest.TestCase):
                 encoding="utf-8",
             )
             gh_stub.chmod(0o755)
-            env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ.get('PATH', os.defpath)}")
+            env = dict(
+                os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
+            )
             result = subprocess.run(
                 [bash, str(root / "repo-config" / "configure.sh"), *args],
                 capture_output=True,
