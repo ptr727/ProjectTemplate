@@ -134,6 +134,25 @@ tool_shadow_path sometool"""
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"{bin_dir}/sometool")
 
+    def test_bin_dir_spelled_differently_is_still_on_the_path(self) -> None:
+        body = 'PATH="/usr//local/./bin:/usr/bin"\nbefore=$PATH\nensure_bin_dir_on_path\n[[ $PATH == "$before" ]] && printf same'
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "same")
+
+    def test_main_puts_bin_dir_on_the_path_before_reporting(self) -> None:
+        body = """parse_args() { :; }
+load_repo_tools() { :; }
+resolve_selection() { :; }
+detect_host() { :; }
+report() { printf '%s' "$PATH"; }
+host_path=$PATH
+PATH=/usr/bin:/bin
+main"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "/usr/local/bin:/usr/bin:/bin")
+
     def test_minimal_path_reports_no_shadow_for_a_distro_copy(self) -> None:
         distro = self.dir / "distro"
         distro.mkdir()
