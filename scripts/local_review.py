@@ -105,6 +105,7 @@ and 2 only when it could not run at all.
 """
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -165,6 +166,18 @@ def silence(stream: object) -> None:
         pass
 
 
+def closed_reader(e: BaseException) -> bool:
+    """Whether a write failed because the reader at the other end of a pipe went away.
+
+    POSIX reports that as EPIPE, which Python raises as BrokenPipeError. Windows reports the same
+    event as EINVAL on the write, a plain OSError, so testing for the subclass alone misses it
+    there and the interpreter's own shutdown flush then exits 120.
+    """
+    if isinstance(e, BrokenPipeError):
+        return True
+    return os.name == "nt" and isinstance(e, OSError) and e.errno == errno.EINVAL
+
+
 def emit(text: str, stream: object = None) -> None:
     """Write a line, tolerating a reader that closed the pipe before it arrived.
 
@@ -183,9 +196,10 @@ def emit(text: str, stream: object = None) -> None:
         # The guards below are what cover a stand-in that is not writable.
         print(text, file=target)  # type: ignore[arg-type]
         target.flush()  # type: ignore[union-attr]
-    except BrokenPipeError:
-        silence(target)
-    except (OSError, ValueError):
+    except OSError as e:
+        if closed_reader(e):
+            silence(target)
+    except ValueError:
         pass
 
 
@@ -507,7 +521,25 @@ def worktree_states(root: Path) -> dict[str, set[str]]:
     finally:
         Path(staging).unlink(missing_ok=True)
         Path(staging + ".lock").unlink(missing_ok=True)
-        shutil.rmtree(objects, ignore_errors=True)
+        shutil.rmtree(objects, onexc=unlink_read_only)
+
+
+def unlink_read_only(func: object, path: str, exc: BaseException) -> None:
+    """An rmtree error handler that removes a read-only file, and swallows anything else.
+
+    git writes every loose object read-only. POSIX unlinks such a file anyway, since that needs
+    write access to the directory rather than to the file, but Windows refuses it. The throwaway
+    object directory then outlived the read, holding the staged content of every untracked file.
+    Any other failure is still swallowed, since this runs in a finally block that must not
+    replace the read's own result.
+    """
+    if func is not os.unlink or not isinstance(exc, PermissionError):
+        return
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def state_mark(index: set[str], work: set[str]) -> str:
@@ -1143,7 +1175,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_RUN
     # A reader that closes early, `| head -1` being the ordinary case, otherwise raises here.
     # It then raises again during the interpreter's own shutdown flush, which exits 120, outside the contract.
-    except BrokenPipeError:
+    except OSError as e:
+        if not closed_reader(e):
+            return crashed(e)
         # A backstop only, since `emit` absorbs a closed reader at the point of writing.
         # Reaching here means the failure came from somewhere that does not report through it.
         # Whatever verdict was reached is still the honest answer.
@@ -1154,8 +1188,13 @@ def main(argv: list[str] | None = None) -> int:
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
     except Exception as e:  # noqa: BLE001
-        emit(f"local_review: unexpected failure ({type(e).__name__}: {e})", sys.stderr)
-        return EXIT_CANNOT_RUN
+        return crashed(e)
+
+
+def crashed(e: Exception) -> int:
+    """Report an unexpected failure and return the boundary code, since the check did not run."""
+    emit(f"local_review: unexpected failure ({type(e).__name__}: {e})", sys.stderr)
+    return EXIT_CANNOT_RUN
 
 
 if __name__ == "__main__":
