@@ -35,7 +35,9 @@ import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
+
+from host_capability import bash_or_skip
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
@@ -1355,6 +1357,113 @@ class TestMenuSkillsInstall(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "host-setup/linux/install-skills.sh")
 
 
+class HubCleanupCases:
+    """Which hub cache a menu's exit removes, the same cases for both menus.
+
+    A session removes only the tree whose marker still records its own fetch's token, since another
+    session sharing the directory may have fetched again since, and the tree is then that session's.
+    """
+
+    TOKEN = "0123456789abcdef0123456789abcdef"
+
+    dir: Path
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        raise NotImplementedError
+
+    def cleanup_body(self, token: str) -> str:
+        """The menu's lines setting this session's token and running its exit cleanup."""
+        raise NotImplementedError
+
+    def fetch_body(self, refetched: bool) -> str:
+        """The menu's lines fetching, and fetching again as another session where asked, then exiting.
+
+        git is stubbed to create the clone's directory, so no case reaches the network.
+        """
+        raise NotImplementedError
+
+    def make_cache(self, marker: str) -> None:
+        (self.dir / "hub").mkdir()
+        (self.dir / "hub" / "README.md").write_text("hub\n", encoding="utf-8")
+        (self.dir / "hub.owned").write_text(marker, encoding="utf-8", newline="")
+
+    def assert_removed(self, body: str, removed: bool) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(body)
+        test.assertEqual(result.returncode, 0, result.stderr)
+        test.assertEqual((self.dir / "hub").exists(), not removed)
+        test.assertEqual((self.dir / "hub.owned").exists(), not removed)
+
+    def assert_cleaned(self, token: str, removed: bool) -> None:
+        self.assert_removed(self.cleanup_body(token), removed)
+
+    def test_a_sessions_own_fetch_is_removed_at_its_exit(self) -> None:
+        """The token the fetch writes is the one cleanup reads back."""
+        self.assert_removed(self.fetch_body(refetched=False), removed=True)
+
+    def test_a_fetch_another_session_made_since_survives_the_first_sessions_exit(self) -> None:
+        self.assert_removed(self.fetch_body(refetched=True), removed=False)
+
+    def test_the_tree_this_sessions_fetch_marked_is_removed(self) -> None:
+        self.make_cache(self.TOKEN)
+        self.assert_cleaned(self.TOKEN, removed=True)
+
+    def test_a_marker_written_with_the_other_menus_trailing_newline_still_matches(self) -> None:
+        self.make_cache(f"{self.TOKEN}\n")
+        self.assert_cleaned(self.TOKEN, removed=True)
+
+    def test_a_tree_another_session_fetched_since_is_left_in_place(self) -> None:
+        self.make_cache("fedcba9876543210fedcba9876543210")
+        self.assert_cleaned(self.TOKEN, removed=False)
+
+    def test_a_marker_recording_no_token_is_left_in_place(self) -> None:
+        self.make_cache("")
+        self.assert_cleaned(self.TOKEN, removed=False)
+
+    def test_a_session_with_no_token_of_its_own_removes_nothing(self) -> None:
+        self.make_cache("")
+        self.assert_cleaned("", removed=False)
+
+
+class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
+    """`menu.sh`'s `cleanup`, with `flock` stubbed, since its lock is covered on Linux alone."""
+
+    def setUp(self) -> None:
+        self.bash = bash_or_skip()
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.scripts = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.scripts / "functions.sh").write_text(menu_functions(), encoding="utf-8", newline="\n")
+
+    def cleanup_body(self, token: str) -> str:
+        return f'HUB_FETCHED=true\nHUB_FETCH_TOKEN="{token}"\ncleanup\n'
+
+    def fetch_body(self, refetched: bool) -> str:
+        again = 'mine=$HUB_FETCH_TOKEN\nfetch_hub_locked\nHUB_FETCH_TOKEN="$mine"\n'
+        return (
+            'git() { mkdir -p "${!#}"; }\nfetch_hub_locked\n'
+            + (again if refetched else "")
+            + "cleanup\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = self.scripts / "body.sh"
+        script.write_text(
+            f'source "{(self.scripts / "functions.sh").as_posix()}"\n'
+            "flock() { return 0; }\n"
+            f'DIR="{self.dir.as_posix()}"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        return subprocess.run(
+            [self.bash, str(script)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+
+
 MENU_PS = ROOT / "host-setup" / "menu.ps1"
 
 POWERSHELL_MENU_LOCK_HARNESS = r"""
@@ -1364,13 +1473,16 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 $script:DIR = $Dir
 $script:HUB_LOCK = $null
 $script:DRY_RUN = $false
+$script:KEEP = $false
+$script:HUB_FETCHED = $false
+$script:HUB_FETCH_TOKEN = ''
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $BodyFile)))
 """
 
@@ -1525,6 +1637,58 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
                 fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
             holder.communicate(input="\n", timeout=60)
             fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
+class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
+    """`menu.ps1`'s `Invoke-Cleanup`, under its real lock."""
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.scripts = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.scripts / "harness.ps1").write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
+
+    def cleanup_body(self, token: str) -> str:
+        return f"$script:HUB_FETCHED = $true\n$script:HUB_FETCH_TOKEN = '{token}'\nInvoke-Cleanup\n"
+
+    def fetch_body(self, refetched: bool) -> str:
+        again = (
+            "$mine = $script:HUB_FETCH_TOKEN\n"
+            "[void](Invoke-FetchHubLocked)\n"
+            "$script:HUB_FETCH_TOKEN = $mine\n"
+        )
+        return (
+            "$script:HUB_REPO = 'owner/hub'\n$script:HUB_URL = 'https://example.invalid/hub'\n"
+            "$script:DEFAULT_REF = 'main'\n$script:REF = 'main'\n$script:HUB_ROOT = ''\n"
+            "function step { param([string]$Message) }\n"
+            "function git { New-Item -ItemType Directory -Path $args[-1] -Force | Out-Null; "
+            "$global:LASTEXITCODE = 0 }\n"
+            "[void](Invoke-FetchHubLocked)\n" + (again if refetched else "") + "Invoke-Cleanup\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        body_file = self.scripts / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        return subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(self.scripts / "harness.ps1"),
+                "-Menu",
+                str(MENU_PS),
+                "-Dir",
+                str(self.dir),
+                "-BodyFile",
+                str(body_file),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=60,
+        )
 
 
 class TestHarness(unittest.TestCase):
