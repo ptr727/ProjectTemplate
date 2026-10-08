@@ -4220,6 +4220,31 @@ class TestOverviewSections(GqlCase):
         self.assertIn("Resolve the two outstanding parser-retry", printed)
         self.assertIn("status=VERDICT_NAMES_UNCOUNTED_FINDINGS", printed)
 
+    def test_partial_coverage_outranks_fifty(self) -> None:
+        """A part-reviewed diff is the larger gap, so 42 is what the round reports."""
+        body = self.headline().replace(COVERS_ONE, COVERS_ONE.replace("changed=1", "changed=2"))
+        self.answer(payload([review(body=body)]))
+        self.assertEqual(42, pr_review.main(["status", "7", "--repo", "o/r"]))
+
+    def test_fifty_outranks_a_stuck_check(self) -> None:
+        """`main` reads the real clock, so the check's age comes from it, as in the 44 case."""
+        stuck = check(name="gate", status="QUEUED", conclusion="", started=real_ago(900))
+        self.answer(payload([review(body=self.headline())], merge="BLOCKED", checks=[stuck]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        self.assertNotIn("status=CHECKS_NOT_MERGEABLE", self.out.getvalue())
+
+    def test_a_collapsed_finding_cancels_the_reading(self) -> None:
+        """A suppressed or previously-missed block is a counted finding the digest already prints."""
+        for summary in ("Previously missed (1)", "Suppressed comments (1)"):
+            with self.subTest(summary=summary):
+                block = (
+                    f"<details>\n<summary><strong>{summary}</strong></summary>\n\n"
+                    "- a.py:12 A constructed finding.\n</details>\n\n<details>"
+                )
+                body = self.headline().replace("<details>", block, 1)
+                self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)])))
+
     def test_a_clean_verdict_counting_no_finding_exits_zero(self) -> None:
         self.answer(payload([review(body=self.headline("### Approval recommended"))]))
         self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
