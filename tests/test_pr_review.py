@@ -4025,7 +4025,11 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertEqual("", pr_review.table_shortfall(pr))
 
     def test_a_note_is_kept_where_the_row_names_a_path_with_it(self) -> None:
-        """A changed path or a shortened tail ending in parentheses reads as written."""
+        """Parentheses that are part of a changed path or a shortened tail are kept.
+
+        A row naming a changed path reads as written. A note comes off only a row naming none,
+        and only its last parenthesized group, so a path's own inner parentheses stay.
+        """
         for cell, files, shortfall in (
             ("docs/a (draft).md (cleanup)", ["docs/a (draft).md"], ""),
             ("docs/a (draft)", ["docs/a (draft)", "docs/a"], "the table leaves out docs/a"),
