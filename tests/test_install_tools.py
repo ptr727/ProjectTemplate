@@ -107,6 +107,66 @@ PATH=$host_path
         self.assertEqual(len(report["notes"]), 1)
         self.assertIn("curl is not installed", report["notes"][0])
 
+    def test_bin_dir_joins_a_path_that_leaves_it_out(self) -> None:
+        result = self.run_bash('PATH=/usr/bin:/bin\nensure_bin_dir_on_path\nprintf "%s" "$PATH"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "/usr/local/bin:/usr/bin:/bin")
+
+    def test_bin_dir_joins_an_empty_path_without_a_trailing_separator(self) -> None:
+        result = self.run_bash(
+            'host_path=$PATH\nPATH=""\nensure_bin_dir_on_path\nresult=$PATH\nPATH=$host_path\nprintf "%s" "$result"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "/usr/local/bin")
+
+    def test_a_path_naming_bin_dir_keeps_its_order_and_its_real_shadow(self) -> None:
+        bin_dir = self.dir / "shadow"
+        bin_dir.mkdir()
+        tool = bin_dir / "sometool"
+        tool.write_text("#!/bin/sh\n", encoding="utf-8")
+        tool.chmod(0o755)
+        body = f"""PATH="{bin_dir}:/usr/bin:/usr/local/bin/:/bin"
+before=$PATH
+ensure_bin_dir_on_path
+[[ $PATH == "$before" ]] || {{ echo "changed: $PATH"; exit 1; }}
+tool_shadow_path sometool"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"{bin_dir}/sometool")
+
+    def test_bin_dir_spelled_differently_is_still_on_the_path(self) -> None:
+        body = 'PATH="/usr//local/./bin:/usr/bin"\nbefore=$PATH\nensure_bin_dir_on_path\n[[ $PATH == "$before" ]] && printf same'
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "same")
+
+    def test_main_puts_bin_dir_on_the_path_before_reporting(self) -> None:
+        body = """parse_args() { :; }
+load_repo_tools() { :; }
+resolve_selection() { :; }
+detect_host() { :; }
+report() { printf '%s' "$PATH"; }
+host_path=$PATH
+PATH=/usr/bin:/bin
+main"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "/usr/local/bin:/usr/bin:/bin")
+
+    def test_minimal_path_reports_no_shadow_for_a_distro_copy(self) -> None:
+        distro = self.dir / "distro"
+        distro.mkdir()
+        tool = distro / "sometool"
+        tool.write_text("#!/bin/sh\n", encoding="utf-8")
+        tool.chmod(0o755)
+        body = (
+            f'host_path=$PATH\nPATH="{distro}"\nensure_bin_dir_on_path\n'
+            'result=$(tool_shadow_path sometool)\nPATH=$host_path\nprintf "%s" "$result"'
+        )
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_json_string_drops_bytes_that_are_not_utf8(self) -> None:
         never_valid = b"\xff"
         above_the_last_code_point = b"\xf4\x90\x80\x80"

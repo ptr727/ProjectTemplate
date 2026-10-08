@@ -3077,6 +3077,44 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn(f"the newest round that does, on {OLD[:8]}, carries its table", out)
         self.assertIn("names exactly the 2 changed files", out)
 
+    def test_a_second_format_table_carries_to_a_lite_round_finding_nothing(self) -> None:
+        """Both rounds in the second format, the later one at Lite effort with no table.
+
+        The first round names every changed file and states no coverage, and the head then moves
+        while the pull request changes the same files. The round on the new head states its effort
+        and a total of none and carries no table, so only the earlier table can stand in.
+        """
+        rows = "| a.py | Narrows the reader. |\n| b.py | Narrows the writer. |\n"
+        first = (
+            f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Approval recommended\n\n"
+            "The change is narrow.\n\n**Review effort:** Balanced\n**Findings:** None\n\n"
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "This pull request narrows two readers.\n\n"
+            f"| File | Description |\n| ---- | ----------- |\n{rows}\n</details>\n"
+        )
+        lite = (
+            f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Approval recommended\n\n"
+            "The change is narrow.\n\n**Review effort:** Lite\n**Findings:** None\n"
+        )
+        pr = payload(
+            [
+                review(oid=OLD, body=first, at=EARLY, rid="A"),
+                review(oid=HEAD, body=lite, at=LATE, rid="B"),
+            ],
+            files=["a.py", "b.py"],
+        )
+        self.assertTrue(pr_review.second_format(first))
+        self.assertTrue(pr_review.second_format(lite))
+        self.assertEqual(["a.py", "b.py"], pr_review.file_table(first))
+        self.assertEqual([], pr_review.file_table(lite))
+        with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(0, code)
+        self.assertIn("effort=lite ", out)
+        self.assertIn("overview=0/0 ", out)
+        self.assertIn("coverage=carried:table ", out)
+        self.assertNotIn("NO FILE TABLE STANDS IN", out)
+
     def test_a_moved_file_set_keeps_the_table_where_it_was(self) -> None:
         with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
             code, out = self.verdict(self.tabled())
