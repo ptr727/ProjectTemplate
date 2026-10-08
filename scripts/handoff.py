@@ -1202,6 +1202,16 @@ def cmd_link(a: argparse.Namespace) -> int:
             f"there and leave #{taken['number']} unreachable. Name the track's newest link as "
             "--previous instead."
         )
+    lane = track_links(a.repo, marker["track"], open_handoffs(a.repo))
+    rest = lane._replace(links=[r for r in lane.links if int(r["number"]) != int(new["number"])])
+    doubts = head_doubts({"number": previous["number"], "marker": before}, rest)
+    if doubts:
+        raise Refusal(
+            cut(
+                f"#{previous['number']} may not be the head of track {marker['track']!r}, so "
+                f"pointing #{new['number']} at it could fork the chain there. {' '.join(doubts)}"
+            )
+        )
     if marker["previous"] not in ("none", str(previous["number"])):
         raise Refusal(
             f"#{new['number']} already names #{marker['previous']} as its predecessor, not "
