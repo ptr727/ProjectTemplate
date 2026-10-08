@@ -20,6 +20,10 @@ readonly KEY_SETTING="~/.ssh/id_ed25519.pub"
 readonly ALLOWED_SIGNERS_SETTING="~/.config/git/allowed_signers"
 readonly KEY_SETTINGS_URL="https://github.com/settings/ssh/new"
 
+# The command that sets gh's git protocol, named in the report as the remedy and run by the opt-in flag.
+# A per-host value outranks the global one, and gh auth login writes one, so the global form alone can leave https.
+readonly GH_PROTOCOL_COMMAND=(gh config set git_protocol ssh --host github.com)
+
 # The identity the maintainer's commits carry, used only where the host names none of its own.
 readonly DEFAULT_NAME="Pieter Viljoen"
 readonly DEFAULT_EMAIL="ptr727@users.noreply.github.com"
@@ -33,6 +37,7 @@ ASSUME_YES=false
 GITHUB_USER=""
 MANAGED_KEY_AUTHENTICATES=false
 SHARED_CHECKOUT=""
+GH_SSH_PROTOCOL=false
 SUDO=()
 
 TMP_DIR=$(mktemp -d)
@@ -74,6 +79,10 @@ Options:
                     ownership check for that path, so it is named rather than assumed: a host one
                     account uses needs it for nothing. "*" applies it to every path on the host,
                     which is the broadest form and is reported as such.
+      --gh-ssh-protocol
+                    With --configure, set the git protocol gh uses for github.com to ssh. Without
+                    it gh's protocol is only reported, --configure included, because rewriting a
+                    working authentication setup is the operator's call.
 
 The identity comes from --name and --email, or from what this host already carries, or from the
 default the maintainer commits under, in that order. A host configured for somebody else keeps its
@@ -439,6 +448,88 @@ signing_works() {
     git -C "$repo" verify-commit HEAD >/dev/null 2>&1
 }
 
+# --- GitHub CLI ---
+
+# The account gh acts as on github.com, empty when it is not logged in or the active account's token is broken.
+# Not being logged in is an answer rather than a failure, so the exit status is not the result.
+# Each entry marks whether it is active, and only the active one is what gh runs as, whichever account is listed first.
+gh_account() {
+    local auth
+    auth=$(gh auth status --active --hostname github.com 2>&1 || true)
+    # Before 2.57 gh has no --active, and its full listing marks the active entry the same way.
+    if [[ $auth == *"unknown flag: --active"* ]]; then
+        auth=$(gh auth status --hostname github.com 2>&1 || true)
+    fi
+    awk '/Logged in to [^ ]+ account |Failed to log in to / { entry = $0; next }
+        /- Active account: true/ {
+            if (entry ~ /Logged in to /) {
+                sub(/.*Logged in to [^ ]+ account /, "", entry)
+                sub(/ .*/, "", entry)
+                print entry
+            }
+            exit
+        }' <<<"$auth"
+}
+
+# Read for the host, since a per-host value outranks the global one in what gh repo clone and gh pr checkout use.
+gh_protocol() {
+    gh config get git_protocol --host github.com 2>/dev/null || true
+}
+
+# Reported, and set only by --gh-ssh-protocol, since rewriting a working authentication setup is the operator's call.
+report_gh() {
+    log ""
+    log "GitHub CLI"
+    if ! command -v gh >/dev/null; then
+        missing "gh installed, which install-tools.sh --install gh provides"
+        return 0
+    fi
+
+    local account protocol
+    account=$(gh_account)
+    if [[ -n $account ]]; then
+        ok "authenticated as $account"
+    else
+        missing "authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh"
+        # Setting the protocol before a login breaks gh's login state, so the login is the one remedy named.
+        missing "git protocol is ssh, unchecked until gh is logged in, and the login above sets it"
+        return 0
+    fi
+
+    protocol=$(gh_protocol)
+    if [[ $protocol == "ssh" ]]; then
+        ok "git protocol is ssh"
+    elif [[ -n $protocol ]]; then
+        missing "git protocol is ssh, it is $protocol, set it with: ${GH_PROTOCOL_COMMAND[*]}, or --configure --gh-ssh-protocol"
+    else
+        missing "git protocol is ssh, gh did not report one, set it with: ${GH_PROTOCOL_COMMAND[*]}, or --configure --gh-ssh-protocol"
+    fi
+}
+
+configure_gh_protocol() {
+    [[ $GH_SSH_PROTOCOL == true ]] || return 0
+
+    step "Setting the GitHub CLI git protocol to ssh"
+    if ! command -v gh >/dev/null; then
+        warn "gh is not installed, so its git protocol was not set. install-tools.sh --install gh installs it."
+        return 0
+    fi
+    # Setting it before a login writes a tokenless github.com entry, which gh then reports as a failed login.
+    if [[ -z $(gh_account) ]]; then
+        warn "gh is not logged in, so its git protocol was not set. gh auth login --hostname github.com --git-protocol ssh sets both."
+        return 0
+    fi
+
+    local current
+    current=$(gh_protocol)
+    if [[ $current == "ssh" ]]; then
+        info "Already ssh"
+        return 0
+    fi
+    run "${GH_PROTOCOL_COMMAND[@]}"
+    [[ $DRY_RUN == true ]] || info "Was ${current:-unreported}, set to ssh"
+}
+
 # --- Actions ---
 
 status() {
@@ -529,6 +620,8 @@ status() {
         info "[    ] core.sharedRepository not set, optional as above"
     fi
 
+    report_gh
+
     log ""
     log "Signing"
     if signing_works; then
@@ -548,6 +641,7 @@ configure() {
     configure_git
     configure_shared_checkout
     configure_signing
+    configure_gh_protocol
 
     step "Signing a commit to check the configuration"
     if [[ $DRY_RUN == true ]]; then
@@ -617,6 +711,7 @@ parse_args() {
             SHARED_CHECKOUT="$2"
             shift
             ;;
+        --gh-ssh-protocol) GH_SSH_PROTOCOL=true ;;
         -h | --help)
             usage
             exit 0
