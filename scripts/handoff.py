@@ -1203,7 +1203,15 @@ def cmd_link(a: argparse.Namespace) -> int:
             "--previous instead."
         )
     lane = track_links(a.repo, marker["track"], open_handoffs(a.repo))
-    rest = lane._replace(links=[r for r in lane.links if int(r["number"]) != int(new["number"])])
+    after = {str(new["number"])}
+    grew = True
+    while grew:
+        grew = False
+        for row in lane.links:
+            if str(row["number"]) not in after and row["marker"]["previous"] in after:
+                after.add(str(row["number"]))
+                grew = True
+    rest = lane._replace(links=[r for r in lane.links if str(r["number"]) not in after])
     doubts = head_doubts({"number": previous["number"], "marker": before}, rest)
     if doubts:
         raise Refusal(

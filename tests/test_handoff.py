@@ -2148,6 +2148,19 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
         self.assertEqual(fake.issues[13]["state"], "OPEN")
 
+    def test_an_orphan_with_successors_can_still_be_adopted(self) -> None:
+        """Links that descend from `--new` are not evidence against `--previous`."""
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, None, state="CLOSED"),
+                12: link(12, "lane", 3, 11),
+            }
+        )
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
+        self.assertEqual(code, 0)
+        self.assertEqual(read_marker(fake.issues[11]["body"], 11)["previous"], "10")
+
     def test_a_full_closed_window_refuses_rather_than_reading_as_no_successor(self) -> None:
         """A reader that answers None for "could not look" hands the caller a guard that passes."""
         rows = {
