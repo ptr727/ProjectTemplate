@@ -137,7 +137,8 @@ Subcommands
            beside the number of review threads that round actually opened, `M`. `T` reads `?`
            where no total is found in the overview preamble or in a count-first open-findings
            section, which covers a round stating none, a round stating one only after its first
-           collapsed section anywhere else, and a round stating one as a bullet, that last blocking at exit 43 as an unvetted metadata label. None of them says
+           collapsed section anywhere else, and a round stating one as a bullet, that last
+           blocking at exit 43 as an unvetted metadata label. None of them says
            the round withheld nothing, and a `?` is a reason to read the body. Present
            only where the round covering the head is written in that format, which reached this
            repository after every round the vetted marker lists below were measured over.
@@ -159,7 +160,9 @@ Subcommands
            Where the preamble states no total, the count opening the open-findings section is
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
-           the pull request is counted in that same block whatever the totals say.
+           the pull request is counted in that same block whatever the totals say. Where that
+           section supplied `T`, its entries are the same count, so they alone decide the block,
+           an entry linking an earlier round's thread being no finding without one.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -1993,7 +1996,7 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     return verdict, " ".join(headline), sections
 
 
-def stated_total(body: str) -> int | None:
+def stated_total(body: str, preamble_only: bool = False) -> int | None:
     """The finding total this round states for itself, or None where its overview states none.
 
     Read from the overview preamble, the text ahead of the first section opener, because a total
@@ -2012,7 +2015,8 @@ def stated_total(body: str) -> int | None:
 
     That revision writes the bare line only for a zero, measured over every body carrying it, and
     states any other total as the count opening its open-findings section, so where the preamble
-    states no total, the round's open section states it.
+    states no total, the round's open section states it. `preamble_only` leaves that section out,
+    which is how a caller tells which of the two supplied the total.
     """
     stripped = strip_fences(body or "")
     plain = CODE_SPAN.sub(" ", stripped)
@@ -2021,7 +2025,7 @@ def stated_total(body: str) -> int | None:
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
     totals += [counted(m.group(1)) for m in CCR_OPEN_FINDINGS.finditer(preamble)]
     found = [t for t in totals if t is not None]
-    if not found:
+    if not found and not preamble_only:
         found = [c for role, c, _ in read_overview(body)[2] if role == TOTAL and c is not None]
     return max(found, default=None)
 
@@ -3549,7 +3553,9 @@ def digest(
     manifest = head_overview(pr)
     stated, listed = manifest if manifest else (None, 0)
     unthreaded = unthreaded_entries(pr)
-    unlisted = max(unlisted_findings(manifest), unthreaded)
+    newest_body = (second_format_head(pr) or {}).get("body") or ""
+    sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
+    unlisted = unthreaded if sectional else max(unlisted_findings(manifest), unthreaded)
     flagged = uncounted_verdict(pr)
 
     answer = answered_outside_review(pr)

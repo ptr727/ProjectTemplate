@@ -4182,6 +4182,18 @@ class TestOverviewSections(GqlCase):
         self.assertIn("shapes=ok", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
+    def test_an_earlier_round_s_thread_in_the_open_section_is_no_finding_without_one(self) -> None:
+        """The section supplied the total, so its entries decide, and both link threads."""
+        rd = review(body=revised_with(open_section(("6000000001", "6000000002"))), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_head", cid="6000000001"),
+            thread("T2", rid="PRR_old", cid="6000000002"),
+        ]
+        self.answer(payload([rd], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/1", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
     def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
         """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""
         self.answer(payload([review(body=overview_v2(findings="", entries=1))]))
