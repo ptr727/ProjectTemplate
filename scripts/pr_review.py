@@ -161,10 +161,13 @@ Subcommands
            Where the preamble states no total, the count opening the open-findings section is
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
-           the pull request is counted in that same block whatever the totals say. Where that
-           section supplied `T`, the block is measured against its entries rather than against
-           `M`, so an entry linking an earlier round's thread is no finding without one, while a
-           finding the count names and no entry links is still counted.
+           the pull request is counted in that same block whatever the totals say. So is each
+           entry an `Open (N)` section counts beyond its linked entries, the bullets at its
+           margin carrying a link this script reads, outside any block collapsed within it.
+           Where the open-findings section supplied `T`, the block is measured against its
+           entries rather than against `M`, so an entry linking an earlier round's thread is no
+           finding without one, while a finding that section's count names and no entry links is
+           still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -1946,7 +1949,8 @@ def findings_on(tail: str) -> int | None:
 
 
 DISCUSSION_LINK = re.compile(r"\]\(#discussion_r(\d+)\)")
-OverviewSection = tuple[str, int | None, list[str]]
+ENTRY_LINE = re.compile(r"[-*+]\s")
+OverviewSection = tuple[str, int | None, list[str], int]
 
 
 def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
@@ -1961,9 +1965,12 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     is the prose under it up to the next heading or bold line, taken from the body unmasked so a
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
-    summary states, and the thread id each of its entries links, which is the database id of that
-    thread's first comment. Quotations are masked first, so a body quoting a section is not read
-    as carrying one.
+    summary states, the thread id each of its entries links, which is the database id of that
+    thread's first comment, and its linked entry count, the bullets at its margin carrying a link
+    this reader recognizes, outside any block collapsed within it. One entry can link a thread
+    beside its own, hold an indented back-reference, or collapse a list of its own, so a section's
+    links overstate its linked entries. Quotations are masked first, so a body quoting a section
+    is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -1994,7 +2001,14 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
             continue
         digits = re.search(r"\d+", EMPHASIS.sub("", summary))
         count = counted(digits.group()) if digits else None
-        sections.append((role, count, DISCUSSION_LINK.findall(masked[start:end])))
+        text = masked[start:end]
+        own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
+        linked = sum(
+            1
+            for line in own.splitlines()
+            if ENTRY_LINE.match(line) and DISCUSSION_LINK.search(line)
+        )
+        sections.append((role, count, DISCUSSION_LINK.findall(text), linked))
     return verdict, " ".join(headline), sections
 
 
@@ -2028,7 +2042,7 @@ def stated_total(body: str, preamble_only: bool = False) -> int | None:
     totals += [counted(m.group(1)) for m in CCR_OPEN_FINDINGS.finditer(preamble)]
     found = [t for t in totals if t is not None]
     if not found and not preamble_only:
-        found = [c for role, c, _ in read_overview(body)[2] if role == TOTAL and c is not None]
+        found = [c for role, c, *_ in read_overview(body)[2] if role == TOTAL and c is not None]
     return max(found, default=None)
 
 
@@ -2111,13 +2125,29 @@ def unthreaded_entries(pr: dict) -> int:
     a finding named only in the review body, which no thread poll reaches. Distinct ids are
     counted, and a resolved section's entries are not, being threads an earlier round raised. A
     thread past the hundred the query reads counts here too, overstating rather than hiding.
+    An `Open (N)` section counting more entries than it has linked entries adds the difference.
+    An entry carrying a link this reader does not recognize lands there too, overstating rather
+    than hiding.
     """
     known = {
         str(first_comment(thread)["fullDatabaseId"])
         for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
         if first_comment(thread).get("fullDatabaseId") is not None
     }
-    return len(open_entry_ids(pr) - known)
+    return len(open_entry_ids(pr) - known) + unlinked_open_entries(pr)
+
+
+def unlinked_open_entries(pr: dict) -> int:
+    """How many entries the head round's `Open (N)` sections count beyond their linked entries."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    sections = read_overview(newest.get("body") or "")[2]
+    return sum(
+        max(count - linked, 0)
+        for role, count, _, linked in sections
+        if role == OPEN and count is not None
+    )
 
 
 def open_entry_ids(pr: dict) -> set[str]:
@@ -2126,7 +2156,7 @@ def open_entry_ids(pr: dict) -> set[str]:
     if newest is None:
         return set()
     sections = read_overview(newest.get("body") or "")[2]
-    return {i for role, _, ids in sections if role != RESOLVED for i in ids}
+    return {i for role, _, ids, _ in sections if role != RESOLVED for i in ids}
 
 
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
@@ -2149,7 +2179,7 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
     verdict, headline, sections = read_overview(body)
     if not verdict or unvetted(verdict, FLAGGING_VERDICTS):
         return None
-    listed = any(role != RESOLVED and (count or ids) for role, count, ids in sections)
+    listed = any(role != RESOLVED and (count or ids) for role, count, ids, _ in sections)
     if listed or stated_total(body) or round_threads(pr, newest):
         return None
     if suppressed_blocks(body) or previously_missed_blocks(body):
@@ -3736,8 +3766,9 @@ def digest(
                 else f" and opened {listed} thread{'' if listed == 1 else 's'}"
             )
             + (
-                f", and {unthreaded} of the entries its open section lists "
-                f"link{'s' if unthreaded == 1 else ''} no thread on this pull request"
+                f", and {unthreaded} of the entries its open sections count "
+                f"{'carries' if unthreaded == 1 else 'carry'} no link this script reads to a "
+                "thread on this pull request"
                 if unthreaded
                 else ""
             )
