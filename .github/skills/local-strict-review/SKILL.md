@@ -33,7 +33,7 @@ Dispatches one read-only subagent against this branch's full diff since it forke
 
 The subagent reads the full content of every file the diff and the untracked-file list touch, not just the hunks, since cross-file and whole-file context is exactly what incremental review misses. It reports findings only. It never fixes, stages, or commits anything.
 
-Review criteria are `fleet-code-review`'s "Review the Change" section, reused rather than restated here, plus three traps worth calling out explicitly for a pass that runs before a human or a PR-hosted reviewer ever sees the diff: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. Each is called out only where the code's actual deployment can produce it, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". `fleet-code-review`'s separate "Publish Every Finding" section does not apply here: this skill has no PR to post a comment on and no coverage marker to close a review with, so its own report contract below replaces that section rather than extending it.
+Review criteria are `fleet-code-review`'s "Review the Change" section, reused rather than restated here, plus three traps worth calling out explicitly for a pass that runs before a human or a PR-hosted reviewer ever sees the diff: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. Each is called out only where the code's actual deployment can produce it, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". The brief also asks the reviewer to search for an existing helper doing the job of each one the diff adds, per `GOVERNANCE.md` "Design Before Code". `fleet-code-review`'s separate "Publish Every Finding" section does not apply here: this skill has no PR to post a comment on and no coverage marker to close a review with, so its own report contract below replaces that section rather than extending it.
 
 ## Running It
 
@@ -56,6 +56,8 @@ Paths: the files `git diff --name-only "$(git merge-base refs/remotes/origin/<ta
 Rules that bind this task: quote `fleet-code-review`'s "Review the Change" section into the prompt,
   plus flag unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior
   differences explicitly, each only where the code's actual deployment can produce it.
+  For each function or helper the diff adds, search the repository for one doing the same job,
+  and report a consolidation or over-hardening finding.
   Do not quote "Publish Every Finding", this task's report contract is the Return line below,
   not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, no severity theater.

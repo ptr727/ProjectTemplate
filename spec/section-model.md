@@ -38,6 +38,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Pull Request Title and Commit Message Conventions | `GOVERNANCE.md` | verbatim | universal, with generic examples |
 | Documentation Style Conventions | `GOVERNANCE.md` | verbatim | all rule text, including the Line Endings *rule* (a repo's `.editorconfig` value is not here) |
 | Verification Discipline | `GOVERNANCE.md` | verbatim | universal verification law |
+| Design Before Code | `GOVERNANCE.md` | verbatim | universal law on threat modeling, reuse, and consolidation before code is written |
 | Trust Boundaries and Hardening Effort | `GOVERNANCE.md` | verbatim | universal law on where hardening effort is spent |
 | PR Review Etiquette | `GOVERNANCE.md` | verbatim | universal review-loop contract |
 | Communicating with the User | `GOVERNANCE.md` | verbatim | universal |
