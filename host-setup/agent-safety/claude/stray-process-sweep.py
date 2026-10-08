@@ -505,7 +505,7 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
     stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows, since
     the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
     and only once nothing is left in it. `table` is None where the process table could not be read,
-    which says nothing about which agents run, so nothing is stopped then.
+    which says nothing about which agents run, so no scope is stopped then.
     """
     reader = reader or _read_process_table
     own = sorted({t for t in map(session_token, session_ids) if t})
