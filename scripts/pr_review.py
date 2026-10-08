@@ -1964,8 +1964,8 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, the thread id each of its entries links, which is the database id of that
-    thread's first comment, and how many of its entries carry a link. An entry is a list item at
-    the margin, and one can link a thread beside its own or hold an indented back-reference, so a
+    thread's first comment, and how many of its entries carry a link. An entry is a bullet at the
+    margin, and one can link a thread beside its own or hold an indented back-reference, so a
     section's links overstate the section's entries. Quotations are masked first, so a body
     quoting a section is not read as carrying one.
 
