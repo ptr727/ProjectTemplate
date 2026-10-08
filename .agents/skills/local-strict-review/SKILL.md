@@ -57,8 +57,9 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   plus flag unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior
   differences explicitly, each only where the code's actual deployment can produce it.
   For each function or helper the diff adds, search this repository and the hub for one doing
-  the same job, and report a consolidation finding where one exists. Report hardening the
-  threat model rules out as an over-hardening finding.
+  the same job, and report a consolidation finding where one exists. Where the diff itself adds
+  hardening the threat model rules out, report that code as an over-hardening finding. Never
+  ask for such hardening.
   Do not quote "Publish Every Finding", this task's report contract is the Return line below,
   not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
