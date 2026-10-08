@@ -37,7 +37,9 @@ class UsageCase(unittest.TestCase):
                 encoding="utf-8",
             )
             gh_stub.chmod(0o755)
-            env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ.get('PATH', os.defpath)}")
+            env = dict(
+                os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
+            )
             result = subprocess.run(
                 [bash, str(root / "repo-config" / "configure.sh"), *args],
                 capture_output=True,
