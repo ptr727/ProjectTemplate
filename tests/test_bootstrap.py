@@ -1477,6 +1477,22 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
         self.assertEqual(stdout.strip(), "rc=7")
         self.assertIn("Could not open", stderr)
 
+    def test_a_cache_directory_that_cannot_be_created_returns_the_failure_value(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what refuses a directory differs by platform and by account.
+        """
+        failed = self.start(
+            "function New-Item { throw 'refused' }\n"
+            "$rc = Invoke-WithHubLock -Failed 7 { [Console]::Out.WriteLine('ran') }\n"
+            '[Console]::Out.WriteLine("rc=$rc")',
+            self.dir / "cache",
+        )
+        stdout, stderr = failed.communicate(timeout=60)
+        self.assertEqual(failed.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "rc=7")
+        self.assertIn("Could not create", stderr)
+
     def test_a_span_already_holding_the_lock_runs_a_nested_one_without_waiting_on_itself(
         self,
     ) -> None:

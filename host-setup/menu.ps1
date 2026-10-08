@@ -184,7 +184,12 @@ function Get-HubLockPath { Join-Path $script:DIR 'hub.lock' }
 # A session that dies releases it, and the file stays in place, matching menu.sh, since removing it while held would let a third session lock a new file under the same name.
 function Lock-Hub {
     $lock = Get-HubLockPath
-    New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
+    try {
+        New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
+    } catch {
+        fail "Could not create $script:DIR for its lock file: $($_.Exception.Message)"
+        return $null
+    }
     $waited = $false
     while ($true) {
         try {
