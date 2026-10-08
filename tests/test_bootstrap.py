@@ -24,6 +24,7 @@ Run as `python3 tests/test_bootstrap.py`, or under `python3 -m unittest discover
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -1358,6 +1359,217 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.content("skills-tree"), "new")
         self.assertFalse((self.dir / "skills-tree.old").exists())
+
+
+STUB_TOOL = """\
+#!/usr/bin/env bash
+arg="${1:-}"
+[[ $arg == --yes ]] && arg=""
+step="$(basename "$0") $arg"
+step="${step% }"
+kept=absent
+[[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
+printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")" "$kept" >>"$STEP_LOG"
+[[ $step == "$FAIL_STEP" ]] && exit 7
+exit 0
+"""
+
+STUB_CURL = """\
+#!/usr/bin/env bash
+out="" url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    -o) out="$2"; shift ;;
+    -H | --retry | --connect-timeout) shift ;;
+    -*) ;;
+    *) url="$1" ;;
+    esac
+    shift
+done
+case "$url" in
+https://api.github.com/*) printf '%s' "$STUB_COMMIT" ;;
+https://codeload.github.com/*) cp "$STUB_TARBALL" "$out" ;;
+*) echo "stub curl refuses $url" >&2; exit 22 ;;
+esac
+"""
+
+STUB_MV = """\
+#!/usr/bin/env bash
+if [[ "${!#}" == "$KEPT_TREE" ]]; then
+    retired=absent
+    [[ -e "$KEPT_TREE.old/VERSION" ]] && retired=$(cat "$KEPT_TREE.old/VERSION")
+    printf '%s\\n' "$retired" >>"$MV_LOG"
+fi
+exec /bin/mv "$@"
+"""
+
+STAND_UP_STEPS = (
+    "install-tools.sh --sudo-timestamp",
+    "upgrade-host.sh --packages",
+    "install-tools.sh --install",
+    "setup-github.sh --configure",
+    "install-skills.sh",
+)
+
+
+@unittest.skipUnless(
+    sys.platform == "linux" and shutil.which("flock") and shutil.which("tar"),
+    "runs the Linux loader's whole main flow, which needs flock and tar",
+)
+class TestKeptTreeEndToEnd(unittest.TestCase):
+    """`bootstrap.sh --host` run whole, with a stub curl serving a local tarball and stub tools failing at a chosen step.
+
+    The tree the plugin loads is asserted from disk afterwards, so this holds the loader's own
+    ordering to the property rather than restating it: a failed stand-up leaves the previous tree
+    loading, and a successful one leaves only the new tree.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.home = self.root / "home"
+        self.stubs = self.root / "bin"
+        self.log = self.root / "steps.log"
+        self.data = self.root / "data"
+        for directory in (self.home, self.stubs, self.data):
+            directory.mkdir()
+        curl = self.stubs / "curl"
+        curl.write_text(STUB_CURL, encoding="utf-8")
+        curl.chmod(0o755)
+        mv = self.stubs / "mv"
+        mv.write_text(STUB_MV, encoding="utf-8")
+        mv.chmod(0o755)
+        self.mv_log = self.root / "mv.log"
+        self.tarball = self.root / "source.tar.gz"
+        with tarfile.open(self.tarball, "w:gz") as archive:
+            for tool in sorted({step.split()[0] for step in STAND_UP_STEPS}):
+                self.add_member(
+                    archive, f"ProjectTemplate-abc/host-setup/linux/{tool}", STUB_TOOL, 0o755
+                )
+            self.add_member(archive, "ProjectTemplate-abc/VERSION", "new", 0o644)
+
+    @staticmethod
+    def add_member(archive: tarfile.TarFile, name: str, content: str, mode: int) -> None:
+        data = content.encode("utf-8")
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        info.mode = mode
+        archive.addfile(info, io.BytesIO(data))
+
+    @property
+    def kept(self) -> Path:
+        return self.data / "skills-tree"
+
+    def previous_tree(self) -> None:
+        self.kept.mkdir()
+        (self.kept / ".bootstrap-owned").touch()
+        (self.kept / "VERSION").write_text("old", encoding="utf-8")
+
+    def run_main(self, fail_step: str = "") -> subprocess.CompletedProcess[str]:
+        env = {
+            "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(self.home),
+            "KEPT_TREE": str(self.kept),
+            "STEP_LOG": str(self.log),
+            "MV_LOG": str(self.mv_log),
+            "FAIL_STEP": fail_step,
+            "STUB_TARBALL": str(self.tarball),
+            "STUB_COMMIT": "0123456789abcdef0123456789abcdef01234567",
+        }
+        return subprocess.run(
+            [bash_or_skip(), str(BOOTSTRAP), "--host", "--yes", "--dir", str(self.data)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=60,
+        )
+
+    def steps(self) -> list[list[str]]:
+        """Each tool run as [step, tree it ran from, version the kept tree held at that moment]."""
+        if not self.log.exists():
+            return []
+        return [line.split("|") for line in self.log.read_text(encoding="utf-8").splitlines()]
+
+    def version(self) -> str:
+        return (self.kept / "VERSION").read_text(encoding="utf-8")
+
+    def leftovers(self) -> list[str]:
+        """Everything under the directory except the kept tree and the lock file the loader leaves by design."""
+        return sorted(
+            path.name
+            for path in self.data.iterdir()
+            if path.name not in ("skills-tree", "skills-tree.lock")
+        )
+
+    def test_a_successful_run_swaps_the_new_tree_in_and_leaves_nothing_beside_it(self) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.version(), "new")
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_the_previous_tree_is_still_held_aside_when_the_new_one_moves_into_place(self) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.mv_log.read_text(encoding="utf-8").split(), ["old"], result.stderr)
+
+    def test_a_first_run_with_no_previous_tree_installs_one(self) -> None:
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.version(), "new")
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_the_previous_tree_is_untouched_until_the_skills_step_and_replaced_before_it_runs(
+        self,
+    ) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.steps()
+        self.assertEqual([step for step, _, _ in steps], list(STAND_UP_STEPS), result.stderr)
+        *before, last = steps
+        for step, tree, kept in before:
+            self.assertEqual(kept, "old", f"{step} found the previous tree gone or replaced")
+            self.assertEqual(tree, "skills-tree.new", f"{step} ran from {tree}")
+        self.assertEqual(
+            last[1:], ["skills-tree", "new"], "the skills step must run from the swapped-in tree"
+        )
+
+    def test_a_stand_up_failing_before_the_skills_step_leaves_the_previous_tree_loading(
+        self,
+    ) -> None:
+        for fail_step in STAND_UP_STEPS[:-1]:
+            with self.subTest(fail_step=fail_step):
+                shutil.rmtree(self.data)
+                self.data.mkdir()
+                self.log.unlink(missing_ok=True)
+                self.previous_tree()
+                result = self.run_main(fail_step)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.version(), "old", result.stderr)
+                self.assertEqual(self.leftovers(), [], result.stderr)
+                self.assertEqual(
+                    self.steps()[-1][0], fail_step, "the run went on past the failed step"
+                )
+
+    def test_a_first_run_failing_before_the_skills_step_leaves_no_tree(self) -> None:
+        result = self.run_main("install-tools.sh --install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.kept.exists(), result.stderr)
+        self.assertEqual(self.leftovers(), [], result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-tools.sh --install")
+
+    def test_a_failing_skills_installer_leaves_the_new_tree_whole_and_no_old_one_beside_it(
+        self,
+    ) -> None:
+        self.previous_tree()
+        result = self.run_main("install-skills.sh")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-skills.sh")
+        self.assertEqual(self.version(), "new", result.stderr)
+        self.assertEqual(self.leftovers(), [], result.stderr)
 
 
 def menu_functions() -> str:
