@@ -149,7 +149,8 @@ Subcommands
            shortfall by counting something that was not an entry, telling those apart needing a
            Markdown parser rather than a line scan.
            A total larger than the thread count is findings the round raised that polling threads
-           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall. Two
+           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall, except
+           where a count-first open section supplied the total, as stated below. Two
            things overstate that shortfall rather than hiding it, so it is confirmed against the
            body rather than acted on from the number. One is a thread past the hundred
            `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
