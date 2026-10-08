@@ -4210,6 +4210,7 @@ class TestOverviewSections(GqlCase):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn("overview=3/2", out)
                 self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+                self.assertIn("states 3 findings, its open section linking 2, so 1 finding", out)
 
     def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
         """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""

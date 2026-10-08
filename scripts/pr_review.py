@@ -2111,16 +2111,21 @@ def unthreaded_entries(pr: dict) -> int:
     counted, and a resolved section's entries are not, being threads an earlier round raised. A
     thread past the hundred the query reads counts here too, overstating rather than hiding.
     """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
     known = {
         str(first_comment(thread)["fullDatabaseId"])
         for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
         if first_comment(thread).get("fullDatabaseId") is not None
     }
+    return len(open_entry_ids(pr) - known)
+
+
+def open_entry_ids(pr: dict) -> set[str]:
+    """The distinct thread ids the head round's open sections link, resolved sections left out."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return set()
     sections = read_overview(newest.get("body") or "")[2]
-    return len({i for role, _, ids in sections if role != RESOLVED for i in ids} - known)
+    return {i for role, _, ids in sections if role != RESOLVED for i in ids}
 
 
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
@@ -3556,7 +3561,7 @@ def digest(
     unthreaded = unthreaded_entries(pr)
     newest_body = (second_format_head(pr) or {}).get("body") or ""
     sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
-    linked = {i for role, _, ids in read_overview(newest_body)[2] if role != RESOLVED for i in ids}
+    linked = open_entry_ids(pr)
     unlisted = (
         max((stated or 0) - len(linked), 0) + unthreaded
         if sectional
@@ -3724,8 +3729,11 @@ def digest(
         lines.append(
             f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
             + ("no total" if stated is None else f"{stated} finding{'' if stated == 1 else 's'}")
-            + f" and opened {listed} thread"
-            f"{'' if listed == 1 else 's'}"
+            + (
+                f", its open section linking {len(linked)}"
+                if sectional
+                else f" and opened {listed} thread{'' if listed == 1 else 's'}"
+            )
             + (
                 f", and {unthreaded} of the entries its open section lists "
                 f"link{'s' if unthreaded == 1 else ''} no thread on this pull request"
