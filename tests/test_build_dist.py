@@ -646,9 +646,10 @@ class IncludeCase(TreeCase):
         for rel in (
             "../outside.md",
             str(outside),
-            "link.md",
             ".github/skills/gen.md",
             "missing.md",
+            # Last, since a skip inside a subTest stops the loop under failfast.
+            "link.md",
         ):
             with self.subTest(rel):
                 if rel == "link.md" and not can_symlink():
@@ -833,9 +834,10 @@ class IncludeCase(TreeCase):
             (self.tmp / "link.md").symlink_to(outside)
         cases = {
             "missing": "docs/absent.md",
-            "through a symlink": "link.md",
             "under a generated tree": ".claude-plugin/fleet-skills/GEN.md",
             "outside the root": "../outside.md",
+            # Last, since a skip inside a subTest stops the loop under failfast.
+            "through a symlink": "link.md",
         }
         for label, rel in cases.items():
             with self.subTest(label):
