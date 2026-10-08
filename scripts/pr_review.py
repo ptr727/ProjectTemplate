@@ -1965,9 +1965,9 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, the thread id each of its entries links, which is the database id of that
     thread's first comment, and how many of its entries carry a link. An entry is a list item at
-    the margin, and one can link a thread beside its own or hold an indented back-reference, so
-    its links overstate its entries. Quotations are masked first, so a body quoting a section is
-    not read as carrying one.
+    the margin, and one can link a thread beside its own or hold an indented back-reference, so a
+    section's links overstate the section's entries. Quotations are masked first, so a body
+    quoting a section is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -2133,7 +2133,7 @@ def unthreaded_entries(pr: dict) -> int:
 
 
 def unlinked_open_entries(pr: dict) -> int:
-    """How many entries the head round's `Open (N)` sections count beyond their linked lines."""
+    """How many entries the head round's `Open (N)` sections count beyond their linked entries."""
     newest = second_format_head(pr)
     if newest is None:
         return 0
