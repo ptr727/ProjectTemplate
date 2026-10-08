@@ -20,6 +20,7 @@ ASSUME_YES=false
 
 HUB_ROOT=""
 HUB_FETCHED=false
+HUB_FETCH_TOKEN=""
 DOWNSTREAM_ROOT=""
 DOWNSTREAM_NAME=""
 
@@ -87,6 +88,13 @@ remove_unowned_hub_check() {
     [[ -e "$(marker_path)" ]] && return 0
     fail "$DIR/hub exists and this run did not create it, so it will not be removed. Pass --dir to choose another cache location."
     return 1
+}
+
+hub_fetched_here() {
+    [[ -n $HUB_FETCH_TOKEN && -f "$(marker_path)" ]] || return 1
+    local recorded
+    recorded=$(<"$(marker_path)") || return 1
+    [[ $recorded == "$HUB_FETCH_TOKEN" ]]
 }
 
 # Acquires the reader half of the fetch/use lock, held from immediately before ensure_hub_root's own freshness check through the caller's entire use of $HUB_ROOT.
@@ -162,10 +170,23 @@ fetch_hub() {
 
 fetch_hub_locked() {
     step "Fetching $HUB_REPO at $REF"
+    local token
+    if ! token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') || [[ -z $token ]]; then
+        fail "Could not read /dev/urandom for the token marking this fetch as this session's."
+        return 1
+    fi
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
+    if [[ -e "$DIR/hub" || -L "$DIR/hub" ]]; then
+        fail "Could not remove $DIR/hub to fetch it again. Check that nothing holds a file under it."
+        return 1
+    fi
     # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
-    touch "$(marker_path)"
+    if ! printf '%s\n' "$token" >"$(marker_path)"; then
+        fail "Could not write $(marker_path). Check that $DIR is writable."
+        return 1
+    fi
+    HUB_FETCH_TOKEN="$token"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
         {
@@ -286,6 +307,10 @@ cleanup() {
             exec {lock_fd}>&-
             return 1
         }
+    fi
+    if ! hub_fetched_here; then
+        exec {lock_fd}>&-
+        return 0
     fi
     # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
     rm -rf "$DIR/hub"
