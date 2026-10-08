@@ -1964,10 +1964,10 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, the thread id each of its entries links, which is the database id of that
-    thread's first comment, and how many of its entries carry a link. An entry is a bullet at the
-    margin, and one can link a thread beside its own or hold an indented back-reference, so a
-    section's links overstate the section's entries. Quotations are masked first, so a body
-    quoting a section is not read as carrying one.
+    thread's first comment, and its linked entry count, the bullets at its margin carrying a link
+    this reader recognizes. One entry can link a thread beside its own or hold an indented
+    back-reference, so a section's links overstate its linked entries. Quotations are masked
+    first, so a body quoting a section is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -2121,8 +2121,9 @@ def unthreaded_entries(pr: dict) -> int:
     a finding named only in the review body, which no thread poll reaches. Distinct ids are
     counted, and a resolved section's entries are not, being threads an earlier round raised. A
     thread past the hundred the query reads counts here too, overstating rather than hiding.
-    An `Open (N)` section counting more entries than it lists with a link adds the difference,
-    since an entry carrying no link, or one this reader cannot recognize, links no thread either.
+    An `Open (N)` section counting more entries than it has linked entries adds the difference.
+    An entry carrying a link this reader does not recognize lands there too, overstating rather
+    than hiding.
     """
     known = {
         str(first_comment(thread)["fullDatabaseId"])
@@ -3762,7 +3763,8 @@ def digest(
             )
             + (
                 f", and {unthreaded} of the entries its open sections count "
-                f"link{'s' if unthreaded == 1 else ''} no thread on this pull request"
+                f"{'carries' if unthreaded == 1 else 'carry'} no link this script reads to a "
+                "thread on this pull request"
                 if unthreaded
                 else ""
             )
