@@ -172,6 +172,23 @@ package_installed() { [[ " $ABSENT " != *" $1 "* ]]; }
                 self.assertEqual(rows["python"]["status"], status)
                 self.assertEqual(rows["python"]["pending_packages"], pending)
 
+    def test_a_held_package_counts_as_installed(self) -> None:
+        """A package held by apt-mark is installed, so it never reads as pending work an apply cannot do."""
+        cases = {
+            "install ok installed": "yes",
+            "hold ok installed": "yes",
+            "deinstall ok config-files": "no",
+            "install ok half-configured": "no",
+        }
+        for status, expected in cases.items():
+            with self.subTest(status=status):
+                result = self.run_bash(
+                    'dpkg-query() { printf "%s" "$STATUS"; }\nSTATUS=$1\npackage_installed pkg && echo yes || echo no',
+                    status,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
     def test_dotnet_s_other_sdk_lines_are_pending_only_under_optional(self) -> None:
         """The newest SDK line is installed and current, and the two older lines are not installed."""
         stubs = """

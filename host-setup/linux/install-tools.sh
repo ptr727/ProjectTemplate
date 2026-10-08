@@ -198,9 +198,10 @@ entry per tool with "tool", "installed", "available", "source", "mechanism", "st
 tool. A version that was not read is null. "pending_packages" lists what an install or upgrade
 would add from the tool's package set, and a tool otherwise current reads "incomplete" while it is
 not empty. "unmanaged" marks a tool whose upstream repository is not configured, installed or not,
-and its "available" is the distro's version rather than the one an install or upgrade would take. Like "source", "mechanism" names how this script manages the tool rather than where
-the installed copy came from: "apt", which any apt upgrade moves, "binary", which only this script
-moves, or "docker-desktop" for docker inside a WSL distribution, which it leaves to Docker Desktop.
+and its "available" is not the version an install or upgrade would take. Like "source",
+"mechanism" names how this script manages the tool rather than where the installed copy came
+from: "apt", which any apt upgrade moves, "binary", which only this script moves, or
+"docker-desktop" for docker inside a WSL distribution, which it leaves to Docker Desktop.
 
 --sudo-timestamp writes a sudoers drop-in for the invoking user alone, so one "sudo -v" covers
 every terminal that user has open rather than only the one it ran in. It touches no tool.
@@ -327,7 +328,7 @@ apt_install() {
 # Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts, because dpkg answers about the installed state while apt-cache also carries a candidate, and the two disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Eq "^(install|hold) ok installed"
 }
 
 apt_missing() {
