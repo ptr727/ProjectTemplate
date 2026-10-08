@@ -42,6 +42,7 @@ $IS_HUB_CHECKOUT = $false
 $DOWNSTREAM_ROOT = ''
 $DOWNSTREAM_NAME = ''
 $PWSH_PATH = ''
+$HUB_LOCK = $null
 $QUIT = $false
 $BAD_CHOICE = $false
 
@@ -177,40 +178,52 @@ function Test-HubRemovable {
     return $false
 }
 
-# Windows has no peer to flock, so a session-scoped named mutex serializes a fetch against a second menu.ps1 sharing this -Dir instead.
-function Get-HubMutexName {
-    $safe = ($script:DIR -replace '[^A-Za-z0-9]', '_')
-    return "ProjectTemplateHostSetupMenu_$safe"
+function Get-HubLockPath { Join-Path $script:DIR 'hub.lock' }
+
+# The file menu.sh locks, held with FileShare.None, which .NET implements as an exclusive flock on Linux and which on Windows refuses any other open handle, so the two menus sharing one -Dir serialize against each other.
+# A session that dies releases it, and the file stays in place, matching menu.sh, since removing it while held would let a third session lock a new file under the same name.
+function Lock-Hub {
+    $lock = Get-HubLockPath
+    New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
+    $waited = $false
+    while ($true) {
+        try {
+            return [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
+        } catch [System.Management.Automation.MethodInvocationException] {
+            # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
+            # The open does not block on either platform, so a held lock is waited out by retrying it.
+            $reason = $_.Exception.InnerException
+            if ($reason.GetType() -ne [IO.IOException]) {
+                fail "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
+                return $null
+            }
+        }
+        if (-not $waited) {
+            info "Waiting for another session using $script:DIR\hub..."
+            $waited = $true
+        }
+        Start-Sleep -Milliseconds 250
+    }
 }
 
 function Invoke-WithHubLock {
     # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) alike.
-    # Unlike menu.sh's flock, which gives readers a genuine shared mode, a named .NET Mutex has no such mode, and building a correct cross-process reader count on top of one (a shared counter, itself needing its own guard) is real complexity for a rarely-hit race in a low-traffic interactive tool.
-    # Every caller here takes the same exclusive lock instead, trading reader concurrency for a locking scheme simple enough to get right.
+    # Unlike menu.sh, which gives readers a genuine shared mode, every caller here takes the same exclusive lock, trading reader concurrency for a locking scheme simple enough to get right.
     # That trade is not always brief: Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade, so a second session waiting here can wait as long as that run takes, not just for a quick read.
     # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
+    # A span already holding the lock runs the scriptblock as it is, since Invoke-FetchHub is reached from inside one through Confirm-HubRoot, and a second open of the file would wait on this session's own lock forever.
+    # A lock that cannot be taken at all returns $Failed without running the scriptblock, the value each caller already returns for its own task failing, since a $false would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site, where a bare closure reads as an unused parameter to it, since the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
-    param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @())
-    $mutex = New-Object System.Threading.Mutex($false, (Get-HubMutexName))
-    $acquired = $false
+    param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @(), [object]$Failed = 1)
+    if ($script:HUB_LOCK) { return (& $ScriptBlock @ArgumentList) }
+    $script:HUB_LOCK = Lock-Hub
+    if (-not $script:HUB_LOCK) { return $Failed }
     try {
-        try {
-            # A quick non-blocking probe first, so a session that has to wait says so instead of blocking with no output, matching Invoke-Cleanup's own pattern.
-            if (-not $mutex.WaitOne(0)) {
-                info "Waiting for another session using $script:DIR\hub..."
-                $acquired = $mutex.WaitOne()
-            } else {
-                $acquired = $true
-            }
-        } catch [System.Threading.AbandonedMutexException] {
-            # A prior holder crashed mid-operation, which leaves whatever it was doing in a bad state rather than the lock itself, so ownership passes to this run.
-            $acquired = $true
-        }
         & $ScriptBlock @ArgumentList
     } finally {
-        if ($acquired) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
+        $script:HUB_LOCK.Dispose()
+        $script:HUB_LOCK = $null
     }
 }
 
@@ -220,23 +233,9 @@ function Invoke-FetchHub {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change -DryRun does not make. Run without -DryRun, or from inside a hub checkout already on $script:DEFAULT_REF."
         return $false
     }
-    New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
-    $mutex = New-Object System.Threading.Mutex($false, (Get-HubMutexName))
-    $acquired = $false
-    try {
-        try {
-            $acquired = $mutex.WaitOne()
-        } catch [System.Threading.AbandonedMutexException] {
-            # A prior holder crashed mid-fetch, which leaves the tree it was writing rather than the lock itself in a bad state, so ownership passes to this run.
-            $acquired = $true
-        }
-        return (Invoke-FetchHubLocked)
-    } finally {
-        # Released here, once the fetch itself finishes, rather than held for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu.ps1 sharing this -Dir until this session quits.
-        # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
-        if ($acquired) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
-    }
+    # Held for the fetch's own span rather than for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu sharing this -Dir until this session quits.
+    # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
+    return (Invoke-WithHubLock -Failed $false -ScriptBlock { Invoke-FetchHubLocked })
 }
 
 function Invoke-FetchHubLocked {
@@ -436,7 +435,7 @@ function Invoke-AuditRepo {
 }
 
 function Invoke-CheckSkillsDist {
-    $rc = Invoke-WithHubLock {
+    $rc = Invoke-WithHubLock -Failed 2 -ScriptBlock {
         # 2, not 1: scripts\build_dist.py --check documents 1 as its own "stale" result, and the switch below reads that value as a genuine check outcome.
         # A Confirm-HubRoot failure must not collide with it, or a failed confirmation reports as "stale" with exit code 0 instead of the failure it actually is.
         if (-not (Confirm-HubRoot)) { return 2 }
