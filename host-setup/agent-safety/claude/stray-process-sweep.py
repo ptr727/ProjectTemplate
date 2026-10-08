@@ -60,6 +60,8 @@ _TREE_ROUNDS = 4
 
 # The share of the hook's timeout the tree may take, leaving the rest for the report-only phase after it.
 _TREE_SECONDS = 20
+# How far past that share a call already under way may run, so the stop it started can finish.
+_TREE_GRACE = 5
 
 ROOT_VAR = "AGENT_CONTAINMENT_ROOT"
 
@@ -253,7 +255,7 @@ def report(table, roots):
     return "\n".join(lines)
 
 
-def _systemctl(*args, runtime=None):
+def _systemctl(*args, runtime=None, timeout=5):
     """(exit code, stdout) of `systemctl --user <args>`, or (None, "") when it cannot run at all.
 
     `runtime` points it at the manager found by `manager_runtime`, which may not be the session's own
@@ -268,7 +270,7 @@ def _systemctl(*args, runtime=None):
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=5,
+            timeout=timeout,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -473,7 +475,11 @@ def _tool_scopes(runner):
     if code != 0:
         return None
     units = sorted(line.split()[0] for line in out.splitlines() if line.split())
-    return units, unit_props(units, ["Slice", "Description"], runner)
+    props = unit_props(units, ["Slice", "Description"], runner)
+    # A scope `show` did not answer for has no known slice, and reading that as "not in the tree" could end a tree still holding it.
+    if any(u not in props for u in units):
+        return None
+    return units, props
 
 
 def _tree_members(name, runner):
@@ -666,6 +672,11 @@ def main():
         def runner(*args):
             return _systemctl(*args, runtime=runtime)
 
+        def tree_runner(*args):
+            # Every call is held inside the tree's share of the hook's time, and one cut short reads as a failure to list, which stops nothing.
+            left = started + _TREE_SECONDS + _TREE_GRACE - time.monotonic()
+            return _systemctl(*args, runtime=runtime, timeout=max(0.1, min(5.0, left)))
+
         reaped = reap(
             session_ids, _read_process_table() or {}, runner=runner, manager_found=bool(runtime)
         )
@@ -675,7 +686,7 @@ def main():
                 session_ids,
                 os.environ,
                 _read_process_table(),
-                runner=runner,
+                runner=tree_runner,
                 deadline=started + _TREE_SECONDS,
             )
             reaped = "\n".join(t for t in (reaped, tree) if t)
@@ -1001,6 +1012,14 @@ def _selftest():
     def unlisted_run(*args):
         return (1, "") if args[0] == "list-units" else listed_run(*args)
 
+    unshown_world, shown_run = world([nested, alive])
+
+    def unshown_run(*args):
+        if args[0] == "show" and args[-1] != tree:
+            return 1, ""
+        return shown_run(*args)
+
+    unshown_text = reap_tree([sid], {}, tree_table, unshown_run, reader=same)
     empty_world, empty_run = world([], slice_state="inactive")
     empty_world["dropins"] = False
     gone_all = orphaned(
@@ -1095,6 +1114,13 @@ def _selftest():
         (
             posing_world["slice"] == "active" and posing_world["dropins"],
             "a session handed a root never ends that tree, even one naming its own id",
+        ),
+        (
+            "could not list" in unshown_text
+            and unshown_world["slice"] == "active"
+            and unshown_world["members"] == {nested, alive}
+            and orphan_report(tree_table, unshown_run)[0] == 2,
+            "scopes listed but not shown are a failure to list, never an empty tree to end",
         ),
         (
             "could not list" in reap_tree([sid], {}, tree_table, lambda *a: (1, ""))
