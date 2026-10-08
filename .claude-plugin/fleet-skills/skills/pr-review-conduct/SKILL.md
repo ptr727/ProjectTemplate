@@ -244,9 +244,11 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Disprove a wrong finding with the command and its output, the code path that makes it
    impossible, or the rule that governs it. A finding that is factually correct but not this
    repo's to fix (a verbatim-fidelity manifest entry byte-locking the section, ownership that
-   sits elsewhere) declines the same way: name the boundary and cite what proves it. Either shape
-   closes the thread on its own evidence, and the agent resolves such a thread itself rather than
-   leaving it for the maintainer. What makes that safe is the evidence being checkable by anyone,
+   sits elsewhere) declines the same way: name the boundary and cite what proves it. So does a
+   hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out,
+   citing that section and the input or deployment it turns on. Each shape closes the thread on
+   its own evidence, and the agent resolves such a thread itself rather than leaving it for the
+   maintainer. What makes that safe is the evidence being checkable by anyone,
    a command and its output, the code path, the quoted rule, a byte-identical diff, so a decline
    resting on anything weaker is not one of these. An assertion ("this is fine") does not close a
    finding, and outcome 3's value call is the maintainer's, so that thread stays open until they
@@ -284,6 +286,8 @@ instance's outcome is context for the new one, never a standing answer to reuse 
 never against its confidence label. Classify before responding:
 
 - **Bug**, wrong behavior, missing coverage, a real code or doc divergence. Fix it.
+- **Hardening that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out**, including
+  a test it says not to write. Decline it under outcome 2, even where it reads as missing coverage.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**, and take it to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.
