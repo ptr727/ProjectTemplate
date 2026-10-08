@@ -203,7 +203,7 @@ GitHub CLI
   [    ] git protocol is ssh, it is https, set it with: gh config set git_protocol ssh --host github.com, or --configure --gh-ssh-protocol
 ```
 
-The Windows script names `-Configure -GhSshProtocol` in the same place. Neither script changes the protocol by default, and `--configure` alone leaves it as it found it. Rewriting a working authentication setup is the operator's call. Setting it is therefore an explicit opt-in on the configure run, `--gh-ssh-protocol` for [`setup-github.sh`][setup-github-linux] and `-GhSshProtocol` for [`setup-github.ps1`][setup-github-windows]:
+The Windows script names `-Configure -GhSshProtocol` in the same place. Where `gh` is not logged in, the report names only the login, which sets the protocol too. Neither script changes the protocol by default, and `--configure` alone leaves it as it found it. Rewriting a working authentication setup is the operator's call. Setting it is therefore an explicit opt-in on the configure run, `--gh-ssh-protocol` for [`setup-github.sh`][setup-github-linux] and `-GhSshProtocol` for [`setup-github.ps1`][setup-github-windows]:
 
 ```shell
 host-setup/linux/setup-github.sh --configure --gh-ssh-protocol

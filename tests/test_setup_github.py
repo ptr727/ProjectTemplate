@@ -128,6 +128,12 @@ class TestLinuxGitHubCli(unittest.TestCase):
             " --git-protocol ssh\n",
             result.stdout,
         )
+        self.assertIn(
+            "  [    ] git protocol is ssh, unchecked until gh is logged in,"
+            " and the login above sets it\n",
+            result.stdout,
+        )
+        self.assertNotIn(REMEDY, result.stdout)
 
     def test_report_names_the_install_when_gh_is_absent(self) -> None:
         result = self.run_bash(f'PATH="{self.empty}"\nreport_gh')
@@ -372,6 +378,12 @@ class TestWindowsGitHubCli(unittest.TestCase):
             " --git-protocol ssh",
             self.output("logged-out"),
         )
+        self.assertIn(
+            "  [    ] git protocol is ssh, unchecked until gh is logged in,"
+            " and the login above sets it",
+            self.output("logged-out"),
+        )
+        self.assertFalse(any(REMEDY in line for line in self.output("logged-out")))
 
     def test_configure_alone_leaves_the_protocol_as_it_found_it(self) -> None:
         self.assertEqual(self.results["configure"]["protocol"], "https")

@@ -452,11 +452,11 @@ signing_works() {
 
 # The account gh is logged in to github.com as, empty when it is not.
 # Not being logged in is an answer rather than a failure, so the exit status is not the result.
-# The first account listed is the active one, and sed stops there itself rather than a head closing the pipe under pipefail.
+# The first account listed is the active one.
 gh_account() {
     local auth
     auth=$(gh auth status --hostname github.com 2>&1 || true)
-    printf '%s\n' "$auth" | sed -n '/Logged in to [^ ]* account /{s/.*Logged in to [^ ]* account \([^ ]*\).*/\1/p;q;}'
+    sed -n '/Logged in to [^ ]* account /{s/.*Logged in to [^ ]* account \([^ ]*\).*/\1/p;q;}' <<<"$auth"
 }
 
 # Read for the host, since a per-host value outranks the global one in what gh repo clone and gh pr checkout use.
@@ -479,6 +479,9 @@ report_gh() {
         ok "authenticated as $account"
     else
         missing "authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh"
+        # Setting the protocol before a login breaks gh's login state, so the login is the one remedy named.
+        missing "git protocol is ssh, unchecked until gh is logged in, and the login above sets it"
+        return 0
     fi
 
     protocol=$(gh_protocol)

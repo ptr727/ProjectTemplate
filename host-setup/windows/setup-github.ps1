@@ -507,7 +507,12 @@ function Show-GhStatus {
         return
     }
     $account = Get-GhAccount
-    if ($account) { ok "authenticated as $account" } else { missing 'authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh' }
+    if ($account) { ok "authenticated as $account" } else {
+        missing 'authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh'
+        # Setting the protocol before a login breaks gh's login state, so the login is the one remedy named.
+        missing 'git protocol is ssh, unchecked until gh is logged in, and the login above sets it'
+        return
+    }
 
     $protocol = Get-GhProtocol
     if ($protocol -eq 'ssh') { ok 'git protocol is ssh' }
