@@ -591,10 +591,45 @@ function Add-ToolNote {
     if ($Tool.Name -eq 'dotnet' -and -not $script:WITH_OPTIONAL) {
         note 'dotnet' "optional set not selected: $($Tool.Optional -join ', ')"
     }
+    if ($Tool.Name -eq 'dotnet') {
+        $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk (Get-DotnetSdk)
+        if ($untracked) {
+            note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so something other than $($State.Package), such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares $($State.Package) alone"
+        }
+    }
     if ($Tool.Name -eq 'docker') {
         $wslProblem = Test-WslReadyForDocker
         if ($wslProblem) { note 'docker' $wslProblem }
     }
+}
+
+# --- dotnet ---
+
+function Read-DotnetSdkList {
+    param([string[]]$Line)
+    return , @($Line | ForEach-Object { ($_ -split ' ', 2)[0] } | Where-Object { $_ -match '^\d+\.\d+\.\d+' })
+}
+
+# Every SDK dotnet itself can see, since Visual Studio and other winget SDK packages land theirs in the same directory, where the row's own winget package never lists them.
+function Get-DotnetSdk {
+    if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { return , @() }
+    $lines = @(& dotnet --list-sdks)
+    if ($LASTEXITCODE -ne 0) { return , @() }
+    return Read-DotnetSdkList -Line $lines
+}
+
+# The newest SDK above the version winget installed, which is the one a caller runs wherever no global.json pins another.
+# A prerelease compares equal to its own release, so on an equal key the release wins, and between two prereleases the later one does, since dotnet lists in ascending order.
+function Get-UntrackedDotnetSdk {
+    param([string]$Installed, [string[]]$Sdk)
+    if (-not $Installed) { return $null }
+    $newest = $null
+    foreach ($version in $Sdk) {
+        if ((Compare-HostVersion $version $Installed) -le 0) { continue }
+        $order = if ($newest) { Compare-HostVersion $version $newest } else { 1 }
+        if ($order -gt 0 -or ($order -eq 0 -and ($version -notmatch '-' -or $newest -match '-'))) { $newest = $version }
+    }
+    return $newest
 }
 
 # --- Python ---
