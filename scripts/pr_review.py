@@ -2139,8 +2139,8 @@ def table_match(
     A row naming one path at most that matches several names none of them, since which one it
     shortened is unknown. A row covers what it names unless a note came off it first, per
     `row_paths`, and the last list holds the uncovered paths such a row names, so it is a subset
-    of the first. Each list is sorted, and the table
-    stands in for coverage only where the first three are empty.
+    of the first. Each list is sorted, and the table stands in for coverage only where the first
+    three are empty.
     """
     covered: set[str] = set()
     noted_paths: set[str] = set()
@@ -2431,13 +2431,17 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             "two changed paths differ only by a format character, so the table cannot tell "
             "them apart"
         )
-    omitted, invented, ambiguous, _ = table_match(named, diff)
-    if not omitted and not invented and not ambiguous:
+    left, invented, ambiguous, noted = table_match(named, diff)
+    if not left and not invented and not ambiguous:
         return ""
+    omitted = [p for p in left if p not in noted]
     return "the table " + ", and ".join(
         part
         for part in (
             f"leaves out {', '.join(omitted)}" if omitted else "",
+            f"names {', '.join(noted)} only on a row with a note, which covers nothing"
+            if noted
+            else "",
             f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
             f"shortens {', '.join(ambiguous)}, which matches more than one changed file"
             if ambiguous

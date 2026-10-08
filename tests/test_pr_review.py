@@ -4264,7 +4264,8 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertEqual("", pr_review.table_shortfall(pr))
                 pr = payload([review(body=self.written([cell]))], files=files)
                 self.assertEqual(
-                    f"the table leaves out {', '.join(sorted(files))}",
+                    f"the table names {', '.join(sorted(files))} only on a row with a note, "
+                    "which covers nothing",
                     pr_review.table_shortfall(pr),
                 )
 
@@ -4286,7 +4287,7 @@ class TestCoverageExitCodes(GqlCase):
             (
                 "docs/a (draft).md (cleanup)",
                 ["docs/a (draft).md"],
-                "the table leaves out docs/a (draft).md",
+                "the table names docs/a (draft).md only on a row with a note, which covers nothing",
             ),
             ("docs/a (draft)", ["docs/a (draft)", "docs/a"], "the table leaves out docs/a"),
             ("docs/Long ... (draft)", ["docs/Long name (draft)"], ""),
