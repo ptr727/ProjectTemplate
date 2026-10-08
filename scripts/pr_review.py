@@ -163,10 +163,11 @@ Subcommands
            Each entry an open section lists links its thread, and an entry linking no thread on
            the pull request is counted in that same block whatever the totals say. So is each
            entry an `Open (N)` section counts beyond its linked entries, the bullets at its
-           margin carrying a link this script reads. Where the open-findings section supplied
-           `T`, the block is measured against its entries rather than against `M`, so an entry
-           linking an earlier round's thread is no finding without one, while a finding that
-           section's count names and no entry links is still counted.
+           margin carrying a link this script reads, outside any block collapsed within it.
+           Where the open-findings section supplied `T`, the block is measured against its
+           entries rather than against `M`, so an entry linking an earlier round's thread is no
+           finding without one, while a finding that section's count names and no entry links is
+           still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
