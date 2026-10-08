@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
@@ -1352,6 +1353,178 @@ class TestMenuSkillsInstall(unittest.TestCase):
         result = self.run_task(fetched=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "host-setup/linux/install-skills.sh")
+
+
+MENU_PS = ROOT / "host-setup" / "menu.ps1"
+
+POWERSHELL_MENU_LOCK_HARNESS = r"""
+param([string]$Menu, [string]$Dir, [string]$BodyFile)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$script:DIR = $Dir
+$script:HUB_LOCK = $null
+$script:DRY_RUN = $false
+. ([scriptblock]::Create((Get-Content -Raw -LiteralPath $BodyFile)))
+"""
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
+class TestPowerShellMenuHubLock(unittest.TestCase):
+    """The lock `menu.ps1` takes over the shared hub cache, driven through its own functions."""
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def start(self, body: str, cache: Path | None = None) -> subprocess.Popen[str]:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        harness = directory / "harness.ps1"
+        harness.write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
+        body_file = directory / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        process = subprocess.Popen(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(harness),
+                "-Menu",
+                str(MENU_PS),
+                "-Dir",
+                str(cache or self.dir),
+                "-BodyFile",
+                str(body_file),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        self.addCleanup(self._end, process)
+        return process
+
+    @staticmethod
+    def _end(process: subprocess.Popen[str]) -> None:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=60)
+
+    def read_line(self, process: subprocess.Popen[str]) -> str:
+        """The process's next stdout line, failing the case rather than hanging where none comes."""
+        output = process.stdout
+        assert output is not None
+        lines: list[str] = []
+        reader = threading.Thread(target=lambda: lines.append(output.readline()))
+        reader.start()
+        reader.join(timeout=60)
+        if reader.is_alive():
+            process.kill()
+            reader.join(timeout=10)
+            self.fail("no output line within 60 seconds")
+        return lines[0].strip()
+
+    def hold(self) -> subprocess.Popen[str]:
+        """A second session holding the lock through `Invoke-WithHubLock`, until its input closes."""
+        holder = self.start(
+            "Invoke-WithHubLock { [Console]::Out.WriteLine('held'); [void][Console]::In.ReadLine() }"
+        )
+        self.assertEqual(self.read_line(holder), "held")
+        return holder
+
+    def assert_waits_then_runs(self, release: Callable[[], None]) -> None:
+        waiter = self.start("Invoke-WithHubLock { [Console]::Out.WriteLine('ran') }")
+        self.assertIn("Waiting for another session", self.read_line(waiter))
+        release()
+        stdout, stderr = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "ran")
+
+    def test_a_second_session_waits_for_the_first_and_runs_once_it_ends(self) -> None:
+        holder = self.hold()
+
+        def release() -> None:
+            holder.communicate(input="\n", timeout=60)
+
+        self.assert_waits_then_runs(release)
+
+    def test_a_dry_run_runs_unlocked_and_creates_no_cache_directory(self) -> None:
+        cache = self.dir / "absent"
+        dry = self.start(
+            "$script:DRY_RUN = $true\nInvoke-WithHubLock { [Console]::Out.WriteLine('ran') }", cache
+        )
+        stdout, stderr = dry.communicate(timeout=60)
+        self.assertEqual(dry.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "ran")
+        self.assertFalse(cache.exists())
+
+    def test_a_lock_that_cannot_be_opened_returns_the_failure_value_without_running(self) -> None:
+        """A directory at the lock's name is a failure to open rather than a lock to wait on."""
+        (self.dir / "hub.lock").mkdir()
+        failed = self.start(
+            "$rc = Invoke-WithHubLock -Failed 7 { [Console]::Out.WriteLine('ran') }\n"
+            '[Console]::Out.WriteLine("rc=$rc")'
+        )
+        stdout, stderr = failed.communicate(timeout=60)
+        self.assertEqual(failed.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "rc=7")
+        self.assertIn("Could not open", stderr)
+
+    def test_a_cache_directory_that_cannot_be_created_returns_the_failure_value(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what refuses a directory differs by platform and by account.
+        """
+        failed = self.start(
+            "function New-Item { throw 'refused' }\n"
+            "$rc = Invoke-WithHubLock -Failed 7 { [Console]::Out.WriteLine('ran') }\n"
+            '[Console]::Out.WriteLine("rc=$rc")',
+            self.dir / "cache",
+        )
+        stdout, stderr = failed.communicate(timeout=60)
+        self.assertEqual(failed.returncode, 0, stderr)
+        self.assertEqual(stdout.strip(), "rc=7")
+        self.assertIn("Could not create", stderr)
+
+    def test_a_span_already_holding_the_lock_runs_a_nested_one_without_waiting_on_itself(
+        self,
+    ) -> None:
+        """`Invoke-FetchHub` is reached through `Confirm-HubRoot` from inside a held span."""
+        nested = self.start(
+            "Invoke-WithHubLock { Invoke-WithHubLock { [Console]::Out.WriteLine('inner') } }\n"
+            "Invoke-WithHubLock { [Console]::Out.WriteLine('again') }"
+        )
+        stdout, stderr = nested.communicate(timeout=60)
+        self.assertEqual(nested.returncode, 0, stderr)
+        self.assertEqual(stdout.split(), ["inner", "again"])
+
+    @unittest.skipUnless(sys.platform == "linux", "menu.sh's lock is a Linux flock")
+    def test_a_shared_lock_menu_sh_holds_makes_this_menu_wait(self) -> None:
+        """A menu.sh reader holds `flock -s`, which an exclusive flock must wait out."""
+        import fcntl
+
+        handle = (self.dir / "hub.lock").open("a", encoding="utf-8")
+        self.addCleanup(handle.close)
+        fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        self.assert_waits_then_runs(handle.close)
+
+    @unittest.skipUnless(sys.platform == "linux", "menu.sh's lock is a Linux flock")
+    def test_a_lock_this_menu_holds_refuses_menu_sh_a_shared_one(self) -> None:
+        import fcntl
+
+        holder = self.hold()
+        with (self.dir / "hub.lock").open("a", encoding="utf-8") as handle:
+            with self.assertRaises(BlockingIOError):
+                fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            holder.communicate(input="\n", timeout=60)
+            fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
 
 
 class TestHarness(unittest.TestCase):
