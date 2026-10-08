@@ -998,6 +998,22 @@ tool_status() {
     fi
 }
 
+# Puts $BIN_DIR first on PATH when the caller's PATH leaves it out, as a cron job's /usr/bin:/bin does.
+# Every managed binary this script installs lives there, so without it a managed copy reads as missing and a distro copy reads as the answer, with a false note that it shadows the managed one.
+# A caller whose PATH names $BIN_DIR keeps its own order, so a copy ahead of it is still reported as the real shadow it is.
+ensure_bin_dir_on_path() {
+    local dir
+    local -a path_dirs
+    IFS=':' read -ra path_dirs <<<"$PATH"
+    for dir in "${path_dirs[@]}"; do
+        [[ $dir == / ]] || dir="${dir%/}"
+        [[ $dir == "$BIN_DIR" ]] && return 0
+        [[ $dir == /* && $dir -ef $BIN_DIR ]] && return 0
+    done
+    PATH="$BIN_DIR${PATH:+:$PATH}"
+    export PATH
+}
+
 # Where PATH currently resolves $1 to, when that directory precedes $BIN_DIR, or empty otherwise.
 # Shared by the report, which only names the shadow, and --install/--upgrade, which act on it (apply_tool decides when it is safe to remove).
 # Walks PATH itself, since "type -P" answers with the same path whether that directory is ahead of $BIN_DIR or behind it.
@@ -1740,6 +1756,7 @@ parse_args() {
 }
 
 main() {
+    ensure_bin_dir_on_path
     parse_args "$@"
     if [[ $MODE != "sudo-timestamp" ]]; then
         load_repo_tools
