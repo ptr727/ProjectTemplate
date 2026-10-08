@@ -37,7 +37,8 @@ lines when the behavior depends on unchanged callers or consumers.
 For each candidate finding:
 
 1. Verify it against the current head tree, not an unfetched checkout or the base branch.
-2. Identify the concrete failing behavior and the conditions that reach it.
+2. Identify the concrete failing behavior and the conditions that reach it, or for a design
+   finding, what item 7 names.
 3. Confirm that the repository does not already prevent it elsewhere.
 4. Prefer one root-cause finding over several symptoms of the same defect.
 5. Omit pure preferences that no repository rule or user-visible risk supports.
@@ -92,8 +93,9 @@ Each finding states:
 
 - A concise imperative title with a severity.
 - The file and smallest useful line range.
-- The behavior that fails and the input or state that triggers it.
-- Why the change causes the failure.
+- The behavior that fails and the input or state that triggers it, or for a design finding,
+  what "Review the Change" item 7 names.
+- Why the change causes the failure, or the duplication or excess.
 - A bounded direction for the fix when one is known.
 
 Do not report a clean review until every changed file has been read. End the review body with

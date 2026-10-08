@@ -61,7 +61,8 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   threat model rules out as an over-hardening finding.
   Do not quote "Publish Every Finding", this task's report contract is the Return line below,
   not a PR comment or a coverage marker.
-Return: one finding per line, file:line, the concrete failure scenario, no severity theater.
+Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
+  what fleet-code-review's item 7 names, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
