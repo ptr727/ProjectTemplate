@@ -450,13 +450,25 @@ signing_works() {
 
 # --- GitHub CLI ---
 
-# The account gh is logged in to github.com as, empty when it is not.
+# The account gh acts as on github.com, empty when it is not logged in or the active account's token is broken.
 # Not being logged in is an answer rather than a failure, so the exit status is not the result.
-# The first account listed is the active one.
+# Each entry marks whether it is active, and only the active one is what gh runs as, whichever account is listed first.
 gh_account() {
     local auth
-    auth=$(gh auth status --hostname github.com 2>&1 || true)
-    sed -n '/Logged in to [^ ]* account /{s/.*Logged in to [^ ]* account \([^ ]*\).*/\1/p;q;}' <<<"$auth"
+    auth=$(gh auth status --active --hostname github.com 2>&1 || true)
+    # Before 2.57 gh has no --active, and its full listing marks the active entry the same way.
+    if [[ $auth == *"unknown flag: --active"* ]]; then
+        auth=$(gh auth status --hostname github.com 2>&1 || true)
+    fi
+    awk '/Logged in to [^ ]+ account |Failed to log in to / { entry = $0; next }
+        /- Active account: true/ {
+            if (entry ~ /Logged in to /) {
+                sub(/.*Logged in to [^ ]+ account /, "", entry)
+                sub(/ .*/, "", entry)
+                print entry
+            }
+            exit
+        }' <<<"$auth"
 }
 
 # Read for the host, since a per-host value outranks the global one in what gh repo clone and gh pr checkout use.

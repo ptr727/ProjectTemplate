@@ -27,21 +27,59 @@ WINDOWS_SCRIPT = ROOT / "host-setup" / "windows" / "setup-github.ps1"
 ACCOUNT = "example-user"
 REMEDY = "gh config set git_protocol ssh --host github.com"
 
-# A `gh` answering the three calls the script makes from two state files beside it, and logging each call.
-# `account` holds the logged-in account, empty for none, and `protocol` the github.com git protocol.
+SECOND = "other-user"
+
+
+def auth_status(
+    account: str, *, broken: bool = False, second: str = "", active_only: bool = False
+) -> tuple[str, int]:
+    """What `gh auth status --hostname github.com` prints and exits with, `--active` keeping the active entry.
+
+    `account` is the active account, empty for none, `broken` makes its token invalid, and `second` adds
+    an inactive account whose token works.
+    """
+    if not account:
+        return "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", 1
+    lines = ["github.com"]
+    if broken:
+        lines += [
+            f"  X Failed to log in to github.com account {account} (keyring)",
+            "  - Active account: true",
+            "  - The token in keyring is invalid.",
+        ]
+    else:
+        lines += [
+            f"  \u2713 Logged in to github.com account {account} (keyring)",
+            "  - Active account: true",
+            "  - Git operations protocol: https",
+        ]
+    if second and not active_only:
+        lines += [
+            "",
+            f"  \u2713 Logged in to github.com account {second} (keyring)",
+            "  - Active account: false",
+            "  - Git operations protocol: https",
+        ]
+    return "\n".join(lines) + "\n", 1 if broken else 0
+
+
+# A `gh` answering the calls the script makes from state files beside it, and logging each call.
+# `active` and `all` hold what auth status prints with and without --active, `old` makes --active unknown, and `protocol` holds the github.com git protocol.
 GH_STUB = r"""#!/bin/sh
 here=$(dirname "$0")
 printf '%s\n' "$*" >>"$here/calls"
 case "$*" in
-"auth status --hostname github.com")
-    account=$(cat "$here/account")
-    if [ -z "$account" ]; then
-        echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2
+"auth status --active --hostname github.com")
+    if [ -e "$here/old" ]; then
+        echo "unknown flag: --active" >&2
         exit 1
     fi
-    echo "github.com"
-    echo "  Logged in to github.com account $account (keyring)"
-    echo "  - Git operations protocol: $(cat "$here/protocol")"
+    cat "$here/active"
+    exit "$(cat "$here/active.rc")"
+    ;;
+"auth status --hostname github.com")
+    cat "$here/all"
+    exit "$(cat "$here/all.rc")"
     ;;
 "config get git_protocol --host github.com") cat "$here/protocol" ;;
 "config set git_protocol ssh --host github.com") echo ssh >"$here/protocol" ;;
@@ -80,8 +118,22 @@ class TestLinuxGitHubCli(unittest.TestCase):
         (self.empty / "rm").symlink_to(rm)
         self.state(ACCOUNT, "https")
 
-    def state(self, account: str, protocol: str) -> None:
-        (self.bin / "account").write_text(account + "\n", encoding="ascii")
+    def state(
+        self,
+        account: str,
+        protocol: str,
+        *,
+        broken: bool = False,
+        second: str = "",
+        old_gh: bool = False,
+    ) -> None:
+        for name, active_only in (("active", True), ("all", False)):
+            text, code = auth_status(account, broken=broken, second=second, active_only=active_only)
+            (self.bin / name).write_text(text, encoding="utf-8")
+            (self.bin / f"{name}.rc").write_text(f"{code}\n", encoding="ascii")
+        (self.bin / "old").unlink(missing_ok=True)
+        if old_gh:
+            (self.bin / "old").write_text("", encoding="ascii")
         (self.bin / "protocol").write_text(protocol + "\n", encoding="ascii")
 
     def protocol(self) -> str:
@@ -134,6 +186,41 @@ class TestLinuxGitHubCli(unittest.TestCase):
             result.stdout,
         )
         self.assertNotIn(REMEDY, result.stdout)
+
+    def test_a_broken_active_account_reads_as_logged_out_beside_a_working_one(self) -> None:
+        for old_gh in (False, True):
+            with self.subTest(old_gh=old_gh):
+                self.state(ACCOUNT, "https", broken=True, second=SECOND, old_gh=old_gh)
+                result = self.run_bash("report_gh")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("authenticated as", result.stdout)
+                self.assertIn("  [    ] authenticated, log in with:", result.stdout)
+
+    def test_the_active_account_is_named_beside_another(self) -> None:
+        for old_gh in (False, True):
+            with self.subTest(old_gh=old_gh):
+                self.state(ACCOUNT, "https", second=SECOND, old_gh=old_gh)
+                result = self.run_bash("report_gh")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}\n", result.stdout)
+
+    def test_a_gh_without_active_falls_back_to_the_full_listing(self) -> None:
+        self.state(ACCOUNT, "https", old_gh=True)
+        result = self.run_bash("report_gh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}\n", result.stdout)
+        self.assertEqual(
+            self.calls()[:2],
+            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+        )
+
+    def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:
+        self.state(ACCOUNT, "https", broken=True, second=SECOND)
+        result = self.run_bash("GH_SSH_PROTOCOL=true\nconfigure_gh_protocol")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gh is not logged in, so its git protocol was not set", result.stderr)
+        self.assertEqual(self.protocol(), "https")
+        self.assertNotIn("config set git_protocol ssh --host github.com", self.calls())
 
     def test_report_names_the_install_when_gh_is_absent(self) -> None:
         result = self.run_bash(f'PATH="{self.empty}"\nreport_gh')
@@ -232,9 +319,14 @@ $GhStub = {
     $global:LASTEXITCODE = 0
     $line = $args -join ' '
     switch ($line) {
+        'auth status --active --hostname github.com' {
+            if ($script:Stub.oldGh) { $global:LASTEXITCODE = 1; return 'unknown flag: --active' }
+            $global:LASTEXITCODE = $script:Stub.activeRc
+            return $script:Stub.active
+        }
         'auth status --hostname github.com' {
-            if (-not $script:Stub.account) { $global:LASTEXITCODE = 1; return 'You are not logged into any GitHub hosts.' }
-            return @('github.com', "  Logged in to github.com account $($script:Stub.account) (keyring)", "  - Git operations protocol: $($script:Stub.protocol)")
+            $global:LASTEXITCODE = $script:Stub.allRc
+            return $script:Stub.all
         }
         'config get git_protocol --host github.com' { return $script:Stub.protocol }
         'config set git_protocol ssh --host github.com' { $script:Stub.protocol = 'ssh'; return }
@@ -246,7 +338,7 @@ New-Item -ItemType Directory -Path $empty | Out-Null
 
 $results = [ordered]@{}
 foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
-    $script:Stub = @{ account = $case.account; protocol = $case.protocol }
+    $script:Stub = @{ protocol = $case.protocol; oldGh = $case.oldGh; active = $case.active; activeRc = $case.activeRc; all = $case.all; allRc = $case.allRc }
     $script:Calls = @()
     $script:GH_SSH_PROTOCOL = [bool]$case.optIn
     $script:DRY_RUN = [bool]$case.dryRun
@@ -289,6 +381,40 @@ WINDOWS_CASES: list[dict[str, object]] = [
     },
     {"name": "unreported", "action": "status", "account": ACCOUNT, "protocol": ""},
     {
+        "name": "broken-active",
+        "action": "status",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "broken": True,
+        "second": SECOND,
+    },
+    {
+        "name": "broken-active-old",
+        "action": "status",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "broken": True,
+        "second": SECOND,
+        "oldGh": True,
+    },
+    {
+        "name": "two-accounts-old",
+        "action": "status",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "second": SECOND,
+        "oldGh": True,
+    },
+    {
+        "name": "opt-in-broken-active",
+        "action": "configure",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "broken": True,
+        "second": SECOND,
+        "optIn": True,
+    },
+    {
         "name": "absent",
         "action": "status",
         "account": ACCOUNT,
@@ -321,6 +447,29 @@ WINDOWS_CASES: list[dict[str, object]] = [
 ]
 
 
+def windows_case(case: dict[str, object]) -> dict[str, object]:
+    """A case with every field the harness reads under strict mode, its auth status rendered from its accounts."""
+    full: dict[str, object] = {
+        "optIn": False,
+        "dryRun": False,
+        "ghAbsent": False,
+        "oldGh": False,
+        "broken": False,
+        "second": "",
+        **case,
+    }
+    for name, active_only in (("active", True), ("all", False)):
+        text, code = auth_status(
+            str(full["account"]),
+            broken=bool(full["broken"]),
+            second=str(full["second"]),
+            active_only=active_only,
+        )
+        full[name] = text
+        full[f"{name}Rc"] = code
+    return full
+
+
 def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["pwsh", "-NoProfile", "-NonInteractive", *arguments],
@@ -345,10 +494,7 @@ class TestWindowsGitHubCli(unittest.TestCase):
             harness.write_text(WINDOWS_HARNESS, encoding="utf-8")
             cases = Path(directory, "cases.json")
             # Every case carries every field, since the harness reads them under strict mode.
-            full: list[dict[str, object]] = [
-                {"optIn": False, "dryRun": False, "ghAbsent": False, **case}
-                for case in WINDOWS_CASES
-            ]
+            full = [windows_case(case) for case in WINDOWS_CASES]
             cases.write_text(json.dumps(full), encoding="utf-8")
             result = run_pwsh(
                 ["-File", str(harness), "-Script", str(WINDOWS_SCRIPT), "-Cases", str(cases)]
@@ -435,6 +581,31 @@ class TestWindowsGitHubCli(unittest.TestCase):
         )
         self.assertTrue(
             any("gh is not logged in" in line for line in self.output("opt-in-logged-out"))
+        )
+
+    def test_a_broken_active_account_reads_as_logged_out_beside_a_working_one(self) -> None:
+        for name in ("broken-active", "broken-active-old"):
+            with self.subTest(name=name):
+                self.assertFalse(any("authenticated as" in line for line in self.output(name)))
+                self.assertTrue(
+                    any(
+                        line.startswith("  [    ] authenticated, log in with:")
+                        for line in self.output(name)
+                    )
+                )
+
+    def test_a_gh_without_active_falls_back_to_the_full_listing(self) -> None:
+        self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}", self.output("two-accounts-old"))
+        self.assertEqual(
+            self.results["two-accounts-old"]["calls"][:2],
+            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+        )
+
+    def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:
+        self.assertEqual(self.results["opt-in-broken-active"]["protocol"], "https")
+        self.assertNotIn(
+            "config set git_protocol ssh --host github.com",
+            self.results["opt-in-broken-active"]["calls"],
         )
 
     def test_help_names_the_opt_in(self) -> None:

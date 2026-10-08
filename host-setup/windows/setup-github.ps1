@@ -482,12 +482,14 @@ function Show-AgentStatus {
 
 # --- GitHub CLI ---
 
-# The account gh is logged in to github.com as, empty when it is not.
+# The account gh acts as on github.com, empty when it is not logged in or the active account's token is broken.
 # Not being logged in is an answer rather than a failure, so the exit code is not the result.
-# The first account listed is the active one.
+# Each entry marks whether it is active, and only the active one is what gh runs as, whichever account is listed first.
 function Get-GhAccount {
-    $auth = (& gh auth status --hostname github.com 2>&1 | Out-String)
-    if ($auth -match 'Logged in to \S+ account (\S+)') { return $Matches[1] }
+    $auth = (& gh auth status --active --hostname github.com 2>&1 | Out-String)
+    # Before 2.57 gh has no --active, and its full listing marks the active entry the same way.
+    if ($auth -match 'unknown flag: --active') { $auth = (& gh auth status --hostname github.com 2>&1 | Out-String) }
+    if ($auth -match 'Logged in to \S+ account (\S+)[^\r\n]*\r?\n\s*- Active account: true') { return $Matches[1] }
     return ''
 }
 
