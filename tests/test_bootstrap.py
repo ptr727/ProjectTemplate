@@ -1393,6 +1393,16 @@ https://codeload.github.com/*) cp "$STUB_TARBALL" "$out" ;;
 esac
 """
 
+STUB_MV = """\
+#!/usr/bin/env bash
+if [[ "${!#}" == "$KEPT_TREE" ]]; then
+    retired=absent
+    [[ -e "$KEPT_TREE.old/VERSION" ]] && retired=$(cat "$KEPT_TREE.old/VERSION")
+    printf '%s\\n' "$retired" >>"$MV_LOG"
+fi
+exec /bin/mv "$@"
+"""
+
 STAND_UP_STEPS = (
     "install-tools.sh --sudo-timestamp",
     "upgrade-host.sh --packages",
@@ -1402,7 +1412,10 @@ STAND_UP_STEPS = (
 )
 
 
-@unittest.skipUnless(sys.platform == "linux", "runs the Linux loader's whole main flow")
+@unittest.skipUnless(
+    sys.platform == "linux" and shutil.which("flock") and shutil.which("tar"),
+    "runs the Linux loader's whole main flow, which needs flock and tar",
+)
 class TestKeptTreeEndToEnd(unittest.TestCase):
     """`bootstrap.sh --host` run whole, with a stub curl serving a local tarball and stub tools failing at a chosen step.
 
@@ -1422,6 +1435,10 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         curl = self.stubs / "curl"
         curl.write_text(STUB_CURL, encoding="utf-8")
         curl.chmod(0o755)
+        mv = self.stubs / "mv"
+        mv.write_text(STUB_MV, encoding="utf-8")
+        mv.chmod(0o755)
+        self.mv_log = self.root / "mv.log"
         self.tarball = self.root / "source.tar.gz"
         with tarfile.open(self.tarball, "w:gz") as archive:
             for tool in sorted({step.split()[0] for step in STAND_UP_STEPS}):
@@ -1453,6 +1470,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
             "HOME": str(self.home),
             "KEPT_TREE": str(self.kept),
             "STEP_LOG": str(self.log),
+            "MV_LOG": str(self.mv_log),
             "FAIL_STEP": fail_step,
             "STUB_TARBALL": str(self.tarball),
             "STUB_COMMIT": "0123456789abcdef0123456789abcdef01234567",
@@ -1490,6 +1508,12 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.version(), "new")
         self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_the_previous_tree_is_still_held_aside_when_the_new_one_moves_into_place(self) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.mv_log.read_text(encoding="utf-8").split(), ["old"], result.stderr)
 
     def test_a_first_run_with_no_previous_tree_installs_one(self) -> None:
         result = self.run_main()
@@ -1535,13 +1559,15 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.kept.exists(), result.stderr)
         self.assertEqual(self.leftovers(), [], result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-tools.sh --install")
 
     def test_a_failing_skills_installer_leaves_the_new_tree_whole_and_no_old_one_beside_it(
         self,
     ) -> None:
         self.previous_tree()
         result = self.run_main("install-skills.sh")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-skills.sh")
         self.assertEqual(self.version(), "new", result.stderr)
         self.assertEqual(self.leftovers(), [], result.stderr)
 
