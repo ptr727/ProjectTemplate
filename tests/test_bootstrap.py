@@ -1451,13 +1451,39 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         self.make_cache(self.TOKEN)
         result = self.run_body(
             'git() { mkdir -p "${!#}"; }\nod() { return 1; }\n'
-            'rc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("rc=1", result.stdout)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
         self.assertIn("Could not read /dev/urandom", result.stderr)
         self.assertTrue((self.dir / "hub" / "README.md").exists())
         self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """A clone into the surviving tree would fail, and its cleanup would then drop the marker."""
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            'git() { mkdir -p "${!#}"; }\nrm() { return 0; }\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
+        """A directory at the marker's name refuses the write, which errexit would not catch here."""
+        (self.dir / "hub.owned").mkdir()
+        result = self.run_body(
+            f'git() {{ mkdir -p "${{!#}}"; }}\nHUB_FETCH_TOKEN={self.TOKEN}\nrc=0\n'
+            'fetch_hub_locked || rc=$?\nprintf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
+        self.assertIn("Could not write", result.stderr)
+        self.assertFalse((self.dir / "hub").exists())
 
     def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
         script = self.scripts / "body.sh"
@@ -1658,6 +1684,13 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
     """`menu.ps1`'s `Invoke-Cleanup`, under its real lock, its marker ending CRLF as on Windows."""
 
     LINE_BREAK = "\r\n"
+    FETCH_SETUP = (
+        "$script:HUB_REPO = 'owner/hub'\n$script:HUB_URL = 'https://example.invalid/hub'\n"
+        "$script:DEFAULT_REF = 'main'\n$script:REF = 'main'\n$script:HUB_ROOT = ''\n"
+        "function step { param([string]$Message) }\n"
+        "function git { New-Item -ItemType Directory -Path $args[-1] -Force | Out-Null; "
+        "$global:LASTEXITCODE = 0 }\n"
+    )
 
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1674,13 +1707,46 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
             "$script:HUB_FETCH_TOKEN = $mine\n"
         )
         return (
-            "$script:HUB_REPO = 'owner/hub'\n$script:HUB_URL = 'https://example.invalid/hub'\n"
-            "$script:DEFAULT_REF = 'main'\n$script:REF = 'main'\n$script:HUB_ROOT = ''\n"
-            "function step { param([string]$Message) }\n"
-            "function git { New-Item -ItemType Directory -Path $args[-1] -Force | Out-Null; "
-            "$global:LASTEXITCODE = 0 }\n"
-            "[void](Invoke-FetchHubLocked)\n" + (again if refetched else "") + "Invoke-Cleanup\n"
+            self.FETCH_SETUP
+            + "[void](Invoke-FetchHubLocked)\n"
+            + (again if refetched else "")
+            + "Invoke-Cleanup\n"
         )
+
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what holds a file open differs by platform.
+        """
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Remove-Item { throw 'held' }\n"
+            "$ok = Invoke-FetchHubLocked\n"
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what refuses a write differs by platform and by account.
+        """
+        result = self.run_body(
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Set-Content { throw 'refused' }\n"
+            "$ok = Invoke-FetchHubLocked\n"
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
+        self.assertIn("Could not write", result.stderr)
+        self.assertFalse((self.dir / "hub").exists())
 
     def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
         body_file = self.scripts / "body.ps1"
