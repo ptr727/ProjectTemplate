@@ -591,10 +591,44 @@ function Add-ToolNote {
     if ($Tool.Name -eq 'dotnet' -and -not $script:WITH_OPTIONAL) {
         note 'dotnet' "optional set not selected: $($Tool.Optional -join ', ')"
     }
+    if ($Tool.Name -eq 'dotnet') {
+        $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk (Get-DotnetSdk)
+        if ($untracked) {
+            note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so an installer winget does not track, such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares winget's copy alone"
+        }
+    }
     if ($Tool.Name -eq 'docker') {
         $wslProblem = Test-WslReadyForDocker
         if ($wslProblem) { note 'docker' $wslProblem }
     }
+}
+
+# --- dotnet ---
+
+function Read-DotnetSdkList {
+    param([string[]]$Line)
+    return , @($Line | ForEach-Object { ($_ -split ' ', 2)[0] } | Where-Object { $_ -match '^\d+\.\d+\.\d+' })
+}
+
+# Every SDK dotnet itself can see, since Visual Studio lands its own in the same directory and winget's inventory never holds them.
+function Get-DotnetSdk {
+    if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { return , @() }
+    $lines = @(& dotnet --list-sdks)
+    if ($LASTEXITCODE -ne 0) { return , @() }
+    return Read-DotnetSdkList -Line $lines
+}
+
+# The newest SDK above the version winget installed, which is the one a caller runs wherever no global.json pins another.
+# A prerelease compares equal to its own release, which is right here, since the release outranks it.
+function Get-UntrackedDotnetSdk {
+    param([string]$Installed, [string[]]$Sdk)
+    if (-not $Installed) { return $null }
+    $newest = $null
+    foreach ($version in $Sdk) {
+        if ((Compare-HostVersion $version $Installed) -le 0) { continue }
+        if (-not $newest -or (Compare-HostVersion $version $newest) -gt 0) { $newest = $version }
+    }
+    return $newest
 }
 
 # --- Python ---

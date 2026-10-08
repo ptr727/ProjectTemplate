@@ -51,6 +51,8 @@ Nothing here elevates itself. A run that is already elevated says so and carries
 
 **What provenance can and cannot be detected.** Scope is solid, and so is a tool that answers on `PATH` while `winget` knows no package for it, which reports as `unmanaged`. Whether a package was installed *by* winget is not solid and is not claimed: winget runs the vendor's own installer for an `exe` or an `msi`, so the resulting uninstall entry is identical whether winget invoked it or a person did. The one positive marker is the uninstall key winget writes for itself on a portable or archive package, which the report names where it is present and says nothing about where it is absent.
 
+**A newer `dotnet` SDK winget did not install is named rather than compared.** Visual Studio lands its own SDKs, previews included, in the same directory the winget SDK packages use, and winget's inventory for the SDK id does not hold them. The `dotnet` status still compares winget's copy alone, since that is the copy an upgrade acts on, but where `dotnet --list-sdks` holds a newer SDK the report names it in a note, because that SDK is the one `dotnet` runs wherever no `global.json` pins another.
+
 ## Self-Updating Packages
 
 Some applications update themselves and never rewrite the version recorded at install time. `winget` reports them as permanently behind, and its manifest marks them as requiring explicit targeting so an upgrade of everything leaves them alone.
