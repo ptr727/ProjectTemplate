@@ -134,7 +134,7 @@ class ArchivedRepositoryCase(unittest.TestCase):
             stub.chmod(0o755)
             registry = self.registry(tmp, [{"name": "Fixture", "status": "archived"}])
             script = (
-                f"PATH={shlex.quote(str(bin_dir))}:$PATH\n"
+                f'PATH="$(cd {shlex.quote(str(bin_dir))} && pwd):$PATH"\n'
                 f"registry={shlex.quote(str(registry))}\nname=Fixture\ncmd=check\nrepo=owner/Fixture\n"
                 f"{ARCHIVED_EXEMPTION}echo REACHED_NEXT\n"
             )
