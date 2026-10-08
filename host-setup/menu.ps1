@@ -324,7 +324,21 @@ function Test-HubCleanOnDefaultRef {
     return ("$branch".Trim() -eq $script:DEFAULT_REF)
 }
 
-# Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it.
+function Get-HubRefCommit {
+    if ($script:REF -eq $script:DEFAULT_REF) {
+        & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
+        $resolve = "origin/$script:DEFAULT_REF"
+    } else {
+        & git -C $script:HUB_ROOT fetch --quiet origin "+$($script:REF):refs/menu/$($script:REF)" | Out-Host
+        $resolve = "refs/menu/$($script:REF)^{commit}"
+    }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $commit = & git -C $script:HUB_ROOT rev-parse $resolve
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return "$commit".Trim()
+}
+
+# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it.
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 function Confirm-HubRoot {
     if ($script:HUB_ROOT) {
@@ -333,16 +347,12 @@ function Confirm-HubRoot {
             if (Test-HubCleanOnDefaultRef) { return $true }
             $script:HUB_ROOT = ''
         } else {
-            & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
-            if ($LASTEXITCODE -eq 0) {
+            $refHead = Get-HubRefCommit
+            if ($refHead) {
                 $status = & git -C $script:HUB_ROOT status --porcelain
                 if ($LASTEXITCODE -eq 0 -and -not $status) {
                     $head = & git -C $script:HUB_ROOT rev-parse HEAD
-                    $headOk = ($LASTEXITCODE -eq 0)
-                    if ($headOk) {
-                        $originHead = & git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF"
-                        if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq "$originHead".Trim()) { return $true }
-                    }
+                    if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq $refHead) { return $true }
                 }
             }
             $script:HUB_ROOT = ''

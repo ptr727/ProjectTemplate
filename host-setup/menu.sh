@@ -241,7 +241,18 @@ hub_root_clean_on_default_ref() {
     [[ $branch == "$DEFAULT_REF" ]]
 }
 
-# Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
+# A ref other than $DEFAULT_REF is fetched into a ref named for it rather than read from FETCH_HEAD, since another session sharing $DIR/hub can fetch a different ref into FETCH_HEAD between this fetch and its read.
+hub_ref_commit() {
+    if [[ $REF == "$DEFAULT_REF" ]]; then
+        git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" || return 1
+        git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF"
+        return
+    fi
+    git -C "$HUB_ROOT" fetch --quiet origin "+$REF:refs/menu/$REF" || return 1
+    git -C "$HUB_ROOT" rev-parse "refs/menu/$REF^{commit}"
+}
+
+# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
 # A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
     if [[ -n $HUB_ROOT ]]; then
@@ -250,13 +261,12 @@ ensure_hub_root() {
             hub_root_clean_on_default_ref && return 0
             HUB_ROOT=""
         else
-            # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone.
-            local status head origin_head
-            if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
+            # The freshness check below itself fetches, which updates FETCH_HEAD and the ref it fetches into even though it touches no working file, so it is as much a change as fetch_hub's own clone.
+            local status head ref_head
+            if ref_head=$(hub_ref_commit) &&
                 status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
                 head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
-                origin_head=$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF") &&
-                [[ $head == "$origin_head" ]]; then
+                [[ $head == "$ref_head" ]]; then
                 return 0
             fi
             HUB_ROOT=""
