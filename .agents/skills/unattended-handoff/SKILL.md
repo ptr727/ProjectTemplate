@@ -57,7 +57,8 @@ The maintainer names the scope when invoking the skill, and the scope is the who
 | `release` | both, then dispatch the release that promotion unblocks |
 
 The default keeps every main merge the maintainer's. `main` promotes each fix alone, since many
-develop merges queued behind one promotion make that promotion too large to review. `release`
+develop merges queued behind one promotion make that promotion too large to review. A decision
+blocking the promotion is the one case where they queue anyway, per "The Worker" step 3. `release`
 exists because a merge to main with no release never exercises artifact creation.
 
 - **The grant is bounded by the session it was named in**, as `backlog-burndown`'s "What Invoking
@@ -128,14 +129,13 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 | either | `STOP <reason>` | a condition no later round can clear, so the run ends |
 
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
-an exhausted reviewer quota, or a push the executor refuses. A promotion pull request waiting on an
-open `decision` issue is not one, since a round can still merge its own work to develop, per "The
-Worker" step 3.
+an exhausted reviewer quota, or a push the executor refuses. A promotion waiting on an open
+`decision` issue is not one, since a round can still merge to develop, per "The Worker" step 3.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
-Under `main` or `release` every round promotes unless a decision blocks the promotion, so each one
-ordinarily carries one fix, and a change another session merged to develop meanwhile rides along
-with it. Naming the scope accepts that.
+Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
+fix. A change another session merged to develop meanwhile rides along with it. Naming the scope
+accepts that.
 
 ## Auto-Resolvable
 
@@ -216,20 +216,21 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    Every Merge Gate item other than the permission still has to hold. **A blocked promotion narrows
    the round to develop.** Before promoting, read the open `decision` issues with `gh issue list
    --repo "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`
-   under picker step 1's full-page check. Where one states, in its body or in a comment on it, that
-   it blocks the open develop -> main pull request, as "Parking" step 2 has it state, open, merge,
-   or release no promotion while it stays open. Close the lane out once the develop merge lands,
-   naming that decision issue in the close-out comment, and leave the issue to close when the
-   promotion merges.
+   under picker step 1's full-page check. One may block the open develop -> main pull request,
+   stating so in its body or in a comment, as "Parking" step 2 has it state. While it stays
+   open, merge or release no promotion and open no other. Amend that promotion's body with this
+   issue's `Fixes` line, per `backlog-burndown` "Assembling the Promotion Body", so the issue
+   closes when it merges. Then close the lane out, naming the decision issue in the close-out
+   comment.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
-   only on a choice only the maintainer can make, and anything with a determined outcome is
-   applied or handed to the pull request's review instead, as `local-strict-review` "Disposing of
-   Findings" hands it a spent edit budget's remaining findings.
+   only on a choice the maintainer alone can make. Anything with a determined outcome is applied,
+   or handed to the pull request's review as `local-strict-review` "Disposing of Findings" hands
+   it a spent edit budget's remaining findings.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options in
