@@ -4218,7 +4218,7 @@ class TestOverviewSections(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=?/0", out)
         self.assertIn(
-            "states no total and opened 0 threads, and 1 of the entries its open section lists "
+            "states no total and opened 0 threads, and 1 of the entries its open sections count "
             "links no thread",
             out,
         )
@@ -4233,7 +4233,7 @@ class TestOverviewSections(GqlCase):
         self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("and 1 of the entries its open section lists links no thread", out)
+        self.assertIn("and 1 of the entries its open sections count links no thread", out)
 
     def test_a_second_link_on_one_entry_does_not_cover_an_unlinked_entry(self) -> None:
         """An entry linking a thread beside its own is still one entry, so the unlinked one counts."""
@@ -4242,6 +4242,19 @@ class TestOverviewSections(GqlCase):
         self.assertIn(linked, body)
         body = body.replace("Open (1)", "Open (2)").replace(
             linked, f"{linked}, see [earlier](#discussion_r4000000007)\n- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_indented_back_reference_does_not_cover_an_unlinked_entry(self) -> None:
+        """A back-reference on its own line under an entry is not another entry."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n  - see [earlier](#discussion_r4000000007)\n- Finding 2 New"
         )
         threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
         self.answer(payload([review(body=body)], threads))
@@ -4260,7 +4273,7 @@ class TestOverviewSections(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=2/2", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("and 1 of the entries its open section lists links no thread", out)
+        self.assertIn("and 1 of the entries its open sections count links no thread", out)
 
     def test_a_resolved_section_s_entries_are_not_findings(self) -> None:
         """Its entries link threads an earlier round raised, so none needs a thread of its own."""

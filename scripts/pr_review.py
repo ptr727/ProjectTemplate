@@ -162,10 +162,10 @@ Subcommands
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
            the pull request is counted in that same block whatever the totals say. So is each
-           entry an `Open (N)` section counts beyond the lines in it carrying a link. Where the
-           open-findings section supplied `T`, the block is measured against its entries rather than against
-           `M`, so an entry linking an earlier round's thread is no finding without one, while a
-           finding the count names and no entry links is still counted.
+           entry an `Open (N)` section counts beyond those it lists with a link. Where the
+           open-findings section supplied `T`, the block is measured against its entries rather
+           than against `M`, so an entry linking an earlier round's thread is no finding without
+           one, while a finding that section's count names and no entry links is still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -1947,6 +1947,7 @@ def findings_on(tail: str) -> int | None:
 
 
 DISCUSSION_LINK = re.compile(r"\]\(#discussion_r(\d+)\)")
+ENTRY_LINE = re.compile(r"[-*+]\s")
 OverviewSection = tuple[str, int | None, list[str], int]
 
 
@@ -1963,9 +1964,10 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
     summary states, the thread id each of its entries links, which is the database id of that
-    thread's first comment, and how many of its lines carry a link. That last is the linked entry
-    count, since an entry is one line and can link a thread beside its own. Quotations are masked
-    first, so a body quoting a section is not read as carrying one.
+    thread's first comment, and how many of its entries carry a link. An entry is a list item at
+    the margin, and one can link a thread beside its own or hold an indented back-reference, so
+    its links overstate its entries. Quotations are masked first, so a body quoting a section is
+    not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -1997,7 +1999,11 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         digits = re.search(r"\d+", EMPHASIS.sub("", summary))
         count = counted(digits.group()) if digits else None
         text = masked[start:end]
-        linked = sum(1 for line in text.splitlines() if DISCUSSION_LINK.search(line))
+        linked = sum(
+            1
+            for line in text.splitlines()
+            if ENTRY_LINE.match(line) and DISCUSSION_LINK.search(line)
+        )
         sections.append((role, count, DISCUSSION_LINK.findall(text), linked))
     return verdict, " ".join(headline), sections
 
@@ -2115,8 +2121,8 @@ def unthreaded_entries(pr: dict) -> int:
     a finding named only in the review body, which no thread poll reaches. Distinct ids are
     counted, and a resolved section's entries are not, being threads an earlier round raised. A
     thread past the hundred the query reads counts here too, overstating rather than hiding.
-    An `Open (N)` section counting more entries than it links adds the difference, since an entry
-    carrying no link, or one this reader cannot recognize, links no thread either.
+    An `Open (N)` section counting more entries than it lists with a link adds the difference,
+    since an entry carrying no link, or one this reader cannot recognize, links no thread either.
     """
     known = {
         str(first_comment(thread)["fullDatabaseId"])
@@ -3755,7 +3761,7 @@ def digest(
                 else f" and opened {listed} thread{'' if listed == 1 else 's'}"
             )
             + (
-                f", and {unthreaded} of the entries its open section lists "
+                f", and {unthreaded} of the entries its open sections count "
                 f"link{'s' if unthreaded == 1 else ''} no thread on this pull request"
                 if unthreaded
                 else ""
