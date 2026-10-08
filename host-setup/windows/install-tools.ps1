@@ -619,14 +619,15 @@ function Get-DotnetSdk {
 }
 
 # The newest SDK above the version winget installed, which is the one a caller runs wherever no global.json pins another.
-# A prerelease compares equal to its own release, which is right here, since the release outranks it.
+# A prerelease compares equal to its own release, so on an equal key the release wins, and between two prereleases the later one does, since dotnet lists in ascending order.
 function Get-UntrackedDotnetSdk {
     param([string]$Installed, [string[]]$Sdk)
     if (-not $Installed) { return $null }
     $newest = $null
     foreach ($version in $Sdk) {
         if ((Compare-HostVersion $version $Installed) -le 0) { continue }
-        if (-not $newest -or (Compare-HostVersion $version $newest) -gt 0) { $newest = $version }
+        $order = if ($newest) { Compare-HostVersion $version $newest } else { 1 }
+        if ($order -gt 0 -or ($order -eq 0 -and ($version -notmatch '-' -or $newest -match '-'))) { $newest = $version }
     }
     return $newest
 }

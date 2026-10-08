@@ -530,6 +530,14 @@ class TestWindowsUntrackedDotnetSdk(unittest.TestCase):
                 "installed": "10.0.111",
                 "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.204", "10.0.303"),
             },
+            "a release beside its own preview": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.400"),
+            },
+            "the later of two prereleases": {
+                "installed": "10.0.303",
+                "listing": dotnet_sdks("10.0.400-preview.0.1", "10.0.400-rc.2.1"),
+            },
             "winget holds the newest": {
                 "installed": "10.0.303",
                 "listing": dotnet_sdks("8.0.319", "10.0.204", "10.0.303"),
@@ -554,6 +562,8 @@ class TestWindowsUntrackedDotnetSdk(unittest.TestCase):
             {
                 "preview ahead of winget": "10.0.400-preview.0.1",
                 "newest of several ahead": "10.0.400-preview.0.1",
+                "a release beside its own preview": "10.0.400",
+                "the later of two prereleases": "10.0.400-rc.2.1",
                 "winget holds the newest": None,
                 "a preview of winget's own release": None,
                 "winget version unread": None,
