@@ -1446,6 +1446,19 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
             + "cleanup\n"
         )
 
+    def test_a_token_that_cannot_be_read_fails_the_fetch_before_it_changes_anything(self) -> None:
+        """errexit is suspended inside the fetch, so a failed read would otherwise mark it empty."""
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            'git() { mkdir -p "${!#}"; }\nod() { return 1; }\n'
+            'rc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rc=1", result.stdout)
+        self.assertIn("Could not read /dev/urandom", result.stderr)
+        self.assertTrue((self.dir / "hub" / "README.md").exists())
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
     def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
         script = self.scripts / "body.sh"
         script.write_text(

@@ -170,10 +170,13 @@ fetch_hub() {
 
 fetch_hub_locked() {
     step "Fetching $HUB_REPO at $REF"
+    if ! HUB_FETCH_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') || [[ -z $HUB_FETCH_TOKEN ]]; then
+        fail "Could not read /dev/urandom for the token marking this fetch as this session's."
+        return 1
+    fi
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
     # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
-    HUB_FETCH_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
     printf '%s\n' "$HUB_FETCH_TOKEN" >"$(marker_path)"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
