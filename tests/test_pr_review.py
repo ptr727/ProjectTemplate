@@ -4832,6 +4832,20 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("c.yml", out)
         self.assertIn("lead to check rather than a verdict", out)
 
+    def test_a_file_named_only_past_a_note_disqualifies_the_naming(self) -> None:
+        """A noted row covers nothing, so its file sits in the omissions although the table names it.
+
+        Reading it as the unread file would point at a file the reviewer listed.
+        """
+        out = self.reading(
+            summarized(["a.py", "b.md", "c.yml (cleanup)"], covers=self.PART),
+            ["a.py", "b.md", "c.yml"],
+        )
+        self.assertNotIn("omits exactly", out)
+        self.assertIn("names 3 of the 3 changed files, omitting 0", out)
+        self.assertIn("naming c.yml only on a row with a note, which covers nothing", out)
+        self.assertIn("names no unread file", out)
+
     def test_a_path_the_diff_does_not_carry_disqualifies_the_naming(self) -> None:
         """One round names `GOVENANCE.md`, which no diff here carries.
 

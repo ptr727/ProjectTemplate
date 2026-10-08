@@ -2131,15 +2131,19 @@ def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
     return [], True
 
 
-def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str], list[str]]:
-    """The changed paths no row covers, the rows naming none, and the rows naming too many.
+def table_match(
+    named: list[str], diff: set[str]
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """The changed paths no row covers, the rows naming none, too many, and the noted paths.
 
     A row naming one path at most that matches several names none of them, since which one it
     shortened is unknown. A row covers what it names unless a note came off it first, per
-    `row_paths`. Each list is sorted, and the table stands in for coverage only where all three
-    are empty.
+    `row_paths`, and the last list holds the uncovered paths such a row names, so it is a subset
+    of the first. Each list is sorted, and the table
+    stands in for coverage only where the first three are empty.
     """
     covered: set[str] = set()
+    noted_paths: set[str] = set()
     invented, ambiguous = [], []
     for row in dict.fromkeys(named):
         paths, single, noted = row_paths(row, diff)
@@ -2147,9 +2151,10 @@ def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str],
             invented.append(row)
         elif single and len(paths) > 1:
             ambiguous.append(row)
-        elif not noted:
-            covered.update(paths)
-    return sorted(diff - covered), sorted(invented), sorted(ambiguous)
+        else:
+            (noted_paths if noted else covered).update(paths)
+    left = diff - covered
+    return sorted(left), sorted(invented), sorted(ambiguous), sorted(noted_paths & left)
 
 
 def file_table(body: str) -> list[str]:
@@ -2249,7 +2254,9 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
     A path named that the diff does not carry is what disqualifies the naming arm, that typo
     being enough to drop a real file into the omissions and read it as the one nobody reviewed.
-    A shortened path matching several changed files disqualifies it for the same reason.
+    A shortened path matching several changed files disqualifies it for the same reason, and so
+    does a file named only on a row carrying a note, which sits in the omissions although the
+    table names it.
     """
     named = head_table(pr)
     if not named:
@@ -2261,7 +2268,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    left, invented, ambiguous = table_match(named, {bare_path(c) for c in changed})
+    left, invented, ambiguous, noted = table_match(named, {bare_path(c) for c in changed})
     omitted = [p for p in changed if bare_path(p) in left]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
@@ -2270,7 +2277,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"also does on rounds stating full coverage, so it corroborates nothing and "
             f"names no unread file"
         )
-    if len(omitted) == short and not invented and not ambiguous:
+    if len(omitted) == short and not invented and not ambiguous and not noted:
         return (
             f"the reviewer's own file table omits exactly the {short} file"
             f"{'' if short == 1 else 's'} the counts leave unread, naming "
@@ -2278,11 +2285,16 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"list from the API, so that is a lead to check rather than a verdict"
         )
     return (
-        f"the reviewer's own file table names {len(changed) - len(omitted)} of the "
+        f"the reviewer's own file table names {len(changed) - len(omitted) + len(noted)} of the "
         f"{len(changed)} changed "
-        f"files, omitting {len(omitted)} where the counts leave {short} unread"
+        f"files, omitting {len(omitted) - len(noted)} where the counts leave {short} unread"
         + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
         + (f" and shortening {', '.join(ambiguous)} to fit several" if ambiguous else "")
+        + (
+            f" and naming {', '.join(noted)} only on a row with a note, which covers nothing"
+            if noted
+            else ""
+        )
         + ", so it tracks the counts nowhere and names no unread file"
     )
 
@@ -2419,7 +2431,7 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             "two changed paths differ only by a format character, so the table cannot tell "
             "them apart"
         )
-    omitted, invented, ambiguous = table_match(named, diff)
+    omitted, invented, ambiguous, _ = table_match(named, diff)
     if not omitted and not invented and not ambiguous:
         return ""
     return "the table " + ", and ".join(
