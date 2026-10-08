@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -285,7 +286,7 @@ class DockerLintCase(unittest.TestCase):
     def test_mount_quotes_commas_and_embedded_quotes(self) -> None:
         root = Path('/tmp/docker-lint,"root')
         self.assertEqual(
-            'type=bind,"src=/tmp/docker-lint,""root",dst=/workdir,readonly',
+            f'type=bind,"src={root.parent}{os.sep}docker-lint,""root",dst=/workdir,readonly',
             docker_lint.docker_mount(root, "/workdir"),
         )
 

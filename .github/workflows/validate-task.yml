@@ -473,12 +473,26 @@ jobs:
           fi
           echo "labeled=$labeled" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve prose base step
+        id: prose-base
+        if: github.event.pull_request != null
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -Eeuo pipefail
+          base=$EVENT_BASE
+          if git rev-parse --verify --quiet 'HEAD^2^{commit}' > /dev/null; then
+            base=$(git rev-parse --verify 'HEAD^1^{commit}')
+          fi
+          echo "Prose diff base: $base, the event's base.sha: $EVENT_BASE."
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
       # A publish run's content is already gated by the pull request that introduced it.
       - name: Check prose step
         if: github.event.pull_request != null
         uses: $/.github/actions/prose-gate
         with:
-          base: ${{ github.event.pull_request.base.sha }}
+          base: ${{ steps.prose-base.outputs.base }}
           # The label is read off the pull request rather than passed as an input a caller sets.
           # A repository cannot then leave the override on, since it is reapplied per change by hand.
           # A promotion runs develop into the default branch, and it diffs against that branch's tip.

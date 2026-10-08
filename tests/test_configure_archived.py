@@ -132,7 +132,7 @@ class ArchivedRepositoryCase(unittest.TestCase):
             stub = bin_dir / "jq"
             stub.write_text("#!/bin/sh\nprintf 'archived\\r\\n'\n", encoding="utf-8")
             stub.chmod(0o755)
-            registry = self.registry(tmp, [{"name": "Fixture", "status": "archived"}])
+            registry = self.registry(tmp, [{"name": "Fixture", "status": "cataloged"}])
             script = (
                 f'PATH="$(cd {shlex.quote(str(bin_dir))} && pwd):$PATH"\n'
                 f"registry={shlex.quote(str(registry))}\nname=Fixture\ncmd=check\nrepo=owner/Fixture\n"
