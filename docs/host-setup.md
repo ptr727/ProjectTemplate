@@ -213,6 +213,8 @@ host-setup/linux/setup-github.sh --configure --gh-ssh-protocol
 host-setup\windows\setup-github.ps1 -Configure -GhSshProtocol
 ```
 
+The opt-in sets nothing on a host where `gh` is not installed or not logged in, and warns instead. Setting the protocol before a login leaves a tokenless github.com entry that `gh` reports as a failed login, and `gh auth login --hostname github.com --git-protocol ssh` sets both at once.
+
 ## Agent Host-Safety
 
 Host-level safety guards are required where an agent runs with the maintainer's `gh` credentials, and where it runs unattended on the maintainer's machine. Each provider's implementation stays in its own subsection.

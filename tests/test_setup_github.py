@@ -167,21 +167,35 @@ class TestLinuxGitHubCli(unittest.TestCase):
         result = self.run_bash("GH_SSH_PROTOCOL=true\nDRY_RUN=true\nconfigure_gh_protocol")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"  [dry run] {REMEDY}\n", result.stdout)
+        self.assertNotIn("set to ssh", result.stdout)
         self.assertEqual(self.protocol(), "https")
         self.assertNotIn("config set git_protocol ssh --host github.com", self.calls())
 
-    def test_the_opt_in_without_gh_refuses_before_changing_anything(self) -> None:
-        # A sudo that is present and never run, so main reaches the gh check rather than the sudo one.
-        (self.empty / "sudo").write_text("#!/bin/sh\nexit 9\n", encoding="ascii")
-        (self.empty / "sudo").chmod(0o755)
+    def test_the_opt_in_without_gh_warns_and_carries_on(self) -> None:
         result = self.run_bash(
-            f'PATH="{self.empty}"\nconfigure() {{ echo configured; }}\n'
-            "main --configure --gh-ssh-protocol --yes"
+            f'PATH="{self.empty}"\nGH_SSH_PROTOCOL=true\nconfigure_gh_protocol\necho carried-on'
         )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("--gh-ssh-protocol", result.stderr)
-        self.assertIn("gh is not installed", result.stderr)
-        self.assertNotIn("configured", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gh is not installed, so its git protocol was not set", result.stderr)
+        self.assertIn("carried-on\n", result.stdout)
+
+    def test_the_opt_in_on_a_logged_out_gh_writes_nothing(self) -> None:
+        self.state("", "https")
+        result = self.run_bash("GH_SSH_PROTOCOL=true\nconfigure_gh_protocol")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gh is not logged in, so its git protocol was not set", result.stderr)
+        self.assertEqual(self.protocol(), "https")
+        self.assertNotIn("config set git_protocol ssh --host github.com", self.calls())
+
+    def test_report_names_a_protocol_gh_did_not_report(self) -> None:
+        self.state(ACCOUNT, "")
+        result = self.run_bash("report_gh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"  [    ] git protocol is ssh, gh did not report one, set it with: {REMEDY},"
+            " or --configure --gh-ssh-protocol\n",
+            result.stdout,
+        )
 
 
 WINDOWS_HARNESS = r"""
@@ -203,10 +217,11 @@ foreach ($statement in $ast.EndBlock.Statements) {
     }
 }
 function die { param([string]$Message) throw "die: $Message" }
+function warn { param([string]$Message) Write-Host "WARNING: $Message" }
 
 # A gh answering the three calls the script makes from $script:Stub, and recording each call.
-# A function rather than a file on PATH, so the same stub runs on every platform.
-function gh {
+# Installed as the gh function per case rather than as a file on PATH, so the same stub runs on every platform.
+$GhStub = {
     $script:Calls += ($args -join ' ')
     $global:LASTEXITCODE = 0
     $line = $args -join ' '
@@ -220,6 +235,8 @@ function gh {
         default { $global:LASTEXITCODE = 9 }
     }
 }
+$empty = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $empty | Out-Null
 
 $results = [ordered]@{}
 foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
@@ -227,11 +244,21 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Calls = @()
     $script:GH_SSH_PROTOCOL = [bool]$case.optIn
     $script:DRY_RUN = [bool]$case.dryRun
+    # An absent gh is no stub and a PATH holding nothing.
+    $path = $env:PATH
+    if ($case.ghAbsent) {
+        Remove-Item function:gh -ErrorAction SilentlyContinue
+        $env:PATH = $empty
+    } else {
+        Set-Item function:script:gh $GhStub
+    }
     $output = & {
         if ($case.action -eq 'status') { Show-GhStatus } else { Set-GhProtocol }
     } 6>&1 | ForEach-Object { "$_" }
+    $env:PATH = $path
     $results[$case.name] = [ordered]@{ output = @($output); protocol = $script:Stub.protocol; calls = @($script:Calls) }
 }
+Remove-Item $empty
 $results | ConvertTo-Json -Depth 4
 """
 
@@ -252,6 +279,29 @@ WINDOWS_CASES: list[dict[str, object]] = [
         "action": "configure",
         "account": ACCOUNT,
         "protocol": "ssh",
+        "optIn": True,
+    },
+    {"name": "unreported", "action": "status", "account": ACCOUNT, "protocol": ""},
+    {
+        "name": "absent",
+        "action": "status",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "ghAbsent": True,
+    },
+    {
+        "name": "opt-in-absent",
+        "action": "configure",
+        "account": ACCOUNT,
+        "protocol": "https",
+        "optIn": True,
+        "ghAbsent": True,
+    },
+    {
+        "name": "opt-in-logged-out",
+        "action": "configure",
+        "account": "",
+        "protocol": "https",
         "optIn": True,
     },
     {
@@ -290,7 +340,8 @@ class TestWindowsGitHubCli(unittest.TestCase):
             cases = Path(directory, "cases.json")
             # Every case carries every field, since the harness reads them under strict mode.
             full: list[dict[str, object]] = [
-                {"optIn": False, "dryRun": False, **case} for case in WINDOWS_CASES
+                {"optIn": False, "dryRun": False, "ghAbsent": False, **case}
+                for case in WINDOWS_CASES
             ]
             cases.write_text(json.dumps(full), encoding="utf-8")
             result = run_pwsh(
@@ -341,12 +392,65 @@ class TestWindowsGitHubCli(unittest.TestCase):
 
     def test_the_opt_in_under_dry_run_prints_the_command_and_changes_nothing(self) -> None:
         self.assertIn(f"  [dry run] {REMEDY}", self.output("opt-in-dry-run"))
+        self.assertFalse(any("set to ssh" in line for line in self.output("opt-in-dry-run")))
         self.assertEqual(self.results["opt-in-dry-run"]["protocol"], "https")
+
+    def test_report_names_a_protocol_gh_did_not_report(self) -> None:
+        self.assertIn(
+            f"  [    ] git protocol is ssh, gh did not report one, set it with: {REMEDY},"
+            " or -Configure -GhSshProtocol",
+            self.output("unreported"),
+        )
+
+    def test_report_names_the_install_when_gh_is_absent(self) -> None:
+        self.assertIn(
+            "  [    ] gh installed, which install-tools.ps1 -Install gh provides",
+            self.output("absent"),
+        )
+
+    def test_the_opt_in_without_gh_warns_and_carries_on(self) -> None:
+        self.assertIn(
+            "WARNING: gh is not installed, so its git protocol was not set."
+            " install-tools.ps1 -Install gh installs it.",
+            self.output("opt-in-absent"),
+        )
+
+    def test_the_opt_in_on_a_logged_out_gh_writes_nothing(self) -> None:
+        self.assertEqual(self.results["opt-in-logged-out"]["protocol"], "https")
+        self.assertNotIn(
+            "config set git_protocol ssh --host github.com",
+            self.results["opt-in-logged-out"]["calls"],
+        )
+        self.assertTrue(
+            any("gh is not logged in" in line for line in self.output("opt-in-logged-out"))
+        )
 
     def test_help_names_the_opt_in(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-GhSshProtocol", result.stdout)
+
+
+def function_body(text: str, opener: str) -> str:
+    """The text from `opener` to the closing brace at column 0 that ends the function it opens."""
+    start = text.index(opener)
+    return text[start : text.index("\n}\n", start)]
+
+
+class TestCallSites(unittest.TestCase):
+    """Each script's status and configure actions reach the GitHub CLI functions the tests drive."""
+
+    def test_the_linux_actions_call_the_gh_functions(self) -> None:
+        text = LINUX_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("\n    report_gh\n", function_body(text, "\nstatus() {"))
+        self.assertIn("\n    configure_gh_protocol\n", function_body(text, "\nconfigure() {"))
+
+    def test_the_windows_actions_call_the_gh_functions(self) -> None:
+        text = WINDOWS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("\n    Show-GhStatus\n", function_body(text, "\nfunction Show-Status {"))
+        self.assertIn(
+            "\n    Set-GhProtocol\n", function_body(text, "\nfunction Invoke-Configure {")
+        )
 
 
 if __name__ == "__main__":

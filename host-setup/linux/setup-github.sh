@@ -21,7 +21,7 @@ readonly ALLOWED_SIGNERS_SETTING="~/.config/git/allowed_signers"
 readonly KEY_SETTINGS_URL="https://github.com/settings/ssh/new"
 
 # The command that sets gh's git protocol, named in the report as the remedy and run by the opt-in flag.
-# It is set for the host rather than globally, because gh auth login records the protocol per host and a per-host value outranks the global one, so the global form alone leaves a host reading https.
+# A per-host value outranks the global one, and gh auth login writes one, so the global form alone can leave https.
 readonly GH_PROTOCOL_COMMAND=(gh config set git_protocol ssh --host github.com)
 
 # The identity the maintainer's commits carry, used only where the host names none of its own.
@@ -495,6 +495,16 @@ configure_gh_protocol() {
     [[ $GH_SSH_PROTOCOL == true ]] || return 0
 
     step "Setting the GitHub CLI git protocol to ssh"
+    if ! command -v gh >/dev/null; then
+        warn "gh is not installed, so its git protocol was not set. install-tools.sh --install gh installs it."
+        return 0
+    fi
+    # Setting it before a login writes a tokenless github.com entry, which gh then reports as a failed login.
+    if [[ -z $(gh_account) ]]; then
+        warn "gh is not logged in, so its git protocol was not set. gh auth login --hostname github.com --git-protocol ssh sets both."
+        return 0
+    fi
+
     local current
     current=$(gh_protocol)
     if [[ $current == "ssh" ]]; then
@@ -502,7 +512,7 @@ configure_gh_protocol() {
         return 0
     fi
     run "${GH_PROTOCOL_COMMAND[@]}"
-    info "Was ${current:-unreported}, set to ssh"
+    [[ $DRY_RUN == true ]] || info "Was ${current:-unreported}, set to ssh"
 }
 
 # --- Actions ---
@@ -715,10 +725,6 @@ main() {
     case "$MODE" in
     status) status ;;
     configure)
-        # Checked before any change, so a host without gh is refused rather than configured part way.
-        if [[ $GH_SSH_PROTOCOL == true ]] && ! command -v gh >/dev/null; then
-            die "--gh-ssh-protocol sets the git protocol gh uses, and gh is not installed. install-tools.sh --install gh installs it."
-        fi
         confirm "Configure git and GitHub on this host?" || die "Declined"
         configure
         ;;

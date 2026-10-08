@@ -36,7 +36,7 @@ $ALLOWED_SIGNERS_SETTING = '~/.config/git/allowed_signers'
 $KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
 
 # The command that sets gh's git protocol, named in the report as the remedy and run by the opt-in switch.
-# It is set for the host rather than globally, because gh auth login records the protocol per host and a per-host value outranks the global one, so the global form alone leaves a host reading https.
+# A per-host value outranks the global one, and gh auth login writes one, so the global form alone can leave https.
 $GH_PROTOCOL_ARGUMENTS = @('config', 'set', 'git_protocol', 'ssh', '--host', 'github.com')
 $GH_PROTOCOL_COMMAND = "gh $($GH_PROTOCOL_ARGUMENTS -join ' ')"
 
@@ -483,7 +483,8 @@ function Show-AgentStatus {
 # --- GitHub CLI ---
 
 # The account gh is logged in to github.com as, empty when it is not.
-# Not being logged in is an answer rather than a failure, so the exit code is not the result, and the first account listed is the active one.
+# Not being logged in is an answer rather than a failure, so the exit code is not the result.
+# The first account listed is the active one.
 function Get-GhAccount {
     $auth = (& gh auth status --hostname github.com 2>&1 | Out-String)
     if ($auth -match 'Logged in to \S+ account (\S+)') { return $Matches[1] }
@@ -517,6 +518,16 @@ function Show-GhStatus {
 function Set-GhProtocol {
     if (-not $script:GH_SSH_PROTOCOL) { return }
     step 'Setting the GitHub CLI git protocol to ssh'
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        warn 'gh is not installed, so its git protocol was not set. install-tools.ps1 -Install gh installs it.'
+        return
+    }
+    # Setting it before a login writes a tokenless github.com entry, which gh then reports as a failed login.
+    if (-not (Get-GhAccount)) {
+        warn 'gh is not logged in, so its git protocol was not set. gh auth login --hostname github.com --git-protocol ssh sets both.'
+        return
+    }
+
     $current = Get-GhProtocol
     if ($current -eq 'ssh') {
         info 'Already ssh'
@@ -524,7 +535,7 @@ function Set-GhProtocol {
     }
     $code = run -Command 'gh' -Arguments $script:GH_PROTOCOL_ARGUMENTS
     if ($code -ne 0) { die "$($script:GH_PROTOCOL_COMMAND) exited $code" }
-    info "Was $(if ($current) { $current } else { 'unreported' }), set to ssh"
+    if (-not $script:DRY_RUN) { info "Was $(if ($current) { $current } else { 'unreported' }), set to ssh" }
 }
 
 # --- Actions ---
@@ -597,10 +608,6 @@ function Show-Status {
 
 function Invoke-Configure {
     Test-Prerequisite
-    # Checked before any change, so a host without gh is refused rather than configured part way.
-    if ($script:GH_SSH_PROTOCOL -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        die '-GhSshProtocol sets the git protocol gh uses, and gh is not installed. install-tools.ps1 -Install gh installs it.'
-    }
     Resolve-Identity
     New-KeyIfAbsent
     Add-KnownHost
