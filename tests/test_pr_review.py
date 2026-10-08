@@ -4248,7 +4248,10 @@ class TestCoverageExitCodes(GqlCase):
         self.assertIn("coverage=table ", self.out.getvalue())
 
     def test_a_trailing_note_is_read_past_on_every_row_form(self) -> None:
-        """A code span before the note, a wildcard, and a gap each name what they would alone."""
+        """A code span before the note, a wildcard, and a gap each stop refusing, covering nothing.
+
+        Beside bare rows naming the same files the table stands in, and alone it leaves them out.
+        """
         long = "docs/x - one z.md"
         for cell, files in (
             ("`docs/a.md` (cleanup)", ["docs/a.md"]),
@@ -4257,8 +4260,20 @@ class TestCoverageExitCodes(GqlCase):
             ("docs/a.md (one) (two)", ["docs/a.md"]),
         ):
             with self.subTest(cell=cell):
-                pr = payload([review(body=self.written([cell]))], files=files)
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
                 self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    f"the table leaves out {', '.join(sorted(files))}",
+                    pr_review.table_shortfall(pr),
+                )
+
+    def test_a_file_named_only_on_a_noted_row_refuses(self) -> None:
+        """A note is never read, so it could say the file went unreviewed, and the table refuses."""
+        body = self.written(["src/app.sh", "docs/a.md (not reviewed)"])
+        self.answer(payload([review(body=body)], files=["src/app.sh", "docs/a.md"]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=unstated ", self.out.getvalue())
 
     def test_a_note_is_kept_where_the_row_names_a_path_with_it(self) -> None:
         """Parentheses that are part of a changed path or a shortened tail are kept.
@@ -4268,7 +4283,11 @@ class TestCoverageExitCodes(GqlCase):
         so they are never read as a note.
         """
         for cell, files, shortfall in (
-            ("docs/a (draft).md (cleanup)", ["docs/a (draft).md"], ""),
+            (
+                "docs/a (draft).md (cleanup)",
+                ["docs/a (draft).md"],
+                "the table leaves out docs/a (draft).md",
+            ),
             ("docs/a (draft)", ["docs/a (draft)", "docs/a"], "the table leaves out docs/a"),
             ("docs/Long ... (draft)", ["docs/Long name (draft)"], ""),
         ):

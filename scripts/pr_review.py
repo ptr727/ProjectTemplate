@@ -2064,19 +2064,25 @@ def segment_fits(segment: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
 
 
-def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
-    """The changed paths one table row names, out of `diff`, reading past notes where it must.
+def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool, bool]:
+    """The changed paths one table row names, out of `diff`, and whether a note came off first.
 
     While a row names nothing and ends in a parenthesized note, it is read again without that
     note, since the second format writes one after a path, as in `docs/a.md (cleanup)`. A note
     comes off only while the row names nothing, so a row naming a changed path in any of
     `row_form`'s ways reads as written, whatever parentheses it ends in.
+
+    A row that names its paths only once a note comes off is not counted as naming a path the
+    diff does not carry, and it covers none of them either. Nothing reads the note's text, which
+    could just as well say the file went unreviewed, so only a row naming a path as written
+    covers it.
     """
+    noted = False
     while True:
         paths, single = row_form(row, diff)
         if paths or not (head := note_head(row)):
-            return paths, single
-        row = head
+            return paths, single, noted
+        row, noted = head, True
 
 
 def note_head(row: str) -> str:
@@ -2126,21 +2132,22 @@ def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
 
 
 def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str], list[str]]:
-    """The changed paths no row names, the rows naming none, and the rows naming too many.
+    """The changed paths no row covers, the rows naming none, and the rows naming too many.
 
     A row naming one path at most that matches several names none of them, since which one it
-    shortened is unknown. Each list is sorted, and the table stands in for coverage only where
-    all three are empty.
+    shortened is unknown. A row covers what it names unless a note came off it first, per
+    `row_paths`. Each list is sorted, and the table stands in for coverage only where all three
+    are empty.
     """
     covered: set[str] = set()
     invented, ambiguous = [], []
     for row in dict.fromkeys(named):
-        paths, single = row_paths(row, diff)
+        paths, single, noted = row_paths(row, diff)
         if not paths:
             invented.append(row)
         elif single and len(paths) > 1:
             ambiguous.append(row)
-        else:
+        elif not noted:
             covered.update(paths)
     return sorted(diff - covered), sorted(invented), sorted(ambiguous)
 
@@ -2179,8 +2186,9 @@ def cell_paths(cell: str) -> list[str]:
 
     The second format can group related files into one row, each in a code span of its own with
     a comma between them, and read whole that cell is one path holding backticks, which names
-    none of the files it lists. So a cell holding spans with nothing but commas and whitespace
-    outside them names each span, and any other cell is read whole, its outer backticks dropped.
+    none of the files it lists. So a cell holding single-backtick spans with nothing but commas
+    and whitespace outside them names each span, and any other cell is read whole, its outer
+    backticks dropped.
     """
     spans = TABLE_SPAN.findall(cell)
     if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
