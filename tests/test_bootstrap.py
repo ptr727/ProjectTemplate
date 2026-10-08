@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import unittest
@@ -634,6 +635,25 @@ def bootstrap_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
+REGISTRATION_RECORDER = """\
+import os
+from pathlib import Path
+
+Path(os.environ["REGISTERED_RECORD"]).write_text(str(Path(__file__).resolve().parent.parent), encoding="utf-8")
+"""
+
+
+def installer_tree(root: Path, platform: str, wrapper: str) -> Path:
+    """A tree holding the real skills wrapper for `platform`, its installer replaced by one recording the ROOT it would register."""
+    target = root / "host-setup" / platform / wrapper
+    target.parent.mkdir(parents=True)
+    shutil.copy2(ROOT / "host-setup" / platform / wrapper, target)
+    recorder = root / "scripts" / "skills_install.py"
+    recorder.parent.mkdir()
+    recorder.write_text(REGISTRATION_RECORDER, encoding="utf-8")
+    return root
+
+
 class TestDirectoryLockOrder(unittest.TestCase):
     """A run refused the directory lock stops before anything that removes a tree.
 
@@ -876,6 +896,27 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertIn("this loader did not create it", result.stderr)
         self.assertTrue((foreign / "theirs").exists())
 
+    def test_the_directory_the_skills_installer_registers_outlives_the_run(self) -> None:
+        """The marketplace loads the directory the installer ran from, so that has to be the tree the run keeps."""
+        work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        top = installer_tree(work / "ProjectTemplate-0123456", "linux", "install-skills.sh")
+        archive = work / "archive.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(top, arcname=top.name)
+        record = work / "registered"
+        result = self.run_loader(
+            f'export REGISTERED_RECORD="{record}"\n'
+            f'fetch() {{ cp "{archive}" "$2"; }}\n'
+            "RESOLVED=0123456789abcdef0123456789abcdef01234567\n"
+            "lock_dir\ntrap cleanup EXIT\ndownload_tree\ninstall_skills"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        registered = Path(record.read_text(encoding="utf-8"))
+        self.assertEqual(registered, (self.dir / "skills-tree").resolve())
+        self.assertTrue((registered / "scripts" / "skills_install.py").is_file())
+        self.assertFalse((self.dir / "skills-tree.new").exists())
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
 
 POWERSHELL_TREE_HARNESS = r"""
 param([string]$Loader, [string]$Dir, [string]$BodyFile)
@@ -888,7 +929,7 @@ $wanted = @(
     'log', 'info', 'step', 'warn', 'die',
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
-    'Resolve-Directory'
+    'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -896,7 +937,9 @@ foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management
 $script:DIR = $Dir
 $script:MODE = 'skills'
 $script:DRY_RUN = $false
+$script:ASSUME_YES = $false
 $script:KEEP = $false
+$script:PWSH_PATH = (Get-Process -Id $PID).Path
 $script:REPO = 'ptr727/ProjectTemplate'
 $script:REF = 'main'
 $script:RESOLVED = ''
@@ -1166,14 +1209,14 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("-Dir takes an absolute path", result.stderr)
 
-    def fetch(self, tar: str) -> str:
-        """Harness lines that stand in for the download and the extract, then run a kept-tree fetch and its cleanup."""
+    def fetch(self, tar: str, then: str = "Invoke-SwapIn") -> str:
+        """Harness lines that stand in for the download and the extract, then run a kept-tree fetch, `then`, and the cleanup."""
         return (
             "function Invoke-WebRequest { param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile, [int]$TimeoutSec) Set-Content -LiteralPath $OutFile -Value 'archive' }\n"
             f"function Invoke-FakeTar {{ {tar} }}\n"
             "function Get-TarPath { 'Invoke-FakeTar' }\n"
             "$script:RESOLVED = '0123456789abcdef0123456789abcdef01234567'\n"
-            "try { Get-Tree; Invoke-SwapIn } finally { Invoke-Cleanup }"
+            f"try {{ Get-Tree; {then} }} finally {{ Invoke-Cleanup }}"
         )
 
     def test_a_kept_tree_fetch_swaps_the_new_tree_in_and_records_its_commit(self) -> None:
@@ -1191,6 +1234,26 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
             (self.dir / "skills-tree" / ".bootstrap-commit").read_text(encoding="ascii").strip(),
             "0123456789abcdef0123456789abcdef01234567",
         )
+        self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
+
+    def test_the_directory_the_skills_installer_registers_outlives_the_run(self) -> None:
+        """The marketplace loads the directory the installer ran from, so that has to be the tree the run keeps."""
+        work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        source = installer_tree(work / "source", "windows", "install-skills.ps1")
+        record = work / "registered"
+        extract = (
+            "$into = $args[[array]::IndexOf($args, '-C') + 1]; "
+            f"Copy-Item -Path (Join-Path '{source}' '*') -Destination $into -Recurse; "
+            "$global:LASTEXITCODE = 0"
+        )
+        result = self.run_loader(
+            f"$env:REGISTERED_RECORD = '{record}'\n"
+            + self.fetch(extract, then="Invoke-SkillsInstall")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        registered = Path(record.read_text(encoding="utf-8"))
+        self.assertEqual(registered, (self.dir / "skills-tree").resolve())
+        self.assertTrue((registered / "scripts" / "skills_install.py").is_file())
         self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
 
     def test_a_failed_extract_leaves_the_kept_tree_as_it_was(self) -> None:
