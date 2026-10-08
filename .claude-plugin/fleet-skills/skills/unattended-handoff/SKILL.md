@@ -209,19 +209,20 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
-   `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Under `main` or
-   `release`, continue to the promotion pull request, its body carrying a `Fixes` line for every
-   issue develop fixes, assembled per `backlog-burndown` "Assembling the Promotion Body", and hand
-   it to `merge-and-release`, merging only under `main` and merging and releasing under `release`.
-   Every Merge Gate item other than the permission still has to hold. **A blocked promotion narrows
-   the round to develop.** Before promoting, read the open `decision` issues under picker step 1's
-   full-page check, with `gh issue list --repo "<owner>/<repo>" --label decision --state open
-   --limit 100 --json number,body,comments`. Where one of them states, in its body or in a comment,
-   that it blocks the open develop -> main pull request, as "Parking" step 2 has it state, the
-   worker merges, opens, and releases no promotion while that decision issue is open. It instead
-   adds `Fixes #<issue>` to that promotion's body, per `backlog-burndown` "Assembling the Promotion
-   Body", so `#<issue>` closes when the promotion merges. It then closes the lane out, naming the
-   decision issue in the close-out comment.
+   `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Every Merge Gate item
+   other than the permission still has to hold, on this pull request and on any promotion.
+   **Under `main` or `release`, check for a blocked promotion before opening or driving one.** Read
+   the open `decision` issues under picker step 1's full-page check, with `gh issue list --repo
+   "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`. Where
+   one of them states, in its body or in a comment, that it blocks the open develop -> main pull
+   request, as "Parking" step 2 has it state, the round narrows to develop. The worker then merges,
+   opens, and releases no promotion while that decision issue is open. It instead adds `Fixes
+   #<issue>` to that promotion's body, per `backlog-burndown` "Assembling the Promotion Body", so
+   `#<issue>` closes when the promotion merges. It then closes the lane out, naming the decision
+   issue in the close-out comment. Where none does, continue to the promotion pull request, its
+   body carrying a `Fixes` line for every issue develop fixes, assembled per that same section, and
+   hand it to `merge-and-release`, merging only under `main` and merging and releasing under
+   `release`.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.
