@@ -324,7 +324,6 @@ function Test-HubCleanOnDefaultRef {
     return ("$branch".Trim() -eq $script:DEFAULT_REF)
 }
 
-# A ref other than $DEFAULT_REF is fetched into a ref named for it rather than read from FETCH_HEAD, since another session sharing $DIR\hub can fetch a different ref into FETCH_HEAD between this fetch and its read.
 function Get-HubRefCommit {
     if ($script:REF -eq $script:DEFAULT_REF) {
         & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host

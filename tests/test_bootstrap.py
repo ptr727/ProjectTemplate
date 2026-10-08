@@ -1988,7 +1988,7 @@ class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
 class TestPowerShellMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
-    """`menu.ps1`'s `Confirm-HubRoot`, under its real lock."""
+    """`menu.ps1`'s `Confirm-HubRoot`, driven through its own functions."""
 
     SETUP = (
         "$script:HUB_REPO = 'ptr727/ProjectTemplate'\n"
