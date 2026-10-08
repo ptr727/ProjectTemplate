@@ -1704,7 +1704,8 @@ gh() {
         by fromJSON as a number, and uv resolves some of those rather than refusing them, so that
         shape carries a run green too. The step's whole script is run here, not just its filter, since
         inverting the condition or exiting zero would leave a filter-only assertion green while
-        the step admitted everything.
+        the step admitted everything. It is run from a file rather than through `-c`, for the reason
+        `host_capability.bash_path` gives.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
@@ -1733,6 +1734,8 @@ gh() {
         script = "\n".join(lines)
         self.assertIn("jq -e", script)
         self.assertIn("::error::The python-versions input must be", script)
+        guard_script = Path(self.enterContext(tempfile.TemporaryDirectory())) / "guard.sh"
+        guard_script.write_text(script, encoding="utf-8", newline="\n")
 
         cases = {
             # Reachable: a non-empty JSON array expands into legs whatever its entries hold.
@@ -1756,7 +1759,7 @@ gh() {
         for value, expected in cases.items():
             with self.subTest(value=value):
                 verdict = run(
-                    [bash_or_skip(), "-c", script],
+                    [bash_or_skip(), str(guard_script)],
                     env={**os.environ, "PYTHON_VERSIONS": value},
                     capture_output=True,
                     text=True,
@@ -1769,7 +1772,7 @@ gh() {
         # The runner reads a workflow command off any line starting with one, so an unescaped newline starts a second.
         injected = '["3.13"]\n::error::injected'
         verdict = run(
-            [bash_or_skip(), "-c", script],
+            [bash_or_skip(), str(guard_script)],
             env={**os.environ, "PYTHON_VERSIONS": injected},
             capture_output=True,
             text=True,
@@ -1783,7 +1786,7 @@ gh() {
 
         # A carriage return is the third escape, and without this nothing here would notice its removal.
         verdict = run(
-            [bash_or_skip(), "-c", script],
+            [bash_or_skip(), str(guard_script)],
             env={**os.environ, "PYTHON_VERSIONS": "x\ry"},
             capture_output=True,
             text=True,
@@ -1797,7 +1800,7 @@ gh() {
         # Their order is what the %0A assertion above covers instead, not this one.
         # Substituting the percent last renders a newline %250A, which fails there and passes here.
         verdict = run(
-            [bash_or_skip(), "-c", script],
+            [bash_or_skip(), str(guard_script)],
             env={**os.environ, "PYTHON_VERSIONS": "%"},
             capture_output=True,
             text=True,
