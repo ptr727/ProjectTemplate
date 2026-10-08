@@ -537,7 +537,9 @@ def step_dialect(shell: object) -> str | None:
     """The shellcheck dialect for a step's `shell`, or None where the step is not bash or sh."""
     if shell is None:
         return "bash"
-    words = str(shell).split()
+    if not isinstance(shell, str):
+        return None
+    words = shell.split()
     name = words[0].rsplit("/", 1)[-1] if words else ""
     return name if name in {"bash", "sh"} else None
 
@@ -693,8 +695,9 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         if dialect is None:
             continue
         label = f"{path} step {index}"
-        if step.get("name"):
-            label += f" ({step['name']})"
+        name = step.get("name")
+        if name and not isinstance(name, (dict, list)):
+            label += f" ({name})"
         hits.extend(shellcheck_body(label, dialect, substitute_expressions(body)))
     return hits
 

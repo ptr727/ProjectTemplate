@@ -7,7 +7,11 @@ a real home by default, so a test that forgot the override would rewrite the dev
 Standard library only, matching the rest of the gates, so CI needs no install step.
 """
 
+import contextlib
+import importlib.util
+import io
 import json
+import ntpath
 import os
 import pathlib
 import re
@@ -15,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -28,7 +33,7 @@ import install
 REAL_WHICH = shutil.which
 
 
-def run(home, *args, dirty=False, contain=True):
+def run(home, *args, dirty=False, contain=True, timeout=None):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
@@ -38,10 +43,14 @@ def run(home, *args, dirty=False, contain=True):
 
     contain forces the containment-capable signal the same way, so a verdict does not depend on
     whether the machine running the suite has a systemd user manager.
+
+    The host-local instruction file is pointed beside the throwaway home, so no case reads the
+    developer's own file into what it renders.
     """
     env = dict(
         os.environ,
         CLAUDE_HOME=str(home),
+        AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
     )
@@ -52,7 +61,13 @@ def run(home, *args, dirty=False, contain=True):
         encoding="utf-8",
         env=env,
         check=False,
+        timeout=timeout,
     )
+
+
+def local_file(home):
+    """The host-local instruction file every case uses, beside its throwaway CLAUDE_HOME."""
+    return home.parent / "local.md"
 
 
 class StampCase(unittest.TestCase):
@@ -261,6 +276,886 @@ class TestInstalledContent(StampCase):
         self.assertEqual(run(self.home, "--report").returncode, 0)
 
 
+class TestWholeFileOwnership(StampCase):
+    """CLAUDE.md is rendered whole, so nothing outside the kit's content survives an install unseen."""
+
+    def setUp(self):
+        super().setUp()
+        self.local = local_file(self.home)
+
+    def backups(self):
+        return sorted(self.home.glob("CLAUDE.md.*.bak"))
+
+    def test_an_install_writes_the_header_and_both_blocks_and_nothing_else(self):
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("<!-- Written by ProjectTemplate host-setup/agent-safety"))
+        for marker in install.BLOCK_MARKERS:
+            self.assertEqual(len(re.findall(rf"<!-- {marker} v\d+ start -->", text)), 1)
+        self.assertNotIn("host-local", text.split("-->", 1)[1])
+        self.assertEqual(self.backups(), [])
+
+    def test_the_local_file_is_appended_under_its_marker_and_reports_current(self):
+        self.local.write_text("Constructed host note for this case.\n", encoding="utf-8")
+        self.install()
+        text = self.md.read_text(encoding="utf-8")
+        self.assertIn(
+            "<!-- host-local start -->\nConstructed host note for this case.\n<!-- host-local end -->",
+            text,
+        )
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_content_from_before_whole_file_ownership_is_backed_up_and_dropped(self):
+        """A pre-existing file has no stamp digest, so it cannot be told from a hand edit."""
+        self.home.mkdir(parents=True)
+        original = b"## A Hand-Written Section\n\nAn older wording of a fleet rule.\n"
+        self.md.write_bytes(original)
+        r = self.install()
+        self.assertNotIn("older wording", self.md.read_text(encoding="utf-8"))
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+        self.assertIn("backed up", r.stdout)
+
+    def test_an_untouched_earlier_render_is_replaced_without_a_backup(self):
+        """The file the last install wrote matches the stamp, so nothing in it is anyone's edit."""
+        self.install()
+        self.local.write_text("A note added after the first install.\n", encoding="utf-8")
+        r = self.install()
+        self.assertIn("(updated)", r.stdout)
+        self.assertEqual(self.backups(), [])
+        self.assertIn("A note added after the first install.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_hand_edit_after_an_install_is_backed_up_before_the_rewrite(self):
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertIn("A line added by hand.", backups[0].read_text(encoding="utf-8"))
+        self.assertNotIn("A line added by hand.", self.md.read_text(encoding="utf-8"))
+
+    def test_a_stamp_without_the_digest_treats_a_changed_file_as_an_edit(self):
+        """A stamp from before the field existed cannot vouch for the file, so it is kept."""
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        del stamp["instructionsDigest"]
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_the_report_names_an_earlier_render(self):
+        self.install()
+        self.local.write_text("A note that changes the render.\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is this installer's own output rather than a hand edit", r.stdout)
+
+    def test_the_report_names_a_hand_edit(self):
+        self.install()
+        self.md.write_text(
+            self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n", encoding="utf-8"
+        )
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("edited since the last install", r.stdout)
+
+    def test_a_second_backup_never_overwrites_the_first(self):
+        self.home.mkdir(parents=True)
+        first = install.write_backup(self.md, b"first")
+        second = install.write_backup(self.md, b"second")
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.read_bytes(), b"first")
+        self.assertEqual(second.read_bytes(), b"second")
+
+    def test_a_claude_md_that_is_not_utf8_is_backed_up_byte_for_byte(self):
+        """The file the installer most needs to back up is the one it cannot decode."""
+        self.home.mkdir(parents=True)
+        original = b"A hand-written note with a Latin-1 byte: \xe9.\n"
+        self.md.write_bytes(original)
+        self.install()
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+
+    def test_a_local_file_carrying_a_kit_marker_stops_the_install_with_nothing_changed(self):
+        """Copying an old backup into the local file would otherwise duplicate a block for good."""
+        self.local.write_text(
+            "<!-- agent-safety v1 start -->\ncopied\n<!-- agent-safety v1 end -->\n",
+            encoding="utf-8",
+        )
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Nothing was installed", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_file_that_is_not_utf8_stops_the_install_with_nothing_changed(self):
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not UTF-8", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_the_report_names_an_unusable_local_file_rather_than_crashing(self):
+        self.install()
+        self.local.write_bytes(b"\xe9\n")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not UTF-8", r.stdout)
+        self.assertIn("first, since the installer refuses it", r.stdout)
+
+    def test_a_dangling_local_symlink_stops_the_install_rather_than_reading_as_absent(self):
+        """A configured local file that went missing must not silently drop its text."""
+        self.local.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.local.symlink_to(self.local.parent / "missing-target.md")
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is a link that leads to nothing", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_file_in_a_directory_that_cannot_be_entered_stops_with_a_message(self):
+        """exists() raises there rather than answering, which would otherwise be a traceback."""
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("needs a non-root POSIX user for a directory mode to deny access")
+        locked = self.local.parent / "locked"
+        locked.mkdir(parents=True)
+        inner = locked / "local.md"
+        inner.write_text("A constructed note.\n", encoding="utf-8")
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(inner),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="0",
+        )
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def assert_refused_with_nothing_changed(self, r, reason):
+        """A refusal at the CLAUDE.md step leaves no hook, settings file, or stamp behind."""
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Nothing was installed", r.stderr)
+        self.assertIn(reason, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertFalse((self.home / "hooks").exists())
+        self.assertFalse((self.home / "settings.json").exists())
+        self.assertFalse(self.stamp.exists())
+
+    def needs_posix_non_root(self):
+        if os.name != "posix" or os.geteuid() == 0:
+            self.skipTest("needs a non-root POSIX user for a file mode to deny access")
+
+    def test_a_claude_md_that_is_a_directory_stops_the_install_with_nothing_changed(self):
+        """The write would raise after the hooks and settings were already replaced."""
+        self.md.mkdir(parents=True)
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+
+    def test_a_claude_md_fifo_is_refused_rather_than_hanging_the_write(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.home.mkdir(parents=True)
+        os.mkfifo(self.md)
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+
+    def test_a_claude_md_link_to_a_device_is_refused_rather_than_written_into_nothing(self):
+        if not os.path.exists(os.devnull) or os.name != "posix":
+            self.skipTest("needs a POSIX null device")
+        self.home.mkdir(parents=True)
+        self.md.symlink_to(os.devnull)
+        self.assert_refused_with_nothing_changed(run(self.home), "is not a regular file")
+
+    def test_a_claude_md_dangling_symlink_stops_the_install_with_nothing_changed(self):
+        """A dotfiles link whose repository is not cloned yet has nowhere to write."""
+        self.home.mkdir(parents=True)
+        try:
+            self.md.symlink_to(self.home.parent / "not-cloned" / "CLAUDE.md")
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        self.assert_refused_with_nothing_changed(run(self.home), "could not be written")
+
+    def test_a_claude_md_symlink_loop_stops_the_install_with_nothing_changed(self):
+        self.home.mkdir(parents=True)
+        try:
+            self.md.symlink_to(self.md)
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        self.assert_refused_with_nothing_changed(run(self.home), str(self.md))
+
+    def test_an_unreadable_claude_md_stops_the_install_with_nothing_changed(self):
+        self.needs_posix_non_root()
+        self.home.mkdir(parents=True)
+        self.md.write_text("A constructed note.\n", encoding="utf-8")
+        self.md.chmod(0)
+        self.addCleanup(self.md.chmod, 0o644)
+        self.assert_refused_with_nothing_changed(run(self.home), "cannot be read")
+
+    def test_a_read_only_edited_claude_md_is_refused_without_piling_up_backups(self):
+        """The open for writing fails first, so no refused re-run leaves a backup behind."""
+        self.needs_posix_non_root()
+        self.home.mkdir(parents=True)
+        self.md.write_text("A constructed note.\n", encoding="utf-8")
+        self.md.chmod(0o444)
+        self.addCleanup(self.md.chmod, 0o644)
+        for _ in range(2):
+            r = run(self.home)
+            self.assert_refused_with_nothing_changed(r, "could not be rewritten")
+            self.assertNotIn("backed up at", r.stderr)
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(self.md.read_text(encoding="utf-8"), "A constructed note.\n")
+
+    def run_with_file_size_limit(self, limit):
+        """Run the installer with writes capped at `limit` bytes, the way a full disk stops one."""
+        try:
+            import resource
+        except ImportError:
+            self.skipTest("needs POSIX resource limits")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(self.local),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="1",
+        )
+        return subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+            timeout=120,
+            preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit)),
+        )
+
+    def test_a_write_cut_short_is_named_as_incomplete_rather_than_nothing_installed(self):
+        """The truncate already happened, so the file holds neither version and the message says so."""
+        self.install()
+        prior_size = self.md.stat().st_size
+        self.assertGreater(prior_size, 4096)
+        self.local.write_text("A constructed note that changes the render.\n", encoding="utf-8")
+        r = self.run_with_file_size_limit(4096)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertNotIn("Nothing was installed", r.stderr)
+        self.assertIn("was left incomplete", r.stderr)
+        self.assertIn("could not be put back", r.stderr)
+        self.assertEqual(self.md.stat().st_size, 4096)
+
+    def test_a_write_cut_short_puts_the_prior_content_back_where_it_fits(self):
+        """A small hand edit is restored, so nothing was installed and the backup is still named."""
+        self.home.mkdir(parents=True)
+        self.md.write_text("A constructed note.\n", encoding="utf-8")
+        r = self.run_with_file_size_limit(4096)
+        self.assert_refused_with_nothing_changed(r, "could not be rewritten")
+        self.assertIn("backed up at", r.stderr)
+        self.assertEqual(self.md.read_text(encoding="utf-8"), "A constructed note.\n")
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_a_write_cut_short_is_not_read_back_as_a_hand_edit(self):
+        """The leftover is the installer's own bytes, so neither the report nor the re-run calls it edited."""
+        self.install()
+        self.local.write_text("A constructed note that changes the render.\n", encoding="utf-8")
+        r = self.run_with_file_size_limit(4096)
+        self.assertIn("was left incomplete", r.stderr)
+        report = run(self.home, "--report")
+        self.assertEqual(report.returncode, 1, report.stdout + report.stderr)
+        self.assertNotIn("was edited since the last install", report.stdout)
+        self.assertIn("left when its write of the file failed", report.stdout)
+        self.install()
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_hand_edit_cut_short_is_backed_up_once(self):
+        """The first run backs the edit up, so the leftover it writes is not backed up again.
+
+        Cut short in process, since a size limit that refuses the restore refuses the backup too.
+        """
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        real_replace = install._replace_contents
+        calls = []
+
+        def cut_short(fd, data):
+            calls.append(data)
+            if len(calls) > 2:
+                return real_replace(fd, data)
+            if len(calls) == 1:
+                real_replace(fd, data[:100])
+            raise OSError(27, "constructed: file too large")
+
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1",
+        }
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(install.main(), 1)
+        self.assertIn("was left incomplete", stderr.getvalue())
+        self.assertEqual(self.md.read_bytes(), calls[0][:100])
+        self.assertEqual(len(self.backups()), 1)
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+        self.assertEqual(self.backups()[0].read_text(encoding="utf-8"), edited)
+
+    def test_a_failed_write_removes_the_file_it_created(self):
+        """The path held nothing, so a write cut short leaves nothing rather than a partial file."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertNotIn("left incomplete", str(caught.exception))
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_created_claude_md_cut_short_leaves_nothing_to_move_aside(self):
+        """The file the run created is gone, so the message neither calls it incomplete nor asks for a move."""
+        self.home.mkdir(parents=True)
+        r = self.run_with_file_size_limit(4096)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("could not be written (its write failed", r.stderr)
+        self.assertNotIn("left incomplete", r.stderr)
+        self.assertNotIn("move the file aside", r.stderr)
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_an_interrupt_stays_an_interrupt_when_the_created_file_cannot_be_removed(self):
+        self.home.mkdir(parents=True)
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            mock.patch.object(install.os, "unlink", side_effect=PermissionError(13, "in use")),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+
+    def after_close(self, action):
+        """os.close that runs `action` once the descriptor is closed, where a cleanup next reads the path.
+
+        Run after the close rather than during the write, since Windows refuses to replace or remove
+        a file this process still holds open.
+        """
+        real_close = os.close
+        pending = [action]
+
+        def closing(fd):
+            real_close(fd)
+            while pending:
+                pending.pop()()
+
+        return mock.patch.object(install.os, "close", side_effect=closing)
+
+    def test_a_created_file_already_gone_reads_as_removed(self):
+        """Something else removed it first, so the error says it no longer exists."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(lambda: os.unlink(self.md)),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertIn("no longer exists", str(caught.exception))
+
+    def test_a_failed_check_before_the_write_removes_the_file_it_created(self):
+        """The create already happened when fstat fails, and the empty file it made is removed."""
+        self.home.mkdir(parents=True)
+        real_fstat = os.fstat
+        calls = []
+
+        def refused(fd):
+            calls.append(fd)
+            if len(calls) == 1:
+                return real_fstat(fd)
+            raise OSError(5, "constructed: I/O error")
+
+        with (
+            mock.patch.object(install.os, "fstat", side_effect=refused),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertFalse(os.path.lexists(self.md))
+
+    def test_a_restore_cut_short_is_not_backed_up_again(self):
+        """A leftover of the prior content alone, not of the render, is still the run's own output."""
+        self.install()
+        edited = "A line added by hand.\n" + self.md.read_text(encoding="utf-8")
+        self.md.write_text(edited, encoding="utf-8")
+        real_replace = install._replace_contents
+        calls = []
+
+        def cut_short(fd, data):
+            calls.append(data)
+            if len(calls) > 2:
+                return real_replace(fd, data)
+            if len(calls) == 2:
+                real_replace(fd, data[:100])
+            raise OSError(27, "constructed: file too large")
+
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 1)
+        self.assertFalse(calls[0].startswith(self.md.read_bytes()))
+        self.assertEqual(len(self.backups()), 1)
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_an_interrupt_stays_an_interrupt_when_the_close_also_fails(self):
+        """A failed close is reported only for an error, so an interrupt is never turned into one."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=KeyboardInterrupt),
+            self.close_failing_once(),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_created_file_that_cannot_be_removed_is_named_as_incomplete(self):
+        """The partial file stays, so the error is the write's own rather than the removal's."""
+        self.home.mkdir(parents=True)
+        real_replace = install._replace_contents
+
+        def cut_short(fd, data):
+            real_replace(fd, b"partial")
+            raise OSError(27, "constructed: file too large")
+
+        in_use = PermissionError(13, "constructed: in use")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            mock.patch.object(install.os, "unlink", side_effect=in_use),
+            self.assertRaisesRegex(install.IncompleteWrite, "was left incomplete"),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"partial")
+
+    def test_a_failed_write_keeps_a_file_created_through_a_link(self):
+        """Where an exclusive open follows a link, as Windows may, the link's target is a file found."""
+        self.home.mkdir(parents=True)
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install.os.path, "islink", return_value=True),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertTrue(self.md.exists())
+
+    def leftover_stamped(self, left, written):
+        """Install, leave `left` in CLAUDE.md, and say whether the stamp now vouches for it."""
+        self.install()
+        self.md.write_bytes(left)
+        note = install.record_leftover_instructions(self.home, self.md, written)
+        self.assertEqual(note, "")
+        return install.stamped_instructions_digest(self.home) == install.text_digest(
+            left.decode("utf-8")
+        )
+
+    def test_a_leftover_this_run_wrote_is_stamped(self):
+        self.assertTrue(self.leftover_stamped(b"A partial", (b"A partial render", None)))
+
+    def test_a_leftover_this_run_did_not_write_is_not_stamped(self):
+        """A save landing after the failed write is someone's edit, so the next run backs it up."""
+        self.assertFalse(self.leftover_stamped(b"An edit saved meanwhile", (b"A render", b"prior")))
+
+    def test_a_stamp_failing_its_shape_check_is_not_updated(self):
+        self.install()
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        before = self.stamp.read_bytes()
+        self.md.write_bytes(b"A partial")
+        install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(self.stamp.read_bytes(), before)
+
+    def test_a_stamp_written_whole_before_its_close_failed_needs_no_note(self):
+        """The stamp read back holds the digest, so the re-run replaces the leftover silently."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        real_write = install.write_regular_file
+
+        def close_failed(path, data, prior=None, before=None):
+            real_write(path, data, prior=prior, before=before)
+            raise install.IncompleteWrite(f"{path} may be incomplete, since closing it failed")
+
+        with mock.patch.object(install, "write_regular_file", side_effect=close_failed):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertEqual(note, "")
+        self.assertEqual(
+            install.stamped_instructions_digest(self.home), install.text_digest("A partial")
+        )
+
+    def test_a_stamp_write_cut_short_is_named(self):
+        """A stamp left incomplete no longer vouches for the leftover, and the note says what follows."""
+        self.install()
+        self.md.write_bytes(b"A partial")
+        cut_short = OSError(27, "constructed: file too large")
+        with mock.patch.object(install, "_replace_contents", side_effect=cut_short):
+            note = install.record_leftover_instructions(self.home, self.md, (b"A partial render",))
+        self.assertIn("agent-safety-stamp.json was left incomplete", note)
+        self.assertIn("backs CLAUDE.md up as a hand edit", note)
+
+    def test_a_failed_write_keeps_a_file_put_at_the_path_meanwhile(self):
+        """Another writer's file at the path is not the one this call created, so it stays."""
+        self.home.mkdir(parents=True)
+        other = self.home / "other"
+
+        def replaced():
+            other.write_bytes(b"another writer's file\n")
+            os.replace(other, self.md)
+
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.after_close(replaced),
+            self.assertRaisesRegex(
+                install.IncompleteWrite, "is no longer the file this run created"
+            ),
+        ):
+            install.write_regular_file(self.md, b"new\n")
+        self.assertEqual(self.md.read_bytes(), b"another writer's file\n")
+
+    def test_a_failed_write_keeps_a_file_it_found(self):
+        """Only a file this call created is removed, so a found one stays to hold what is left."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaises(install.IncompleteWrite),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+        self.assertTrue(self.md.exists())
+
+    def test_a_read_only_claude_md_that_is_current_still_installs_and_reports_current(self):
+        """Nothing would change, so the file is not written and its mode does not matter."""
+        self.needs_posix_non_root()
+        self.install()
+        self.md.chmod(0o444)
+        self.addCleanup(self.md.chmod, 0o644)
+        r = self.install()
+        self.assertIn("(already current)", r.stdout)
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_a_symlinked_claude_md_installs_through_the_link(self):
+        """The dotfiles case: the link stays a link and the kit lands in its target."""
+        self.home.mkdir(parents=True)
+        target = self.home.parent / "dotfiles-CLAUDE.md"
+        try:
+            self.md.symlink_to(target)
+        except OSError:
+            self.skipTest("this host cannot create a symlink")
+        target.write_text("", encoding="utf-8")
+        self.install()
+        self.assertTrue(self.md.is_symlink())
+        self.assertIn("agent-safety", target.read_text(encoding="utf-8"))
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_the_report_on_a_claude_md_directory_names_it_rather_than_crashing(self):
+        self.install()
+        self.md.unlink()
+        self.md.mkdir()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("exists but is not a readable regular file", r.stdout)
+        self.assertIn("move it aside first", r.stdout)
+
+    def test_the_report_on_an_unreadable_claude_md_gives_a_verdict_rather_than_crashing(self):
+        self.needs_posix_non_root()
+        self.install()
+        self.md.chmod(0)
+        self.addCleanup(self.md.chmod, 0o644)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("exists but is not a readable regular file", r.stdout)
+
+    def test_a_stamp_failing_its_shape_check_does_not_vouch_for_the_file(self):
+        """A hand-edited stamp could otherwise carry a digest that skips the backup."""
+        self.install()
+        edited = self.md.read_text(encoding="utf-8") + "\nA line added by hand.\n"
+        self.md.write_text(edited, encoding="utf-8")
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["instructionsDigest"] = install.text_digest(edited)
+        stamp["stampVersion"] = "not an int"
+        self.stamp.write_text(json.dumps(stamp) + "\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(len(self.backups()), 1)
+
+    def test_reading_a_directory_closes_its_descriptor(self):
+        """fdopen raised on a directory without closing the descriptor it was handed."""
+        if os.name != "posix":
+            self.skipTest("only POSIX opens a directory for reading")
+        self.home.mkdir(parents=True)
+        opened = []
+        real_open = os.open
+
+        def spy(path, flags, *rest):
+            fd = real_open(path, flags, *rest)
+            opened.append(fd)
+            return fd
+
+        with mock.patch.object(install.os, "open", side_effect=spy):
+            self.assertIsNone(install.read_regular_file(self.home))
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+
+    def close_failing_once(self):
+        """os.close that closes the descriptor and then reports a quota error, as NFS can."""
+        real_close = os.close
+
+        def failing(fd):
+            real_close(fd)
+            raise OSError(122, "constructed: disk quota exceeded")
+
+        return mock.patch.object(install.os, "close", side_effect=failing)
+
+    def test_a_failed_close_after_the_write_is_named_as_incomplete(self):
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        with self.close_failing_once(), self.assertRaises(install.IncompleteWrite):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_failed_close_does_not_replace_an_incomplete_write_already_raised(self):
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        cut_short = OSError(27, "constructed: file too large")
+        with (
+            self.close_failing_once(),
+            mock.patch.object(install, "_replace_contents", side_effect=cut_short),
+            self.assertRaisesRegex(install.IncompleteWrite, "could not be put back"),
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+
+    def test_a_failed_truncate_reads_as_unchanged_rather_than_incomplete(self):
+        """A byte-range lock can refuse the size change, and the file then still holds its prior bytes."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        locked = OSError(33, "constructed: the region is locked")
+        with (
+            mock.patch.object(install.os, "ftruncate", side_effect=locked),
+            self.assertRaises(OSError) as caught,
+        ):
+            install.write_regular_file(self.md, b"new\n", prior=b"prior\n")
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertEqual(self.md.read_bytes(), b"prior\n")
+
+    def test_a_failed_close_before_the_truncate_still_reads_as_unchanged(self):
+        """A refused open-time check never touched the file, so it stays a plain OSError."""
+        self.home.mkdir(parents=True)
+        self.md.write_bytes(b"prior\n")
+        refused = OSError(13, "constructed: backup refused")
+        with self.close_failing_once(), self.assertRaises(OSError) as caught:
+            install.write_regular_file(
+                self.md, b"new\n", prior=b"prior\n", before=mock.Mock(side_effect=refused)
+            )
+        self.assertNotIsInstance(caught.exception, install.IncompleteWrite)
+        self.assertEqual(self.md.read_bytes(), b"prior\n")
+
+    def test_a_local_path_under_a_file_is_refused_rather_than_skipped(self):
+        """An XDG_CONFIG_HOME pointing at a file must not drop the configured local text."""
+        if os.name != "posix":
+            self.skipTest(
+                "Windows raises FileNotFoundError for a file parent, so it reads as absent"
+            )
+        parent = self.home.parent / "a-file-not-a-directory"
+        parent.write_text("", encoding="utf-8")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(parent / "local.md"),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="0",
+        )
+        r = subprocess.run(
+            [sys.executable, str(INSTALL)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("cannot be read", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_a_local_fifo_is_refused_rather_than_blocking_the_read(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.local.parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(self.local)
+        # Bounded, so a regression fails the case rather than hanging the suite.
+        r = run(self.home, timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_the_report_names_a_local_fifo_rather_than_blocking(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        self.install()
+        os.mkfifo(self.local)
+        r = run(self.home, "--report", timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stdout)
+
+    def replace_with_fifo(self, path):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("this host has no FIFOs")
+        path.unlink()
+        os.mkfifo(path)
+
+    def test_a_settings_fifo_is_refused_rather_than_hanging_the_install_or_report(self):
+        self.install()
+        self.replace_with_fifo(self.home / "settings.json")
+        r = run(self.home, timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
+        r = run(self.home, "--report", timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("settings.json is not a regular file", r.stdout)
+
+    def test_a_stamp_fifo_is_refused_rather_than_hanging_the_install_or_report(self):
+        self.install()
+        self.replace_with_fifo(self.stamp)
+        r = run(self.home, timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the stamp could not be written", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        r = run(self.home, "--report", timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("is not a regular file", r.stderr)
+
+    def test_a_deployed_hook_fifo_reads_as_not_installed_rather_than_hanging_the_report(self):
+        self.install()
+        self.replace_with_fifo(self.home / "hooks" / install.DEPLOYED_HOOKS[0])
+        r = run(self.home, "--report", timeout=60)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("missing or unreadable", r.stdout)
+
+    def test_a_settings_file_that_is_not_utf8_is_refused_rather_than_crashing(self):
+        self.home.mkdir(parents=True)
+        (self.home / "settings.json").write_bytes(b'{"note": "\xff"}\n')
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("settings.json cannot be read", r.stderr)
+
+    def test_a_local_path_under_a_file_is_refused_where_lstat_reports_it_missing(self):
+        """Windows raises FileNotFoundError for a file parent, so the nearest existing ancestor decides."""
+        parent = self.home.parent / "a-file-not-a-directory"
+        parent.write_text("", encoding="utf-8")
+        missing = FileNotFoundError("constructed: the system cannot find the path specified")
+        with mock.patch.object(install.os, "lstat", side_effect=missing):
+            text, problem = install.read_local_instructions(parent / "local.md")
+        self.assertEqual(text, "")
+        self.assertIn("is not a directory", problem)
+
+    def test_a_local_path_in_a_missing_directory_still_reads_as_absent(self):
+        """The ancestor walk passes over missing directories to the one that exists."""
+        missing = self.home.parent / "not-created" / "nested" / "local.md"
+        self.assertEqual(install.read_local_instructions(missing), ("", None))
+
+    def test_a_local_path_that_cannot_be_read_says_so_rather_than_blaming_the_encoding(self):
+        self.local.mkdir(parents=True)
+        r = run(self.home)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertRegex(r.stderr, "is not a regular file|cannot be read")
+        self.assertNotIn("UTF-8", r.stderr)
+
+    def test_the_install_stamps_the_digest_it_rendered(self):
+        """main() must hand build_stamp the rendered digest, or the stamp re-reads the file."""
+        self.local.write_text("A constructed note.\n", encoding="utf-8")
+        env = {
+            "CLAUDE_HOME": str(self.home),
+            install.LOCAL_INSTRUCTIONS_ENV: str(self.local),
+            "AGENT_SAFETY_DIRTY_OVERRIDE": "0",
+            "AGENT_SAFETY_CONTAINMENT_OVERRIDE": "0",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(sys, "argv", ["install.py"]),
+            mock.patch.object(install, "build_stamp", wraps=install.build_stamp) as spy,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(install.main(), 0)
+        expected = install.text_digest(
+            install.render_instructions(self.local.absolute(), "A constructed note.")
+        )
+        self.assertEqual(spy.call_args.args[2], expected)
+
+    def test_the_stamp_records_the_rendered_digest_rather_than_rereading_the_file(self):
+        """A write between the install's own write and the stamp must not be vouched for."""
+        self.home.mkdir(parents=True)
+        self.md.write_text("written by something else after the install\n", encoding="utf-8")
+        stamp = install.build_stamp(self.home, "2026-01-01T00:00:00Z", "rendereddigest00")
+        self.assertEqual(stamp["instructionsDigest"], "rendereddigest00")
+
+
+class TestLocalInstructionsPath(unittest.TestCase):
+    def test_a_relative_xdg_config_home_is_ignored(self):
+        """The XDG spec treats a relative value as unset, so the file cannot depend on the cwd."""
+        env = {"XDG_CONFIG_HOME": "relative/config"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, pathlib.Path.home() / ".config" / "agent-fleet" / "local.md")
+
+    def test_an_absolute_xdg_config_home_is_honored(self):
+        root = pathlib.Path(tempfile.gettempdir()).resolve() / "xdg-case"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root)}, clear=False):
+            os.environ.pop(install.LOCAL_INSTRUCTIONS_ENV, None)
+            path = install.local_instructions_path()
+        self.assertEqual(path, root / "agent-fleet" / "local.md")
+
+    def test_a_relative_override_resolves_to_an_absolute_path(self):
+        with mock.patch.dict(os.environ, {install.LOCAL_INSTRUCTIONS_ENV: "local.md"}):
+            path = install.local_instructions_path()
+        self.assertTrue(path.is_absolute())
+
+
 class TestDuplicateBlocks(StampCase):
     def test_a_duplicated_block_is_not_reported_as_present(self):
         """Two blocks mean the second silently governs, and naming the first hides that."""
@@ -286,7 +1181,12 @@ class TestDuplicateBlocks(StampCase):
 class TestDegradedEnvironments(StampCase):
     def test_a_host_without_git_stamps_rather_than_crashing(self):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
-        env = dict(os.environ, CLAUDE_HOME=str(self.home), PATH="")
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+            PATH="",
+        )
         r = subprocess.run(
             [sys.executable, str(INSTALL)],
             capture_output=True,
@@ -364,6 +1264,12 @@ class TestDegradedEnvironments(StampCase):
 
 class TestRegistration(StampCase):
     """Correct bytes on disk are not a running guard. These are the inert-kit cases."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"AGENT_SAFETY_CONTAINMENT_OVERRIDE": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _settings(self):
         return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
@@ -630,7 +1536,11 @@ class TestRegistration(StampCase):
             ),
             encoding="utf-8",
         )
-        env = dict(os.environ, CLAUDE_HOME=str(self.home))
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
+        )
         r = subprocess.run(
             [sys.executable, str(broken / "install.py")],
             capture_output=True,
@@ -1180,6 +2090,38 @@ class TestStampContent(StampCase):
         line = install.stamp_line(stamp)
         self.assertIn(stamp["host"]["hostname"], line)
         self.assertIn(stamp["payloadDigest"], line)
+
+
+class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
+    """The guard's own self-test with Windows path semantics, the check the installer runs on a
+    Windows host before it replaces any hook. The fixtures spell directories POSIX-style, and
+    `ntpath.normpath` rewrites `/` to `\\`, so a fixture lookup that compares exact strings passes
+    here and fails there.
+
+    Only the guard's own `os` takes Windows path semantics, since patching the shared module breaks
+    `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
+    the one the fixture table expanded `~` against at import. The one case that spawns git creates
+    a real checkout, so this test skips it, and only `--selftest` run with the host's own paths
+    covers it.
+    """
+
+    def test_selftest_passes_with_ntpath(self):
+        spec = importlib.util.spec_from_file_location("guard_ntpath", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        windows_os = types.SimpleNamespace(**{**vars(os), "path": ntpath})
+        out = io.StringIO()
+        with (
+            mock.patch.object(guard, "os", windows_os),
+            mock.patch.dict(os.environ, {"USERPROFILE": os.path.expanduser("~")}),
+            mock.patch.object(guard, "_is_primary_checkout_selftest", return_value="skip"),
+            contextlib.redirect_stdout(out),
+        ):
+            status = guard._selftest()
+        fails = [line for line in out.getvalue().splitlines() if "FAIL" in line]
+        self.assertEqual(status, 0, "\n".join(fails))
 
 
 if __name__ == "__main__":

@@ -3,9 +3,9 @@
 
 Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
 registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
-in its `env`, merges the permission rules this kit owns into the same file, adds the safety rules to
-the user CLAUDE.md (marker-delimited so re-runs update in place), and self-tests each hook before
-registering it.
+in its `env`, merges the permission rules this kit owns into the same file, renders the user
+CLAUDE.md whole from the kit's blocks and the host-local instruction file, and self-tests each hook
+before registering it.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -18,6 +18,7 @@ Usage: python3 install.py            (installs to ~/.claude)
        CLAUDE_HOME=/x python3 install.py   (override target, for testing)
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing)
        AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing)
+       AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing)
 """
 
 import argparse
@@ -30,6 +31,7 @@ import platform
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 
@@ -67,6 +69,12 @@ CLAUDE_MD_BLOCKS = (
     ("fleet-bootstrap", "claude-md-fleet.md"),
 )
 BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
+
+# The host-local file appended to the rendered instruction file, the one place host-specific text lives.
+# One file rather than one per agent, since a host's own notes are rarely about a single agent.
+# Another agent's global file is rendered from these same parts, so adding one changes no part of this.
+LOCAL_INSTRUCTIONS_ENV = "AGENT_FLEET_LOCAL_INSTRUCTIONS"
+LOCAL_MARKER = "host-local"
 
 # The files whose bytes this kit actually places on a machine, the hook first and then each block.
 # Derived rather than listed, so a block added above enters the digest without a second edit.
@@ -406,6 +414,332 @@ def normalized(data):
     return data.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def local_instructions_path():
+    """The host-local instruction file, under the XDG config root unless the override names one."""
+    override = os.environ.get(LOCAL_INSTRUCTIONS_ENV)
+    if override:
+        # Absolute rather than resolved, so a symlink stays a symlink and a dangling one is still seen.
+        return pathlib.Path(override).expanduser().absolute()
+    # The XDG spec treats a relative value as unset, and honoring one made the file depend on the cwd.
+    root = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or "").expanduser()
+    base = root if root.is_absolute() else pathlib.Path.home() / ".config"
+    return base / "agent-fleet" / "local.md"
+
+
+def read_regular_file(path):
+    """The bytes of `path` where it is a regular file, or None where it is anything else.
+
+    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
+    rather than hanging the read, and nothing can swap the path between the check and the read.
+    Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags)
+    # Windows refuses to open a directory at all, and a directory is still not a regular file.
+    except FileNotFoundError:
+        raise
+    except OSError:
+        if os.path.isdir(path):
+            return None
+        raise
+    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+class NotRegularFile(OSError):
+    """A write target that exists and is not a regular file, refused before anything was written."""
+
+
+class IncompleteWrite(OSError):
+    """A failed write that may leave the file holding neither its prior content nor the new."""
+
+
+def write_regular_file(path, data, prior=None, before=None):
+    """Replace the contents of `path`, a regular file or absent, with `data`.
+
+    The open is the check: a file that cannot be opened for writing raises before anything changes,
+    so `before`, which backs the file up, runs only once the write is known to be possible.
+    Opened without blocking and judged on the descriptor, as `read_regular_file` reads, so a FIFO
+    or a device is refused rather than hanging or swallowing the write. Written in place rather than
+    replaced, so a dotfiles symlink stays a link and its target takes the content.
+
+    The open is tried exclusively first, so a file this call created is told from one it found, and
+    a path that is a link always counts as found, so its target is kept. A created file is removed
+    again when the write fails, where the path still holds that same file, leaving it absent as it
+    was found.
+
+    Raises OSError where the file is unchanged or the created file was removed. Raises
+    IncompleteWrite where a write failed after the truncate and `prior` could not be put back,
+    where the close after the truncate failed, or where a created file could not be removed, any
+    of which can leave the file holding neither version.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags | os.O_EXCL, 0o666)
+    except FileExistsError:
+        fd = os.open(path, flags, 0o666)
+        created = False
+    else:
+        created = not os.path.islink(path)
+    if not created:
+        _write_open_file(path, fd, data, prior, before)
+        return
+    try:
+        made = os.fstat(fd)
+    except OSError:
+        made = None
+    try:
+        _write_open_file(path, fd, data, prior, before)
+    except BaseException as e:
+        try:
+            _remove_if_same_file(path, made)
+        except OSError as unlink_error:
+            if isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(f"{e}, and removing it failed ({unlink_error})") from e
+            if isinstance(e, Exception):
+                raise IncompleteWrite(
+                    f"{path} was created and left incomplete, and could not be removed "
+                    f"({unlink_error})"
+                ) from e
+        else:
+            if isinstance(e, IncompleteWrite):
+                raise OSError(
+                    f"its write failed, and the file this run created no longer exists "
+                    f"({e.__cause__ or e})"
+                ) from e
+        raise
+
+
+def _remove_if_same_file(path, made):
+    """Remove `path` where it is still the file `made` describes, and raise OSError where it is not.
+
+    Compared rather than removed by name, since something else may have put its own file at the
+    path once the descriptor closed. The comparison narrows the time in which such a file could be
+    removed to the moment between it and the removal, rather than closing it. A path already gone
+    is left gone.
+    """
+    if made is None:
+        raise OSError(f"{path} could not be identified as the file this run created")
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if (now.st_dev, now.st_ino) != (made.st_dev, made.st_ino):
+        raise OSError(f"{path} is no longer the file this run created")
+    os.unlink(path)
+
+
+def _write_open_file(path, fd, data, prior, before):
+    """The body of `write_regular_file` on its open descriptor, which this closes."""
+    truncated = False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise NotRegularFile(f"{path} is not a regular file")
+        if before is not None:
+            before()
+        os.ftruncate(fd, 0)
+        truncated = True
+        try:
+            _replace_contents(fd, data)
+        except OSError as e:
+            if prior is None:
+                raise IncompleteWrite(f"{path} was left incomplete ({e})") from e
+            try:
+                _replace_contents(fd, prior)
+            except OSError:
+                raise IncompleteWrite(
+                    f"{path} was left incomplete ({e}), and its prior content could not be put back"
+                ) from e
+            raise
+    except BaseException as e:
+        try:
+            os.close(fd)
+        except OSError as close_error:
+            if truncated and isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
+                raise IncompleteWrite(
+                    f"{path} may be incomplete, since closing it failed ({close_error})"
+                ) from e
+        raise
+    # A network filesystem can report a quota or I/O error at the close rather than at the write.
+    try:
+        os.close(fd)
+    except OSError as e:
+        raise IncompleteWrite(f"{path} may be incomplete, since closing it failed ({e})") from e
+
+
+def _replace_contents(fd, data):
+    """Truncate the open file and write all of `data`, since one write may take only part of it."""
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
+
+
+def read_local_instructions(local_path):
+    """The host-local text, stripped, and why it cannot be used, or None where it can.
+
+    Checked before anything is installed, so an unusable file stops the run with nothing changed.
+    A file carrying this kit's own markers is refused, since appending it would duplicate a block,
+    and copying an old backup into the local file is exactly how that happens.
+    """
+    # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
+    # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
+    try:
+        info = os.lstat(local_path)
+    # Only a missing path is absent, so a parent that is a file is refused rather than silently skipped.
+    # Windows raises FileNotFoundError for a file parent too, so the nearest existing ancestor decides.
+    except FileNotFoundError:
+        for parent in local_path.parents:
+            try:
+                parent_info = os.stat(parent)
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                return "", f"{local_path} cannot be read ({e})"
+            if not stat.S_ISDIR(parent_info.st_mode):
+                return "", f"{local_path} cannot be read, since {parent} is not a directory"
+            break
+        return "", None
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    try:
+        raw = read_regular_file(local_path)
+    except FileNotFoundError:
+        gone = (
+            "is a link that leads to nothing" if stat.S_ISLNK(info.st_mode) else "no longer exists"
+        )
+        return "", f"{local_path} {gone}"
+    except OSError as e:
+        return "", f"{local_path} cannot be read ({e})"
+    if raw is None:
+        return "", f"{local_path} is not a regular file"
+    try:
+        text = normalized(raw.decode("utf-8")).strip()
+    except UnicodeDecodeError as e:
+        return "", f"{local_path} is not UTF-8 ({e})"
+    for marker in (*BLOCK_MARKERS, LOCAL_MARKER):
+        if re.search(rf"<!-- {marker} (?:v\d+ )?(?:start|end) -->", text):
+            return "", (
+                f"{local_path} carries this kit's {marker} marker, so appending it would duplicate "
+                "kit content. Keep only host-specific text in it"
+            )
+    return text, None
+
+
+def render_instructions(local_path, local_text):
+    """The whole global instruction file in newline form: a header, each block, then the local file.
+
+    Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
+    blocks were never written or checked, so they restated rules in wording the fleet had since
+    changed, and every session on the host read them anyway.
+    """
+    header = (
+        "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
+        f"every install. Put host-specific content in {local_path}, appended below. -->"
+    )
+    parts = [header]
+    parts += [
+        (HERE / filename).read_text(encoding="utf-8").strip() for _, filename in CLAUDE_MD_BLOCKS
+    ]
+    if local_text:
+        parts.append(f"<!-- {LOCAL_MARKER} start -->\n{local_text}\n<!-- {LOCAL_MARKER} end -->")
+    return normalized("\n\n".join(parts)) + "\n"
+
+
+def text_digest(text):
+    """A digest over text with its line endings normalized, so CRLF and LF copies agree."""
+    return hashlib.sha256(normalized(text).encode("utf-8")).hexdigest()[:16]
+
+
+def stamped_instructions_digest(claude_home):
+    """The digest of the instruction file the installer last wrote or left, or None where none is.
+
+    None covers a missing or unreadable stamp and one written before the field existed. Each of
+    those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
+    """
+    try:
+        raw = read_regular_file(claude_home / "agent-safety-stamp.json")
+        stamp = None if raw is None else json.loads(raw.decode("utf-8"))
+    except (ValueError, OSError):
+        return None
+    if stamp is None:
+        return None
+    # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
+    if stamp_problems(stamp):
+        return None
+    value = stamp.get("instructionsDigest")
+    return value if isinstance(value, str) else None
+
+
+def record_leftover_instructions(claude_home, claude_md, written):
+    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where that failed.
+
+    `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
+    one of them is the run's own output, and replacing it loses nothing, since the prior content is
+    a render, a backup, or absent. Anything else read back is a write by something other than this
+    run, so it is not stamped, no note is returned, and the next run backs it up. Without this
+    record the next run backs the run's own leftover up as a hand edit and the report calls it
+    one, so the note says so where the stamp read back does not hold the leftover's digest. A
+    leftover that cannot be read back is not known to be the run's own, so it gets no note. Only a
+    stamp passing its shape check is updated, since one failing it vouches for nothing either way.
+    """
+    try:
+        left = read_regular_file(claude_md)
+    except OSError:
+        return ""
+    if left is None or not any(w is not None and w.startswith(left) for w in written):
+        return ""
+    digest = text_digest(left.decode("utf-8", errors="replace"))
+    stamp_path = claude_home / "agent-safety-stamp.json"
+    why = ""
+    try:
+        stamp_raw = read_regular_file(stamp_path)
+        stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
+        if stamp is not None and not stamp_problems(stamp):
+            stamp["instructionsDigest"] = digest
+            stamp["instructionsLeftover"] = True
+            write_regular_file(
+                stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
+            )
+    except (ValueError, OSError) as e:
+        why = f" ({e})"
+    if stamped_instructions_digest(claude_home) == digest:
+        return ""
+    return (
+        f" The stamp could not record what was left{why}, so the re-run backs CLAUDE.md up as a "
+        "hand edit."
+    )
+
+
+def write_backup(claude_md, raw):
+    """Write `raw` to a new backup beside CLAUDE.md and return its path, never replacing an earlier one.
+
+    Created exclusively rather than checked and then written, so two runs in one second cannot
+    both pick the same free name and have the second overwrite the first.
+    """
+    when = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
+    n = 0
+    while True:
+        suffix = f"{when}.bak" if n == 0 else f"{when}-{n}.bak"
+        candidate = claude_md.with_name(f"{claude_md.name}.{suffix}")
+        try:
+            with open(candidate, "xb") as f:
+                f.write(raw)
+            return candidate
+        except FileExistsError:
+            n += 1
+
+
 def payload_digest():
     """One digest over the content this kit installs, normalized the way the installer writes it.
 
@@ -429,15 +763,28 @@ def payload_digest():
     return h.hexdigest()[:16]
 
 
+def read_claude_md(claude_md):
+    """CLAUDE.md's text, or None where it is absent, not a regular file, or unreadable.
+
+    One reader for every caller, so a file none of them can read gives each the same answer rather
+    than a traceback in whichever reads it first.
+    """
+    try:
+        raw = read_regular_file(claude_md)
+    except OSError:
+        return None
+    return None if raw is None else raw.decode("utf-8", errors="replace")
+
+
 def blocks_present(claude_md):
     """The marker version of each block actually in CLAUDE.md, by name.
 
     Read from the file rather than from what the installer meant to write, since the question the
     stamp answers is what is on the machine.
     """
-    if not claude_md.exists():
+    text = read_claude_md(claude_md)
+    if text is None:
         return {}
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     found = {}
     for marker in BLOCK_MARKERS:
         # A start marker alone is a half-written block, which a presence check reads as installed.
@@ -457,9 +804,9 @@ def marker_corruption(claude_md):
     CLAUDE.md records the same empty block set it reads, so the stamp and the file agree and the
     corruption reads as a match. Two wrong answers agreeing is the failure this exists to catch.
     """
-    if not claude_md.is_file():
+    text = read_claude_md(claude_md)
+    if text is None:
         return []
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     valid = blocks_present(claude_md)
     out = []
     for marker in BLOCK_MARKERS:
@@ -482,12 +829,17 @@ def installed_digest(claude_home):
     # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
     deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
     claude_md = claude_home / "CLAUDE.md"
-    if not all(f.is_file() for f in deployed) or not claude_md.is_file():
+    claude_text = read_claude_md(claude_md)
+    try:
+        hooks = [read_regular_file(f) for f in deployed]
+    except OSError:
+        return None
+    if None in hooks or claude_text is None:
         return None
     h = hashlib.sha256()
-    for f in deployed:
-        h.update(normalized(f.read_bytes()))
-    text = normalized(claude_md.read_text(encoding="utf-8", errors="replace"))
+    for raw in hooks:
+        h.update(normalized(raw))
+    text = normalized(claude_text)
     for marker in BLOCK_MARKERS:
         found = re.search(
             rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", text, re.DOTALL
@@ -498,8 +850,13 @@ def installed_digest(claude_home):
     return h.hexdigest()[:16]
 
 
-def build_stamp(claude_home, installed):
-    """The record written to the machine after an install, or computed live for a report."""
+def build_stamp(claude_home, installed, instructions_digest=None):
+    """The record written to the machine after an install, or computed live for a report.
+
+    An install passes the digest of what it rendered rather than re-reading the file. A write by
+    anything else between the install's write and this read would otherwise be stamped as the
+    install's own, and the next run would replace it with no backup.
+    """
     return {
         "stampVersion": STAMP_VERSION,
         "host": host_facts(),
@@ -507,6 +864,12 @@ def build_stamp(claude_home, installed):
         "payloadDigest": payload_digest(),
         "installedDigest": installed_digest(claude_home),
         "blocks": blocks_present(claude_home / "CLAUDE.md"),
+        "instructionsDigest": instructions_digest
+        or (
+            text_digest(claude_text)
+            if (claude_text := read_claude_md(claude_home / "CLAUDE.md")) is not None
+            else None
+        ),
         "installedUtc": installed,
     }
 
@@ -553,14 +916,19 @@ def registration_problems(claude_home):
     removed from settings.json leaves a machine carrying a complete, current, and entirely inert
     kit, which every other check here reports as fine.
     """
-    settings = claude_home / "settings.json"
-    if not settings.is_file():
-        return ["settings.json is missing, so the hook is not registered"]
     try:
-        data = json.loads(settings.read_text(encoding="utf-8") or "{}")
+        raw = read_regular_file(claude_home / "settings.json")
+    except FileNotFoundError:
+        return ["settings.json is missing, so the hook is not registered"]
+    except OSError as e:
+        return [f"settings.json cannot be read ({e})"]
+    if raw is None:
+        return ["settings.json is not a regular file, so the hook is not registered"]
+    try:
+        data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
     # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
-    except (ValueError, OSError) as e:
+    except ValueError as e:
         return [f"settings.json cannot be read ({e})"]
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
@@ -753,12 +1121,20 @@ def report(claude_home):
     path = claude_home / "agent-safety-stamp.json"
     current = payload_digest()
     print(f"This checkout: payload {current}, hub {source_ref().get('commit', 'unknown')[:7]}")
-    if not path.exists():
+    try:
+        raw = read_regular_file(path)
+        if raw is None:
+            raise NotRegularFile(f"{path} is not a regular file")
+        stamp = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
         print(f"NOT INSTALLED: no stamp at {path}")
         print("  Run the installer with no arguments to install and stamp this machine.")
         return 2
-    try:
-        stamp = json.loads(path.read_text(encoding="utf-8"))
+    except NotRegularFile:
+        sys.stderr.write(
+            f"Stamp at {path} is not a regular file. Move it aside, then re-run the installer.\n"
+        )
+        return 2
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
     # A partially written or non-UTF-8 file raises that before the JSON parser is ever reached.
     except (ValueError, OSError) as e:
@@ -786,14 +1162,15 @@ def report(claude_home):
     live_installed = installed_digest(claude_home)
     if live_installed is None:
         problems.append(
-            "the deployed hook or CLAUDE.md is missing, so the kit is not fully installed"
+            "a deployed hook or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
         )
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
     try:
-        settings_data = json.loads((claude_home / "settings.json").read_text(encoding="utf-8"))
+        settings_raw = read_regular_file(claude_home / "settings.json")
+        settings_data = None if settings_raw is None else json.loads(settings_raw.decode("utf-8"))
     except (ValueError, OSError):
         settings_data = None
     foreign = foreign_prefix(settings_data)
@@ -816,6 +1193,35 @@ def report(claude_home):
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
+    # The whole file is compared too, since content outside the blocks is drift no block check sees.
+    claude_md = claude_home / "CLAUDE.md"
+    local_path = local_instructions_path()
+    local_text, local_problem = read_local_instructions(local_path)
+    claude_text = read_claude_md(claude_md)
+    claude_unreadable = os.path.lexists(claude_md) and claude_text is None
+    if local_problem:
+        problems.append(local_problem)
+    if claude_unreadable:
+        problems.append(f"{claude_md} exists but is not a readable regular file")
+    elif not local_problem and claude_text is not None:
+        live_text = normalized(claude_text)
+        if live_text != render_instructions(local_path, local_text):
+            if text_digest(live_text) != stamp.get("instructionsDigest"):
+                problems.append(
+                    "CLAUDE.md was edited since the last install, or predates whole-file "
+                    "ownership, so a re-run backs it up before rewriting it. Move host-specific "
+                    f"content into {local_path}"
+                )
+            elif stamp.get("instructionsLeftover") is True:
+                problems.append(
+                    "CLAUDE.md holds what an install left when its write of the file failed, so a "
+                    "re-run rewrites it without a backup"
+                )
+            else:
+                problems.append(
+                    "CLAUDE.md is this installer's own output rather than a hand edit, and "
+                    f"this checkout and {local_path} now render a different one"
+                )
     if live != stamp.get("blocks"):
         problems.append(
             f"CLAUDE.md now holds {live or 'no blocks'}, where the stamp recorded {stamp.get('blocks') or 'none'}"
@@ -828,7 +1234,15 @@ def report(claude_home):
         print("STALE:")
         for p in problems:
             print(f"  - {p}")
-        print("  Re-run the installer with no arguments. It is idempotent.")
+        # The installer refuses an unusable local file, so re-running first would only repeat the refusal.
+        if local_problem:
+            print(f"  Fix {local_path} first, since the installer refuses it as it stands.")
+        if claude_unreadable:
+            print(f"  If the re-run refuses {claude_md}, move it aside first.")
+        print(
+            "  Re-run the installer with no arguments. It is idempotent, and it backs up a "
+            "CLAUDE.md edited since the last install before rewriting it."
+        )
         return 1
     print("CURRENT: this machine matches this checkout.")
     return 0
@@ -871,7 +1285,87 @@ def main():
     if args.report:
         return report(claude_home)
 
+    local_path = local_instructions_path()
+    local_text, local_problem = read_local_instructions(local_path)
+    if local_problem:
+        sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
+        return 1
     print(f"Installing agent host-safety kit into: {claude_home}")
+    claude_home.mkdir(parents=True, exist_ok=True)
+
+    # 0. CLAUDE.md is rendered whole: a header, one marker block per snippet, then the host-local file.
+    # It goes first, so a file that cannot be read, backed up, or written stops the run before any hook or setting changes.
+    # Attempting the real read and write is the check, since a predicted one missed cases the write then raised on.
+    # The safety block states restrictions only.
+    # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
+    # A file whose digest matches the stamp is the one the last install wrote, so it is replaced silently.
+    # Anything else is a hand edit, or a file from before whole-file ownership, so it is backed up first.
+    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
+    # A file that is not valid UTF-8 still decodes for the comparison, and the backup keeps its raw bytes.
+    # A file already holding the render is left unwritten, so a read-only file that is current still installs.
+    rendered = render_instructions(local_path, local_text)
+    # Anything else at the path, a FIFO or a link to a device, would hang the write or swallow it.
+    # A dangling link reads as absent, so a dotfiles link whose target is not created yet still writes it.
+    try:
+        raw = read_regular_file(claude_md)
+        if raw is None:
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} is not a regular file. Move it aside and re-run.\n"
+            )
+            return 1
+    except FileNotFoundError:
+        raw = None
+    except OSError as e:
+        sys.stderr.write(
+            f"Nothing was installed: {claude_md} cannot be read ({e}). Move it aside and re-run.\n"
+        )
+        return 1
+    newline = "\r\n" if raw is not None and b"\r\n" in raw else "\n"
+    existing = None if raw is None else normalized(raw.decode("utf-8", errors="replace"))
+    backups = []
+    if existing == rendered:
+        action = "already current"
+    else:
+        # Backed up only once the open shows the write can happen, so a refused re-run leaves no backup.
+        needs_backup = existing is not None and text_digest(
+            existing
+        ) != stamped_instructions_digest(claude_home)
+        encoded = rendered.replace("\n", newline).encode("utf-8")
+        try:
+            write_regular_file(
+                claude_md,
+                encoded,
+                prior=raw,
+                before=(lambda: backups.append(write_backup(claude_md, raw)))
+                if needs_backup
+                else None,
+            )
+        except IncompleteWrite as e:
+            stamp_note = record_leftover_instructions(claude_home, claude_md, (encoded, raw))
+            kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
+            sys.stderr.write(
+                f"{e}.{kept}{stamp_note} Fix what the error names, then re-run. "
+                "No hook or setting was changed.\n"
+            )
+            return 1
+        except OSError as e:
+            kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
+            aside = ", or move the file aside" if os.path.lexists(claude_md) else ""
+            verb = "rewritten" if raw is not None else "written"
+            sys.stderr.write(
+                f"Nothing was installed: {claude_md} could not be {verb} ({e}).{kept} "
+                f"Fix what the error names{aside}, then re-run.\n"
+            )
+            return 1
+        if backups:
+            action = f"rewritten, the edited prior file backed up to {backups[0]}"
+        else:
+            action = "updated" if existing is not None else "written"
+    backup = backups[0] if backups else None
+    print(f"  CLAUDE.md -> {claude_md} ({action})")
+    if backup is not None:
+        print(f"    Move anything host-specific into {local_path}, then re-run to append it.")
+
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Stage every hook beside its live path, self-test each staged copy, and only then replace.
@@ -888,7 +1382,7 @@ def main():
         except OSError as e:
             for _n, f in staged:
                 f.unlink(missing_ok=True)
-            sys.stderr.write(f"staging {src_name} failed ({e}); nothing was replaced.\n")
+            sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
             return 1
         try:
             os.chmod(tmp, 0o755)
@@ -905,7 +1399,7 @@ def main():
             for _n, f in staged:
                 f.unlink(missing_ok=True)
             sys.stderr.write(
-                f"{src_name} self-test FAILED; nothing was replaced.\n" + r.stdout + r.stderr
+                f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
             )
             return 1
         print(f"  {src_name} self-test: PASS")
@@ -934,10 +1428,19 @@ def main():
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
     # Two reads can also disagree, since another process may write between them.
     data = {}
-    raw = settings.read_text(encoding="utf-8") if settings.exists() else ""
-    if raw.strip():
+    try:
+        settings_raw = read_regular_file(settings)
+        if settings_raw is None:
+            raise NotRegularFile(f"{settings} is not a regular file")
+        settings_text = settings_raw.decode("utf-8")
+    except FileNotFoundError:
+        settings_raw, settings_text = None, ""
+    except (ValueError, OSError) as e:
+        sys.stderr.write(f"{settings} cannot be read ({e}). Fix or move it aside, then re-run.\n")
+        return 1
+    if settings_text.strip():
         try:
-            data = json.loads(raw)
+            data = json.loads(settings_text)
         except json.JSONDecodeError as e:
             sys.stderr.write(
                 f"{settings} exists but is not valid JSON ({e}). Fix or remove it, then re-run.\n"
@@ -1081,59 +1584,37 @@ def main():
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.
-    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    try:
+        write_regular_file(
+            settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"), prior=settings_raw
+        )
+    except IncompleteWrite as e:
+        sys.stderr.write(f"{e}. Fix what the error names, check the file, then re-run.\n")
+        return 1
+    except OSError as e:
+        sys.stderr.write(
+            f"{settings} could not be written ({e}). Fix what the error names, then re-run.\n"
+        )
+        return 1
     for line in done:
         print(f"  settings -> {settings} ({line})")
-
-    # 4. CLAUDE.md carries one marker block per snippet, replaced where present and appended where not.
-    # The two blocks install and update independently, so one can change without rewriting the other.
-    # The safety block states restrictions only.
-    # The fleet block enables, so it stays separate from a block whose own text says nothing in it widens a permission.
-    # Preserve CLAUDE.md's existing line endings: work in \n internally, write back with its own ending.
-    if claude_md.exists():
-        raw = claude_md.read_bytes()
-        newline = "\r\n" if b"\r\n" in raw else "\n"
-        existing = normalized(raw.decode("utf-8"))
-    else:
-        newline, existing = "\n", ""
-    for marker, filename in CLAUDE_MD_BLOCKS:
-        snippet = (HERE / filename).read_text(encoding="utf-8").strip()
-        block_re = re.compile(
-            rf"<!-- {marker} v\d+ start -->.*?<!-- {marker} v\d+ end -->", re.DOTALL
-        )
-        if block_re.search(existing):
-            # Keep the first occurrence and drop any duplicate, rather than rewriting each in place.
-            # Substituting every match preserved the duplication, so a file arriving with two blocks kept two.
-            # The report's own remedy of re-running could then never clear it.
-            written = []
-
-            def once(_match, _snippet=snippet, _written=written):
-                _written.append(True)
-                return _snippet if len(_written) == 1 else ""
-
-            existing = block_re.sub(once, existing)
-            action = (
-                "updated"
-                if len(written) == 1
-                else f"updated, {len(written) - 1} duplicate(s) removed"
-            )
-        else:
-            sep = (
-                ""
-                if existing == "" or existing.endswith("\n\n")
-                else ("\n" if existing.endswith("\n") else "\n\n")
-            )
-            existing, action = existing + sep + snippet + "\n", "appended"
-        print(f"  CLAUDE.md -> {claude_md} ({marker} block {action})")
-    claude_md.write_bytes(existing.replace("\n", newline).encode("utf-8"))
 
     # 5. Stamp the machine, written last so it records a completed install rather than an attempted one.
     # The blocks are read back off disk here, so the stamp reports what CLAUDE.md holds rather than what was intended.
     stamp_path = claude_home / "agent-safety-stamp.json"
     stamp = build_stamp(
-        claude_home, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        claude_home,
+        datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        text_digest(rendered),
     )
-    stamp_path.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+    try:
+        write_regular_file(stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"))
+    except OSError as e:
+        sys.stderr.write(
+            f"The kit is installed and registered, but the stamp could not be written ({e}), so "
+            "--report cannot vouch for this machine. Fix what the error names, then re-run.\n"
+        )
+        return 1
     print(f"  stamp -> {stamp_path}")
 
     print("\nDone. This machine:")

@@ -69,13 +69,17 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
    (.commit.message | split("\n")[0])'`, since a feature PR squashed into `develop` after the
    report moves the promotion's head onto content the maintainer never saw. Under an
-   `unattended-handoff` standing grant there is no report to compare, and content another session
-   merged meanwhile rides along, as that skill's grant accepts.
+   `unattended-handoff` standing grant this comparison is skipped, even where the worker holds a
+   ready report. Content another session merged meanwhile rides along, as that skill's grant
+   accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
    this step recorded.
-3. `gh pr merge [number] --merge --match-head-commit <recorded-sha> --repo owner/repo`, so the
-   server refuses the merge if the head moved after step 2. Never `--delete-branch`, the
-   promotion PR's head is `develop`.
+3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
+   the head the go-ahead covers. Attended, that is the head `drive-pr`'s ready report named, or
+   the moved head the maintainer approved after step 2's re-ask. Under an `unattended-handoff`
+   grant, or where no report named a head, it is the head step 2 recorded. The server then
+   refuses the merge if the head moved past that SHA. Never `--delete-branch`, the promotion
+   PR's head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
 5. When the chosen scope includes a release, first bring the hub checkout used for this procedure
    current, `git fetch origin main`, and read this repo's `releaseTrigger` from that fetched tip
@@ -135,10 +139,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps rather than a checkout, and it holds what
    that bootstrap fetched, the commit `live.commit` names where it is not null, until
    `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again, which this step does not do.
+   From the same worktree, also run `python3 host-setup/agent-safety/claude/install.py --report`,
+   and report any result other than CURRENT to the maintainer. The host-safety kit, its rendered
+   `CLAUDE.md` included, is refreshed only by its own installer. That installer rewrites this
+   machine's hooks and settings, so this step reports it rather than running it.
    Then remove the worktree with
-   `git worktree remove <worktree>`, whatever the report said. Removing it leaves the snapshot and
-   its stamp unchanged, and a result that does not read current is reported to the maintainer.
-   `--report` exits on the snapshot alone. This step runs whether step 5
+   `git worktree remove <worktree>`, whatever either report said. Removing it leaves the skills
+   snapshot and its stamp unchanged, and a result that does not read current is reported to the
+   maintainer. The skills `--report` exits on the snapshot alone. This step runs whether step 5
    or 6 dispatched, skipped, or failed a release, since it is gated only on the chosen scope,
    never on the release outcome. This refreshes only the machine running
    this session, per skill-lifecycle, every other machine still refreshes on its own next run or
@@ -235,8 +243,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 
 - A merge conflict, a newly failing check, or a gate item that regressed since drive-pr finished
   are each a stop, report the exact state, never force or retry blindly.
-- A merge refused by `--match-head-commit` means the head moved after step 2. Attended, stop and
-  report the commits added, named as step 2 names them, and never retry with the new SHA on the
-  old go-ahead. Under an `unattended-handoff` grant, re-run step 2 on the new head instead.
+- A merge refused by `--match-head-commit` means the head moved past the SHA it was given.
+  Attended, stop and report the commits added, named as step 2 names them, and never retry with
+  the new SHA on the old go-ahead. Under an `unattended-handoff` grant, re-run step 2 on the new head instead.
 - `gh pr merge` or `gh workflow run` failing is reported with its actual output, never
   suppressed, never assumed harmless on the agent's side alone.

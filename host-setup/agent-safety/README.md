@@ -172,7 +172,10 @@ text says, because the harm it covers was never in the text.
    itself does. `~`/`$HOME` is expanded throughout (a bare `$HOME` only when not immediately followed
    by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
    a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
-   the hook process's own OS-level cwd happens to be. Fail open (allow) when no git repository
+   the hook process's own OS-level cwd happens to be. On Windows, a Git Bash drive spelling such as
+   `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
+   the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
+   maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
    resolves at all, matching this requirement's own
    precision-over-recall stance, not requirement 4's fail-closed one -- the harm here needs a
    positively-identified primary checkout to fire on. Granted only by
@@ -273,6 +276,21 @@ text says, because the harm it covers was never in the text.
    literal compare of either. The target is normalized and the whole of both trees is denied,
    `/dev/null` included. Only an absolute target is read that way, since a relative one resolves
    against a working directory the rule does not model.
+
+   An `eval`'s arguments are read as a payload, the way a `sh -c`/`bash -c` argument is. Bash joins
+   them with spaces and runs the result in the same shell. An `eval` is read only where it runs.
+   Nothing may stand before it in its run but assignments, redirections, and runners. A runner is a
+   reserved word such as `do`, `if`, or `while`, a `{` or `!`, `coproc`, `time`, `command`, or
+   `builtin`. `time -p`, `command -p`, and a `--` after any of the last three still run the
+   `eval`, while `command -v` only names it. A reserved word counts only ahead of every other
+   prefix, since bash reads it as a plain command name after one. The name a `function` or
+   `coproc` gives its group is skipped. An external launcher such as `timeout` or `nohup`
+   cannot run a builtin. So `timeout 600 eval '<the loop>'` runs nothing, and only a bound on the
+   shell holding the `eval` reaches its loop. A redirection on the `eval` applies to the whole
+   payload. Where the rule cannot tell which words were quoted, any separator on the `eval`'s line
+   may be a quoted one. The payload then runs to the end of that line. The payloads read in one
+   pass over a command share a fixed budget. An `eval` met once it is spent is not read, which
+   leaves its loop unseen, as a wait inside a script file is.
 
    A command that forks work out of a `timeout`'s reach is bounded by nothing, whatever else it
    carries. Three shapes are recognized. A background operator lets the shell exit at once, so

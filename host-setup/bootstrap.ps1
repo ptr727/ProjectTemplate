@@ -81,6 +81,8 @@ $MODE = ''
 $RESOLVED = ''
 $TREE = ''
 $PWSH_PATH = ''
+# Held rather than disposed, since the lock it carries lasts until this process ends.
+$LOCK = $null
 
 function usage {
     # The closing marker of a here-string has to sit at column 0, so this block is deliberately unindented.
@@ -235,6 +237,8 @@ function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
 function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
 function Get-RetiredPath { Join-Path $script:DIR "$(Get-TreeName).old" }
 function Get-ArchivePath { Join-Path $script:DIR "$(Get-TreeName).tar.gz" }
+function Get-LockPath { Join-Path $script:DIR "$(Get-TreeName).lock" }
+function Get-TarPath { Join-Path $env:SystemRoot 'System32\tar.exe' }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
@@ -242,7 +246,35 @@ function Test-Ownership {
     param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
-    Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')
+    if (-not ($item -and $item.PSIsContainer)) { return $false }
+    # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
+    # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
+    # A directory that cannot be read is not known to be either, so it stays somebody else's, which on Linux includes the marker check itself throwing.
+    try {
+        if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
+        return -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
+    } catch {
+        return $false
+    }
+}
+
+# Two runs sharing a -Dir use the same fixed names, so without this one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
+# The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it, and FileShare.None is the share mode .NET implements as a flock on Linux, which is the lock bootstrap.sh takes on the same file.
+# The file is left in place, since removing it while another run holds it open would let a third run lock a new file under the same name.
+function Lock-Directory {
+    $lock = Get-LockPath
+    New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
+    try {
+        $script:LOCK = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
+    } catch [System.Management.Automation.MethodInvocationException] {
+        # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
+        # A file system error .NET maps to no subclass, a read-only mount or a full disk, is a plain IOException too, so the message names the reason rather than asserting the cause.
+        $reason = $_.Exception.InnerException
+        if ($reason.GetType() -eq [IO.IOException]) {
+            die "Could not lock ${lock}: $($reason.Message) Another bootstrap run using $script:DIR is the usual cause, so let it finish, then run this again."
+        }
+        die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
+    }
 }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
@@ -273,7 +305,7 @@ function Get-Tree {
     Remove-Owned -Path $staging
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $staging '.bootstrap-owned') -Force | Out-Null
-    & tar -xzf $archive -C $staging --strip-components=1
+    & (Get-TarPath) -xzf $archive -C $staging --strip-components=1
     if ($LASTEXITCODE -ne 0) { die 'Could not extract the downloaded archive' }
     Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
     # The commit a later report reads for this tree, since a tarball has no .git to answer for it.
@@ -289,6 +321,16 @@ function Remove-Tree {
     param([string]$Path)
     Get-ChildItem -LiteralPath $Path -Force | Where-Object { $_.Name -ne '.bootstrap-owned' } | Remove-Item -Recurse -Force
     Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+# Renames a tree whole or not at all, which Move-Item does not: where a held file stops the rename, it moves the tree entry by entry instead, marker included.
+function Move-Tree {
+    param([string]$Path, [string]$Destination)
+    try {
+        [IO.Directory]::Move($Path, $Destination)
+    } catch [System.Management.Automation.MethodInvocationException] {
+        throw $_.Exception.InnerException
+    }
 }
 
 # Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
@@ -310,19 +352,19 @@ function Invoke-SwapIn {
             }
         }
         try {
-            Move-Item -LiteralPath $tree -Destination $retired
+            Move-Tree -Path $tree -Destination $retired
             $moved = $true
         } catch {
             die "Could not move the previous tree at $tree aside, which a process holding a file in it causes: $($_.Exception.Message)"
         }
     }
     try {
-        Move-Item -LiteralPath $staging -Destination $tree
+        Move-Tree -Path $staging -Destination $tree
     } catch {
         $reason = $_.Exception.Message
         if ($moved) {
             try {
-                Move-Item -LiteralPath $retired -Destination $tree
+                Move-Tree -Path $retired -Destination $tree
             } catch {
                 die "Could not move the extracted tree into place at ${tree} ($reason), and could not put the previous tree back from ${retired}: $($_.Exception.Message)"
             }
@@ -352,7 +394,7 @@ function Invoke-Cleanup {
     if (Test-Ownership -Path $retired) {
         if (-not (Test-Path -LiteralPath (Get-TreePath))) {
             try {
-                Move-Item -LiteralPath $retired -Destination (Get-TreePath)
+                Move-Tree -Path $retired -Destination (Get-TreePath)
             } catch {
                 if (Test-KeepsTree) { warn "Could not put the previous tree back from $retired, so move it to $(Get-TreePath) by hand: $($_.Exception.Message)" }
             }
@@ -476,7 +518,7 @@ function Show-Menu {
 # Windows has shipped tar.exe under %SystemRoot%\System32 since Windows 10 1803 and Windows Server 2019, and it reads a .tar.gz archive directly.
 # That is why this loader does not reach for Expand-Archive, which cannot.
 function Test-Prerequisite {
-    if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath (Get-TarPath) -PathType Leaf)) {
         die 'tar.exe not found under %SystemRoot%\System32. This assumes Windows 10 1803, Windows Server 2019, or later, all of which ship it.'
     }
 }
@@ -484,7 +526,7 @@ function Test-Prerequisite {
 # An absolute path, and never a drive root, since everything below it is created and removed under it.
 function Resolve-Directory {
     if (-not $script:Dir) { return (Join-Path $env:LOCALAPPDATA 'host-setup') }
-    if (-not [IO.Path]::IsPathRooted($script:Dir)) { die "-Dir takes an absolute path, and `"$($script:Dir)`" is relative" }
+    if (-not [IO.Path]::IsPathFullyQualified($script:Dir)) { die "-Dir takes an absolute path, and `"$($script:Dir)`" is relative" }
     $trimmed = $script:Dir.TrimEnd('\', '/')
     if ((-not $trimmed) -or ($trimmed -match '^[A-Za-z]:$')) { die '-Dir may not be a drive root' }
     return $trimmed
@@ -542,6 +584,8 @@ function main {
         }
     }
 
+    # Taken before the try, so a run refused here never reaches the cleanup that would remove the trees of the run holding the lock.
+    Lock-Directory
     try {
         Resolve-Ref
         # The commit the resolve produced is handed to the skills installer, since the tarball tree it runs from has no .git to answer for it.

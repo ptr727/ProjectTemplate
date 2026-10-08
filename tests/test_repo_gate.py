@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import importlib
 import io
 import os
 import re
@@ -693,6 +694,17 @@ NEEDS_SCHEMA = unittest.skipUnless(schema_ready(), "neither uvx nor pipx present
 NEEDS_UVX = unittest.skipUnless(shutil.which("uvx"), "uvx not present")
 
 
+def pyyaml_imports() -> bool:
+    try:
+        importlib.import_module("yaml")
+    except ImportError:
+        return False
+    return True
+
+
+NEEDS_PYYAML = unittest.skipUnless(pyyaml_imports(), "PyYAML does not import")
+
+
 class TestCompositeActions(TreeCase):
     def setUp(self) -> None:
         super().setUp()
@@ -752,6 +764,47 @@ class TestCompositeActions(TreeCase):
     def test_an_empty_body_is_not_checked(self) -> None:
         files = self.action("    - shell: bash\n      run: ' '\n")
         self.assertEqual([], self.shell_hits(files))
+
+    def test_a_container_name_or_shell_is_never_formatted(self) -> None:
+        class ListTripwire(list[object]):
+            def __repr__(self) -> str:
+                raise AssertionError("a list step field was formatted")
+
+        class DictTripwire(dict[str, object]):
+            def __repr__(self) -> str:
+                raise AssertionError("a mapping step field was formatted")
+
+        steps = [
+            {"name": ListTripwire(["x"]), "shell": "bash", "run": "echo $x"},
+            {"name": DictTripwire(x="y"), "shell": "bash", "run": "echo $x"},
+            {"name": "Say", "shell": ListTripwire(["bash"]), "run": "echo $x"},
+            {"name": "Say", "shell": DictTripwire(x="bash"), "run": "echo $x"},
+        ]
+        with (
+            mock.patch.object(repo_gate, "load_action", return_value={"runs": {"steps": steps}}),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], repo_gate.check_composite_shell(self.tmp, "a/action.yml"))
+        labels = [call.args[0] for call in body.call_args_list]
+        self.assertEqual(["a/action.yml step 1", "a/action.yml step 2"], labels)
+
+    @NEEDS_PYYAML
+    def test_an_alias_chain_name_or_shell_is_read_in_process(self) -> None:
+        nested = "".join(
+            f"{name}: &{name} [{', '.join([f'*{prior}'] * 9)}]\n"
+            for prior, name in zip("abcdefgh", "bcdefghi")
+        )
+        files = self.raw(
+            f"a: &a [{', '.join(['x'] * 9)}]\n{nested}"
+            "runs:\n  steps:\n    - name: *i\n      shell: bash\n      run: echo $x\n"
+            "    - shell: *i\n      run: echo $y\n"
+        )
+        with (
+            mock.patch.object(repo_gate, "load_through_uvx", side_effect=AssertionError),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            self.assertEqual([], self.shell_hits(files))
+        self.assertEqual([f"{files[0]} step 1"], [call.args[0] for call in body.call_args_list])
 
     @NEEDS_DOCKER
     def test_an_expression_does_not_trip_shellcheck(self) -> None:

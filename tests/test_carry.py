@@ -9,6 +9,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
+from unittest import mock
+
+from host_capability import requires_symlink
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
@@ -77,6 +81,7 @@ class CarryInventoryTests(unittest.TestCase):
 
         self.assertNotEqual(left_inventory.digest, right_inventory.digest)
 
+    @requires_symlink
     def test_inventory_rejects_source_and_target_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -285,13 +290,23 @@ class CarryManifestTests(unittest.TestCase):
 
     def test_rejects_windows_drive_or_root_in_any_component(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            for value in ("C:x", "real/C:x", "real/sub/d:", "real/1:x", "real/\\x"):
+            for value in ("C:x", "real/C:x", "real/sub/d:", "real/1:x"):
                 with (
                     self.subTest(value=value),
                     self.assertRaisesRegex(carry.CarryError, "Windows drive or root"),
                 ):
                     carry.relative_root(pathlib.Path(temp), value)
 
+    def test_rejects_backslash_anywhere(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            for value in ("real/alias\\sub", "real/\\x", "a\\b", "real\\"):
+                with (
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(carry.CarryError, "backslash"),
+                ):
+                    carry.relative_root(pathlib.Path(temp), value)
+
+    @requires_symlink
     def test_rejects_symlinked_declared_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -341,6 +356,38 @@ class CarryManifestTests(unittest.TestCase):
                 capture_output=True,
             )
             carry.verify_target(standalone, {"url": str(remote)}, [standalone / "owned"])
+
+            git = carry.git
+
+            def listing_with(
+                target_rows: Callable[[str], list[str]],
+            ) -> Callable[..., str]:
+                def patched(root: pathlib.Path, *args: str) -> str:
+                    output = git(root, *args)
+                    if args != ("worktree", "list", "--porcelain"):
+                        return output
+                    return "\n".join(
+                        listed
+                        for row in output.splitlines()
+                        for listed in (
+                            target_rows(row) if row.endswith(f"/{worktree.name}") else [row]
+                        )
+                    )
+
+                return patched
+
+            with mock.patch.object(carry, "git", listing_with(lambda row: [f"{row}/."])):
+                carry.verify_target(worktree, {"url": str(remote)}, [owned])
+            for name, target_rows in (
+                ("unlisted", lambda row: []),
+                ("listed twice", lambda row: [row, f"{row}/."]),
+            ):
+                with (
+                    self.subTest(name),
+                    mock.patch.object(carry, "git", listing_with(target_rows)),
+                    self.assertRaisesRegex(carry.CarryError, "not a registered git worktree"),
+                ):
+                    carry.verify_target(worktree, {"url": str(remote)}, [owned])
 
             with self.assertRaisesRegex(carry.CarryError, "origin does not match"):
                 carry.verify_target(worktree, {"url": str(root / "other.git")}, [owned])

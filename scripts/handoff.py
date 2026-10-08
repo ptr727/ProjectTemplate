@@ -22,6 +22,11 @@ handoff, and a lane closed out whose newest link is closed. `new` chains onto th
 either way. Two or more open on one track is a defect to report, never one to resolve by picking,
 so every command that would have to choose refuses and names both.
 
+A head resolved that way can still be one the chain has moved past, where another link already
+names it as predecessor, holds a higher round, or holds the same round. `new` refuses onto such a
+head, and `current`, `resume`, and `chain` answer from it with a notice naming each such link,
+since answering from it silently is how a search reads "no match" over text in the lane.
+
 Subcommands
   current  The open handoff issue for a track, number and URL. Read-only.
   resume   That issue's body, then a one-line index of the last N closed links. Read-only.
@@ -559,7 +564,8 @@ def on_track(rows: list[dict], track: str) -> dict | None:
     return matches[0] if matches else None
 
 
-def current_or_refuse(repo: str, track: str) -> dict:
+def current_or_refuse(repo: str, track: str) -> tuple[dict, list[str]]:
+    """The open handoff on `track`, with each reason `head_doubts` gives that it is not the head."""
     rows = open_handoffs(repo)
     require_marked(rows)
     found = on_track(rows, track)
@@ -568,7 +574,7 @@ def current_or_refuse(repo: str, track: str) -> dict:
             f"{repo} has no open handoff on track {track!r}. Zero is the state before the first "
             "handoff on a track, so `new` is what follows, not a retry of this."
         )
-    return found
+    return found, head_doubts(found, track_links(repo, track, rows))
 
 
 def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str | None]:
@@ -774,16 +780,18 @@ def edit_body(repo: str, number: int, body: str, dry_run: bool) -> None:
 
 
 def cmd_current(a: argparse.Namespace) -> int:
-    found = current_or_refuse(a.repo, a.track)
+    found, doubts = current_or_refuse(a.repo, a.track)
     marker = found["marker"]
     print(f"#{found['number']} {found['url']}")
     print(f"track={marker['track']} round={marker['round']} previous={marker['previous']}")
     print(found["title"])
+    if doubts:
+        print(doubt_notice(found, a.track, doubts))
     return 0
 
 
 def cmd_resume(a: argparse.Namespace) -> int:
-    found = current_or_refuse(a.repo, a.track)
+    found, doubts = current_or_refuse(a.repo, a.track)
     print(f"# {found['title']}")
     print(f"# {found['url']}")
     print()
@@ -794,12 +802,14 @@ def cmd_resume(a: argparse.Namespace) -> int:
     print(f"## Chain history, last {a.history} closed links")
     if previous is None:
         print("(none - this is the first handoff on this track)")
-        return 0
-    links, stopped = walk(a.repo, previous, a.history, "--history")
-    for link in links:
-        print(describe(link))
-    if stopped is not None:
-        print(f"(index stopped at {stopped})")
+    else:
+        links, stopped = walk(a.repo, previous, a.history, "--history")
+        for link in links:
+            print(describe(link))
+        if stopped is not None:
+            print(f"(index stopped at {stopped})")
+    if doubts:
+        print(doubt_notice(found, a.track, doubts))
     return 0
 
 
@@ -810,12 +820,16 @@ def cmd_chain(a: argparse.Namespace) -> int:
         raise Refusal(f"--grep is not a valid regular expression: {exc}") from exc
     rows = open_handoffs(a.repo)
     require_marked(rows)
-    head = on_track(rows, a.track) or newest_closed(a.repo, a.track)
+    head = on_track(rows, a.track)
+    closed = None if head else read_closed(a.repo)
+    head = head or newest_closed(a.repo, a.track, closed)
     if head is None:
         raise Refusal(
             f"{a.repo} has no handoff on track {a.track!r}, open or closed, so there is no chain "
             "to walk."
         )
+    lane = track_links(a.repo, a.track, rows, closed)
+    doubts = head_doubts(head, lane)
     links, stopped = walk(a.repo, head["number"], a.limit, "--limit")
     shown = 0
     for link in links:
@@ -834,6 +848,18 @@ def cmd_chain(a: argparse.Namespace) -> int:
             f"(the walk stopped at {stopped}, so it read {len(links)} link(s) rather than the "
             "chain, and a search over it is not a search over the chain)"
         )
+    if doubts:
+        print(doubt_notice(head, a.track, doubts))
+    walked = {int(link["number"]) for link in links}
+    missed = [row for row in lane.links if int(row["number"]) not in walked]
+    if stopped is None and missed:
+        listed = ", ".join(f"#{row['number']}" for row in missed)
+        print(
+            cut(
+                f"(the walk did not reach {listed}, on track {a.track!r} and outside the chain "
+                "walked, so a search over it is not a search over the track)"
+            )
+        )
     return 0
 
 
@@ -844,22 +870,8 @@ def cut(text: str) -> str:
     return f"{text[:STDERR_CAP]} ... {len(text) - STDERR_CAP} more character(s) not shown."
 
 
-def newest_closed(repo: str, track: str) -> dict | None:
-    """The newest closed handoff on a track, or None where the track has never had one.
-
-    A track with no open handoff is either one that has never had a handoff or one whose lane was
-    closed out, and the two are not the same. Reading the second as the first makes the next `new`
-    start a second chain at round 1 with `previous=none`, orphaning every link already written,
-    which is the failure the chain exists to prevent.
-
-    The head is the highest round rather than the highest issue number, because a chain is ordered
-    by round everywhere else and an issue number only agrees with that where the links were filed
-    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
-    number there hands `new` a predecessor that is not the head, so it files a second link at a
-    round already taken and the real chain goes unreachable while every step exits 0. The number
-    breaks a tie between two links claiming one round, which is itself a defect the reader should
-    not have to resolve.
-    """
+def read_closed(repo: str) -> list[dict]:
+    """The closed `handoff` issues, up to `CLOSED_WINDOW`, with their bodies."""
     rows = gh_json(
         [
             "issue",
@@ -876,7 +888,29 @@ def newest_closed(repo: str, track: str) -> dict | None:
             "number,body,state",
         ]
     )
-    rows = rows_of(rows, f"closed handoff list for {repo}", "number")
+    return rows_of(rows, f"closed handoff list for {repo}", "number")
+
+
+def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> dict | None:
+    """The newest closed handoff on a track, or None where the track has never had one.
+
+    A track with no open handoff is either one that has never had a handoff or one whose lane was
+    closed out, and the two are not the same. Reading the second as the first makes the next `new`
+    start a second chain at round 1 with `previous=none`, orphaning every link already written,
+    which is the failure the chain exists to prevent.
+
+    The head is the highest round rather than the highest issue number, because a chain is ordered
+    by round everywhere else and an issue number only agrees with that where the links were filed
+    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
+    number there hands `new` a predecessor that is not the head, so it files a second link at a
+    round already taken and the real chain goes unreachable while every step exits 0. The number
+    breaks a tie between two links claiming one round, which is itself a defect the reader should
+    not have to resolve.
+
+    A caller that already read the closed list passes it as `closed`, and it is used as given
+    rather than read again.
+    """
+    rows = closed if closed is not None else read_closed(repo)
     malformed: list[str] = []
     bare: list[str] = []
     found: list[dict] = []
@@ -960,12 +994,15 @@ def cmd_new(a: argparse.Namespace) -> int:
     body = getattr(a, "body", None)
     if body is None:
         body = body_from(Path(a.body_file))
+    closed = None
     if getattr(a, "fresh_label", False):
         rows, previous = [], None
     else:
         rows = open_handoffs(a.repo)
         require_marked(rows)
-        previous = on_track(rows, a.track) or newest_closed(a.repo, a.track)
+        previous = on_track(rows, a.track)
+        closed = None if previous else read_closed(a.repo)
+        previous = previous or newest_closed(a.repo, a.track, closed)
     previous_number = previous["number"] if previous else None
     round_ = int(previous["marker"]["round"]) + 1 if previous else 1
     # A head can already have a successor, whatever key resolved it.
@@ -975,13 +1012,13 @@ def cmd_new(a: argparse.Namespace) -> int:
     # The check runs before the create rather than after it.
     # A refusal that leaves an issue behind is a refusal that changed something.
     if previous is not None:
-        taken = successor_of(a.repo, a.track, int(previous["number"]), 0)
-        if taken is not None:
+        doubts = head_doubts(previous, track_links(a.repo, a.track, rows, closed))
+        if doubts:
             raise Refusal(
-                f"#{taken['number']} already succeeds #{previous['number']} on track "
-                f"{a.track!r}, so filing another link onto it would fork the chain there and "
-                f"leave #{taken['number']} unreachable. That link is the track's head rather "
-                "than this one."
+                cut(
+                    f"#{previous['number']} may not be the head of track {a.track!r}, so filing "
+                    f"another link onto it could fork the chain there. {' '.join(doubts)}"
+                )
             )
     title = TITLE.format(track=a.track, subject=a.title)
     print(f"1. create the new handoff on track {a.track!r}, round {round_}")
@@ -1005,40 +1042,27 @@ def cmd_new(a: argparse.Namespace) -> int:
     return 0
 
 
-def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None:
-    """The link on `track` that already names `number` as its predecessor, or None.
+class Lane(typing.NamedTuple):
+    """Every readable link on one track, and what kept that read from being whole."""
 
-    Read from the open and the closed side together, since a predecessor's successor is closed as
-    soon as the round after it is filed, so the closed side is where it usually sits.
+    links: list[dict]
+    unreadable: list[str]
+    full: bool
+
+
+def track_links(repo: str, track: str, rows: list[dict], closed: list[dict] | None = None) -> Lane:
+    """The links on `track`, the open ones taken from `rows` and the closed ones from `closed`.
+
+    A row whose block is absent or cannot be read could be on this track, so it is named in
+    `unreadable` rather than skipped, and a closed read that fills its window sets `full`, since a
+    link past it is unseen. Each caller decides whether those refuse or are reported. A caller
+    that already read the closed list passes it as `closed`, and one that passes none has it read here.
     """
-    closed = gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--label",
-            LABEL,
-            "--state",
-            "closed",
-            "--limit",
-            str(CLOSED_WINDOW),
-            "--json",
-            "number,body,state",
-        ]
-    )
-    closed = rows_of(closed, f"closed handoff list for {repo}", "number")
-    if len(closed) >= CLOSED_WINDOW:
-        raise Refusal(
-            f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "
-            f"window, so a link already succeeding #{number} could sit past it. Pointing a second "
-            "link at it would fork the chain there unseen."
-        )
+    if closed is None:
+        closed = read_closed(repo)
+    links: list[dict] = []
     unreadable: list[str] = []
-    bare: list[str] = []
-    for row in [*open_handoffs(repo), *closed]:
-        if row["number"] == ignore:
-            continue
+    for row in [*rows, *closed]:
         marker = row.get("marker")
         if marker is None:
             try:
@@ -1047,20 +1071,75 @@ def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None
                 unreadable.append(str(exc))
                 continue
         if marker is None:
-            # `newest_closed` holds these two to be the same hazard, and so does this.
-            # An absent block leaves what the link succeeds unknown, as an unreadable one does.
-            # Reading either as "not the successor" is a guess.
-            bare.append(
-                f"#{row['number']} carries the `{LABEL}` label and no metadata block, so what it "
-                "succeeds cannot be read. Add one to its body by hand, or take the label off it."
+            unreadable.append(
+                f"#{row['number']} carries the `{LABEL}` label and no metadata block, so its "
+                "track cannot be read. Add one to its body by hand, or take the label off it."
             )
             continue
-        if marker["track"] == track and marker["previous"] == str(number):
+        if marker["track"] == track:
             row["marker"] = marker
-            return row
-    if unreadable or bare:
+            links.append(row)
+    return Lane(links, unreadable, len(closed) >= CLOSED_WINDOW)
+
+
+def head_doubts(head: dict, lane: Lane) -> list[str]:
+    """Each reason `head` may not be its track's head, one sentence apiece, empty where none.
+
+    `on_track` takes an open link whatever round it holds, and `newest_closed` breaks a tie on one
+    round by issue number, so either can resolve a link the chain has already moved past. Three
+    states show it: a link already naming it as predecessor, a link at a higher round, and another
+    link at its own round. Answering from such a head is how a search reads "no match" over text
+    in the lane, so the reads print these and `new` refuses on them.
+    """
+    number = int(head["number"])
+    round_ = int(head["marker"]["round"])
+    doubts: list[str] = []
+    for row in lane.links:
+        if int(row["number"]) == number:
+            continue
+        other = int(row["marker"]["round"])
+        if row["marker"]["previous"] == str(number):
+            doubts.append(f"#{row['number']} already succeeds #{number}.")
+        elif other > round_:
+            doubts.append(f"#{row['number']} holds round {other}, above #{number}'s {round_}.")
+        elif other == round_:
+            doubts.append(f"#{row['number']} also holds round {round_}.")
+    if lane.full:
+        doubts.append(
+            f"The closed `{LABEL}` issues fill the read window of {CLOSED_WINDOW}, so a link past "
+            "it went unchecked."
+        )
+    doubts.extend(lane.unreadable)
+    return doubts
+
+
+def doubt_notice(head: dict, track: str, doubts: list[str]) -> str:
+    """The line a read prints over a head `head_doubts` questioned, bounded like a refusal."""
+    return cut(
+        f"(#{head['number']} may not be the head of track {track!r}, so this read may miss the "
+        f"chain's newest links. {' '.join(doubts)})"
+    )
+
+
+def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None:
+    """The link on `track` that already names `number` as its predecessor, or None.
+
+    Read from the open and the closed side together, since a predecessor's successor is closed as
+    soon as the round after it is filed, so the closed side is where it usually sits.
+    """
+    lane = track_links(repo, track, open_handoffs(repo))
+    if lane.full:
         raise Refusal(
-            cut(" ".join([*unreadable, *bare]))
+            f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "
+            f"window, so a link already succeeding #{number} could sit past it. Pointing a second "
+            "link at it would fork the chain there unseen."
+        )
+    for row in lane.links:
+        if row["number"] != ignore and row["marker"]["previous"] == str(number):
+            return row
+    if lane.unreadable:
+        raise Refusal(
+            cut(" ".join(lane.unreadable))
             + f" One of those could already succeed #{number}, so whether pointing a second link "
             "at it forks the chain cannot be read."
         )
