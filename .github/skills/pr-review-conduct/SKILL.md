@@ -288,6 +288,10 @@ never against its confidence label. Classify before responding:
 - **Bug**, wrong behavior, missing coverage, a real code or doc divergence. Fix it.
 - **Hardening that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out**, including
   a test it says not to write. Decline it under outcome 2, even where it reads as missing coverage.
+- **Design finding that `GOVERNANCE.md` "Design Before Code" backs**, such as logic an existing
+  helper provides or a per-site fix for a class seen elsewhere. Fix it in the files the change
+  touches, and file the sites outside them as one issue naming each, rather than surfacing it as
+  an architectural opinion.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**, and take it to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.

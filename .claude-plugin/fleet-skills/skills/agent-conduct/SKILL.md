@@ -23,11 +23,11 @@ description: >-
 
 ## Why This Exists
 
-The fleet's conduct rules (verification before claiming done, asking instead of assuming, recording lessons, accounting at handoff for what was parked rather than asked, recording a blocker that lives in another repository) lived only in doc sections nothing surfaced at the moment of violation, so they were honored by whoever happened to have read them recently. This skill is the decision-moment surface. The full rules stay in `GOVERNANCE.md` ("Verification Discipline", "Communicating with the User", "Durable Knowledge and Self-Improvement"), which keeps authority, and each of those three sections is carried here whole, as a generated include that `scripts/build_dist.py` fills from the section and holds to it, so the text that surfaces at the moment is the rule's own rather than a shorter list of it. The design moment points at `GOVERNANCE.md` "Design Before Code" instead, which the `fleet-code-review` Skill carries whole. The carried `AGENTS.md` "Context and Delegation Discipline" section is the always-on layer and is not carried here. A defect in included text is fixed in `GOVERNANCE.md` and regenerated, never edited in this file, per the `skill-lifecycle` Skill.
+The fleet's conduct rules (verification before claiming done, asking instead of assuming, recording lessons, accounting at handoff for what was parked rather than asked, recording a blocker that lives in another repository) lived only in doc sections nothing surfaced at the moment of violation, so they were honored by whoever happened to have read them recently. This skill is the decision-moment surface. The full rules stay in `GOVERNANCE.md` ("Verification Discipline", "Communicating with the User", "Durable Knowledge and Self-Improvement"), which keeps authority, and each of those three sections is carried here whole, as a generated include that `scripts/build_dist.py` fills from the section and holds to it, so the text that surfaces at the moment is the rule's own rather than a shorter list of it. The carried `AGENTS.md` "Context and Delegation Discipline" section is the always-on layer and is not carried here. A defect in included text is fixed in `GOVERNANCE.md` and regenerated, never edited in this file, per the `skill-lifecycle` Skill.
 
 ## Before Designing a Change
 
-Read `GOVERNANCE.md` "Design Before Code" before the first edit of a change. It is read at its home rather than carried here, since the `fleet-code-review` Skill carries it whole for the review that checks it.
+Read `GOVERNANCE.md` "Design Before Code" before the first edit of a change.
 
 ## Before Claiming Done
 
