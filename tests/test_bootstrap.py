@@ -1459,6 +1459,18 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         self.assertTrue((self.dir / "hub" / "README.md").exists())
         self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
 
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """A clone into the surviving tree would fail, and its cleanup would then drop the marker."""
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            'git() { mkdir -p "${!#}"; }\nrm() { return 0; }\n'
+            'rc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rc=1", result.stdout)
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
     def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
         """A directory at the marker's name refuses the write, which errexit would not catch here."""
         (self.dir / "hub.owned").mkdir()
@@ -1697,6 +1709,22 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
             + (again if refetched else "")
             + "Invoke-Cleanup\n"
         )
+
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what holds a file open differs by platform.
+        """
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            self.FETCH_SETUP + "function Remove-Item { throw 'held' }\n"
+            "$ok = Invoke-FetchHubLocked\n"
+            '[Console]::Out.WriteLine("ok=$ok")\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "ok=False")
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
 
     def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
         """It fails the one task rather than ending the menu's whole session.

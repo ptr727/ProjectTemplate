@@ -257,7 +257,14 @@ function Invoke-FetchHubLocked {
     step "Fetching $script:HUB_REPO at $script:REF"
     if (-not (Test-HubRemovable)) { return $false }
     $hubPath = Join-Path $script:DIR 'hub'
-    if (Test-Path -LiteralPath $hubPath) { Remove-Item -LiteralPath $hubPath -Recurse -Force }
+    if (Test-Path -LiteralPath $hubPath) {
+        try {
+            Remove-Item -LiteralPath $hubPath -Recurse -Force
+        } catch {
+            fail "Could not remove $hubPath to fetch it again. Check that nothing holds a file under it: $($_.Exception.Message)"
+            return $false
+        }
+    }
     # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
     $script:HUB_FETCH_TOKEN = [guid]::NewGuid().ToString('N')
     try {

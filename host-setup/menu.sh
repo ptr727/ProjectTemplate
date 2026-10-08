@@ -176,6 +176,10 @@ fetch_hub_locked() {
     fi
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
+    if [[ -e "$DIR/hub" || -L "$DIR/hub" ]]; then
+        fail "Could not remove $DIR/hub to fetch it again. Check that nothing holds a file under it."
+        return 1
+    fi
     # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
     if ! printf '%s\n' "$HUB_FETCH_TOKEN" >"$(marker_path)"; then
         fail "Could not write $(marker_path). Check that $DIR is writable."
