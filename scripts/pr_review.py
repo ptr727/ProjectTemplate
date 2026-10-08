@@ -2065,7 +2065,7 @@ def segment_fits(segment: str, pattern: str) -> bool:
 
 
 def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool, bool]:
-    """The changed paths one table row names, out of `diff`, and whether a note came off first.
+    """The changed paths a row names, whether it names one at most, and whether a note came off.
 
     While a row names nothing and ends in a parenthesized note, it is read again without that
     note, since the second format writes one after a path, as in `docs/a.md (cleanup)`. A note
