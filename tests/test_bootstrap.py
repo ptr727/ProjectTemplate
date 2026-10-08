@@ -1451,10 +1451,11 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         self.make_cache(self.TOKEN)
         result = self.run_body(
             'git() { mkdir -p "${!#}"; }\nod() { return 1; }\n'
-            'rc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("rc=1", result.stdout)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
         self.assertIn("Could not read /dev/urandom", result.stderr)
         self.assertTrue((self.dir / "hub" / "README.md").exists())
         self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
@@ -1464,10 +1465,11 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         self.make_cache(self.TOKEN)
         result = self.run_body(
             'git() { mkdir -p "${!#}"; }\nrm() { return 0; }\n'
-            'rc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("rc=1", result.stdout)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
         self.assertIn("Could not remove", result.stderr)
         self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
 
@@ -1475,10 +1477,11 @@ class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         """A directory at the marker's name refuses the write, which errexit would not catch here."""
         (self.dir / "hub.owned").mkdir()
         result = self.run_body(
-            'git() { mkdir -p "${!#}"; }\nrc=0\nfetch_hub_locked || rc=$?\nprintf "rc=%s\\n" "$rc"\n'
+            f'git() {{ mkdir -p "${{!#}}"; }}\nHUB_FETCH_TOKEN={self.TOKEN}\nrc=0\n'
+            'fetch_hub_locked || rc=$?\nprintf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("rc=1", result.stdout)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
         self.assertIn("Could not write", result.stderr)
         self.assertFalse((self.dir / "hub").exists())
 
@@ -1717,12 +1720,14 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         """
         self.make_cache(self.TOKEN)
         result = self.run_body(
-            self.FETCH_SETUP + "function Remove-Item { throw 'held' }\n"
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Remove-Item { throw 'held' }\n"
             "$ok = Invoke-FetchHubLocked\n"
-            '[Console]::Out.WriteLine("ok=$ok")\n'
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip().splitlines()[-1], "ok=False")
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
         self.assertIn("Could not remove", result.stderr)
         self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
 
@@ -1732,12 +1737,14 @@ class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
         The refusal is stubbed, since what refuses a write differs by platform and by account.
         """
         result = self.run_body(
-            self.FETCH_SETUP + "function Set-Content { throw 'refused' }\n"
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Set-Content { throw 'refused' }\n"
             "$ok = Invoke-FetchHubLocked\n"
-            '[Console]::Out.WriteLine("ok=$ok")\n'
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip().splitlines()[-1], "ok=False")
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
         self.assertIn("Could not write", result.stderr)
         self.assertFalse((self.dir / "hub").exists())
 

@@ -266,13 +266,14 @@ function Invoke-FetchHubLocked {
         }
     }
     # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
-    $script:HUB_FETCH_TOKEN = [guid]::NewGuid().ToString('N')
+    $token = [guid]::NewGuid().ToString('N')
     try {
-        Set-Content -LiteralPath (Get-MarkerPath) -Value $script:HUB_FETCH_TOKEN
+        Set-Content -LiteralPath (Get-MarkerPath) -Value $token
     } catch {
         fail "Could not write $(Get-MarkerPath). Check that $script:DIR is writable: $($_.Exception.Message)"
         return $false
     }
+    $script:HUB_FETCH_TOKEN = $token
     # A full clone of the default branch first, whatever -Ref names: spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary.
     # Piped to Out-Host rather than left bare: an unassigned native call's stdout otherwise joins this function's own return value, which return $true/$false below would then be appended to instead of replacing.
     & git clone --quiet --branch $script:DEFAULT_REF --single-branch $script:HUB_URL $hubPath | Out-Host
