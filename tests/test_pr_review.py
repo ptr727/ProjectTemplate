@@ -3519,6 +3519,31 @@ class TestSecondOverviewFormat(GqlCase):
             ("lite", "explicit"), pr_review.review_effort(payload([review(body=bullet)]))
         )
 
+    def test_the_effort_line_reads_when_it_opens_on_an_emoji(self) -> None:
+        """A later revision opens the bare bold line on an emoji, which left `effort=unknown`.
+
+        Escaped rather than typed, so the fixture stays inside the repository's charset rule.
+        An ASCII word before the label is prose about the line rather than the line itself.
+        """
+        brain = "\U0001f9e0"
+        for label, effort in (
+            ("emoji", f"{brain} **Review effort:** Lite"),
+            ("emoji with no space", f"{brain}**Review effort:** Lite"),
+        ):
+            with self.subTest(case=label):
+                pr = payload([review(body=overview_v2(effort=effort))])
+                self.assertEqual(("lite", "explicit"), pr_review.review_effort(pr))
+        inherited = overview_v2(effort=f"{brain} **Review effort:** Default (Max)")
+        self.assertEqual(
+            ("max", "default"), pr_review.review_effort(payload([review(body=inherited)]))
+        )
+        self.assertEqual([], pr_review.unrecognized_in(inherited))
+        self.answer(payload([review(body=overview_v2(effort=f"{brain} **Review effort:** Lite"))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("effort=lite effort_source=explicit", out)
+        prose = payload([review(body=overview_v2(effort="See **Review effort:** Lite"))])
+        self.assertEqual(("unknown", "unknown"), pr_review.review_effort(prose))
+
     def test_the_format_is_recognized_by_its_marker_on_a_line_of_its_own(self) -> None:
         """The marker is an HTML comment, so a writer who wants a reader to see it has to quote it,
         which is why a fence and a code span are masked before the search.
