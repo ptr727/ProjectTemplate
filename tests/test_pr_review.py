@@ -4263,8 +4263,9 @@ class TestCoverageExitCodes(GqlCase):
     def test_a_note_is_kept_where_the_row_names_a_path_with_it(self) -> None:
         """Parentheses that are part of a changed path or a shortened tail are kept.
 
-        A row naming a changed path reads as written. A note comes off only a row naming none,
-        and only its last parenthesized group, so a path's own inner parentheses stay.
+        A row naming a changed path reads as written, and trailing notes come off a row only while
+        it names none. Parentheses inside a path, as in `docs/a (draft).md`, are never trailing,
+        so they are never read as a note.
         """
         for cell, files, shortfall in (
             ("docs/a (draft).md (cleanup)", ["docs/a (draft).md"], ""),

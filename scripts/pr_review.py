@@ -2065,12 +2065,12 @@ def segment_fits(segment: str, pattern: str) -> bool:
 
 
 def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
-    """The changed paths one table row names, out of `diff`, reading past a note where it must.
+    """The changed paths one table row names, out of `diff`, reading past notes where it must.
 
-    A row naming nothing that ends in a parenthesized note is read again without it, since the
-    second format writes one on a row for a file another row already names, as in
-    `docs/a.md (cleanup)`. The note is dropped only where the row names nothing, so a changed path
-    or a shortened tail that itself ends in one still reads as written.
+    While a row names nothing and ends in a parenthesized note, it is read again without that
+    note, since the second format writes one after a path, as in `docs/a.md (cleanup)`. A note
+    comes off only while the row names nothing, so a row naming a changed path in any of
+    `row_form`'s ways reads as written, whatever parentheses it ends in.
     """
     while True:
         paths, single = row_form(row, diff)
@@ -2179,8 +2179,8 @@ def cell_paths(cell: str) -> list[str]:
 
     The second format can group related files into one row, each in a code span of its own with
     a comma between them, and read whole that cell is one path holding backticks, which names
-    none of the files it lists. So a cell holding nothing but commas and whitespace outside its
-    spans names each span, and any other cell is read whole, its outer backticks dropped.
+    none of the files it lists. So a cell holding spans with nothing but commas and whitespace
+    outside them names each span, and any other cell is read whole, its outer backticks dropped.
     """
     spans = TABLE_SPAN.findall(cell)
     if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
