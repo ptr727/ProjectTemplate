@@ -69,8 +69,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
    (.commit.message | split("\n")[0])'`, since a feature PR squashed into `develop` after the
    report moves the promotion's head onto content the maintainer never saw. Under an
-   `unattended-handoff` standing grant there is no report to compare, and content another session
-   merged meanwhile rides along, as that skill's grant accepts.
+   `unattended-handoff` standing grant this comparison is skipped, even where the worker holds a
+   ready report. Content another session merged meanwhile rides along, as that skill's grant
+   accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
    this step recorded.
 3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
