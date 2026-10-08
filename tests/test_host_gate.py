@@ -190,8 +190,11 @@ class TestCheck(unittest.TestCase):
     def test_a_host_setup_remedy_resolves_against_this_checkout(self):
         """The data stays repo-relative and the printed command is runnable from any directory."""
         resolved = host_gate.resolve_remedy("host-setup/linux/install-tools.sh --upgrade gh")
-        self.assertTrue(resolved.startswith(str(host_gate.SPEC.parent.parent)))
-        self.assertTrue(resolved.endswith("install-tools.sh --upgrade gh"))
+        script = host_gate.quote_argument(
+            str(host_gate.SPEC.parent.parent / "host-setup/linux/install-tools.sh")
+        )
+        prefix = f"& {script}" if host_gate.platform_key() == "windows" else script
+        self.assertEqual(f"{prefix} --upgrade gh", resolved)
         self.assertEqual(host_gate.resolve_remedy("brew upgrade gh"), "brew upgrade gh")
 
     def test_a_checkout_path_needing_quoting_is_quoted(self):
@@ -212,11 +215,12 @@ class TestCheck(unittest.TestCase):
         try:
             host_gate.sys.platform = "win32"
             self.assertEqual(host_gate.quote_argument("tool; & 'next'"), "'tool; & ''next'''")
+            root = Path("C:/repo; & 'quoted'")
+            script = str(root / "host-setup/windows/install-tools.ps1").replace("'", "''")
             self.assertTrue(
                 host_gate.resolve_remedy(
-                    "host-setup/windows/install-tools.ps1 -Install needed",
-                    root=Path("C:/repo; & 'quoted'"),
-                ).startswith("& 'C:/repo; & ''quoted''/host-setup/windows/install-tools.ps1'")
+                    "host-setup/windows/install-tools.ps1 -Install needed", root=root
+                ).startswith(f"& '{script}'")
             )
             host_gate.REMEDY_REPO = Path("/tmp/repo; & 'quoted'")
             remedy = host_gate.package_remedy(
@@ -225,7 +229,8 @@ class TestCheck(unittest.TestCase):
                     install={"windows": {"manager": "winget", "package": "Vendor.Tool"}},
                 )
             )
-            self.assertIn("-Repo '/tmp/repo; & ''quoted'''", remedy or "")
+            repo = str(host_gate.REMEDY_REPO.resolve()).replace("'", "''")
+            self.assertIn(f"-Repo '{repo}'", remedy or "")
             self.assertTrue((remedy or "").endswith("'tool; & ''next'''"))
         finally:
             host_gate.sys.platform = original
@@ -601,7 +606,8 @@ class TestBareRunOverlayWarning(unittest.TestCase):
             (root / "host-tools.json").write_text(json.dumps({"tools": [local]}), encoding="utf-8")
             out = self.run_from(root, ["--spec", self.spec_with_one_passing_tool(d), "--quiet"])
             self.assertIn("REMEDY:", out)
-            self.assertIn(f"--repo {host_gate.quote_argument(str(root.resolve()))}", out)
+            flag = "-Repo" if host_gate.platform_key() == "windows" else "--repo"
+            self.assertIn(f"{flag} {host_gate.quote_argument(str(root.resolve()))}", out)
 
     def test_an_explicit_repo_does_not_warn(self):
         import tempfile

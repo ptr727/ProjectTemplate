@@ -82,16 +82,10 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     )
 
 
-def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, str, list[str]]:
-    """Run the workflow's own label-reading step against a stub gh.
-
-    Returns the exit code, the step output written, the log, and the arguments gh received.
-
-    `live` is what the stub prints as the label names, and None makes the read fail.
-    """
+def workflow_step_script(name: str) -> str:
+    """The `run` block of the validate-task workflow step called `name`, dedented as a runner reads it."""
     workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-    marker = "      - name: Read comments label step\n"
-    _, body = workflow.split(marker, 1)
+    _, body = workflow.split(f"      - name: {name}\n", 1)
     _, block = body.split("        run: |\n", 1)
     script_lines = []
     for line in block.splitlines():
@@ -101,6 +95,17 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
             script_lines.append(line)
         else:
             break
+    return "\n".join(script_lines)
+
+
+def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, str, list[str]]:
+    """Run the workflow's own label-reading step against a stub gh.
+
+    Returns the exit code, the step output written, the log, and the arguments gh received.
+
+    `live` is what the stub prints as the label names, and None makes the read fail.
+    """
+    script = workflow_step_script("Read comments label step")
     with tempfile.TemporaryDirectory() as scratch:
         stub = Path(scratch) / "gh"
         if live is None:
@@ -120,7 +125,7 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
             "PAYLOAD_LABELED": payload,
         }
         result = subprocess.run(
-            [bash_or_skip(), "-c", "\n".join(script_lines)],
+            [bash_or_skip(), "-c", script],
             env=env,
             text=True,
             encoding="utf-8",
@@ -5116,6 +5121,106 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
                 code, output, log, _ = run_comments_label_step(None, payload)
                 self.assertEqual(("0", f"labeled={payload}"), (code, output), log)
                 self.assertIn("could not be read live", log)
+
+
+class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
+    """A pull request is gated on its own change, whatever base the event recorded.
+
+    The checkout is GitHub's merge commit, built on the base branch's tip, while the event's
+    base.sha can predate commits that landed since. Diffed against that older SHA, the gate read
+    every landed commit as this change's and failed a pull request that added nothing it reports.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", "-b", "develop", str(self.root)], check=True)
+        (self.root / "tool.py").write_text("value = 1\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.event_base = self.rev("HEAD")
+        self.git("checkout", "-qb", "feature")
+        (self.root / "tool.py").write_text("value = 2\n", encoding="utf-8")
+        self.git("commit", "-qam", "change")
+        self.git("checkout", "-q", "develop")
+        (self.root / "landed.py").write_text(
+            "# The value is read once, since the second read can disagree.\nlanded = 1\n",
+            encoding="utf-8",
+        )
+        self.git("add", "-A")
+        self.git("commit", "-qm", "landed after the event")
+        self.git("merge", "-q", "--no-ff", "-m", "merge", "feature")
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.root),
+                "-c",
+                "user.email=gate@example.invalid",
+                "-c",
+                "user.name=gate test",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def rev(self, ref: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.root), "rev-parse", ref],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    def resolve_base(self) -> str:
+        output = self.root.parent / f"{self.root.name}.output"
+        self.addCleanup(output.unlink, missing_ok=True)
+        result = subprocess.run(
+            [bash_or_skip(), "-c", workflow_step_script("Resolve prose base step")],
+            cwd=self.root,
+            env=os.environ | {"EVENT_BASE": self.event_base, "GITHUB_OUTPUT": str(output)},
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return output.read_text(encoding="utf-8").strip().removeprefix("base=")
+
+    def test_a_merge_commit_is_diffed_against_its_first_parent(self) -> None:
+        base = self.resolve_base()
+        self.assertEqual(self.rev("HEAD^1"), base)
+        self.assertNotEqual(self.event_base, base)
+        result = run_prose_gate_action(self.root, BASE=base)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_the_events_base_would_report_the_landed_commit(self) -> None:
+        """The defect itself, so the case above is known to stand on a base that would bite."""
+        result = run_prose_gate_action(self.root, BASE=self.event_base)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("landed.py:1: comment-added", result.stdout)
+
+    def test_a_checkout_that_is_no_merge_commit_keeps_the_events_base(self) -> None:
+        """A second commit keeps HEAD^1 off the event's base, so an unguarded first parent fails."""
+        self.git("checkout", "-q", "feature")
+        (self.root / "tool.py").write_text("value = 3\n", encoding="utf-8")
+        self.git("commit", "-qam", "second change")
+        self.assertNotEqual(self.event_base, self.rev("HEAD^1"))
+        self.assertEqual(self.event_base, self.resolve_base())
+
+    def test_the_gate_reads_the_resolved_base(self) -> None:
+        """The resolution decides nothing unless the gate step consumes its output."""
+        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+        _, gate = workflow.split("      - name: Check prose step\n", 1)
+        self.assertIn(
+            "base: ${{ steps.prose-base.outputs.base }}", gate.split("      - name:", 1)[0]
+        )
+        self.assertIn("        id: prose-base\n", workflow)
 
 
 class TestTheIssueRefRule(unittest.TestCase):

@@ -581,7 +581,21 @@ def version_literal_errors(root):
     return errors
 
 
+def utf8_console() -> None:
+    """Write the console streams as UTF-8, whatever the host code page is.
+
+    A registry name or a quoted path can carry a character a Windows ANSI code page cannot encode,
+    which would crash the report naming it. A stream without `reconfigure` is one a test harness
+    substituted.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main():
+    utf8_console()
     errors = []
     repos = load("registry/repos.json")
     types = load("spec/project-types.json")

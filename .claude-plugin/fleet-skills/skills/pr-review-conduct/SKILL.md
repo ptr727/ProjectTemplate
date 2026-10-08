@@ -103,7 +103,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    nothing else does, so read it and dispose of what it holds as this section's outcomes require.
    `T` reads `?` where no total was found, which is a round stating none and equally one the digest
    could not locate, so a `?` leaves this item unsatisfied and sends you to the body exactly as a
-   shortfall does.
+   shortfall does. The digest's `FINDINGS WITH NO THREAD` block also counts an open-findings entry
+   linking no thread, whatever the totals say. A round with a verdict other than the clean one
+   that counts no finding prints its headline under `VERDICT WITH NO COUNTED FINDING`, and
+   `status` and `wait` exit `50`. The
+   headline is the one place that round names what it flags, so answer it as a suppressed finding.
+   The exit code repeats on that head after the answer.
    The body read in that format so far carried no `Suppressed comments` heading, so `suppressed=`
    finds nothing in it and there is no collapsed block to quote a count from: the digest's
    shortfall and the body's own prose are what an answer cites instead. A later body that does
