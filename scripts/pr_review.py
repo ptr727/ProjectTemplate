@@ -1997,9 +1997,10 @@ def stated_total(body: str) -> int | None:
     """The finding total this round states for itself, or None where its overview states none.
 
     Read from the overview preamble, the text ahead of the first section opener, because a total
-    inside a collapsed section is that section's own. A total stated only after that opener reads
-    as none stated, which prints `?` and no shortfall, so the reading that is missing suppresses
-    the shortfall rather than fabricating one.
+    inside a collapsed section is that section's own, the count-first open-findings section below
+    being the one exception. Any other total stated only after that opener reads as none stated,
+    which prints `?` and no shortfall, so the reading that is missing suppresses the shortfall
+    rather than fabricating one.
 
     The largest wins where the preamble states more than one, so an ambiguous body overstates the
     shortfall rather than suppressing it. The opener is found where each code span is one
@@ -2142,10 +2143,14 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
         return None
     if suppressed_blocks(body) or previously_missed_blocks(body):
         return None
-    threads = (pr.get("reviewThreads") or {}).get("nodes") or []
-    if any(not t.get("isResolved") and thread_author(t) in KNOWN_REVIEWERS for t in threads):
+    if open_reviewer_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
         return None
     return verdict, headline
+
+
+def open_reviewer_threads(threads: list[dict]) -> list[dict]:
+    """The unresolved threads a known reviewer opened, which block a ruleset-gated merge."""
+    return [t for t in threads if not t.get("isResolved") and thread_author(t) in KNOWN_REVIEWERS]
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
@@ -3505,7 +3510,7 @@ def digest(
     # Any known reviewer's own thread, not only Copilot's.
     # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one.
     # `thread_author` carries the deleted-account default this needs.
-    unresolved = [t for t in threads if not t["isResolved"] and thread_author(t) in KNOWN_REVIEWERS]
+    unresolved = open_reviewer_threads(threads)
     # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
     # A single reviewer's own count is what `unresolved=N` already meant before this generalized.
     # Printing one name beside its own total says nothing the number did not already say.

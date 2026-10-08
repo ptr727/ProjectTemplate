@@ -4016,7 +4016,7 @@ class TestSecondOverviewFormat(GqlCase):
         """
         self.assertIn("reviews(last:100){ nodes{ id ", pr_review.Q_FULL)
         self.assertIn("pullRequestReview{ id }", pr_review.Q_FULL)
-        self.assertIn("fullDatabaseId", pr_review.Q_FULL)
+        self.assertIn("body fullDatabaseId pullRequestReview{ id }", pr_review.Q_FULL)
 
     def test_a_details_tag_named_in_the_preamble_prose_does_not_end_it(self) -> None:
         """The opener is a tag on a line of its own, for the reason the marker and the total are.
@@ -4181,6 +4181,17 @@ class TestOverviewSections(GqlCase):
         self.assertIn("overview=2/2", out)
         self.assertIn("shapes=ok", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
+        """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""
+        self.answer(payload([review(body=overview_v2(findings="", entries=1))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=?/0", out)
+        self.assertIn(
+            "states no total and opened 0 threads, and 1 of the entries its open section lists "
+            "links no thread",
+            out,
+        )
 
     def test_an_entry_linking_no_thread_is_counted_where_the_totals_balance(self) -> None:
         """The round opened as many threads as it states, and one entry links none of them, so
