@@ -161,8 +161,9 @@ Subcommands
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
            the pull request is counted in that same block whatever the totals say. Where that
-           section supplied `T`, its entries are the same count, so they alone decide the block,
-           an entry linking an earlier round's thread being no finding without one.
+           section supplied `T`, the block is measured against its entries rather than against
+           `M`, so an entry linking an earlier round's thread is no finding without one, while a
+           finding the count names and no entry links is still counted.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -3555,7 +3556,12 @@ def digest(
     unthreaded = unthreaded_entries(pr)
     newest_body = (second_format_head(pr) or {}).get("body") or ""
     sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
-    unlisted = unthreaded if sectional else max(unlisted_findings(manifest), unthreaded)
+    linked = {i for role, _, ids in read_overview(newest_body)[2] if role != RESOLVED for i in ids}
+    unlisted = (
+        max((stated or 0) - len(linked), 0) + unthreaded
+        if sectional
+        else max(unlisted_findings(manifest), unthreaded)
+    )
     flagged = uncounted_verdict(pr)
 
     answer = answered_outside_review(pr)

@@ -4194,6 +4194,23 @@ class TestOverviewSections(GqlCase):
         self.assertIn("overview=2/1", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
+    def test_a_finding_the_count_names_and_no_entry_links_is_counted(self) -> None:
+        """An entry carrying no link, or a link in another form, is still a finding no poll sees."""
+        ids = ("6000000001", "6000000002")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        for extra in ("- Constructed finding with no link", "- [Linked](https://x/pull/7#d)"):
+            with self.subTest(extra=extra):
+                block = (
+                    open_section(ids)
+                    .replace("2 open findings", "3 open findings")
+                    .replace("</details>", f"{extra}\n</details>")
+                )
+                rd = review(body=revised_with(block), rid="PRR_head")
+                self.answer(payload([rd], threads))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("overview=3/2", out)
+                self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
         """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""
         self.answer(payload([review(body=overview_v2(findings="", entries=1))]))
