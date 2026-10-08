@@ -92,6 +92,14 @@ class BashPathCase(WindowsCase):
     def test_a_path_holding_only_launchers_has_no_bash(self) -> None:
         self.assertIsNone(self.walk([SYSTEM, APPS], {bash_in(SYSTEM), bash_in(APPS)})[0])
 
+    def test_off_windows_shutil_which_answers_relative_entries_included(self) -> None:
+        with (
+            mock.patch.object(host_capability, "_WINDOWS", False),
+            mock.patch.object(host_capability.shutil, "which", return_value="bin/bash") as which,
+        ):
+            self.assertEqual("bin/bash", host_capability.bash_path())
+        which.assert_called_once_with("bash")
+
     def test_path_is_read_on_every_call(self) -> None:
         self.assertIsNone(self.walk([SYSTEM], {bash_in(SYSTEM), bash_in(GIT)})[0])
         self.assertEqual(bash_in(GIT), self.walk([GIT], {bash_in(GIT)})[0])

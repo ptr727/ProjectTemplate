@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import ntpath
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -68,18 +69,19 @@ def bash_path() -> str | None:
     A bare "bash" passed to subprocess on Windows is resolved by CreateProcess, which searches
     System32 before PATH and so finds the WSL launcher. That launcher hands the script to a second
     shell that re-parses it, which mangles any quoting or expansion the script relies on, so the
-    PATH entry is named instead, passing over the launcher wherever PATH lists it. Each directory
-    is probed for bash.exe itself rather than through shutil.which, which on Windows would also
-    look in the current directory first and admit a bash.cmd shim that cmd.exe re-parses. PATH is
-    read on every call rather than cached, since a test may change it for the duration of its run.
+    PATH entry is named instead, passing over the launcher wherever PATH lists it. There each
+    absolute directory is probed for bash.exe itself rather than through shutil.which, which on
+    Windows would also look in the current directory first and admit a bash.cmd shim that cmd.exe
+    re-parses. Elsewhere shutil.which answers, as it did for a bare "bash". PATH is read on every
+    call rather than cached, since a test may change it for the duration of its run.
     """
-    paths = ntpath if _WINDOWS else os.path
-    name = "bash.exe" if _WINDOWS else "bash"
-    for entry in os.environ.get("PATH", "").split(paths.pathsep):
-        directory = entry.strip('"') if _WINDOWS else entry
-        if not paths.isabs(directory):
+    if not _WINDOWS:
+        return shutil.which("bash")
+    for entry in os.environ.get("PATH", "").split(ntpath.pathsep):
+        directory = entry.strip('"')
+        if not ntpath.isabs(directory):
             continue
-        candidate = paths.join(directory, name)
+        candidate = ntpath.join(directory, "bash.exe")
         if _executable(candidate) and runs_a_script(candidate):
             return candidate
     return None
