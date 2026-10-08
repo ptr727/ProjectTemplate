@@ -168,6 +168,10 @@ Subcommands
            entries rather than against `M`, so an entry linking an earlier round's thread is no
            finding without one, while a finding that section's count names and no entry links is
            still counted.
+           A round can also list its findings in prose under a `Review findings:` label, each
+           entry naming the files it concerns in code spans. An entry naming no file a thread of
+           that round is on is a finding with no thread, so where those entries outnumber the
+           shortfall above, the block counts them instead.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -2076,15 +2080,20 @@ def round_threads(pr: dict, review: dict) -> int:
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
     page was cut.
     """
+    return len(round_thread_nodes(pr, review))
+
+
+def round_thread_nodes(pr: dict, review: dict) -> list[dict]:
+    """The review threads this round opened, each read by the round its first comment names."""
     rid = review.get("id")
     if not rid:
-        return 0
-    return sum(
-        1
+        return []
+    return [
+        thread
         for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
         for comment in (((thread.get("comments") or {}).get("nodes") or [])[:1])
         if ((comment.get("pullRequestReview") or {}).get("id")) == rid
-    )
+    ]
 
 
 def head_overview(pr: dict) -> tuple[int | None, int] | None:
@@ -2156,6 +2165,79 @@ def open_entry_ids(pr: dict) -> set[str]:
         return set()
     sections = read_overview(newest.get("body") or "")[2]
     return {i for role, _, ids, _ in sections if role != RESOLVED for i in ids}
+
+
+PROSE_FINDINGS = re.compile(
+    r"^ {0,3}[*_]{0,2}Review findings[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
+)
+
+
+def prose_findings(body: str) -> list[list[str]]:
+    """The paths each entry of a `Review findings:` list names, one list per entry.
+
+    An entry is a bullet at the margin in the run of lines directly under the label, and an
+    indented line continues the entry above it. The label and the bullets are found where
+    quotations are masked, so a body quoting the list is not read as carrying one, and each
+    entry's paths are then read from its own code spans in the body.
+    """
+    raw = (body or "").splitlines()
+    masked = mask_quotations(body or "").splitlines()
+    entries: list[str] = []
+    at = 0
+    while at < len(masked):
+        if not PROSE_FINDINGS.match(masked[at]):
+            at += 1
+            continue
+        at += 1
+        while at < len(masked) and not masked[at].strip():
+            at += 1
+        start = len(entries)
+        while at < len(masked):
+            line = masked[at]
+            if ENTRY_LINE.match(line):
+                entries.append(raw[at])
+            elif len(entries) > start and line.strip() and line[:1].isspace():
+                entries[-1] += "\n" + raw[at]
+            else:
+                break
+            at += 1
+    return [
+        [
+            named
+            for span in CODE_SPAN.finditer(entry)
+            if (named := bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip())
+        ]
+        for entry in entries
+    ]
+
+
+def names_path(named: str, path: str) -> bool:
+    """Whether a path an entry names is `path`, a trailing part of it, or a directory holding it."""
+    named = named.strip("/")
+    return bool(named) and (
+        path == named or path.endswith("/" + named) or path.startswith(named + "/")
+    )
+
+
+def unthreaded_prose_findings(pr: dict) -> int:
+    """How many `Review findings:` entries in the head round name no file its own threads are on.
+
+    Matched by file because an entry names a file and a thread carries one, where its wording
+    shares nothing a match could key on. An entry naming no path is counted. An entry whose file
+    carries a thread on some other finding is not, which is the case this cannot see.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    paths = {
+        bare_path(first_comment(thread).get("path") or "")
+        for thread in round_thread_nodes(pr, newest)
+    }
+    return sum(
+        1
+        for named in prose_findings(newest.get("body") or "")
+        if not any(names_path(n, p) for n in named for p in paths)
+    )
 
 
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
@@ -3592,10 +3674,12 @@ def digest(
     newest_body = (second_format_head(pr) or {}).get("body") or ""
     sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
     linked = open_entry_ids(pr)
-    unlisted = (
+    prose = unthreaded_prose_findings(pr)
+    unlisted = max(
         max((stated or 0) - len(linked), 0) + unthreaded
         if sectional
-        else max(unlisted_findings(manifest), unthreaded)
+        else max(unlisted_findings(manifest), unthreaded),
+        prose,
     )
     flagged = uncounted_verdict(pr)
 
@@ -3769,6 +3853,12 @@ def digest(
                 f"{'carries' if unthreaded == 1 else 'carry'} no link this script reads to a "
                 "thread on this pull request"
                 if unthreaded
+                else ""
+            )
+            + (
+                f", and {prose} of the entries under its `Review findings:` label "
+                f"{'names' if prose == 1 else 'name'} no file a thread of that round is on"
+                if prose
                 else ""
             )
             + f", so {unlisted} "

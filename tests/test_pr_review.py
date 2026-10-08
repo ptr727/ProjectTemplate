@@ -4500,6 +4500,127 @@ class TestOverviewSections(GqlCase):
         self.assertIsNotNone(pr_review.uncounted_verdict(resolved))
 
 
+def with_prose(listed: str, body: str | None = None) -> str:
+    """A second-format body whose overview prose lists findings under a `Review findings:` label.
+
+    The list sits in the narrative section, after its change bullets, where the shape was seen.
+    Paths and wording are constructed, per GOVERNANCE.md "Representative Data in Agent-Authored
+    Text".
+    """
+    body = overview_v2() if body is None else body
+    anchor = "- Narrow the reader.\n"
+    assert anchor in body
+    return body.replace(anchor, f"{anchor}\nReview findings:\n{listed}\n", 1)
+
+
+PROSE_LISTED = (
+    "- `lib/reader.py`: moderate retry issue (2 votes).\n"
+    "- `writer.py`: low naming issue (1 vote).\n"
+)
+
+
+def prose_threads(rid: str = "PRR_one") -> list[dict]:
+    """The two threads `overview_v2`'s open section links, one on each file `PROSE_LISTED` names."""
+    return [
+        thread("T1", rid=rid, cid="4000000001", path="lib/reader.py"),
+        thread("T2", rid=rid, cid="4000000002", path="lib/writer.py"),
+    ]
+
+
+class TestProseFindings(GqlCase):
+    """A finding a round names only in its overview prose, under a `Review findings:` label."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def digest(self, body: str, threads: list[dict] | None = None) -> str:
+        self.answer(payload([review(body=body)], prose_threads() if threads is None else threads))
+        return pr_review.digest("o", "r", 7)[0]
+
+    def test_an_entry_on_a_file_no_thread_is_on_is_counted_where_the_totals_balance(self) -> None:
+        out = self.digest(
+            with_prose(PROSE_LISTED + "- `lib/parser.py`: validation issue (1 vote).")
+        )
+        self.assertIn("overview=2/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn(
+            "1 of the entries under its `Review findings:` label names no file a thread of that "
+            "round is on",
+            out,
+        )
+
+    def test_every_entry_on_a_threaded_file_counts_none(self) -> None:
+        """A trailing part, a zero-width space after a slash, and a directory each name a file."""
+        for listed in (
+            PROSE_LISTED,
+            "- `lib/\u200breader.py` and `lib/writer.py`: one issue each (2 votes each).\n",
+            "- `lib/`: moderate retry issue (2 votes).\n",
+            "- A retry issue\n  in `lib/reader.py` (2 votes).\n",
+        ):
+            with self.subTest(listed=listed):
+                out = self.digest(with_prose(listed))
+                self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_bold_label_is_read(self) -> None:
+        body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(
+            "Review findings:", "**Review findings:**"
+        )
+        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
+
+    def test_an_entry_naming_no_file_is_counted(self) -> None:
+        out = self.digest(with_prose(PROSE_LISTED + "- A validation issue (1 vote)."))
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_earlier_round_s_thread_does_not_cover_an_entry(self) -> None:
+        """The list is this round's, so a thread another round opened on that file is not its."""
+        threads = [*prose_threads(), thread("T3", rid="PRR_old", path="lib/parser.py")]
+        out = self.digest(with_prose(PROSE_LISTED + "- `lib/parser.py`: issue (1 vote)."), threads)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_quoted_list_is_not_read(self) -> None:
+        listed = "- `lib/parser.py`: validation issue (1 vote)."
+        body = with_prose(PROSE_LISTED).replace(
+            "Review findings:\n", f"```text\nReview findings:\n{listed}\n```\n\nReview findings:\n"
+        )
+        self.assertEqual([["lib/reader.py"], ["writer.py"]], pr_review.prose_findings(body))
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_the_list_ends_at_its_first_line_that_is_not_an_entry(self) -> None:
+        body = with_prose(PROSE_LISTED + "\n- `lib/parser.py`: a change bullet, not a finding.")
+        self.assertEqual([["lib/reader.py"], ["writer.py"]], pr_review.prose_findings(body))
+
+    def test_the_prose_and_the_totals_naming_one_finding_count_it_once(self) -> None:
+        """A round stating three findings over two threads may be naming the third in prose."""
+        body = with_prose(
+            PROSE_LISTED + "- `lib/parser.py`: validation issue (1 vote).",
+            overview_v2(findings="**Findings:** 3"),
+        )
+        out = self.digest(body)
+        self.assertIn("overview=3/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_first_format_round_is_not_read(self) -> None:
+        body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(CCR_MARKER, "")
+        self.assertEqual(0, pr_review.unthreaded_prose_findings(payload([review(body=body)])))
+
+    def test_a_flagging_verdict_over_a_stated_zero_names_its_findings_in_the_headline(
+        self,
+    ) -> None:
+        """The other shape: a flagging verdict, a `**Findings:** None` total, a resolved section
+        only, and a headline naming what is still owed."""
+        body = revised_with("**Findings:** None", "### \U0001f535 Needs a closer look").replace(
+            "One reader still needs a look.",
+            "Address the constructed retry issue and the parser validation.",
+        )
+        earlier = [
+            thread(f"T{i}", resolved=True, rid="PRR_old", cid=f"500000000{i}") for i in (1, 2, 3)
+        ]
+        self.answer(payload([review(body=body)], earlier))
+        self.assertEqual(50, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("Address the constructed retry issue", self.out.getvalue())
+
+
 class TestEveryGqlCaseKeepsItsBaseSetUp(unittest.TestCase):
     """A subclass overriding `setUp` without chaining silently drops what the base installs.
 
