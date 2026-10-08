@@ -74,6 +74,10 @@ def bash_path() -> str | None:
     Windows would also look in the current directory first and admit a bash.cmd shim that cmd.exe
     re-parses. Elsewhere shutil.which answers, as it did for a bare "bash". PATH is read on every
     call rather than cached, since a test may change it for the duration of its run.
+
+    A script holding a doubled backslash is handed to this bash as a file rather than through
+    `-c`. subprocess writes the pair literally into the Windows command line, and Git Bash's own
+    parse of that line collapses it to one, which a jq filter's escaped class then fails to compile.
     """
     if not _WINDOWS:
         return shutil.which("bash")
