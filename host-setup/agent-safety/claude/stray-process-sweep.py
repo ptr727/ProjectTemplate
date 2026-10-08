@@ -541,7 +541,7 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
             if round_ == _TREE_ROUNDS or (deadline is not None and time.monotonic() > deadline):
                 lines.append(
                     f"agent-safety: {len(gone)} command scope(s) in this session's tree outlived their "
-                    f"session and were left running, for want of time. End them with:\n"
+                    f"session and were left running, out of rounds or time. End them with:\n"
                     f"  systemctl --user stop {' '.join(gone)}"
                 )
                 break
@@ -573,7 +573,19 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
         # Only the root ends the tree, and only an empty one, since a scope whose agent runs is a live session's.
         if inherited:
             continue
-        others = [u for u in members if scope_session(u) not in own and u not in stuck]
+        others, unknown = [], []
+        if table is not None:
+            ended = set(orphaned(members, props, table)[0]) | set(stuck)
+            for u in members:
+                if scope_session(u) in own or u in ended:
+                    continue
+                (unknown if scope_agent(props.get(u, {})) is None else others).append(u)
+        if unknown:
+            lines.append(
+                f"agent-safety: {len(unknown)} command scope(s) in this session's tree record no "
+                f"agent, so the tree {name} and its ceiling are left in place:"
+            )
+            lines += [f"  {u}  session {scope_session(u)}" for u in unknown]
         if others:
             lines.append(
                 f"agent-safety: {len(others)} command scope(s) in this session's tree belong to a "
@@ -975,6 +987,9 @@ def _selftest():
     deep_text = reap_tree([sid], {}, deep_table, deep_run, reader=same)
     sibling_world, sibling_run = world([sibling])
     sibling_text = reap_tree([sid], {}, tree_table, sibling_run, reader=same)
+    unrecorded = f"{_TOOL_UNIT}-3c3c-770-cd.scope"
+    unknown_world, unknown_run = world([unrecorded])
+    unknown_text = reap_tree([sid], {}, tree_table, unknown_run, reader=same)
     late_world, late_run = world([nested])
     late_text = reap_tree([sid], {}, tree_table, late_run, reader=same, deadline=0)
     posing_world, posing_run = world([])
@@ -1047,6 +1062,7 @@ def _selftest():
         (
             blind_world["members"] == {nested}
             and "could not read the process table" in blind_text
+            and "still running" not in blind_text
             and not any(c[0] == "stop" for c in blind_world["calls"]),
             "an unreadable process table stops nothing, since it cannot say which agents run",
         ),
@@ -1065,9 +1081,16 @@ def _selftest():
         ),
         (
             late_world["members"] == {nested}
-            and "for want of time" in late_text
-            and f"systemctl --user stop {nested}" in late_text,
+            and "out of rounds or time" in late_text
+            and f"systemctl --user stop {nested}" in late_text
+            and "still running" not in late_text,
             "past its share of the hook's time the sweep stops nothing more, and hands over the line",
+        ),
+        (
+            unknown_world["slice"] == "active"
+            and "record no agent" in unknown_text
+            and "still running" not in unknown_text,
+            "another session's scope recording no agent keeps the tree, named as unknown, not live",
         ),
         (
             posing_world["slice"] == "active" and posing_world["dropins"],
