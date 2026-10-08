@@ -611,14 +611,25 @@ $results | ConvertTo-Json -Depth 4
 
 
 def write_dotnet_stub(directory: Path, exit_code: int, *versions: str) -> None:
-    """A `dotnet` on `directory` that prints `versions` as `--list-sdks` does, then exits `exit_code`."""
+    """A `dotnet` on `directory` that prints `versions` as `--list-sdks` does, then exits `exit_code`.
+
+    Any other argument exits 9 printing nothing, so a caller asking for the wrong listing reads none.
+    """
     if sys.platform == "win32":
-        lines = ["@echo off", *(f"echo {version} [X:\\dotnet\\sdk]" for version in versions)]
+        lines = [
+            "@echo off",
+            'if not "%~1"=="--list-sdks" exit /b 9',
+            *(f"echo {version} [X:\\dotnet\\sdk]" for version in versions),
+        ]
         Path(directory, "dotnet.cmd").write_text(
             "\r\n".join([*lines, f"exit /b {exit_code}", ""]), encoding="ascii"
         )
     else:
-        lines = ["#!/bin/sh", *(f"echo '{version} [/dotnet/sdk]'" for version in versions)]
+        lines = [
+            "#!/bin/sh",
+            '[ "$1" = --list-sdks ] || exit 9',
+            *(f"echo '{version} [/dotnet/sdk]'" for version in versions),
+        ]
         stub = Path(directory, "dotnet")
         stub.write_text("\n".join([*lines, f"exit {exit_code}", ""]), encoding="ascii")
         stub.chmod(0o755)
