@@ -16,6 +16,7 @@ param(
     [string]$Name,
     [string]$Email,
     [string]$SharedCheckout,
+    [switch]$GhSshProtocol,
     [Alias('h')][switch]$Help
 )
 
@@ -33,6 +34,11 @@ $ALLOWED_SIGNERS = Join-Path $HOME '.config\git\allowed_signers'
 $KEY_SETTING = '~/.ssh/id_ed25519.pub'
 $ALLOWED_SIGNERS_SETTING = '~/.config/git/allowed_signers'
 $KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
+
+# The command that sets gh's git protocol, named in the report as the remedy and run by the opt-in switch.
+# It is set for the host rather than globally, because gh auth login records the protocol per host and a per-host value outranks the global one, so the global form alone leaves a host reading https.
+$GH_PROTOCOL_ARGUMENTS = @('config', 'set', 'git_protocol', 'ssh', '--host', 'github.com')
+$GH_PROTOCOL_COMMAND = "gh $($GH_PROTOCOL_ARGUMENTS -join ' ')"
 
 # The identity the maintainer's commits carry, used only where the host names none of its own.
 $DEFAULT_NAME = 'Pieter Viljoen'
@@ -52,6 +58,7 @@ $ASSUME_YES = [bool]$Yes
 $WANT_NAME = $Name
 $WANT_EMAIL = $Email
 $SHARED = $SharedCheckout
+$GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
 
@@ -88,6 +95,10 @@ Options:
                     ownership check for that path, so it is named rather than assumed: a host one
                     account uses needs it for nothing. "*" applies it to every path on the host,
                     which is the broadest form and is reported as such.
+      -GhSshProtocol
+                    With -Configure, set the git protocol gh uses for github.com to ssh. Without
+                    it gh's protocol is only reported, -Configure included, because rewriting a
+                    working authentication setup is the operator's call.
 
 The identity comes from -Name and -Email, or from what this host already carries, or from the
 default the maintainer commits under, in that order. A host configured for somebody else keeps its
@@ -105,6 +116,8 @@ Examples:
   setup-github.ps1                     Report, change nothing
   setup-github.ps1 -Configure          Set the host up
   setup-github.ps1 -Configure -DryRun  Show what it would do
+  setup-github.ps1 -Configure -GhSshProtocol
+                                       Set the host up, and set gh's git protocol to ssh
   setup-github.ps1 -Configure -Email you@users.noreply.github.com
 '@
 }
@@ -467,6 +480,53 @@ function Show-AgentStatus {
     }
 }
 
+# --- GitHub CLI ---
+
+# The account gh is logged in to github.com as, empty when it is not.
+# Not being logged in is an answer rather than a failure, so the exit code is not the result, and the first account listed is the active one.
+function Get-GhAccount {
+    $auth = (& gh auth status --hostname github.com 2>&1 | Out-String)
+    if ($auth -match 'Logged in to \S+ account (\S+)') { return $Matches[1] }
+    return ''
+}
+
+# Read for the host, since a per-host value outranks the global one in what gh repo clone and gh pr checkout use.
+function Get-GhProtocol {
+    $value = (& gh config get git_protocol --host github.com 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { return '' }
+    return $value
+}
+
+# Reported, and set only by -GhSshProtocol, since rewriting a working authentication setup is the operator's call.
+function Show-GhStatus {
+    log ''
+    log 'GitHub CLI'
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        missing 'gh installed, which install-tools.ps1 -Install gh provides'
+        return
+    }
+    $account = Get-GhAccount
+    if ($account) { ok "authenticated as $account" } else { missing 'authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh' }
+
+    $protocol = Get-GhProtocol
+    if ($protocol -eq 'ssh') { ok 'git protocol is ssh' }
+    elseif ($protocol) { missing "git protocol is ssh, it is $protocol, set it with: $($script:GH_PROTOCOL_COMMAND), or -Configure -GhSshProtocol" }
+    else { missing "git protocol is ssh, gh did not report one, set it with: $($script:GH_PROTOCOL_COMMAND), or -Configure -GhSshProtocol" }
+}
+
+function Set-GhProtocol {
+    if (-not $script:GH_SSH_PROTOCOL) { return }
+    step 'Setting the GitHub CLI git protocol to ssh'
+    $current = Get-GhProtocol
+    if ($current -eq 'ssh') {
+        info 'Already ssh'
+        return
+    }
+    $code = run -Command 'gh' -Arguments $script:GH_PROTOCOL_ARGUMENTS
+    if ($code -ne 0) { die "$($script:GH_PROTOCOL_COMMAND) exited $code" }
+    info "Was $(if ($current) { $current } else { 'unreported' }), set to ssh"
+}
+
 # --- Actions ---
 
 function Show-Status {
@@ -528,21 +588,7 @@ function Show-Status {
     }
 
     Show-AgentStatus
-
-    log ''
-    log 'GitHub CLI'
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        missing 'gh installed, which install-tools.ps1 -Install gh provides'
-    } else {
-        $auth = (& gh auth status 2>&1 | Out-String)
-        if ($auth -match 'Logged in to \S+ account (\S+)') { ok "authenticated as $($Matches[1])" } else { missing 'authenticated, log in with: gh auth login --hostname github.com --git-protocol ssh' }
-        # Reported and never set, matching the Linux peer, which touches gh nowhere.
-        # An https protocol makes a checkout made through gh authenticate by token where every other checkout on the host authenticates by key.
-        if ($auth -match 'Git operations protocol: (\S+)') {
-            if ($Matches[1] -eq 'ssh') { ok 'git protocol is ssh' }
-            else { missing "git protocol is ssh, it is $($Matches[1]), set it with: gh config set git_protocol ssh" }
-        }
-    }
+    Show-GhStatus
 
     log ''
     log 'Signing'
@@ -551,6 +597,10 @@ function Show-Status {
 
 function Invoke-Configure {
     Test-Prerequisite
+    # Checked before any change, so a host without gh is refused rather than configured part way.
+    if ($script:GH_SSH_PROTOCOL -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        die '-GhSshProtocol sets the git protocol gh uses, and gh is not installed. install-tools.ps1 -Install gh installs it.'
+    }
     Resolve-Identity
     New-KeyIfAbsent
     Add-KnownHost
@@ -560,6 +610,7 @@ function Invoke-Configure {
     Set-GitIdentity
     Set-SharedCheckout
     Set-Signing
+    Set-GhProtocol
 
     step 'Signing a commit to check the configuration'
     if ($script:DRY_RUN) {

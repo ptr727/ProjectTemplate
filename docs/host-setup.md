@@ -189,6 +189,30 @@ gh auth login --hostname github.com --git-protocol ssh
 
 Choose the SSH key generated above when prompted.
 
+**The git protocol `gh` uses for github.com is `ssh`.** `gh repo clone` and `gh pr checkout` set a checkout's remote in that protocol. An `https` remote authenticates by token, so revoking the host's SSH key does not cut that checkout's access. `gh auth login` records the protocol per host, and a per-host value outranks the global one, so set it for the host:
+
+```shell
+gh config set git_protocol ssh --host github.com
+```
+
+Both setup scripts report this under **GitHub CLI**, as the account `gh` is logged in as and whether the protocol is `ssh`. A protocol other than `ssh` reads as a gap that names the command above:
+
+```text
+GitHub CLI
+  [ ok ] authenticated as example-user
+  [    ] git protocol is ssh, it is https, set it with: gh config set git_protocol ssh --host github.com, or --configure --gh-ssh-protocol
+```
+
+The Windows script names `-Configure -GhSshProtocol` in the same place. Neither script changes the protocol by default, and `--configure` alone leaves it as it found it. Rewriting a working authentication setup is the operator's call. Setting it is therefore an explicit opt-in on the configure run, `--gh-ssh-protocol` for [`setup-github.sh`][setup-github-linux] and `-GhSshProtocol` for [`setup-github.ps1`][setup-github-windows]:
+
+```shell
+host-setup/linux/setup-github.sh --configure --gh-ssh-protocol
+```
+
+```powershell
+host-setup\windows\setup-github.ps1 -Configure -GhSshProtocol
+```
+
 ## Agent Host-Safety
 
 Host-level safety guards are required where an agent runs with the maintainer's `gh` credentials, and where it runs unattended on the maintainer's machine. Each provider's implementation stays in its own subsection.
@@ -385,6 +409,8 @@ A host that fails any row is not ready for the procedure that row names, and the
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [operations]: ../OPERATIONS.md
 [scripts-dir]: ../scripts/
+[setup-github-linux]: ../host-setup/linux/setup-github.sh
+[setup-github-windows]: ../host-setup/windows/setup-github.ps1
 [skills-install]: ../scripts/skills_install.py
 [spec-dir]: ../spec/
 [ssh-signing]: ./ssh-signing.md
