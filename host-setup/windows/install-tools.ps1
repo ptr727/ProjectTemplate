@@ -594,7 +594,7 @@ function Add-ToolNote {
     if ($Tool.Name -eq 'dotnet') {
         $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk (Get-DotnetSdk)
         if ($untracked) {
-            note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so an installer winget does not track, such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares winget's copy alone"
+            note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so something other than $($State.Package), such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares $($State.Package) alone"
         }
     }
     if ($Tool.Name -eq 'docker') {
@@ -610,7 +610,7 @@ function Read-DotnetSdkList {
     return , @($Line | ForEach-Object { ($_ -split ' ', 2)[0] } | Where-Object { $_ -match '^\d+\.\d+\.\d+' })
 }
 
-# Every SDK dotnet itself can see, since Visual Studio lands its own in the same directory and winget's inventory never holds them.
+# Every SDK dotnet itself can see, since Visual Studio and other winget SDK packages land theirs in the same directory, where the row's own winget package never lists them.
 function Get-DotnetSdk {
     if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { return , @() }
     $lines = @(& dotnet --list-sdks)
