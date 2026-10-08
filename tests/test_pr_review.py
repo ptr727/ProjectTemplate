@@ -233,13 +233,15 @@ def overview_v2_revised(
     open_line: str = "**0 open findings**",
     resolved: int = 3,
     verdict: str = "### Approval recommended",
+    effort: str = "",
 ) -> str:
     """The second format's later revision, carrying the same marker under a different preamble.
 
-    It drops the overview heading, the effort line, and the `**Findings:**` total, states its
-    total as a bare bold `open findings` line instead, and opens its resolved section's summary on
-    the count rather than closing it on one. Titles and anchors are constructed, as `overview_v2`'s
-    are.
+    It drops the overview heading and the `**Findings:**` total, states its total as a bare bold
+    `open findings` line instead, and opens its resolved section's summary on the count rather
+    than closing it on one. Its effort line, where `effort` supplies one, follows the last
+    collapsed section and opens on an emoji. Titles and anchors are constructed, as
+    `overview_v2`'s are.
     """
     listed = "\n".join(
         f"- [Fixed finding {i}](#discussion_r500000000{i})" for i in range(1, resolved + 1)
@@ -251,7 +253,7 @@ def overview_v2_revised(
         f"{listed}\n</details>\n\n"
         "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
         "This pull request narrows one reader.\n\n**Changes:**\n- Narrow the reader.\n"
-        "</details>\n"
+        f"</details>\n{effort}"
     )
 
 
@@ -3520,7 +3522,9 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
     def test_the_effort_line_reads_when_it_opens_on_an_emoji(self) -> None:
-        """A later revision opens the bare bold line on an emoji, which left `effort=unknown`.
+        """The later revision states effort after its last collapsed section, opening on an emoji.
+
+        A reader allowing only a bullet before the label printed `effort=unknown` over it.
 
         Escaped rather than typed, so the fixture stays inside the repository's charset rule.
         An ASCII word before the label is prose about the line rather than the line itself.
@@ -3531,17 +3535,19 @@ class TestSecondOverviewFormat(GqlCase):
             ("emoji with no space", f"{brain}**Review effort:** Lite"),
         ):
             with self.subTest(case=label):
-                pr = payload([review(body=overview_v2(effort=effort))])
+                pr = payload([review(body=overview_v2_revised(effort=effort))])
                 self.assertEqual(("lite", "explicit"), pr_review.review_effort(pr))
-        inherited = overview_v2(effort=f"{brain} **Review effort:** Default (Max)")
+        inherited = overview_v2_revised(effort=f"{brain} **Review effort:** Default (Max)")
         self.assertEqual(
             ("max", "default"), pr_review.review_effort(payload([review(body=inherited)]))
         )
         self.assertEqual([], pr_review.unrecognized_in(inherited))
-        self.answer(payload([review(body=overview_v2(effort=f"{brain} **Review effort:** Lite"))]))
+        self.answer(
+            payload([review(body=overview_v2_revised(effort=f"{brain} **Review effort:** Lite"))])
+        )
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("effort=lite effort_source=explicit", out)
-        prose = payload([review(body=overview_v2(effort="See **Review effort:** Lite"))])
+        prose = payload([review(body=overview_v2_revised(effort="See **Review effort:** Lite"))])
         self.assertEqual(("unknown", "unknown"), pr_review.review_effort(prose))
 
     def test_the_format_is_recognized_by_its_marker_on_a_line_of_its_own(self) -> None:
