@@ -19,6 +19,8 @@ host-setup\windows\setup-github.ps1 -Status
 host-setup\windows\setup-wsl.ps1 -Status
 ```
 
+`setup-github.ps1` reports gh's github.com git protocol and `-Configure` alone leaves it as found, since rewriting a working authentication setup is the operator's call. `-Configure -GhSshProtocol` sets it to ssh, and warns and sets nothing where gh is not installed or not logged in, since setting it before a login leaves a tokenless entry gh reports as a failed login.
+
 ## Requirements
 
 **PowerShell 7 or later**, which is `pwsh` rather than the `powershell.exe` that ships with Windows. Each script refuses an older one and prints `winget install --id Microsoft.PowerShell --exact --source winget` as the remedy. `pwsh` is deliberately not a managed tool: a host that cannot run these scripts cannot be repaired by them.
