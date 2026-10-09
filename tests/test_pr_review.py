@@ -4279,11 +4279,15 @@ class TestSecondOverviewFormat(GqlCase):
 COVERS_ONE = "<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
 
 
-def open_section(ids: tuple[str, ...], noun: str = "") -> str:
+PULL_URL = "https://github.com/example-owner/example-repo/pull/1"
+
+
+def open_section(ids: tuple[str, ...], noun: str = "", base: str = "") -> str:
     """The revision's open-findings section, one badged entry per thread id.
 
-    The summary opens on its count, singular for one finding. Titles and ids are constructed, per
-    GOVERNANCE.md "Representative Data in Agent-Authored Text".
+    The summary opens on its count, singular for one finding. Each link is `base` and the thread's
+    fragment, so an empty `base` writes the fragment-relative form. Titles, ids, and any `base` are
+    constructed, per GOVERNANCE.md "Representative Data in Agent-Authored Text".
     """
     badge = (
         '<picture><source media="(prefers-color-scheme: dark)" srcset="medium-dark.svg">'
@@ -4291,7 +4295,7 @@ def open_section(ids: tuple[str, ...], noun: str = "") -> str:
     )
     noun = noun or ("finding" if len(ids) == 1 else "findings")
     entries = "\n".join(
-        f"- {badge} [Constructed finding](#discussion_r{i}) \u00b7 New" for i in ids
+        f"- {badge} [Constructed finding]({base}#discussion_r{i}) \u00b7 New" for i in ids
     )
     return (
         f"<details open>\n<summary><strong>{len(ids)} open {noun}</strong></summary>\n\n"
@@ -4348,21 +4352,10 @@ class TestOverviewSections(GqlCase):
         self.assertIn("shapes=ok", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
-    def absolute(self, ids: tuple[str, ...]) -> str:
-        """The revision whose open entries link their threads by an absolute pull request URL."""
-        body = revised_with(open_section(ids))
-        for i in ids:
-            relative = f"(#discussion_r{i})"
-            self.assertIn(relative, body)
-            body = body.replace(
-                relative, f"(https://github.com/example-owner/example-repo/pull/1#discussion_r{i})"
-            )
-        return body
-
     def test_an_absolute_thread_link_reports_no_block(self) -> None:
         """Every entry linked by its absolute URL read as unlinked, a false block on each round."""
         ids = ("6000000001", "6000000002")
-        rd = review(body=self.absolute(ids), rid="PRR_head")
+        rd = review(body=revised_with(open_section(ids, base=PULL_URL)), rid="PRR_head")
         threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
         pr = payload([rd], threads)
         self.assertEqual(0, pr_review.unthreaded_entries(pr))
@@ -4374,7 +4367,8 @@ class TestOverviewSections(GqlCase):
     def test_an_absolute_link_to_no_thread_here_is_counted(self) -> None:
         """The URL's pull request is not compared with the one read, since an id no thread here
         carries is still counted by that id."""
-        rd = review(body=self.absolute(("6000000001", "6000000002")), rid="PRR_head")
+        ids = ("6000000001", "6000000002")
+        rd = review(body=revised_with(open_section(ids, base=PULL_URL)), rid="PRR_head")
         threads = [
             thread("T1", rid="PRR_head", cid="6000000001"),
             thread("T2", rid="PRR_head", cid="6000000009"),
