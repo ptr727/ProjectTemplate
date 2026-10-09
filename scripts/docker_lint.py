@@ -283,7 +283,7 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
 
     A git-ignored file, such as a local secrets file beside a tracked placeholder, stays behind.
     A symlink is copied as a link and never followed.
-    A tracked path missing from disk is skipped, as a deleted file is.
+    A tracked path missing from disk never reaches it, since `ls_files` drops it.
     An empty `.git` is added, since actionlint finds its project only where one sits beside
     `.github/workflows`.
     """
@@ -292,8 +292,6 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
         source = root / relative_path
         destination = snapshot / relative_path
         try:
-            if not os.path.lexists(source):
-                continue
             if not source.is_symlink() and source.is_dir():
                 destination.mkdir(parents=True, exist_ok=True)
             else:
