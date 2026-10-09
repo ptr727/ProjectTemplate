@@ -3960,8 +3960,8 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertIn("overview=3/1", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
         self.assertIn(
-            "states 3 findings and opened 1 thread, its open section also linking 1 an earlier "
-            "round opened, so 1 finding is",
+            "states 3 findings and opened 1 thread, its open section also linking 1 thread an "
+            "earlier round opened, so 1 finding is",
             out,
         )
 
@@ -3971,6 +3971,25 @@ class TestSecondOverviewFormat(GqlCase):
         rd = review(body=overview_v2(findings="**Findings:** 3", entries=2), rid="PRR_head")
         pr = payload([rd], [thread("T1", rid="PRR_old", cid="4000000001")])
         self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_a_back_reference_beside_an_unthreaded_title_is_not_carried(self) -> None:
+        """An entry stands for its title's anchor, so a title naming no thread leaves the entry
+        uncarried, and it is counted once, as a finding with no thread, rather than also cancelling
+        a finding the total names past every entry."""
+        body = overview_v2(findings="**Findings:** 3", entries=2).replace(
+            "(#discussion_r4000000002) New",
+            "(#discussion_r4000000002) New, same cause as [earlier](#discussion_r4000000005)",
+        )
+        threads = [
+            thread("T1", rid="PRR_old", cid="4000000001"),
+            thread("T5", rid="PRR_old", cid="4000000005"),
+        ]
+        pr = payload([review(body=body, rid="PRR_head")], threads)
+        self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.assertEqual(1, pr_review.unthreaded_entries(pr))
         self.answer(pr)
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)

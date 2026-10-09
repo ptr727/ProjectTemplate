@@ -2080,7 +2080,7 @@ def round_threads(pr: dict, review: dict) -> int:
     `Resolved since last review (N)` section, so the format tracks a finding's state across rounds
     rather than describing one round. If `Open (N)` likewise carries what an earlier round raised
     and this round left open, its total counts findings whose threads belong to that earlier round,
-    and this undercounts by exactly those, printing a standing shortfall.
+    and this count leaves out exactly those, so it is not compared against the total alone.
 
     It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
     was measured over, which is why that section's count is not read as a total. The preamble
@@ -2176,10 +2176,11 @@ def carried_open_threads(pr: dict) -> int:
 
     Counted per entry rather than per link, since one entry can link a thread beside its own. An
     entry linking any thread this round opened is that round's finding, already in `M`, so a
-    back-reference on it to an earlier thread cancels no shortfall. Only a link to a thread on
-    this pull request counts, an entry linking none being `unthreaded_entries`'s to count. An
-    entry stands for the first such thread it links, its title's own anchor ahead of any
-    back-reference, and two entries standing for one earlier thread count once.
+    back-reference on it to an earlier thread cancels no shortfall. An entry stands for its
+    first link, its title's own anchor, so it is carried only where that link is a thread on this
+    pull request. A title anchor naming no thread is `unthreaded_entries`'s to count, and a
+    back-reference beside it does not also count the entry here. Two entries standing for one
+    earlier thread count once.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2189,11 +2190,11 @@ def carried_open_threads(pr: dict) -> int:
     sections = read_overview(newest.get("body") or "")[2]
     return len(
         {
-            next(i for i in entry if i in known)
+            entry[0]
             for role, _, ids, _ in sections
             if role != RESOLVED
             for entry in ids
-            if set(entry) & known and not set(entry) & own
+            if entry[0] in known and not set(entry) & own
         }
     )
 
@@ -3994,7 +3995,8 @@ def digest(
                 if sectional
                 else f" and opened {listed} thread{'' if listed == 1 else 's'}"
                 + (
-                    f", its open section also linking {restated} an earlier round opened"
+                    f", its open section also linking {restated} "
+                    f"thread{'' if restated == 1 else 's'} an earlier round opened"
                     if restated
                     else ""
                 )
