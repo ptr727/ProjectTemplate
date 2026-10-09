@@ -213,22 +213,23 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    other than the permission still has to hold, on this pull request and on any promotion.
    **Under `main` or `release`, check for a blocked promotion before opening or driving one.** Read
    the open `decision` issues under picker step 1's full-page check, with `gh issue list --repo
-   "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`. Where
-   one of them states, in its body or in a comment, that it blocks the open develop -> main pull
-   request, as "Parking" step 2 has it state, the round narrows to develop. The worker then merges,
-   opens, and releases no promotion while that decision issue is open. It instead brings that
-   promotion's body up to a `Fixes` line for every issue develop fixes, `#<issue>` included, per
+   "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`, noting
+   when it ran. Where one of them states, in its body or in a comment, that it blocks the open
+   develop -> main pull request, as "Parking" step 2 has it state, the round narrows to develop.
+   The worker then merges, opens, and releases no promotion while that decision issue is open. It
+   instead brings that promotion's body up to a `Fixes` line for every issue develop fixes,
+   `#<issue>` included, per
    `backlog-burndown` "Assembling the Promotion Body", so each closes when the promotion merges.
    It then closes the lane out, naming the decision issue in the close-out comment. Where none
    does, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
    develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
    under `main` and merging and releasing under `release`. **Repeat the blocked-promotion read
    immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
-   included, noting when the first read ran. Read too the `decision` issues closed since then, with
-   `--state closed --search "closed:>=<that time>"` under the same full-page check. Where one
-   blocking that promotion is open, the round narrows to develop as above. Where one was closed
-   since the first read, park, asking whether its answer lets the promotion merge, since that
-   answer may not be to merge. Exit `45` on a promotion blocks no
+   included. Run it with `--state all` and with `state,closedAt` added to `--json`, never with a
+   `--search` query, since search can lag a close. Where one blocking that promotion is open, the
+   round narrows to develop as above. Where one was closed since the first read, park, asking
+   whether its answer lets the promotion merge, since that answer may not be to merge. Exit `45` on
+   a promotion blocks no
    merge where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states.
    Such a promotion merges with no `decision` issue, and the worker records that item's evidence
    on the handoff. Any other shortfall parks.
