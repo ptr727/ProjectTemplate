@@ -159,13 +159,13 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    remark on untouched text included, takes its own outcome in that section.
 
    A finding the pull request's own body lists also needs an outcome before merge, under
-   "Every finding ends in one of five outcomes" below. The `local-strict-review` section
-   "Disposing of Findings" lists each one still open there once a push's edit budget is spent.
+   "Every finding ends in one of five outcomes" below. Per the `local-strict-review` section
+   "Disposing of Findings", the body lists each one still open once a push's edit budget is spent.
    It needs that outcome whichever head it was found on and whether or not a reviewer raises it
-   again. It has no thread, so answer it as "Answering a suppressed finding" below states, citing
-   the body's list where that section cites a review round. An outcome 4 answer also carries the
-   filed issue's link. The finding stays open until its answer is posted, and one taking outcome 3
-   stays open until the maintainer has answered it.
+   again. It has no thread, so answer it as "Answering a suppressed finding" below states. Cite
+   the body's list where that section links the review round, and the list's length where it
+   states the block's `(N)` count. The finding stays open until its answer is posted, and one
+   taking outcome 3 stays open until the maintainer has answered it.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
@@ -342,12 +342,12 @@ never against its confidence label. Classify before responding:
 ## Answering a suppressed finding
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
-carry its own context: quote the finding (with its `file:line` anchor and enough of the
-reviewer's own words to identify it), give one bold verdict per finding (`Fixed in <SHA>`,
-`Disproven`, or `No change needed`), state the `(N)` count the block gave so answers can be
-checked against findings, and link the review round. **Read every round, not only the head.** A
-suppressed finding does not retire when a later push supersedes it, it just stops showing up in a
-head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
+carry its own context. Quote the finding with its `file:line` anchor and enough of the reviewer's
+own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
+`No change needed`, `Deferred to <issue>`, or `Awaiting maintainer`. State the `(N)` count the
+block gave so answers can be checked against findings, and link the review round.
+**Read every round, not only the head.** A suppressed finding does not retire when a later push
+supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when
