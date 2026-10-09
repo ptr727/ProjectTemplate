@@ -3931,6 +3931,49 @@ class TestSecondOverviewFormat(GqlCase):
         # Reported rather than gated, the same as `suppressed=` and `cr_outside_diff=`.
         self.assertIn("suppressed=0", out)
 
+    def test_a_later_round_restating_an_earlier_round_s_open_findings_is_no_shortfall(
+        self,
+    ) -> None:
+        """A preamble total counts what is still open, so a round that opened no thread of its own
+        can state findings an earlier round raised, each linking that round's thread."""
+        rd = review(body=overview_v2(findings="**Findings:** 2", entries=2), rid="PRR_head")
+        earlier = [thread(f"T{i}", rid="PRR_old", cid=f"400000000{i}") for i in (1, 2)]
+        pr = payload([rd], earlier)
+        self.assertEqual(2, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/0", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_carried_finding_is_counted_once_beside_the_round_s_own_threads(self) -> None:
+        """An entry linking a thread this round opened is already in `M`, so only the earlier
+        round's thread is added, and a finding the total names past both is still reported."""
+        rd = review(body=overview_v2(findings="**Findings:** 3", entries=2), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_old", cid="4000000001"),
+            thread("T2", rid="PRR_head", cid="4000000002"),
+        ]
+        pr = payload([rd], threads)
+        self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=3/1", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn(
+            "states 3 findings and opened 1 thread, its open section also linking 1 an earlier "
+            "round opened, so 1 finding is",
+            out,
+        )
+
+    def test_an_entry_linking_no_thread_is_not_counted_as_carried(self) -> None:
+        """Only a link to a thread on this pull request accounts for a finding."""
+        rd = review(body=overview_v2(findings="**Findings:** 2", entries=2), rid="PRR_head")
+        pr = payload([rd], [thread("T1", rid="PRR_old", cid="4000000001")])
+        self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_a_single_withheld_finding_reads_as_one_finding(self) -> None:
         """The reachable `stated=1, threads=0` case rendered `them` twice for one finding."""
         self.answer(payload([review(body=overview_v2(findings="**Findings:** 1", entries=0))]))
