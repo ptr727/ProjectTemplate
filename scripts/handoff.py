@@ -23,8 +23,8 @@ either way. Two or more open on one track is a defect to report, never one to re
 so every command that would have to choose refuses and names both.
 
 A head resolved that way can still be one the chain has moved past, where another link already
-names it as predecessor, holds a higher round, or holds the same round. `new` refuses onto such a
-head, and `current`, `resume`, and `chain` answer from it with a notice naming each such link,
+names it as predecessor, holds a higher round, or holds the same round. `new` and `link` refuse
+onto such a head, and `current`, `resume`, and `chain` answer from it with a notice naming each such link,
 since answering from it silently is how a search reads "no match" over text in the lane.
 
 Subcommands
@@ -1089,7 +1089,7 @@ def head_doubts(head: dict, lane: Lane) -> list[str]:
     round by issue number, so either can resolve a link the chain has already moved past. Three
     states show it: a link already naming it as predecessor, a link at a higher round, and another
     link at its own round. Answering from such a head is how a search reads "no match" over text
-    in the lane, so the reads print these and `new` refuses on them.
+    in the lane, so the reads print these, and `new` and `link` refuse on them.
     """
     number = int(head["number"])
     round_ = int(head["marker"]["round"])
@@ -1219,10 +1219,24 @@ def cmd_link(a: argparse.Namespace) -> int:
     rest = lane._replace(links=[r for r in lane.links if str(r["number"]) not in after])
     doubts = head_doubts({"number": previous["number"], "marker": before}, rest)
     if doubts:
+        later = [
+            f"#{r['number']}"
+            for r in rest.links
+            if r["marker"]["previous"] == "none"
+            and int(r["marker"]["round"]) > int(marker["round"])
+        ]
+        order = (
+            f" Repair a chain of orphans later first: link {', '.join(later)} before "
+            f"#{new['number']}, since a later orphan reads as a higher round that does not yet "
+            f"descend from #{new['number']}."
+            if later
+            else ""
+        )
         raise Refusal(
             cut(
                 f"#{previous['number']} may not be the head of track {marker['track']!r}, so "
-                f"pointing #{new['number']} at it could fork the chain there. {' '.join(doubts)}"
+                f"pointing #{new['number']} at it could fork the chain there. "
+                f"{' '.join(doubts)}{order}"
             )
         )
     if marker["previous"] not in ("none", str(previous["number"])):

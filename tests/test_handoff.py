@@ -1986,6 +1986,23 @@ class LinkCase(unittest.TestCase):
         self.assertIn("nothing to edit", out)
         self.assertEqual(fake.issues[20]["state"], "CLOSED")
 
+    def test_adjacent_orphans_name_the_later_first_repair_order(self) -> None:
+        """Closed round 1, closed orphan round 2, open orphan round 3: repair the later orphan first."""
+        fake = FakeGh(
+            {
+                10: link(10, "default", 1, None, state="CLOSED"),
+                11: link(11, "default", 2, None, state="CLOSED"),
+                12: link(12, "default", 3, None),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("link #12 before #11", err)
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "12", "--previous", "11")
+        self.assertEqual(code, 0)
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
+        self.assertEqual(code, 0)
+
     def test_an_issue_cannot_succeed_itself(self) -> None:
         """Otherwise the track's only open link closes into a cycle and the run exits 0."""
         fake = FakeGh({21: link(21, "default", 2, None)})
