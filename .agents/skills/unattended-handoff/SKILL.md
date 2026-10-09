@@ -131,6 +131,10 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
 an exhausted reviewer quota, or a push the executor refuses. A promotion waiting on an open
 `decision` issue is not one, since a round can still merge to develop, per "The Worker" step 3.
+Nor is anything about the worker's own issue. A worker that cannot finish its issue parks it per
+"Parking" and replies `PARKED`, since a `STOP` leaves that handoff neither closed nor parked and
+ends the run with backlog still pickable. A review pass or wait that has not finished is no reason
+to reply at all, per "The Worker" step 4.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
 Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
@@ -235,8 +239,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    item 2 states. Such a promotion merges with no `decision` issue,
    and the worker records that item's evidence on the handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
-   the worker's own turn. A subagent receives no completion notification, so a wait handed to a
-   monitor or a background task never wakes it.
+   the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
+   holds its turn until that pass's reviewer has reported, however the reviewer was dispatched.
+   The orchestrator acts on the worker's line the moment it arrives, so work still running then
+   finishes after the run has already acted on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
@@ -256,7 +262,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
    needing no successor.
 8. **Save no memory**, since state lives in the chain where any session on any machine reads it.
-   Reply with one line.
+   Reply with one line, and only once nothing the worker started is still running, per step 4.
 
 ## Parking
 
