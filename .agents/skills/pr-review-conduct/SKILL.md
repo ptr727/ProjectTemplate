@@ -157,6 +157,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    while a finding on an intent unit is filed there too, the carrier adapting its own copy
    meanwhile, since the defect is still fixed at the source. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
+
+   A finding the pull request's own body lists also needs an outcome before merge, under
+   "Every finding ends in one of five outcomes" below. Per the `local-strict-review` section
+   "Disposing of Findings", the body lists each one still open once a push's edit budget is spent.
+   It needs that outcome whichever head it was found on and whether or not a reviewer raises it
+   again. `pr_review.py status` and `wait` do not read the pull request's body, so read the body
+   live for that list before judging this item. It has no thread, so answer it as
+   "Answering a suppressed finding" below states. Cite the body's list where that section links
+   the review round, and the list's length where it states the block's `(N)` count.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
@@ -333,12 +342,13 @@ never against its confidence label. Classify before responding:
 ## Answering a suppressed finding
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
-carry its own context: quote the finding (with its `file:line` anchor and enough of the
-reviewer's own words to identify it), give one bold verdict per finding (`Fixed in <SHA>`,
-`Disproven`, or `No change needed`), state the `(N)` count the block gave so answers can be
-checked against findings, and link the review round. **Read every round, not only the head.** A
-suppressed finding does not retire when a later push supersedes it, it just stops showing up in a
-head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
+carry its own context. Quote the finding with its `file:line` anchor and enough of the reviewer's
+own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
+`No change needed`, `Deferred to <issue>`, or `Awaiting maintainer`. An `Awaiting maintainer`
+answer leaves the finding open until a later answer records the maintainer's decision. State the
+`(N)` count the block gave so answers can be checked against findings, and link the review round.
+**Read every round, not only the head.** A suppressed finding does not retire when a later push
+supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when
