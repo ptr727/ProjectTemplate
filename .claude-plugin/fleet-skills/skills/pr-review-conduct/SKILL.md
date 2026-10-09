@@ -82,15 +82,17 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    read rather than counted and named to them, and their permission under item 5 is what allows
    the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
 
-   One case satisfies this item with no coverage stated on the head, and it is the only one.
-   The maintainer adopted it as a standing rule. It applies to a develop -> main promotion on
-   which `pr_review.py` exits `45`, meaning no coverage statement and no table reach its head.
-   That promotion satisfies item 2 where all three of these hold on the live head:
+   One further case satisfies this item where no coverage reaches the head, and it is the only
+   such case. The maintainer adopted it as a standing rule. It applies to a develop -> main
+   promotion whose head round states no coverage and carries no file table, so `pr_review.py`
+   exits `45`. The digest's `NO FILE TABLE STANDS IN` line then opens `no round covering the head
+   carries a file table of its own`. Any other reason on that line, such as a partial round on
+   any commit, is another shortfall. That promotion satisfies item 2 where all three of these hold on the live head:
 
-   - Every change it carries had full coverage on its own feature -> develop pull request. A
-     Copilot file table or a round's own coverage statement names each file that pull request
-     changed. A `local-strict-review` pass recorded for that pull request covers a file instead.
-     That pass must have run at the head that last changed the file, or at a later one.
+   - Every change it carries had full coverage on its own feature -> develop pull request. Each
+     file that pull request changed is covered at the head that last changed it, or at a later
+     one. A Copilot file table or a round's own coverage statement covers a file. So does a
+     `local-strict-review` pass recorded for that pull request.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code. Exit `45` returns before the exit
