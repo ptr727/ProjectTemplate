@@ -4794,6 +4794,20 @@ class TestCoverageExitCodes(GqlCase):
                     pr_review.table_shortfall(pr),
                 )
 
+    def test_a_grouped_cell_carrying_a_note_names_each_path_as_noted(self) -> None:
+        """A note anywhere in a grouped cell leaves every path it lists uncovered, named as noted."""
+        files = ["docs/a.md", "docs/b.md"]
+        for cell in ("`docs/a.md`, `docs/b.md` (moved)", "`docs/a.md` (moved), `docs/b.md`"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    "the table names docs/a.md, docs/b.md only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
+
     def test_a_file_named_only_on_a_noted_row_refuses(self) -> None:
         """A note is never read, so it could say the file went unreviewed, and the table refuses."""
         body = self.written(["src/app.sh", "docs/a.md (not reviewed)"])
