@@ -344,9 +344,9 @@ One pull request writing down the agent-to-agent messaging this fleet has now us
 
 ### What Building the Windows Host Tooling Surfaced
 
-Three findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
+Two findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
 
-**State** `ready` for the first two, `decision` for the third. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
+**State** `ready` for both. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
 
 - **Record why the host tooling carries no linter category, or decide that it should.** No installer on either platform manages `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and nothing states that as a decision, so the absence is correct and reachable only by inference.
   - **Blocked by** - Nothing.
@@ -354,13 +354,6 @@ Three findings raised while writing [`host-setup/windows/`][host-setup-windows],
   - **Checked** - `main` at `1d5b076` on 2026-08-11, where `readonly TOOLS=(git gh jq git-restore-mtime node python uv dotnet)` names no linter and no comment says why.
   - **Settled** - The reasoning holds and is worth writing down once rather than per platform: each linter runs as a pinned image or through `uvx`, so the image tag fixes the version and a local run matches CI, and installing native copies would put a second unpinned version on the host and break exactly that.
   - **Open** - Whether it belongs in [`docs/host-setup.md`][host-setup-doc] as a fleet fact, which is what covers Linux by the same sentence, or stays per platform where only the Windows README states it today.
-
-- **Report the `gh` git protocol in `setup-github.sh`, as its Windows peer does.** A host can pass every check the fleet runs while `gh` is configured for https, and a checkout made through `gh` then authenticates by token where every other checkout on that host authenticates by key.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#672][issue-672].
-  - **Checked** - Measured on the maintainer's Windows host on 2026-08-11, where `gh auth status` reports `Git operations protocol: https` against `gh` 2.97.0, an SSH key that signs and verifies, and `scripts/host_gate.py` exiting 0 over all seven declared tools.
-  - **Settled** - Reported rather than written, since rewriting a working authentication configuration is the operator's call, and `setup-github.sh` touches `gh` nowhere today.
-  - **Open** - Whether `--configure` should set it, which is the only part where the two platforms could still diverge.
 
 - **Align the Linux scripts onto "name one action" instead of "the last one given wins".** Overwriting `MODE` in the arg loop discards an intent silently, and it discards it in the dangerous direction: `--report --install` drops the safe action and keeps the one that changes the host.
   - **Blocked by** - Nothing.
@@ -522,7 +515,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
 [issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
-[issue-672]: https://github.com/ptr727/ProjectTemplate/issues/672
 [issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
 [issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
 [issue-1161]: https://github.com/ptr727/ProjectTemplate/issues/1161
