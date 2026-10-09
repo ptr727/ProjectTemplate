@@ -552,6 +552,8 @@ TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
 TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
 TABLE_GLOB = frozenset("*?")
 TABLE_GAP = " ... "
+TABLE_SPAN = re.compile(r"`([^`]+)`")
+TABLE_SEPARATORS = re.compile(r"[\s,]*")
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -2331,7 +2333,51 @@ def segment_fits(segment: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
 
 
-def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
+def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool, bool]:
+    """The changed paths a row names, whether it names one at most, and whether a note came off.
+
+    While a row names nothing and ends in a parenthesized note, it is read again without that
+    note, since the second format writes one after a path, as in `docs/a.md (cleanup)`. A note
+    comes off only while the row names nothing, so a row naming a changed path in any of
+    `row_form`'s ways reads as written, whatever parentheses it ends in.
+
+    A row that names its paths only once a note comes off is not counted as naming a path the
+    diff does not carry, and it covers none of them either. Nothing reads the note's text, which
+    could just as well say the file went unreviewed, so only a row naming a path as written
+    covers it.
+    """
+    noted = False
+    while True:
+        paths, single = row_form(row, diff)
+        if paths or not (head := note_head(row)):
+            return paths, single, noted
+        row, noted = head, True
+
+
+def note_split(row: str) -> tuple[str, str]:
+    """The row's text before its trailing parenthesized note, and the note, or two empty strings.
+
+    The note runs from the last `(` to the closing `)`, holding no parenthesis of its own, and
+    whitespace stands between it and the text before it.
+    """
+    if not row.endswith(")"):
+        return "", ""
+    start = row.rfind("(")
+    if start < 1 or ")" in row[start + 1 : -1] or not row[start - 1].isspace():
+        return "", ""
+    return row[:start], row[start:]
+
+
+def note_head(row: str) -> str:
+    """The row before its trailing note, as `note_split` finds one, or empty where it ends in none.
+
+    That text is returned with its outer backticks dropped, as `cell_paths` drops a whole cell's,
+    since a code span can come before the note.
+    """
+    return note_split(row)[0].strip().strip("`").strip()
+
+
+def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
     """The changed paths one table row names, out of `diff`, and whether it names one at most.
 
     A row names a path in one of three ways, and every claim here and in the digest that a table
@@ -2361,24 +2407,30 @@ def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool]:
     return [], True
 
 
-def table_match(named: list[str], diff: set[str]) -> tuple[list[str], list[str], list[str]]:
-    """The changed paths no row names, the rows naming none, and the rows naming too many.
+def table_match(
+    named: list[str], diff: set[str]
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """The changed paths no row covers, the rows naming none, too many, and the noted paths.
 
     A row naming one path at most that matches several names none of them, since which one it
-    shortened is unknown. Each list is sorted, and the table stands in for coverage only where
-    all three are empty.
+    shortened is unknown. A row covers what it names unless a note came off it first, per
+    `row_paths`, and the last list holds the uncovered paths such a row names, so it is a subset
+    of the first. Each list is sorted, and the table stands in for coverage only where the first
+    three are empty.
     """
     covered: set[str] = set()
+    noted_paths: set[str] = set()
     invented, ambiguous = [], []
     for row in dict.fromkeys(named):
-        paths, single = row_paths(row, diff)
+        paths, single, noted = row_paths(row, diff)
         if not paths:
             invented.append(row)
         elif single and len(paths) > 1:
             ambiguous.append(row)
         else:
-            covered.update(paths)
-    return sorted(diff - covered), sorted(invented), sorted(ambiguous)
+            (noted_paths if noted else covered).update(paths)
+    left = diff - covered
+    return sorted(left), sorted(invented), sorted(ambiguous), sorted(noted_paths & left)
 
 
 def file_table(body: str) -> list[str]:
@@ -2395,7 +2447,7 @@ def file_table(body: str) -> list[str]:
     The header is what opens the table and any line that is not a row closes it, so a second
     table later in the body is read as a second table rather than as more of the first.
 
-    Each cell is reduced by `bare_path`, for the reason it states.
+    Each cell is reduced by `bare_path`, for the reason it states, and read by `cell_paths`.
     """
     paths, reading = [], False
     for line in strip_fences(body or "", to_end=True).splitlines():
@@ -2406,9 +2458,38 @@ def file_table(body: str) -> list[str]:
         elif (row := TABLE_ROW.match(line)) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            cell = bare_path(row.group(1))
-            paths.append(cell.strip().strip("`").strip())
+            paths.extend(cell_paths(bare_path(row.group(1))))
     return [p for p in paths if p]
+
+
+def cell_paths(cell: str) -> list[str]:
+    """The paths one table cell names, one per code span where it lists several.
+
+    The second format can group related files into one row, each in a code span of its own with
+    a comma between them. Read whole, such a cell is one path holding backticks, which names none
+    of the files it lists. So a cell holding single-backtick spans with nothing but commas and
+    whitespace outside them names each span.
+
+    Such a list can end in notes, each as `note_split` finds one, and they come off one after
+    another as `row_paths` takes them off a row. Each span then keeps those notes, so each reads
+    as a noted row, since which file a note is about is unknown. The notes come off before the
+    spans are found, so a span quoted inside one is never read as a path. Any other cell is read
+    whole, its outer backticks dropped.
+    """
+    if spans := span_list(cell):
+        return [s.strip() for s in spans]
+    head, notes = cell.strip(), ""
+    while (split := note_split(head))[1]:
+        head, notes = split[0].rstrip(), f"{split[1]} {notes}".rstrip()
+        if spans := span_list(head):
+            return [f"{s.strip()} {notes}" for s in spans]
+    return [cell.strip().strip("`").strip()]
+
+
+def span_list(text: str) -> list[str]:
+    """The spans `text` lists, or none where it holds more than spans, commas, and whitespace."""
+    spans = TABLE_SPAN.findall(text)
+    return spans if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", text)) else []
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
@@ -2464,7 +2545,9 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
 
     A path named that the diff does not carry is what disqualifies the naming arm, that typo
     being enough to drop a real file into the omissions and read it as the one nobody reviewed.
-    A shortened path matching several changed files disqualifies it for the same reason.
+    A shortened path matching several changed files disqualifies it for the same reason, and so
+    does a file named only on a row carrying a note, which sits in the omissions although the
+    table names it.
     """
     named = head_table(pr)
     if not named:
@@ -2472,11 +2555,11 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated or not changed:
         return (
-            f"the reviewer names {len(named)} rows in its own table and the diff could not "
+            f"the reviewer names {len(named)} entries in its own table and the diff could not "
             f"be read back to compare them, the changed-file list being "
             f"{'longer than the window this reads' if truncated else 'absent from the query'}"
         )
-    left, invented, ambiguous = table_match(named, {bare_path(c) for c in changed})
+    left, invented, ambiguous, noted = table_match(named, {bare_path(c) for c in changed})
     omitted = [p for p in changed if bare_path(p) in left]
     short = 0 if counts is None else counts[1] - counts[0]
     if not omitted:
@@ -2485,7 +2568,7 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"also does on rounds stating full coverage, so it corroborates nothing and "
             f"names no unread file"
         )
-    if len(omitted) == short and not invented and not ambiguous:
+    if len(omitted) == short and not invented and not ambiguous and not noted:
         return (
             f"the reviewer's own file table omits exactly the {short} file"
             f"{'' if short == 1 else 's'} the counts leave unread, naming "
@@ -2493,11 +2576,16 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
             f"list from the API, so that is a lead to check rather than a verdict"
         )
     return (
-        f"the reviewer's own file table names {len(changed) - len(omitted)} of the "
+        f"the reviewer's own file table names {len(changed) - len(omitted) + len(noted)} of the "
         f"{len(changed)} changed "
-        f"files, omitting {len(omitted)} where the counts leave {short} unread"
+        f"files, omitting {len(omitted) - len(noted)} where the counts leave {short} unread"
         + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
         + (f" and shortening {', '.join(ambiguous)} to fit several" if ambiguous else "")
+        + (
+            f" and naming {', '.join(noted)} only on a row with a note, which covers nothing"
+            if noted
+            else ""
+        )
         + ", so it tracks the counts nowhere and names no unread file"
     )
 
@@ -2634,13 +2722,17 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             "two changed paths differ only by a format character, so the table cannot tell "
             "them apart"
         )
-    omitted, invented, ambiguous = table_match(named, diff)
-    if not omitted and not invented and not ambiguous:
+    left, invented, ambiguous, noted = table_match(named, diff)
+    if not left and not invented and not ambiguous:
         return ""
+    omitted = [p for p in left if p not in noted]
     return "the table " + ", and ".join(
         part
         for part in (
             f"leaves out {', '.join(omitted)}" if omitted else "",
+            f"names {', '.join(noted)} only on a row with a note, which covers nothing"
+            if noted
+            else "",
             f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
             f"shortens {', '.join(ambiguous)}, which matches more than one changed file"
             if ambiguous
