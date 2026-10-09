@@ -82,8 +82,11 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
    A driver that cannot dispatch a subagent follows that skill's "Running It".
-   Then push the branch and open the feature -> develop PR if it does not exist yet. Where the
-   change writes a code or config comment line, add the `comments` label after creating the PR, or
+   Then push the branch and open the feature -> develop PR if it does not exist yet. Where a
+   pass's edit budget is spent, on this push or a later one, write each `introduced` finding still
+   open into the pull request's body with its class, per that skill's "Disposing of Findings",
+   adding to any list already there. Step 3 gives each one an outcome under the Merge Gate's item 3.
+   Where the change writes a code or config comment line, add the `comments` label after creating the PR, or
    the prose gate refuses it. Where a public repository's lint log says "Read the pull
    request's labels live", a rerun of the failed job picks the label up. Otherwise it applies to
    the next push.
