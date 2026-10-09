@@ -63,21 +63,21 @@ without trusting the parts of it that have gone stale.
   lane of work, and a session that names no track uses `default`. Parallel lanes each name their
   own, so each closes its own predecessor and neither reads the other's state as current.
 - **A platform lane is for work that needs its platform.** A platform track, such as `wsl` or
-  `windows`, takes only issues that need its platform. An issue needs WSL where its defect lives
-  inside a WSL distro or in its interop with Windows. It needs Windows where its defect lives on
-  Windows itself. A Linux host outside WSL can neither reproduce such a defect nor verify
-  its fix. A defect in the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or `wslpath` needs
-  WSL, and so does running a Windows `.exe` from Linux. Behavior that differs under Windows
-  PowerShell 5.1 or `winget` needs Windows, whichever shell started it, and so do Windows path and
-  ACL semantics. Systemd user scopes, apt, a bash script, and a `pwsh` script run in a Linux
-  container all run on a Linux host. Each needs a lane only where its defect depends on WSL or
-  Windows itself. An issue that needs a platform goes to that platform's lane. An issue that needs
-  none goes to the ordinary backlog, since a platform lane costs a separate chain and a host-bound
-  session. Where only part of an issue needs a platform, each such part is filed as an issue of its
-  own for its platform's lane. The original is narrowed to what a Linux host outside WSL can do, or
-  closed in favor of those issues where nothing is left. A platform lane is closed out with no
-  successor once none of its next steps needs its platform. Its last link carries the outcome as a
-  comment, as `AGENTS.md` "Session Scope" closes a track whose work is complete.
+  `windows`, takes an issue only when its defect reproduces, or its fix can be verified, on that
+  platform alone. It also needs that no Linux host outside WSL can both fix the issue and verify
+  the fix. An issue meeting both goes to its platform's lane. Any other issue goes to the ordinary
+  backlog, since a lane costs a separate chain and a host-bound session. A defect in WSL interop,
+  the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, `wslpath`, or running a Windows `.exe`
+  from Linux reproduces only inside WSL. It is `wsl` work, although WSL runs on Windows. Behavior
+  that differs under Windows PowerShell 5.1 or `winget`, or in Windows path and ACL semantics,
+  reproduces on Windows without WSL, so it is `windows` work. Systemd user scopes, apt, a bash
+  script, and a `pwsh` script run in a Linux container need a lane only where the defect depends on
+  the platform itself. Where only part of an issue needs a platform, each such part is filed as an
+  issue of its own for its platform's lane. The original is narrowed to the rest, or closed in favor
+  of those issues where nothing is left. A platform lane is closed out with no successor once none
+  of its next steps needs its platform, each remaining step first filed as a backlog issue. Its last
+  link carries the outcome as a comment, as `AGENTS.md` "Session Scope" closes a track whose work is
+  complete.
 - **The title is for humans**, shaped `Session Handoff [<track>]: <subject>`, which `new` composes
   from the track and the subject it is given, so what a session writes is the subject alone.
   Nothing parses the title, so a maintainer is free to rename one.
