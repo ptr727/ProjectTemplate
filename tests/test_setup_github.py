@@ -620,6 +620,41 @@ def function_body(text: str, opener: str) -> str:
     return text[start : text.index("\n}\n", start)]
 
 
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux script's own functions")
+class TestPackageInstalled(unittest.TestCase):
+    """`setup-github.sh`'s installed-package check, with a stub `dpkg-query` first on PATH."""
+
+    def check(self, status: str, exit_code: int = 0) -> int:
+        """The exit status of `package_installed git` when dpkg-query prints `status`."""
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        functions = directory / "functions.sh"
+        functions.write_text(linux_functions(), encoding="utf-8")
+        stub = directory / "dpkg-query"
+        stub.write_text(f"#!/bin/sh\nprintf '%s' '{status}'\nexit {exit_code}\n", encoding="ascii")
+        stub.chmod(0o755)
+        script = f'source "{functions}"\nPATH="{directory}:$PATH"\npackage_installed git\n'
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        ).returncode
+
+    def test_an_installed_package_reads_as_installed(self) -> None:
+        self.assertEqual(self.check("install ok installed"), 0)
+
+    def test_a_held_package_reads_as_installed(self) -> None:
+        self.assertEqual(self.check("hold ok installed"), 0)
+
+    def test_a_removed_package_reads_as_missing(self) -> None:
+        self.assertNotEqual(self.check("deinstall ok config-files"), 0)
+
+    def test_an_unknown_package_reads_as_missing(self) -> None:
+        self.assertNotEqual(self.check("", 1), 0)
+
+
 class TestCallSites(unittest.TestCase):
     """Each script's status and configure actions reach the GitHub CLI functions the tests drive."""
 
