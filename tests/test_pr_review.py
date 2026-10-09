@@ -4279,11 +4279,15 @@ class TestSecondOverviewFormat(GqlCase):
 COVERS_ONE = "<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
 
 
-def open_section(ids: tuple[str, ...], noun: str = "") -> str:
+PULL_URL = "https://github.com/example-owner/example-repo/pull/1"
+
+
+def open_section(ids: tuple[str, ...], noun: str = "", base: str = "") -> str:
     """The revision's open-findings section, one badged entry per thread id.
 
-    The summary opens on its count, singular for one finding. Titles and ids are constructed, per
-    GOVERNANCE.md "Representative Data in Agent-Authored Text".
+    The summary opens on its count, singular for one finding. Each link is `base` and the thread's
+    fragment, so an empty `base` writes the fragment-relative form. Titles, ids, and any `base` are
+    constructed, per GOVERNANCE.md "Representative Data in Agent-Authored Text".
     """
     badge = (
         '<picture><source media="(prefers-color-scheme: dark)" srcset="medium-dark.svg">'
@@ -4291,7 +4295,7 @@ def open_section(ids: tuple[str, ...], noun: str = "") -> str:
     )
     noun = noun or ("finding" if len(ids) == 1 else "findings")
     entries = "\n".join(
-        f"- {badge} [Constructed finding](#discussion_r{i}) \u00b7 New" for i in ids
+        f"- {badge} [Constructed finding]({base}#discussion_r{i}) \u00b7 New" for i in ids
     )
     return (
         f"<details open>\n<summary><strong>{len(ids)} open {noun}</strong></summary>\n\n"
@@ -4347,6 +4351,31 @@ class TestOverviewSections(GqlCase):
         self.assertIn("overview=2/2", out)
         self.assertIn("shapes=ok", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_absolute_thread_link_reports_no_block(self) -> None:
+        """An entry linking its thread by an absolute URL reads as linked, so no block prints."""
+        ids = ("6000000001", "6000000002")
+        rd = review(body=revised_with(open_section(ids, base=PULL_URL)), rid="PRR_head")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        pr = payload([rd], threads)
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_absolute_link_to_no_thread_here_is_counted(self) -> None:
+        """The URL's pull request is not compared with the one read, since an id no thread here
+        carries is still counted by that id."""
+        ids = ("6000000001", "6000000002")
+        rd = review(body=revised_with(open_section(ids, base=PULL_URL)), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_head", cid="6000000001"),
+            thread("T2", rid="PRR_head", cid="6000000009"),
+        ]
+        self.answer(payload([rd], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
     def test_an_earlier_round_s_thread_in_the_open_section_is_no_finding_without_one(self) -> None:
         """The section supplied the total, so its entries decide, and both link threads."""
