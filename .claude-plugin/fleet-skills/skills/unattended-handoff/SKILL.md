@@ -228,10 +228,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
    included. Run it with `--state all` and with `state,closedAt` added to `--json`, never with a
    `--search` query, since search can lag a close. Where one blocking that promotion is open, the
-   round narrows to develop as above. Where one has a `closedAt` at or after the time noted before
-   the first read, park. Ask whether its answer lets the promotion merge, since that answer may not
-   be to merge. Exit `45` on a promotion blocks no merge where the promotion meets the one case
-   `pr-review-conduct` Merge Gate item 2 states. Such a promotion merges with no `decision` issue,
+   round narrows to develop as above. Where one blocking that promotion has a `closedAt` at or
+   after the time noted before the first read, park. That answer may not be to merge, so the
+   `decision` issue the park files asks whether it lets the promotion merge. Exit `45` on a
+   promotion blocks no merge where the promotion meets the one case `pr-review-conduct` Merge Gate
+   item 2 states. Such a promotion merges with no `decision` issue,
    and the worker records that item's evidence on the handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a

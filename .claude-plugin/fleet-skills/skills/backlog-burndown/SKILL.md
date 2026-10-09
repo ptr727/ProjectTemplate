@@ -471,7 +471,9 @@ carried. A fix landing during the freeze adds its issue to a body already writte
 body when it lands rather than leaving the issue to be closed by hand. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one
 from a read of the body made immediately before the write, keeping every line that read holds.
-Then read the body again, and repeat the amendment where a `Fixes` line it should carry is missing.
+Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
+range calls for. Checking the whole set rather than only this amendment's own lines is what
+restores a line another session's write dropped.
 
 ## Run State
 
