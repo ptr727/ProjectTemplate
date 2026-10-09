@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,12 +19,16 @@ from host_capability import requires_symlink
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import docker_lint
 
+MOUNT_SOURCE = re.compile(r'^type=bind,"src=(.*)",dst=')
+
 
 class FakeRunner:
     """Record commands and return configured Docker results."""
 
     def __init__(self, failure: int | None = None, timeout: bool = False) -> None:
         self.commands: list[tuple[list[str], int]] = []
+        self.mounted: list[dict[str, bool]] = []
+        self.sources: list[Path] = []
         self.failure = failure
         self.timeout = timeout
 
@@ -31,6 +36,17 @@ class FakeRunner:
         self, command: list[str], timeout: int, *, capture_output: bool = False
     ) -> subprocess.CompletedProcess[str]:
         self.commands.append((command, timeout))
+        for argument in command:
+            source = MOUNT_SOURCE.search(argument)
+            if source:
+                tree = Path(source.group(1).replace('""', '"'))
+                self.mounted.append(
+                    {
+                        path.relative_to(tree).as_posix(): path.is_symlink()
+                        for path in tree.rglob("*")
+                    }
+                )
+                self.sources.append(tree)
         if self.timeout and command[:2] == ["docker", "run"]:
             raise docker_lint.CommandTimedOut(f"timed out after {timeout}s")
         if command[:3] == ["docker", "image", "inspect"]:
@@ -83,7 +99,9 @@ class DockerLintCase(unittest.TestCase):
         self.assertIn("RESULT success: 1 linter(s) completed", output)
         run = next(command for command, _ in runner.commands if command[:2] == ["docker", "run"])
         self.assertIn("--network=none", run)
-        self.assertIn(f'type=bind,"src={self.root}",dst=/workdir,readonly', run)
+        self.assertEqual(1, len(runner.sources))
+        self.assertNotEqual(self.root, runner.sources[0])
+        self.assertIn(docker_lint.docker_mount(runner.sources[0], "/workdir"), run)
         self.assertIn("example@sha256:123", run)
         self.assertEqual("--", run[-2])
         self.assertEqual("README.md", run[-1])
@@ -289,6 +307,46 @@ class DockerLintCase(unittest.TestCase):
             f'type=bind,"src={root.parent}{os.sep}docker-lint,""root",dst=/workdir,readonly',
             docker_lint.docker_mount(root, "/workdir"),
         )
+
+    def test_git_ignored_files_never_reach_the_mounted_tree(self) -> None:
+        self.track(".gitignore", "secrets.yaml\n.artifacts/\n")
+        self.track("README.md")
+        self.track("docs/guide.md")
+        (self.root / "secrets.yaml").write_text("password: example\n", encoding="utf-8")
+        (self.root / ".artifacts" / "bin").mkdir(parents=True)
+        (self.root / ".artifacts" / "bin" / "Example.pdb").write_bytes(b"\r\n")
+        (self.root / "notes.md").write_text("untracked, unignored\n", encoding="utf-8")
+        runner = FakeRunner()
+        result, output = self.invoke({"editorconfig-checker", "markdownlint"}, runner)
+        self.assertEqual(0, result)
+        self.assertIn("SNAPSHOT 4 tracked or unignored path(s) staged to mount", output)
+        self.assertEqual(2, len(runner.mounted))
+        for mounted in runner.mounted:
+            self.assertEqual(
+                {".git", ".gitignore", "README.md", "docs", "docs/guide.md", "notes.md"},
+                set(mounted),
+            )
+        self.assertFalse(any(source.exists() for source in runner.sources))
+
+    @requires_symlink
+    def test_snapshot_copies_a_symlink_without_following_it(self) -> None:
+        outside = self.outside / "outside.md"
+        outside.write_text("outside the checkout\n", encoding="utf-8")
+        self.track("README.md")
+        self.track_symlink("linked.md", outside)
+        runner = FakeRunner()
+        result, _ = self.invoke({"markdownlint"}, runner)
+        self.assertEqual(0, result)
+        self.assertEqual({".git": False, "README.md": False, "linked.md": True}, runner.mounted[0])
+
+    def test_snapshot_skips_a_tracked_file_deleted_from_disk(self) -> None:
+        self.track("README.md")
+        self.track("gone.md")
+        (self.root / "gone.md").unlink()
+        runner = FakeRunner()
+        result, _ = self.invoke({"editorconfig-checker"}, runner)
+        self.assertEqual(0, result)
+        self.assertEqual({".git": False, "README.md": False}, runner.mounted[0])
 
     def test_markdown_literal_marker_precedes_negated_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "markdownlint")

@@ -6,8 +6,11 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -253,6 +256,37 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     return files
 
 
+def stage_snapshot(root: Path, snapshot: Path) -> int:
+    """Copy the tracked and unignored files into snapshot, the only tree a container mounts.
+
+    A git-ignored file, such as a local secrets file beside a tracked placeholder, stays behind.
+    A symlink is copied as a link and never followed.
+    A tracked path missing from disk is skipped, as a deleted file is.
+    An empty `.git` is added, since actionlint finds its project only where one sits beside
+    `.github/workflows`.
+    """
+    staged = 0
+    snapshot.chmod(stat.S_IMODE(root.stat().st_mode))
+    for relative_path in ls_files(root):
+        source = root / relative_path
+        destination = snapshot / relative_path
+        try:
+            if not os.path.lexists(source):
+                continue
+            if not source.is_symlink() and source.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination, follow_symlinks=False)
+        except OSError as error:
+            raise CommandFailed(
+                f"snapshot failed: could not copy {relative_path}: {error}"
+            ) from error
+        staged += 1
+    (snapshot / ".git").mkdir(exist_ok=True)
+    return staged
+
+
 def docker_mount(root: Path, destination: str) -> str:
     """Build the read-only repository mount argument."""
     source = str(root).replace('"', '""')
@@ -441,23 +475,27 @@ def lint(
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
-        for linter, files in applicable:
-            if linter.name == "PSScriptAnalyzer":
-                install_psscriptanalyzer(digests[linter.name], timeout, runner)
-            batches = file_batches(linter, files)
-            for index, batch in enumerate(batches, start=1):
-                label = f"lint {linter.name} ({len(files)} file(s))"
-                if len(batches) > 1:
-                    label = (
-                        f"lint {linter.name} batch {index}/{len(batches)} "
-                        f"({len(batch)} of {len(files)} file(s))"
+        with tempfile.TemporaryDirectory(prefix="docker-lint-") as directory:
+            snapshot = Path(directory)
+            staged = stage_snapshot(root, snapshot)
+            print(f"SNAPSHOT {staged} tracked or unignored path(s) staged to mount", flush=True)
+            for linter, files in applicable:
+                if linter.name == "PSScriptAnalyzer":
+                    install_psscriptanalyzer(digests[linter.name], timeout, runner)
+                batches = file_batches(linter, files)
+                for index, batch in enumerate(batches, start=1):
+                    label = f"lint {linter.name} ({len(files)} file(s))"
+                    if len(batches) > 1:
+                        label = (
+                            f"lint {linter.name} batch {index}/{len(batches)} "
+                            f"({len(batch)} of {len(files)} file(s))"
+                        )
+                    run_step(
+                        label,
+                        container_command(snapshot, linter, digests[linter.name], batch),
+                        timeout,
+                        runner,
                     )
-                run_step(
-                    label,
-                    container_command(root, linter, digests[linter.name], batch),
-                    timeout,
-                    runner,
-                )
     except CommandFailed as error:
         print(f"RESULT failed: {error}", flush=True)
         return 1
