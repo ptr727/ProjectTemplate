@@ -88,9 +88,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    of these hold on the live head:
 
    - Every change it carries had full coverage on its own feature -> develop pull request. That
-     pull request met item 2 at its merged head by coverage, not by permission. Failing that, a
-     `local-strict-review` pass recorded for it read each file its coverage missed. Such a pass
-     ran at the head that last changed the file, or at a later one.
+     pull request met item 2 at its merged head by coverage, not by permission. Failing that,
+     each file it changed has positive evidence of a full read, at the head that last changed
+     the file or a later one. A Copilot table row with no note is such evidence, on a round
+     stating no partial coverage. A round stating full coverage is evidence for every file. So is
+     a `local-strict-review` pass recorded for that pull request, for every file its diff held.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code, since exit `45` returns before the
