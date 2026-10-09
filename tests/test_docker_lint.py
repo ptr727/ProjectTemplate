@@ -350,6 +350,29 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertEqual({".git": False, "README.md": False}, runner.mounted[0])
 
+    def test_sigterm_during_execution_still_removes_the_snapshot(self) -> None:
+        self.track("README.md")
+        sources: list[Path] = []
+
+        def terminated(
+            command: list[str], timeout: int, *, capture_output: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            for argument in command:
+                source = MOUNT_SOURCE.search(argument)
+                if source:
+                    sources.append(Path(source.group(1)))
+                    docker_lint.exit_on_sigterm(15, None)
+            return FakeRunner()(command, timeout, capture_output=capture_output)
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            docker_lint.lint(self.root, 17, {"markdownlint"}, terminated)
+        self.assertEqual(143, raised.exception.code)
+        self.assertEqual(1, len(sources))
+        self.assertFalse(sources[0].exists())
+
     def test_markdown_literal_marker_precedes_negated_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "markdownlint")
         command = docker_lint.container_command(

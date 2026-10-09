@@ -7,6 +7,7 @@ import argparse
 import os
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -14,6 +15,8 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+import local_review
 
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
@@ -263,16 +266,14 @@ def snapshot_parent(root: Path) -> Path:
     The system temporary directory is outside Docker Desktop for Linux's default file sharing.
     """
     try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
-            check=True,
-            capture_output=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise CommandFailed(
-            f"snapshot failed: could not locate the git directory: {error}"
-        ) from error
-    return Path(os.fsdecode(result.stdout).strip())
+        return local_review.git_dir(root)
+    except local_review.CannotRun as error:
+        raise CommandFailed(f"snapshot failed: {error}") from error
+
+
+def exit_on_sigterm(signum: int, _frame: object) -> None:
+    """Turn a termination signal into an exit, so the snapshot is still removed."""
+    raise SystemExit(128 + signum)
 
 
 def stage_snapshot(root: Path, snapshot: Path) -> int:
@@ -544,6 +545,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line entry point."""
     args = parse_args(argv)
+    signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be greater than zero")
     root = args.root.resolve()
