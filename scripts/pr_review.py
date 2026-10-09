@@ -4019,7 +4019,7 @@ def digest(
             )
             + (
                 f", and {unthreaded} of the entries its open sections count "
-                f"{'carries' if unthreaded == 1 else 'carry'} no link this script reads to a "
+                f"{'has' if unthreaded == 1 else 'have'} no title link this script reads to a "
                 "thread on this pull request"
                 if unthreaded
                 else ""

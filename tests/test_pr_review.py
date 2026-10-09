@@ -4417,7 +4417,7 @@ class TestOverviewSections(GqlCase):
         self.assertIn("overview=?/0", out)
         self.assertIn(
             "states no total and opened 0 threads, and 1 of the entries its open sections count "
-            "carries no link this script reads to a thread",
+            "has no title link this script reads to a thread",
             out,
         )
 
@@ -4431,7 +4431,7 @@ class TestOverviewSections(GqlCase):
         self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("open sections count carries no link this script reads to a thread", out)
+        self.assertIn("open sections count has no title link this script reads to a thread", out)
 
     def test_a_second_link_on_one_entry_does_not_cover_an_unlinked_entry(self) -> None:
         """An entry linking a thread beside its own is still one entry, so the unlinked one counts."""
@@ -4526,7 +4526,7 @@ class TestOverviewSections(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=2/2", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("open sections count carries no link this script reads to a thread", out)
+        self.assertIn("open sections count has no title link this script reads to a thread", out)
 
     def back_referenced(self, cid: str) -> dict:
         """One open entry whose title anchors 6000000001 beside a back-reference to 6000000009,
