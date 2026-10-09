@@ -2461,12 +2461,23 @@ def cell_paths(cell: str) -> list[str]:
     The second format can group related files into one row, each in a code span of its own with
     a comma between them, and read whole that cell is one path holding backticks, which names
     none of the files it lists. So a cell holding single-backtick spans with nothing but commas
-    and whitespace outside them names each span, and any other cell is read whole, its outer
-    backticks dropped.
+    and whitespace outside them names each span.
+
+    Such a list can end in a note, set off by whitespace before its `(` as `note_head` requires.
+    Each span then keeps that note, so each reads as a noted row, since which file the note is
+    about is unknown. The note comes off before the spans are found, so a span quoted inside it
+    is never read as a path. Any other cell is read whole, its outer backticks dropped.
     """
     spans = TABLE_SPAN.findall(cell)
     if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
         return [s.strip() for s in spans]
+    noted = cell.strip()
+    start = noted.rfind("(")
+    if noted.endswith(")") and start > 0 and noted[start - 1].isspace():
+        group = noted[:start]
+        listed = TABLE_SPAN.findall(group)
+        if listed and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", group)):
+            return [f"{s.strip()} {noted[start:]}" for s in listed]
     return [cell.strip().strip("`").strip()]
 
 
