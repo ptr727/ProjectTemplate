@@ -64,7 +64,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
    partial gate. A `status` exit `45` is not a partial gate where the promotion meets the one case
-   that skill's Merge Gate item 2 states for a promotion, its evidence recorded as that item says.
+   that skill's Merge Gate item 2 states. Record its evidence as that item says.
    Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both where it is not,
    so the SHA step 3 merges is the one the gate verified. Where drive-pr's ready report named a
    head and it is not a prefix of the recorded one, stop and re-ask with the commits added,

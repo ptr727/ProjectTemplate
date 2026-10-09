@@ -75,8 +75,10 @@ Subcommands
            almost never a statement, which is the case the table reading exists for.
            Where the head branch lacks the current review instructions, which a round at Lite
            effort needs to state coverage, bring them onto it, push, and run `wait`, which requests a round on the new head, and where the
-           comparison could not be read, run `status` again. Past those,
-           hand the state to the maintainer rather than retrying into it, since a round
+           comparison could not be read, run `status` again. Past those, a develop -> main
+           promotion can still satisfy coverage, in the one case pr-review-conduct's Merge Gate
+           item 2 states. Otherwise hand the state to the maintainer rather than retrying into
+           it, since a round
            re-requested on the same head states coverage or carries a table only by chance.
            50 = the round covering the head opens on a verdict other than the clean one, while it
            states no open finding, opened no thread, collapsed no suppressed or previously-missed
@@ -3059,8 +3061,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage or carrying a table only by chance. Past those, a develop -> "
-            "main promotion meeting the one case pr-review-conduct's Merge Gate item 2 states for "
-            "a promotion satisfies that item, recording the evidence it names. Anything else is the "
+            "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
+            "Gate item 2 states, recording the evidence that item names. Anything else is the "
             "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45
