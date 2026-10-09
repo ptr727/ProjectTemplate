@@ -154,8 +154,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   and no comment asks the maintainer something still unanswered.
 - **The fix stays inside this repository's tree.** It changes no repository setting, ruleset,
   visibility, secret, or release condition, and needs no credential, account, or host the session
-  lacks. It needs no platform either, by the test `session-handoff` "The Chain" states, since such
-  an issue belongs to that platform's lane whatever host the session runs on.
+  lacks. It needs no platform, in whole or in part, by the test `session-handoff` "The Chain"
+  states. Such an issue belongs to that platform's lane whatever host the session runs on.
+  Splitting off a platform part is a write the picker does not make.
 - **The fix edits nothing under the hub's `host-setup/agent-safety/`.** That tree is the agent's
   own guard, and it is worked only in an attended session, so a human approves every change to it.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.

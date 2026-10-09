@@ -132,8 +132,8 @@ bodies, and a stuck issue nobody names reads as ordinary backlog that simply nev
 
 An issue that needs a platform, by the test `session-handoff` "The Chain" states, is counted and
 is not ranked. It belongs to that platform's lane, so this run gives it no group, no worker, and no
-claim. Where only part of it needs a platform, that part is split out first as "The Chain" says,
-and the rest is ranked. The round's report names each issue held back this way and its platform,
+claim. Where only part of it needs a platform, it is held back the same way until that part is
+split out as "The Chain" says. The rest is ranked after that. The round's report names each issue held back this way and its platform,
 as it names a `blocked` one.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
