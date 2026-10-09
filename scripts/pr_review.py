@@ -152,17 +152,20 @@ Subcommands
            Markdown parser rather than a line scan.
            A total larger than the thread count is findings the round raised that polling threads
            cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall, except
-           where a count-first open section supplied the total, as stated below. Two
+           where a count-first open section supplied the total, as stated below, or where open
+           entries standing for an earlier round's threads account for it, as stated next. Two
            things overstate that shortfall rather than hiding it, so it is confirmed against the
            body rather than acted on from the number. One is a thread past the hundred
            `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
            trailing `+` saying the page was cut. The other is a finding an earlier round raised
            that the total still counts and no open entry links, its thread being none this round
-           opened. One an open entry does link is counted beside `M` before the two are compared,
-           since the total counts what is still open rather than what this round raised, and the
-           block names how many it counted that way. A withheld finding is owed
-           the triage a suppressed one is. No exit code rides on it, the same as `suppressed=` and
-           `cr_outside_diff=`, since what an unread finding says is the reader's to judge.
+           opened. An open entry linking an earlier round's thread and none this round opened
+           is counted beside `M` before the two are compared, since the total counts what is
+           still open rather than what this round raised, so `T` above `M` can print no block,
+           and where a block prints it names how many it counted that way. A withheld finding is
+           owed the triage a suppressed one is. No exit code rides on it, the same as
+           `suppressed=` and `cr_outside_diff=`, since what an unread finding says is the
+           reader's to judge.
            Where the preamble states no total, the count opening the open-findings section is
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
@@ -1962,7 +1965,7 @@ def findings_on(tail: str) -> int | None:
 
 DISCUSSION_LINK = re.compile(r"\]\(#discussion_r(\d+)\)")
 ENTRY_LINE = re.compile(r"[-*+]\s")
-OverviewSection = tuple[str, int | None, list[str], int]
+OverviewSection = tuple[str, int | None, list[list[str]], int]
 
 
 def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
@@ -1977,12 +1980,13 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
     is the prose under it up to the next heading or bold line, taken from the body unmasked so a
     code span the headline names survives. Each section is a top-level
     `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
-    summary states, the thread ids its entries link, each the database id of that thread's first
-    comment, and how many of its entries carry such a link. An entry is a bullet at the section's
-    margin, outside any block collapsed within it, so an indented back-reference or a list an
-    entry collapses is read as neither an entry nor a link. One entry can still link a thread
-    beside its own, so a section's links can outnumber its linked entries. Quotations are masked
-    first, so a body quoting a section is not read as carrying one.
+    summary states, the thread ids each linked entry links, one list per entry, each id the
+    database id of that thread's first comment, and how many of its entries carry such a link.
+    An entry is a bullet at the section's margin, outside any block collapsed within it, so an
+    indented back-reference or a list an entry collapses is read as neither an entry nor a link.
+    One entry can still link a thread beside its own, so a section's links can outnumber its
+    linked entries, which is why they are kept per entry. Quotations are masked first, so a body
+    quoting a section is not read as carrying one.
 
     An open section's entries are findings, each checked against the threads, and a resolved
     section's are threads an earlier round raised. The count-first open section also states the
@@ -2016,7 +2020,7 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         text = masked[start:end]
         own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
         entries = [line for line in own.splitlines() if ENTRY_LINE.match(line)]
-        ids = [i for line in entries for i in DISCUSSION_LINK.findall(line)]
+        ids = [found for line in entries if (found := DISCUSSION_LINK.findall(line))]
         linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
         sections.append((role, count, ids, linked))
     return verdict, " ".join(headline), sections
@@ -2079,10 +2083,11 @@ def round_threads(pr: dict, review: dict) -> int:
     and this undercounts by exactly those, printing a standing shortfall.
 
     It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
-    was measured over, which is why that section's count is not read as a total. A preamble total
-    in those rounds counted the same carried findings, so the shortfall adds each thread an open
-    entry links that an earlier round opened, per `carried_open_threads`, rather than this count
-    growing to include it, which would move `M` off what the round itself opened.
+    was measured over, which is why that section's count is not read as a total. The preamble
+    total counted those carried findings too, in both rounds measured where a total exceeded the
+    threads its round opened. So the shortfall adds each open entry standing for an earlier
+    round's thread, per `carried_open_threads`, rather than this count growing to include it,
+    which would move `M` off what the round itself opened.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
@@ -2159,21 +2164,37 @@ def thread_comment_ids(threads: list[dict]) -> set[str]:
 
 
 def carried_open_threads(pr: dict) -> int:
-    """How many threads the head round's open sections link that an earlier round opened.
+    """How many of the head round's open entries stand for a thread an earlier round opened.
 
     A preamble total counts what is still open across rounds rather than what this round raised,
     so a finding an earlier round raised and left open is in the total while its thread is not
-    among the ones this round opened. Each such entry links that thread, so it is counted beside
-    the round's own threads before the two are compared, and a carried-over finding with a thread
-    of its own no longer reads as one with none. Only a link to a thread on this pull request
-    counts, an entry linking none being `unthreaded_entries`'s to count.
+    among the ones this round opened. In both rounds measured where a total exceeded the threads
+    its round opened, each entry of the open section linked an earlier round's thread and the
+    total equalled that section's count. Each such entry
+    is counted beside the round's own threads before the two are compared, so a carried-over
+    finding with a thread of its own no longer reads as one with none.
+
+    Counted per entry rather than per link, since one entry can link a thread beside its own. An
+    entry linking any thread this round opened is that round's finding, already in `M`, so a
+    back-reference on it to an earlier thread cancels no shortfall. Only a link to a thread on
+    this pull request counts, an entry linking none being `unthreaded_entries`'s to count, and
+    two entries standing for one earlier thread count once.
     """
     newest = second_format_head(pr)
     if newest is None:
         return 0
     known = thread_comment_ids((pr.get("reviewThreads") or {}).get("nodes") or [])
     own = thread_comment_ids(round_thread_nodes(pr, newest))
-    return len((open_entry_ids(pr) & known) - own)
+    sections = read_overview(newest.get("body") or "")[2]
+    return len(
+        {
+            min(set(entry) & known)
+            for role, _, ids, _ in sections
+            if role != RESOLVED
+            for entry in ids
+            if set(entry) & known and not set(entry) & own
+        }
+    )
 
 
 def unlinked_open_entries(pr: dict) -> int:
@@ -2195,7 +2216,7 @@ def open_entry_ids(pr: dict) -> set[str]:
     if newest is None:
         return set()
     sections = read_overview(newest.get("body") or "")[2]
-    return {i for role, _, ids, _ in sections if role != RESOLVED for i in ids}
+    return {i for role, _, ids, _ in sections if role != RESOLVED for entry in ids for i in entry}
 
 
 PROSE_FINDINGS = re.compile(

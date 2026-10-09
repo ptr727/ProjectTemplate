@@ -3966,10 +3966,28 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
     def test_an_entry_linking_no_thread_is_not_counted_as_carried(self) -> None:
-        """Only a link to a thread on this pull request accounts for a finding."""
-        rd = review(body=overview_v2(findings="**Findings:** 2", entries=2), rid="PRR_head")
+        """Only a link to a thread on this pull request accounts for a finding, so the total here
+        is short by two rather than by the one entry linking no thread."""
+        rd = review(body=overview_v2(findings="**Findings:** 3", entries=2), rid="PRR_head")
         pr = payload([rd], [thread("T1", rid="PRR_old", cid="4000000001")])
         self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+
+    def test_a_back_reference_beside_an_entry_s_own_thread_cancels_no_shortfall(self) -> None:
+        """An entry linking a thread this round opened is that round's finding, so an earlier
+        thread it also links is a back-reference rather than a carried finding."""
+        body = overview_v2(findings="**Findings:** 2", entries=1)
+        own = "(#discussion_r4000000001) New"
+        self.assertIn(own, body)
+        body = body.replace(own, f"{own}, same cause as [earlier](#discussion_r4000000009)")
+        threads = [
+            thread("T1", rid="PRR_head", cid="4000000001"),
+            thread("T9", rid="PRR_old", cid="4000000009"),
+        ]
+        pr = payload([review(body=body, rid="PRR_head")], threads)
+        self.assertEqual(0, pr_review.carried_open_threads(pr))
         self.answer(pr)
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
