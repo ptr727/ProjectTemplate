@@ -222,7 +222,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    It then closes the lane out, naming the decision issue in the close-out comment. Where none
    does, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
    develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
-   under `main` and merging and releasing under `release`. Exit `45` on a promotion blocks no
+   under `main` and merging and releasing under `release`. **Repeat the blocked-promotion read
+   immediately before that hand-off**, once the promotion's head is final, and read the `decision`
+   issues closed since the first read as well. Park where one blocking that promotion is open, or
+   was closed since the first read, since its answer may not be to merge. **Every edit to a
+   promotion's body replaces the whole body**, and another session may add its own `Fixes` line
+   between a read and a write. So build each edit from a read of the body made immediately before
+   the write, keeping every line it holds, then read the body again and repeat the edit where a
+   `Fixes` line it should carry is missing. Exit `45` on a promotion blocks no
    merge where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states.
    Such a promotion merges with no `decision` issue, and the worker records that item's evidence
    on the handoff. Any other shortfall parks.
