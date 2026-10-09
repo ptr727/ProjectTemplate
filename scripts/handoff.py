@@ -23,9 +23,10 @@ either way. Two or more open on one track is a defect to report, never one to re
 so every command that would have to choose refuses and names both.
 
 A head resolved that way can still be one the chain has moved past, where another link already
-names it as predecessor, holds a higher round, or holds the same round. `new` and `link` refuse
-onto such a head, and `current`, `resume`, and `chain` answer from it with a notice naming each such link,
-since answering from it silently is how a search reads "no match" over text in the lane.
+names it as predecessor, holds a higher round, or holds the same round. `new` refuses onto
+such a head, `link` does too bar the links already descending from `--new`, and `current`,
+`resume`, and `chain` answer from it with a notice naming each such link, since answering from it
+silently is how a search reads "no match" over text in the lane.
 
 Subcommands
   current  The open handoff issue for a track, number and URL. Read-only.
@@ -1089,7 +1090,8 @@ def head_doubts(head: dict, lane: Lane) -> list[str]:
     round by issue number, so either can resolve a link the chain has already moved past. Three
     states show it: a link already naming it as predecessor, a link at a higher round, and another
     link at its own round. Answering from such a head is how a search reads "no match" over text
-    in the lane, so the reads print these, and `new` and `link` refuse on them.
+    in the lane, so the reads print these, `new` refuses on them, and `link` does too bar the links
+    already descending from `--new`.
     """
     number = int(head["number"])
     round_ = int(head["marker"]["round"])
@@ -1221,7 +1223,7 @@ def cmd_link(a: argparse.Namespace) -> int:
     if doubts:
         later = [
             f"#{r['number']}"
-            for r in rest.links
+            for r in sorted(rest.links, key=lambda r: -int(r["marker"]["round"]))
             if r["marker"]["previous"] == "none"
             and int(r["marker"]["round"]) > int(marker["round"])
         ]
@@ -1235,8 +1237,8 @@ def cmd_link(a: argparse.Namespace) -> int:
         raise Refusal(
             cut(
                 f"#{previous['number']} may not be the head of track {marker['track']!r}, so "
-                f"pointing #{new['number']} at it could fork the chain there. "
-                f"{' '.join(doubts)}{order}"
+                f"pointing #{new['number']} at it could fork the chain there.{order} "
+                f"{' '.join(doubts)}"
             )
         )
     if marker["previous"] not in ("none", str(previous["number"])):
