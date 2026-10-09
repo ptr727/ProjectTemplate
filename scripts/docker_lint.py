@@ -129,6 +129,7 @@ def ls_files(
 ) -> list[str]:
     """Return tracked paths, plus unignored untracked ones unless told to skip those.
 
+    A tracked path deleted from disk is dropped, since a linter given it fails on a missing file.
     A local `npm install` is untracked and unignored in a repository whose `.gitignore` omits it,
     so its third-party files would otherwise be lint targets.
     Dropping them here rather than in a linter config is what reaches shellcheck and shfmt, which
@@ -154,7 +155,8 @@ def ls_files(
         raise CommandFailed(f"target discovery failed: {detail}") from error
     except OSError as error:
         raise CommandFailed(f"target discovery failed: {error}") from error
-    return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+    paths = [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+    return [path for path in paths if os.path.lexists(root / path)]
 
 
 # The env options below take a separate operand token, never mistaken for the command.
@@ -281,7 +283,7 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
 
     A git-ignored file, such as a local secrets file beside a tracked placeholder, stays behind.
     A symlink is copied as a link and never followed.
-    A tracked path missing from disk is skipped, as a deleted file is.
+    A tracked path missing from disk never reaches it, since `ls_files` drops it.
     An empty `.git` is added, since actionlint finds its project only where one sits beside
     `.github/workflows`.
     """
@@ -290,8 +292,6 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
         source = root / relative_path
         destination = snapshot / relative_path
         try:
-            if not os.path.lexists(source):
-                continue
             if not source.is_symlink() and source.is_dir():
                 destination.mkdir(parents=True, exist_ok=True)
             else:
