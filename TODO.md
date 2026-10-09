@@ -344,9 +344,9 @@ One pull request writing down the agent-to-agent messaging this fleet has now us
 
 ### What Building the Windows Host Tooling Surfaced
 
-Three findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
+Two findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
 
-**State** `ready` for the first two, `decision` for the third. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
+**State** `decision` for the first, `ready` for the second. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
 
 - **Record why the host tooling carries no linter category, or decide that it should.** No installer on either platform manages `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and nothing states that as a decision, so the absence is correct and reachable only by inference.
   - **Blocked by** - Nothing.
