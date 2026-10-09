@@ -134,8 +134,8 @@ an exhausted reviewer quota, or a push the executor refuses. A promotion waiting
 Nor is a cause particular to the worker's own issue, one a later round on another issue would not
 meet. A worker stopped by one is at a choice only the maintainer can make, how that issue proceeds,
 so it parks per "Parking". It replies `PARKED`, since a `STOP` leaves its handoff neither closed
-nor parked. A review pass or wait still running is no reason to reply at
-all, per "The Worker" step 4.
+nor parked. A review pass or wait still running is no reason to reply at all, per "The Worker"
+step 4.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
 Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
@@ -244,8 +244,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    replies only after its reviewer has reported. A reviewer dispatched in the background satisfies
    that only where the harness wakes the worker on its completion before any reply is sent. A
    worker with neither a foreground dispatch nor that wake returns `STOP`, since every later worker
-   in the run would meet the same harness. The orchestrator acts on the worker's line the moment it arrives. Work still running
-   then finishes after the run has acted on a line that no longer describes it.
+   in the run would meet the same harness. The orchestrator acts on the worker's line the moment
+   it arrives. Work still running then finishes after the run has acted on a line that no longer
+   describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
