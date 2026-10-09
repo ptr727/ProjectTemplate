@@ -4729,6 +4729,7 @@ class TestCoverageExitCodes(GqlCase):
             covers="",
             effort="**Review effort:** Balanced",
             entries=0,
+            verdict="### Approval recommended",
         ).replace("| a.py | Narrows the reader. |", table)
 
     def test_a_cell_listing_several_paths_names_each_of_them(self) -> None:
