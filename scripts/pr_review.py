@@ -2354,20 +2354,27 @@ def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool, bool]:
         row, noted = head, True
 
 
-def note_head(row: str) -> str:
-    """The row before its trailing parenthesized note, or empty where it ends in none.
+def note_split(row: str) -> tuple[str, str]:
+    """The row's text before its trailing parenthesized note, and the note, or two empty strings.
 
     The note runs from the last `(` to the closing `)`, holding no parenthesis of its own, and
-    whitespace stands between it and the text before it. That text is returned with its outer
-    backticks dropped, as `cell_paths` drops a whole cell's, since a code span can come before
-    the note.
+    whitespace stands between it and the text before it.
     """
     if not row.endswith(")"):
-        return ""
+        return "", ""
     start = row.rfind("(")
     if start < 1 or ")" in row[start + 1 : -1] or not row[start - 1].isspace():
-        return ""
-    return row[:start].strip().strip("`").strip()
+        return "", ""
+    return row[:start], row[start:]
+
+
+def note_head(row: str) -> str:
+    """The row before its trailing note, as `note_split` finds one, or empty where it ends in none.
+
+    That text is returned with its outer backticks dropped, as `cell_paths` drops a whole cell's,
+    since a code span can come before the note.
+    """
+    return note_split(row)[0].strip().strip("`").strip()
 
 
 def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
@@ -2463,22 +2470,22 @@ def cell_paths(cell: str) -> list[str]:
     none of the files it lists. So a cell holding single-backtick spans with nothing but commas
     and whitespace outside them names each span.
 
-    Such a list can end in a note, set off by whitespace before its `(` as `note_head` requires.
-    Each span then keeps that note, so each reads as a noted row, since which file the note is
+    Such a list can end in a note, as `note_split` finds one. Each span then keeps that note, so each reads as a noted row, since which file the note is
     about is unknown. The note comes off before the spans are found, so a span quoted inside it
     is never read as a path. Any other cell is read whole, its outer backticks dropped.
     """
-    spans = TABLE_SPAN.findall(cell)
-    if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
+    if spans := span_list(cell):
         return [s.strip() for s in spans]
-    noted = cell.strip()
-    start = noted.rfind("(")
-    if noted.endswith(")") and start > 0 and noted[start - 1].isspace():
-        group = noted[:start]
-        listed = TABLE_SPAN.findall(group)
-        if listed and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", group)):
-            return [f"{s.strip()} {noted[start:]}" for s in listed]
+    head, note = note_split(cell.strip())
+    if spans := span_list(head):
+        return [f"{s.strip()} {note}" for s in spans]
     return [cell.strip().strip("`").strip()]
+
+
+def span_list(text: str) -> list[str]:
+    """The code spans `text` lists, or none where anything but commas and whitespace is outside them."""
+    spans = TABLE_SPAN.findall(text)
+    return spans if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", text)) else []
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:

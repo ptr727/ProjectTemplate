@@ -4817,6 +4817,12 @@ class TestCoverageExitCodes(GqlCase):
         pr = payload([review(body=self.written([*files, cell]))], files=files)
         self.assertEqual("", pr_review.table_shortfall(pr))
 
+    def test_a_grouped_cell_ending_in_anything_but_a_note_is_read_whole(self) -> None:
+        """A note set off by no whitespace, or holding a parenthesis of its own, is not peeled."""
+        for cell in ("`a.md`, `b.md`(moved)", "`a.md`, `b.md` (moved) extra)"):
+            with self.subTest(cell=cell):
+                self.assertEqual([cell.strip("`")], pr_review.cell_paths(cell))
+
     def test_a_file_named_only_on_a_noted_row_refuses(self) -> None:
         """A note is never read, so it could say the file went unreviewed, and the table refuses."""
         body = self.written(["src/app.sh", "docs/a.md (not reviewed)"])
