@@ -88,13 +88,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    of these hold on the live head:
 
    - Every change it carries had full coverage on its own feature -> develop pull request. That
-     pull request met item 2 at the head it merged at, by coverage rather than by permission.
-     A file its coverage missed counts as covered where a `local-strict-review` pass recorded
-     for that pull request at that head read it.
+     pull request met item 2 at its merged head by coverage, not by permission. Failing that, a
+     `local-strict-review` pass recorded for it read each file its coverage missed. Such a pass
+     ran at the head that last changed the file, or at a later one.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
-     from the digest's lines rather than from the exit code. Exit `45` returns before the exit
-     `50` check runs, so the code alone cannot rule out a `VERDICT WITH NO COUNTED FINDING`.
+     from the digest's lines rather than from the exit code, since exit `45` returns before the
+     exit `50` check runs. A `VERDICT WITH NO COUNTED FINDING` headline is a second reason until
+     it is answered under item 3, and not after.
 
    The merge then runs with `--match-head-commit` set to the head those were checked on. The
    evidence names each constituent pull request and how its coverage was stated. An
