@@ -4353,7 +4353,7 @@ class TestOverviewSections(GqlCase):
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
     def test_an_absolute_thread_link_reports_no_block(self) -> None:
-        """Every entry linked by its absolute URL read as unlinked, a false block on each round."""
+        """An entry linking its thread by an absolute URL reads as linked, so no block prints."""
         ids = ("6000000001", "6000000002")
         rd = review(body=revised_with(open_section(ids, base=PULL_URL)), rid="PRR_head")
         threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
