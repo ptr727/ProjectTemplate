@@ -3058,7 +3058,9 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "this reads, the table cannot be matched at all, and splitting the pull request is "
             "the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
-            "round stating coverage or carrying a table only by chance. Past those, this is the "
+            "round stating coverage or carrying a table only by chance. Past those, a develop -> "
+            "main promotion meeting the one case pr-review-conduct's Merge Gate item 2 states for "
+            "a promotion satisfies that item, recording the evidence it names. Anything else is the "
             "maintainer's call, and merging without coverage is their decision, not the agent's."
         )
         return 45

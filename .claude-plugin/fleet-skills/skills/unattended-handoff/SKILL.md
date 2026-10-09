@@ -222,7 +222,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    It then closes the lane out, naming the decision issue in the close-out comment. Where none
    does, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
    develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
-   under `main` and merging and releasing under `release`.
+   under `main` and merging and releasing under `release`. A promotion on which `pr_review.py`
+   exits `45` merges with no `decision` issue where it meets the one case `pr-review-conduct`
+   Merge Gate item 2 states for a promotion, the worker recording that item's evidence on the
+   handoff, and parks on any other shortfall.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. A subagent receives no completion notification, so a wait handed to a
    monitor or a background task never wakes it.

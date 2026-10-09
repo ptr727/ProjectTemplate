@@ -81,6 +81,26 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head
    read rather than counted and named to them, and their permission under item 5 is what allows
    the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
+
+   One case satisfies this item with no coverage stated on the head, a standing rule the
+   maintainer adopted, and it is the only one. A develop -> main promotion on which `pr_review.py`
+   exits `45`, no statement of coverage and no table reaching its head, satisfies item 2 where all
+   three of these hold on the live head:
+
+   - Every change it carries had full coverage on its own feature -> develop pull request. Each
+     file that pull request changed is named by a Copilot file table or a round's own coverage
+     statement, or was read by a `local-strict-review` pass recorded for that pull request at
+     that head or a later one.
+   - Every review thread on the promotion is resolved, and every check passes.
+   - Exit `45` is the only reason `pr_review.py` does not report the promotion ready.
+
+   The merge then runs with `--match-head-commit` set to the head those were checked on, and the
+   evidence, each constituent pull request and how its coverage was stated, is recorded on the
+   handoff where an `unattended-handoff` worker merges and reported to the maintainer otherwise.
+   Any other shortfall still goes to the maintainer, a promotion carrying a change whose own pull
+   request lacked that coverage among them, such as one another lane merged with no review round.
+   The case answers item 2 alone, so item 5's permission is still owed, and every pull request
+   other than a promotion owes this item's coverage in full.
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
