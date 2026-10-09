@@ -7,6 +7,7 @@ import contextlib
 import io
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -372,6 +373,14 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(143, raised.exception.code)
         self.assertEqual(1, len(sources))
         self.assertFalse(sources[0].exists())
+
+    def test_main_registers_the_sigterm_handler(self) -> None:
+        previous = signal.getsignal(signal.SIGTERM)
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        with mock.patch.object(docker_lint, "lint", return_value=0) as lint:
+            self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
+        lint.assert_called_once()
+        self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGTERM))
 
     def test_markdown_literal_marker_precedes_negated_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "markdownlint")
