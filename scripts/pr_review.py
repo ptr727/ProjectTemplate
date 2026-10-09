@@ -554,7 +554,6 @@ TABLE_GLOB = frozenset("*?")
 TABLE_GAP = " ... "
 TABLE_SPAN = re.compile(r"`([^`]+)`")
 TABLE_SEPARATORS = re.compile(r"[\s,]*")
-TABLE_NOTE = re.compile(r"\s\([^()]*\)")
 # The readings a round's coverage carries, worst first.
 # A head carries more than one round only through a re-request.
 # Where two disagree, the one naming files it did not read is the one to answer.
@@ -2464,17 +2463,10 @@ def cell_paths(cell: str) -> list[str]:
     none of the files it lists. So a cell holding single-backtick spans with nothing but commas
     and whitespace outside them names each span, and any other cell is read whole, its outer
     backticks dropped.
-
-    A cell listing several spans that also carries a note, set off as `note_head` sets one off,
-    names each span with a note, since which span the note speaks for is unknown. Each then
-    covers nothing, per `row_paths`, and is reported as noted rather than as a path the diff lacks.
     """
     spans = TABLE_SPAN.findall(cell)
-    rest = TABLE_SPAN.sub("", cell)
-    if spans and TABLE_SEPARATORS.fullmatch(rest):
+    if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", cell)):
         return [s.strip() for s in spans]
-    if len(spans) > 1 and TABLE_SEPARATORS.fullmatch(TABLE_NOTE.sub("", rest)):
-        return [f"{s.strip()} (note)" for s in spans]
     return [cell.strip().strip("`").strip()]
 
 
