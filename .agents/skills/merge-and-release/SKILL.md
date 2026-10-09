@@ -63,9 +63,12 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
    run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
-   partial gate. Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both
-   where it is not, so the SHA step 3 merges is the one the gate verified. Where drive-pr's ready
-   report named a head and it is not a prefix of the recorded one, stop and re-ask with the commits added,
+   partial gate. A `status` exit `45` is not a partial gate where the promotion meets the one case
+   that skill's Merge Gate item 2 states. Check that case again on every re-run below, and record
+   its evidence for the head step 3 merges, as that item says.
+   Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both where it is not,
+   so the SHA step 3 merges is the one the gate verified. Where drive-pr's ready report named a
+   head and it is not a prefix of the recorded one, stop and re-ask with the commits added,
    `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
    (.commit.message | split("\n")[0])'`, since a feature PR squashed into `develop` after the
    report moves the promotion's head onto content the maintainer never saw. Under an
