@@ -130,6 +130,13 @@ stands rather than being assumed cleared. The round's report names every issue i
 and the blocker each one waits on, since the maintainer reads the report rather than the issue
 bodies, and a stuck issue nobody names reads as ordinary backlog that simply never moves.
 
+An issue that needs a platform, by the test `session-handoff` "The Chain" states, is counted and
+is not ranked. It belongs to that platform's lane, so this run gives it no group, no worker, and no
+claim. An issue only part of which needs a platform is held back the same way. It waits on the
+split "The Chain" describes, which this run does not make, and the narrowed issue is ranked once
+that split lands. The round's report names each issue held back this way, its platform, and
+whether it waits on a split, as it names a `blocked` one.
+
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
 except how the question travels. It goes to the maintainer at the end of ranking, per
