@@ -286,7 +286,6 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
     `.github/workflows`.
     """
     staged = 0
-    snapshot.chmod(stat.S_IMODE(root.stat().st_mode))
     for relative_path in ls_files(root):
         source = root / relative_path
         destination = snapshot / relative_path
@@ -304,6 +303,7 @@ def stage_snapshot(root: Path, snapshot: Path) -> int:
             ) from error
         staged += 1
     (snapshot / ".git").mkdir(exist_ok=True)
+    snapshot.chmod(stat.S_IMODE(root.stat().st_mode))
     return staged
 
 

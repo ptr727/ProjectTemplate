@@ -8,6 +8,7 @@ import io
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ class FakeRunner:
         self.commands: list[tuple[list[str], int]] = []
         self.mounted: list[dict[str, bool]] = []
         self.sources: list[Path] = []
+        self.modes: list[int] = []
         self.failure = failure
         self.timeout = timeout
 
@@ -48,6 +50,7 @@ class FakeRunner:
                     }
                 )
                 self.sources.append(tree)
+                self.modes.append(stat.S_IMODE(tree.stat().st_mode))
         if self.timeout and command[:2] == ["docker", "run"]:
             raise docker_lint.CommandTimedOut(f"timed out after {timeout}s")
         if command[:3] == ["docker", "image", "inspect"]:
@@ -381,6 +384,16 @@ class DockerLintCase(unittest.TestCase):
             self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
         lint.assert_called_once()
         self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGTERM))
+
+    def test_snapshot_of_a_read_only_root_still_stages_and_takes_its_mode(self) -> None:
+        self.track("README.md")
+        self.root.chmod(0o555)
+        self.addCleanup(self.root.chmod, 0o755)
+        runner = FakeRunner()
+        result, output = self.invoke({"markdownlint"}, runner)
+        self.assertEqual(0, result, output)
+        self.assertEqual({".git": False, "README.md": False}, runner.mounted[0])
+        self.assertEqual(0o555, runner.modes[0])
 
     def test_markdown_literal_marker_precedes_negated_filename(self) -> None:
         linter = next(linter for linter in docker_lint.LINTERS if linter.name == "markdownlint")
