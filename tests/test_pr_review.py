@@ -4384,7 +4384,11 @@ class TestOverviewSections(GqlCase):
         self,
     ) -> None:
         """The section supplied the total, so it is measured against the entries it lists with a
-        link rather than the ids they link, and a second link on one entry covers no other."""
+        link rather than the ids they link, and a second link on one entry covers no other.
+
+        The inline shape is the one counting links let through. The indented one was already read
+        as no entry's link, and is kept so a reader change cannot let it through either.
+        """
         ids = ("6000000001", "6000000002")
         threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
         threads.append(thread("T7", rid="PRR_old", cid="6000000007"))
