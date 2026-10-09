@@ -128,6 +128,8 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] Proof: Dependabot opens a `Bump ptr727/ProjectTemplate` PR on PhotoCleaner after the next hub release. Tick with the PR.
 - [x] HomeAutomation-Config (operational model at adoption, the direct-to-develop path, and release model since its 2026-09-24 reclassification): adopted on `develop` in ptr727/HomeAutomation-Config#58 at `d920805`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin, and `python3 spec/audit.py HomeAutomation-Config` reports no `interface` finding on the file.
 - [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
+- [x] Proof: the `rules` input end to end. The stub landed on homeassistant-purpleair `develop` in ptr727/homeassistant-purpleair#371 at `532ab78`. The first App pull request its `check-ha-version.yml` tracker opened after that, ptr727/homeassistant-purpleair#417 from `ha-version-bump/matrix`, matches no built-in pair and merged to `develop` through the stub's `rules` entry on 2026-10-07 in [run-purpleair-417][run-purpleair-417].
+- [x] Proof: the `merge-app` job merges a pull request the App opened. The `Merge App pull request job` in [run-purpleair-417][run-purpleair-417] resolved the rule, minted the App token, and merged, and `app/ptr727-codegen` is the merger of record.
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
 - [x] NxWitness (`delete-branch: true`, drops the Dependabot semver-major filter per D8.1 unless the open decision lands first): adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] KiCadLibrary: adopted with the semver-major filter dropped per D8.1, in ptr727/KiCadLibrary#59, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
@@ -767,7 +769,7 @@ The task is .NET-specific orchestration. It installs the .NET SDK, runs the call
 
 The hub's own stub, which sets `delete-branch: true`, proves most of the mechanics on the first Dependabot pull request after the task lands on `develop`. That run shows the callee reading the caller's `github.event.*` under `pull_request_target`. It shows an explicit `secrets:` map reaching the callee and the App token minting inside one. It shows `permissions: {}` at the caller not failing the callee at startup, and `--squash` running on `develop`. A Dependabot pull request against `main` after promotion proves `--merge`, and a maintainer push to a bot branch proves the disable job. The first Dependabot pull request merged into `develop` once the delete job is there proves it, by the branch being gone afterwards. A hub feature branch cannot test itself, since under `pull_request_target` the callee resolves from the base branch, so the proof follows the merge rather than preceding it.
 
-Four things the hub cannot prove fall to downstream adopters. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. The first two are proof items under Stage 1 above, and [#2412][issue-2412] tracks the other two.
+Four things the hub cannot prove fall to downstream adopters. They are cross-repository resolution of the owner-scoped `uses:` reference, Dependabot bumping a `# <tag>` pin on a reusable workflow, and the `rules` input end to end on a repo with a tracker. The fourth is `merge-app` itself, since nothing opens App pull requests against the hub. All four are proof items under Stage 1 above. PhotoCleaner owes the first two, and the other two were proved on homeassistant-purpleair.
 
 ## Open Decisions
 
@@ -796,7 +798,6 @@ Four things the hub cannot prove fall to downstream adopters. They are cross-rep
 [issue-942]: https://github.com/ptr727/ProjectTemplate/issues/942
 [issue-2031]: https://github.com/ptr727/ProjectTemplate/issues/2031
 [issue-2336]: https://github.com/ptr727/ProjectTemplate/issues/2336
-[issue-2412]: https://github.com/ptr727/ProjectTemplate/issues/2412
 [no-build-caller-snippet]: ../catalog/snippets/workflows/test-pull-request.yml
 [override-path-run]: https://github.com/ptr727/ProjectTemplate/actions/runs/31950332387/job/95172710046
 [pilot-publish-run]: https://github.com/ptr727/PhotoCleaner/actions/runs/31977092102
@@ -807,6 +808,7 @@ Four things the hub cannot prove fall to downstream adopters. They are cross-rep
 [run-cross-repo-secret-probe]: https://github.com/ptr727/Blog/actions/runs/32618245296
 [run-770]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972611554
 [run-771]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972622149
+[run-purpleair-417]: https://github.com/ptr727/homeassistant-purpleair/actions/runs/37581098442
 [run-startup-failure]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972504539
 [secrets]: ../spec/secrets.json
 [todo]: ../TODO.md
