@@ -168,9 +168,9 @@ Subcommands
            the reader's to judge.
            Where the preamble states no total, the count opening the open-findings section is
            `T`, since that format's later revision writes the bare zero line only for a zero.
-           Each entry an open section lists links its thread, and an entry linking no thread on
-           the pull request is counted in that same block whatever the totals say. So is each
-           entry an `Open (N)` section counts beyond its linked entries, the bullets at its
+           Each entry an open section lists links its thread, and an entry whose title links no
+           thread on the pull request is counted in that same block whatever the totals say. So
+           is each entry an `Open (N)` section counts beyond its linked entries, the bullets at its
            margin carrying a link this script reads, outside any block collapsed within it.
            Where the open-findings section supplied `T`, the block is measured against the
            entries it lists with a link rather than against `M`, so an entry linking an earlier
