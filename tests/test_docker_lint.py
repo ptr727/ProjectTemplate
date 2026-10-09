@@ -354,6 +354,22 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertEqual({".git": False, "README.md": False}, runner.mounted[0])
 
+    def test_a_tracked_file_deleted_from_disk_is_not_a_lint_target(self) -> None:
+        self.track("README.md")
+        self.track("gone.md")
+        (self.root / "gone.md").unlink()
+        markdownlint = next(
+            linter for linter in docker_lint.LINTERS if linter.name == "markdownlint"
+        )
+        self.assertEqual(["README.md"], docker_lint.tracked_files(self.root, markdownlint))
+
+    def test_a_deleted_extensionless_script_does_not_fail_discovery(self) -> None:
+        self.track("run", "#!/bin/bash\necho run\n")
+        self.track("gone", "#!/bin/sh\necho gone\n")
+        (self.root / "gone").unlink()
+        shellcheck = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
+        self.assertEqual(["run"], docker_lint.tracked_files(self.root, shellcheck))
+
     def test_sigterm_during_execution_still_removes_the_snapshot(self) -> None:
         self.track("README.md")
         sources: list[Path] = []
