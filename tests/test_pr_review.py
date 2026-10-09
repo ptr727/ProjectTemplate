@@ -4376,7 +4376,35 @@ class TestOverviewSections(GqlCase):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn("overview=3/2", out)
                 self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-                self.assertIn("states 3 findings, its open section linking 2, so 1 finding", out)
+                self.assertIn(
+                    "states 3 findings, its open section listing 2 with a link, so 1 finding", out
+                )
+
+    def test_a_back_reference_in_the_open_findings_section_cancels_no_unlinked_entry(
+        self,
+    ) -> None:
+        """The section supplied the total, so it is measured against the entries it lists with a
+        link rather than the ids they link, and a second link on one entry covers no other."""
+        ids = ("6000000001", "6000000002")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        threads.append(thread("T7", rid="PRR_old", cid="6000000007"))
+        entry = "[Constructed finding](#discussion_r6000000002) \u00b7 New"
+        back = "see [earlier](#discussion_r6000000007)"
+        for shape in (f"{entry}, {back}", f"{entry}\n  - {back}"):
+            with self.subTest(shape=shape):
+                block = (
+                    open_section(ids)
+                    .replace("2 open findings", "3 open findings")
+                    .replace(entry, shape)
+                    .replace("</details>", "- Constructed finding with no link\n</details>")
+                )
+                self.assertIn(back, block)
+                rd = review(body=revised_with(block), rid="PRR_head")
+                self.answer(payload([rd], threads))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("overview=3/2", out)
+                self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+                self.assertIn("its open section listing 2 with a link, so 1 finding", out)
 
     def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
         """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""

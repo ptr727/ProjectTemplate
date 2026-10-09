@@ -172,10 +172,11 @@ Subcommands
            the pull request is counted in that same block whatever the totals say. So is each
            entry an `Open (N)` section counts beyond its linked entries, the bullets at its
            margin carrying a link this script reads, outside any block collapsed within it.
-           Where the open-findings section supplied `T`, the block is measured against its
-           entries rather than against `M`, so an entry linking an earlier round's thread is no
-           finding without one, while a finding that section's count names and no entry links is
-           still counted.
+           Where the open-findings section supplied `T`, the block is measured against the
+           entries it lists with a link rather than against `M`, so an entry linking an earlier
+           round's thread is no finding without one, while a finding that section's count names
+           and no entry links is still counted. Entries are counted rather than links, so a
+           back-reference beside an entry's own link covers no other entry.
            A round can also list its findings in prose under a `Review findings:` label, each
            entry naming the files it concerns in code spans. An entry naming no file a thread of
            that round is on is a finding with no thread, so where those entries outnumber the
@@ -2212,6 +2213,19 @@ def unlinked_open_entries(pr: dict) -> int:
     )
 
 
+def total_section_entries(pr: dict) -> int:
+    """How many entries the head round's count-first open-findings sections list with a link.
+
+    Counted per entry rather than per link, since one entry can link a thread beside its own, and
+    counting links let that back-reference cancel an entry the section lists with no link at all.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    sections = read_overview(newest.get("body") or "")[2]
+    return sum(linked for role, _, _, linked in sections if role == TOTAL)
+
+
 def open_entry_ids(pr: dict) -> set[str]:
     """The distinct thread ids the head round's open sections link, resolved sections left out."""
     newest = second_format_head(pr)
@@ -3819,11 +3833,11 @@ def digest(
     unthreaded = unthreaded_entries(pr)
     newest_body = (second_format_head(pr) or {}).get("body") or ""
     sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
-    linked = open_entry_ids(pr)
+    linked = total_section_entries(pr)
     restated = carried_open_threads(pr)
     prose = unthreaded_prose_findings(pr)
     unlisted = max(
-        max((stated or 0) - len(linked), 0) + unthreaded
+        max((stated or 0) - linked, 0) + unthreaded
         if sectional
         else max(unlisted_findings((stated, listed + restated)), unthreaded),
         prose,
@@ -3991,7 +4005,7 @@ def digest(
             f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
             + ("no total" if stated is None else f"{stated} finding{'' if stated == 1 else 's'}")
             + (
-                f", its open section linking {len(linked)}"
+                f", its open section listing {linked} with a link"
                 if sectional
                 else f" and opened {listed} thread{'' if listed == 1 else 's'}"
                 + (
