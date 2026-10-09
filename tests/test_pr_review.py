@@ -4721,6 +4721,145 @@ class TestCoverageExitCodes(GqlCase):
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("coverage=unstated ", self.out.getvalue())
 
+    def written(self, cells: list[str]) -> str:
+        """A Balanced round stating no coverage, its file table's first cells written as given."""
+        table = "\n".join(f"| {c} | Prose about the change. |" for c in cells)
+        return overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+            verdict="### Approval recommended",
+        ).replace("| a.py | Narrows the reader. |", table)
+
+    def test_a_cell_listing_several_paths_names_each_of_them(self) -> None:
+        """The table can group related files into one row, a code span each, a comma between.
+
+        The nested paths carry the zero-width space the format writes after a slash.
+        """
+        body = self.written(["`src/app.sh`", "`docs/\u200ba.md`, `docs/\u200bb.example`"])
+        files = ["src/app.sh", "docs/a.md", "docs/b.example"]
+        self.answer(payload([review(body=body)], files=files))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_each_path_a_split_cell_yields_reads_every_row_form(self) -> None:
+        """A listed path can be a wildcard or a shortened one, as a row of its own can."""
+        long = "docs/notes/2020-01-01 - Sample Topic - A Rather Long Descriptive Name.md"
+        body = self.written(["`lib/*.py`, `docs/notes/2020-01-01 - ... Descriptive Name.md`"])
+        pr = payload([review(body=body)], files=["lib/a.py", "lib/b.py", long])
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_split_cell_naming_a_path_the_diff_does_not_carry_still_refuses(self) -> None:
+        """Splitting reads each path on its own, so one the diff lacks is named as invented."""
+        body = self.written(["`docs/a.md`, `docs/c.md`"])
+        pr = payload([review(body=body)], files=["docs/a.md", "docs/b.md"])
+        shortfall = pr_review.table_shortfall(pr)
+        self.assertIn("leaves out docs/b.md", shortfall)
+        self.assertIn("names docs/c.md, which the diff does not carry", shortfall)
+
+    def test_a_cell_with_prose_between_its_spans_is_read_whole(self) -> None:
+        """Only commas and whitespace separate a list, so any other cell stays one path."""
+        self.assertEqual(
+            ["docs/a.md` and `docs/b.md"],
+            pr_review.file_table(self.written(["`docs/a.md` and `docs/b.md`"])),
+        )
+
+    def test_a_row_carrying_a_trailing_note_names_the_path_before_it(self) -> None:
+        """The format writes a second row for a file another row already names, with a note."""
+        body = self.written(["src/app.sh", "docs/a.md", "docs/a.md (cleanup)"])
+        self.answer(payload([review(body=body)], files=["src/app.sh", "docs/a.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_trailing_note_is_read_past_on_every_row_form(self) -> None:
+        """A code span before the note, a wildcard, and a gap each stop refusing, covering nothing.
+
+        Beside bare rows naming the same files the table stands in, and alone it leaves them out.
+        """
+        long = "docs/x - one z.md"
+        for cell, files in (
+            ("`docs/a.md` (cleanup)", ["docs/a.md"]),
+            ("lib/*.py (moved)", ["lib/a.py", "lib/b.py"]),
+            ("docs/x - ... z.md (renamed)", [long]),
+            ("docs/a.md (one) (two)", ["docs/a.md"]),
+        ):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    f"the table names {', '.join(sorted(files))} only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
+
+    def test_a_grouped_cell_ending_in_a_note_names_each_path_as_noted(self) -> None:
+        """Each span keeps the note, so beside bare rows the table stands in and alone it refuses."""
+        files = ["docs/a.md", "docs/b.md"]
+        quoting = "`docs/a.md`, `docs/b.md` (moved from `old/`)"
+        self.assertEqual(
+            ["docs/a.md (moved from `old/`)", "docs/b.md (moved from `old/`)"],
+            pr_review.file_table(self.written([quoting])),
+        )
+        for cell in (quoting, "`docs/a.md`, `docs/b.md` (one) (two)"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    "the table names docs/a.md, docs/b.md only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
+
+    def test_a_span_quoted_in_a_single_paths_note_is_not_read_as_a_path(self) -> None:
+        """The note comes off before the spans are found, so a path it quotes is not read."""
+        files = ["docs/new.md", "docs/b.md"]
+        cell = "`docs/new.md` (renamed from `docs/old.md`)"
+        pr = payload([review(body=self.written([*files, cell]))], files=files)
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_grouped_cell_ending_in_anything_but_a_note_is_read_whole(self) -> None:
+        """A note set off by no whitespace, or holding a parenthesis of its own, is not peeled."""
+        for cell in ("`a.md`, `b.md`(moved)", "`a.md`, `b.md` (moved) extra)"):
+            with self.subTest(cell=cell):
+                self.assertEqual([cell.strip("`")], pr_review.cell_paths(cell))
+
+    def test_a_file_named_only_on_a_noted_row_refuses(self) -> None:
+        """A note is never read, so it could say the file went unreviewed, and the table refuses."""
+        body = self.written(["src/app.sh", "docs/a.md (not reviewed)"])
+        self.answer(payload([review(body=body)], files=["src/app.sh", "docs/a.md"]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_note_is_kept_where_the_row_names_a_path_with_it(self) -> None:
+        """Parentheses that are part of a changed path or a shortened tail are kept.
+
+        A row naming a changed path reads as written, and trailing notes come off a row only while
+        it names none. Parentheses inside a path, as in `docs/a (draft).md`, are never trailing,
+        so they are never read as a note.
+        """
+        for cell, files, shortfall in (
+            (
+                "docs/a (draft).md (cleanup)",
+                ["docs/a (draft).md"],
+                "the table names docs/a (draft).md only on a row with a note, which covers nothing",
+            ),
+            ("docs/a (draft)", ["docs/a (draft)", "docs/a"], "the table leaves out docs/a"),
+            ("docs/Long ... (draft)", ["docs/Long name (draft)"], ""),
+        ):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(shortfall, pr_review.table_shortfall(pr))
+
+    def test_a_note_on_a_path_the_diff_does_not_carry_still_refuses(self) -> None:
+        """Dropping the note reads the path before it, which still has to be a changed one."""
+        for cell in ("docs/c.md (cleanup)", "(cleanup)", "docs/a.md(cleanup)", "docs/a.md (x) y)"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([cell]))], files=["docs/a.md"])
+                self.assertIn(f"names {cell}, which the diff", pr_review.table_shortfall(pr))
+
     def test_a_wildcard_row_covers_the_sibling_files_it_groups(self) -> None:
         """The table can collapse sibling files into one glob row rather than naming each."""
         body = self.balanced(["src/app.py", ".github/workflows/*.yml"])
@@ -5250,6 +5389,20 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("omits exactly the 1 file", out)
         self.assertIn("c.yml", out)
         self.assertIn("lead to check rather than a verdict", out)
+
+    def test_a_file_named_only_past_a_note_disqualifies_the_naming(self) -> None:
+        """A noted row covers nothing, so its file sits in the omissions although the table names it.
+
+        Reading it as the unread file would point at a file the reviewer listed.
+        """
+        out = self.reading(
+            summarized(["a.py", "b.md", "c.yml (cleanup)"], covers=self.PART),
+            ["a.py", "b.md", "c.yml"],
+        )
+        self.assertNotIn("omits exactly", out)
+        self.assertIn("names 3 of the 3 changed files, omitting 0", out)
+        self.assertIn("naming c.yml only on a row with a note, which covers nothing", out)
+        self.assertIn("names no unread file", out)
 
     def test_a_path_the_diff_does_not_carry_disqualifies_the_naming(self) -> None:
         """One round names `GOVENANCE.md`, which no diff here carries.
