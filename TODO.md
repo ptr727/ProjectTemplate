@@ -342,27 +342,6 @@ One pull request writing down the agent-to-agent messaging this fleet has now us
   - **Settled** - A peer's finding is checked rather than adopted. Two of those four did not reproduce at the hub, the `AGENTS.md` anchor rewrite and the settings-diff exposure, and one did and shipped as #653. So the write-up states verification as a step rather than as a courtesy.
   - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do, so work blocked in one session goes back to the maintainer rather than sideways to another agent.
 
-### What Building the Windows Host Tooling Surfaced
-
-Two findings raised while writing [`host-setup/windows/`][host-setup-windows], each about the Linux side or the fleet rather than about the new scripts, and none blocking them.
-
-**State** `ready` for both. **Touches** [`docs/host-setup.md`][host-setup-doc], and the three scripts under `host-setup/linux/`. **Cost** one hub edit each, and no re-vendor, since nothing under `host-setup/` is carried.
-
-- **Record why the host tooling carries no linter category, or decide that it should.** No installer on either platform manages `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `PSScriptAnalyzer` or `ruff`, and nothing states that as a decision, so the absence is correct and reachable only by inference.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#671][issue-671].
-  - **Checked** - `main` at `1d5b076` on 2026-08-11, where `readonly TOOLS=(git gh jq git-restore-mtime node python uv dotnet)` names no linter and no comment says why.
-  - **Settled** - The reasoning holds and is worth writing down once rather than per platform: each linter runs as a pinned image or through `uvx`, so the image tag fixes the version and a local run matches CI, and installing native copies would put a second unpinned version on the host and break exactly that.
-  - **Open** - Whether it belongs in [`docs/host-setup.md`][host-setup-doc] as a fleet fact, which is what covers Linux by the same sentence, or stays per platform where only the Windows README states it today.
-
-- **Align the Linux scripts onto "name one action" instead of "the last one given wins".** Overwriting `MODE` in the arg loop discards an intent silently, and it discards it in the dangerous direction: `--report --install` drops the safe action and keeps the one that changes the host.
-  - **Blocked by** - Nothing.
-  - **Issue** - [#673][issue-673], broadened by [#767][issue-767] to carry the loader as well, which is what this change ships.
-  - **Checked** - `develop` at `63d244b` on 2026-08-16, where all four scripts document last-wins, no documented example passes two actions, `bootstrap.sh` passes exactly one per `run_tool` call, and no test asserts the behavior.
-  - **Settled** - The Windows tooling already refuses this way. That began as a constraint, since a PowerShell `param()` block records which switches were given and not their order, and the constraint produced the better behavior.
-  - **Settled** - The change is four `usage()` heredocs and four `parse_args()` bodies now that `bootstrap.sh` carries the same contract, and taking it deletes the differences-table row in [`host-setup/windows/README.md`][host-setup-windows] rather than leaving a permanent divergence.
-  - **Open** - Nothing.
-
 ### Whether a Removed App Execution Alias Comes Back
 
 Removing the `python.exe` and `python3.exe` app execution alias stubs frees the name, which is measured. What is not measured is whether Windows puts them back. The Settings page keeps reporting both aliases as `On` after the files are gone, so the declared state and the on-disk state diverge, and nothing found so far says which one servicing reads. This needs a human to log out and back in, and to reboot, and to report whether the enabled copies reappear in the WindowsApps directory.
@@ -514,9 +493,6 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
 [issue-607]: https://github.com/ptr727/ProjectTemplate/issues/607
 [issue-623]: https://github.com/ptr727/ProjectTemplate/issues/623
 [issue-633]: https://github.com/ptr727/ProjectTemplate/issues/633
-[issue-671]: https://github.com/ptr727/ProjectTemplate/issues/671
-[issue-673]: https://github.com/ptr727/ProjectTemplate/issues/673
-[issue-767]: https://github.com/ptr727/ProjectTemplate/issues/767
 [issue-1161]: https://github.com/ptr727/ProjectTemplate/issues/1161
 [issue-2412]: https://github.com/ptr727/ProjectTemplate/issues/2412
 

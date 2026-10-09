@@ -344,7 +344,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ## Decision Ledger Cross-References
 
-[`TODO.md`][todo] stays the running backlog, and this register does not fork it. The peer-messaging item resolves to [`docs/peer-messaging.md`][peer-messaging] and section G11. The host-tooling cluster ([#671][issue-671] and [#673][issue-673]) touches the same `host-setup/` surface as G1 and G3, so those issues and the P1 items cross-link rather than duplicate. A future TODO entry about an adoption gap lands as a register row here instead, with TODO carrying only the pointer. The open issues [#699][issue-699] (a repo and worktree layout convention with its own skill) and [#700][issue-700] (Python tooling in CI with a scripts split) each touch a mapped seam and stay on their own tracks, cross-linked here rather than duplicated.
+[`TODO.md`][todo] stays the running backlog, and this register does not fork it. The peer-messaging item resolves to [`docs/peer-messaging.md`][peer-messaging] and section G11. A future TODO entry about an adoption gap lands as a register row here instead, with TODO carrying only the pointer. The open issues [#699][issue-699] (a repo and worktree layout convention with its own skill) and [#700][issue-700] (Python tooling in CI with a scripts split) each touch a mapped seam and stay on their own tracks, cross-linked here rather than duplicated.
 
 <!-- Repo -->
 
