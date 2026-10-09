@@ -158,13 +158,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    meanwhile, since the defect is still fixed at the source. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
 
-   A finding the pull request's own body lists, as `local-strict-review` "Disposing of Findings"
-   lists each one still open when a push's edit budget is spent, also needs an outcome under
-   "Every finding ends in one of five outcomes" below before merge, whichever head it was found
-   on and whether or not a reviewer raises it again. It has no thread, so its outcome is recorded
-   in a pull request comment that names the listed finding and carries what a thread reply would:
-   the fixing commit SHA, the decline's evidence, the filed issue's link, or the maintainer's
-   answer. The finding stays open until that comment exists.
+   A finding the pull request's own body lists also needs an outcome before merge, under
+   "Every finding ends in one of five outcomes" below. The `local-strict-review` section
+   "Disposing of Findings" lists each one still open there once a push's edit budget is spent.
+   It needs that outcome whichever head it was found on and whether or not a reviewer raises it
+   again. It has no thread, so answer it as "Answering a suppressed finding" below states, citing
+   the body's list where that section cites a review round. An outcome 4 answer also carries the
+   filed issue's link. The finding stays open until its answer is posted, and one taking outcome 3
+   stays open until the maintainer has answered it.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
