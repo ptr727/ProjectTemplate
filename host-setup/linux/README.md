@@ -119,6 +119,8 @@ Two steps cannot be automated, because they happen in a browser. The public key 
 
 **`--shared-checkout` exists because `safe.directory` and `core.sharedRepository` are relaxations, not defaults.** They are applied only for a path the caller names, and a host one account uses needs neither. `*` is accepted but called out as turning the ownership check off everywhere.
 
+**`--gh-ssh-protocol` exists because rewriting a working authentication setup is the operator's call.** A plain run reports gh's github.com git protocol and `--configure` alone leaves it as found. `--configure --gh-ssh-protocol` sets it to ssh. It warns and sets nothing where gh is not installed or not logged in. A protocol set before a login leaves a tokenless entry that gh reports as a failed login.
+
 ## install-skills.sh Is the Exception
 
 The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it last. Run on a host without one, it stops and names the tools step as its prerequisite.
