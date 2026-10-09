@@ -2466,20 +2466,23 @@ def cell_paths(cell: str) -> list[str]:
     """The paths one table cell names, one per code span where it lists several.
 
     The second format can group related files into one row, each in a code span of its own with
-    a comma between them, and read whole that cell is one path holding backticks, which names
-    none of the files it lists. So a cell holding single-backtick spans with nothing but commas
-    and whitespace outside them names each span.
+    a comma between them. Read whole, such a cell is one path holding backticks, which names none
+    of the files it lists. So a cell holding single-backtick spans with nothing but commas and
+    whitespace outside them names each span.
 
-    Such a list can end in a note, as `note_split` finds one. Each span then keeps that note, so
-    each reads as a noted row, since which file the note is about is unknown. The note comes off
-    before the spans are found, so a span quoted inside it is never read as a path. Any other
-    cell is read whole, its outer backticks dropped.
+    Such a list can end in notes, each as `note_split` finds one, and they come off one after
+    another as `row_paths` takes them off a row. Each span then keeps those notes, so each reads
+    as a noted row, since which file a note is about is unknown. The notes come off before the
+    spans are found, so a span quoted inside one is never read as a path. Any other cell is read
+    whole, its outer backticks dropped.
     """
     if spans := span_list(cell):
         return [s.strip() for s in spans]
-    head, note = note_split(cell.strip())
-    if spans := span_list(head):
-        return [f"{s.strip()} {note}" for s in spans]
+    head, notes = cell.strip(), ""
+    while (split := note_split(head))[1]:
+        head, notes = split[0].rstrip(), f"{split[1]} {notes}".rstrip()
+        if spans := span_list(head):
+            return [f"{s.strip()} {notes}" for s in spans]
     return [cell.strip().strip("`").strip()]
 
 

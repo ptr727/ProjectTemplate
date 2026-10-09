@@ -4797,18 +4797,21 @@ class TestCoverageExitCodes(GqlCase):
     def test_a_grouped_cell_ending_in_a_note_names_each_path_as_noted(self) -> None:
         """Each span keeps the note, so beside bare rows the table stands in and alone it refuses."""
         files = ["docs/a.md", "docs/b.md"]
-        cell = "`docs/a.md`, `docs/b.md` (moved from `old/`)"
+        quoting = "`docs/a.md`, `docs/b.md` (moved from `old/`)"
         self.assertEqual(
             ["docs/a.md (moved from `old/`)", "docs/b.md (moved from `old/`)"],
-            pr_review.file_table(self.written([cell])),
+            pr_review.file_table(self.written([quoting])),
         )
-        pr = payload([review(body=self.written([*files, cell]))], files=files)
-        self.assertEqual("", pr_review.table_shortfall(pr))
-        pr = payload([review(body=self.written([cell]))], files=files)
-        self.assertEqual(
-            "the table names docs/a.md, docs/b.md only on a row with a note, which covers nothing",
-            pr_review.table_shortfall(pr),
-        )
+        for cell in (quoting, "`docs/a.md`, `docs/b.md` (one) (two)"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    "the table names docs/a.md, docs/b.md only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
 
     def test_a_span_quoted_in_a_single_paths_note_is_not_read_as_a_path(self) -> None:
         """The note comes off before the spans are found, so a path it quotes is not read."""
