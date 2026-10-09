@@ -96,6 +96,19 @@ def linux_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
+def run_sourced(functions: Path, bin_dir: Path, body: str) -> subprocess.CompletedProcess[str]:
+    """Run `body` in bash after sourcing `functions`, with `bin_dir` first on PATH."""
+    script = f'source "{functions}"\nPATH="{bin_dir}:$PATH"\n{body}\n'
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=30,
+    )
+
+
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux script's own functions")
 class TestLinuxGitHubCli(unittest.TestCase):
     """`setup-github.sh`'s GitHub CLI report and opt-in, with a stub `gh` first on PATH."""
@@ -144,15 +157,7 @@ class TestLinuxGitHubCli(unittest.TestCase):
         return log.read_text(encoding="ascii").splitlines() if log.exists() else []
 
     def run_bash(self, body: str) -> subprocess.CompletedProcess[str]:
-        script = f'source "{self.functions}"\nPATH="{self.bin}:$PATH"\n{body}\n'
-        return subprocess.run(
-            ["bash", "-c", script],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=30,
-        )
+        return run_sourced(self.functions, self.bin, body)
 
     def test_report_names_the_account_and_an_https_protocol_with_its_remedy(self) -> None:
         result = self.run_bash("report_gh")
@@ -618,6 +623,33 @@ def function_body(text: str, opener: str) -> str:
     """The text from `opener` to the closing brace at column 0 that ends the function it opens."""
     start = text.index(opener)
     return text[start : text.index("\n}\n", start)]
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux script's own functions")
+class TestPackageInstalled(unittest.TestCase):
+    """`setup-github.sh`'s installed-package check, with a stub `dpkg-query` first on PATH."""
+
+    def check(self, status: str, exit_code: int = 0) -> int:
+        """The exit status of `package_installed git` when dpkg-query prints `status`."""
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        functions = directory / "functions.sh"
+        functions.write_text(linux_functions(), encoding="utf-8")
+        stub = directory / "dpkg-query"
+        stub.write_text(f"#!/bin/sh\nprintf '%s' '{status}'\nexit {exit_code}\n", encoding="ascii")
+        stub.chmod(0o755)
+        return run_sourced(functions, directory, "package_installed git").returncode
+
+    def test_an_installed_package_reads_as_installed(self) -> None:
+        self.assertEqual(self.check("install ok installed"), 0)
+
+    def test_a_held_package_reads_as_installed(self) -> None:
+        self.assertEqual(self.check("hold ok installed"), 0)
+
+    def test_a_removed_package_reads_as_missing(self) -> None:
+        self.assertNotEqual(self.check("deinstall ok config-files"), 0)
+
+    def test_an_unknown_package_reads_as_missing(self) -> None:
+        self.assertNotEqual(self.check("", 1), 0)
 
 
 class TestCallSites(unittest.TestCase):
