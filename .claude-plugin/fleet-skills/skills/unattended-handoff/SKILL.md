@@ -213,9 +213,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    other than the permission still has to hold, on this pull request and on any promotion.
    **Under `main` or `release`, check for a blocked promotion before opening or driving one.** Read
    the open `decision` issues under picker step 1's full-page check, with `gh issue list --repo
-   "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`, noting
-   when it ran. Where one of them states, in its body or in a comment, that it blocks the open
-   develop -> main pull request, as "Parking" step 2 has it state, the round narrows to develop.
+   "<owner>/<repo>" --label decision --state open --limit 100 --json number,body,comments`. Note
+   when it ran, in UTC as `closedAt` reports it. Where one of them states, in its body or in a
+   comment, that it blocks the open develop -> main pull request, as "Parking" step 2 has it
+   state, the round narrows to develop.
    The worker then merges, opens, and releases no promotion while that decision issue is open. It
    instead brings that promotion's body up to a `Fixes` line for every issue develop fixes,
    `#<issue>` included, per
