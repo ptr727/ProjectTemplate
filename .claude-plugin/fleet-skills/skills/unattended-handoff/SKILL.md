@@ -131,10 +131,10 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 `STOP` is for a state of the repository or the session rather than of one issue: a missing label,
 an exhausted reviewer quota, or a push the executor refuses. A promotion waiting on an open
 `decision` issue is not one, since a round can still merge to develop, per "The Worker" step 3.
-Nor is anything about the worker's own issue. A worker that cannot finish its issue parks it per
-"Parking" and replies `PARKED`, since a `STOP` leaves that handoff neither closed nor parked and
-ends the run with backlog still pickable. A review pass or wait that has not finished is no reason
-to reply at all, per "The Worker" step 4.
+Nor is a cause particular to the worker's own issue, one a later round on another issue would not
+meet. A worker stopped by one parks per "Parking" and replies `PARKED`, since a `STOP` leaves its
+handoff neither closed nor parked. A review pass or wait still running is no reason to reply at
+all, per "The Worker" step 4.
 
 A promotion carries whatever develop holds, since that is what a develop -> main pull request is.
 Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
@@ -239,10 +239,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    item 2 states. Such a promotion merges with no `decision` issue,
    and the worker records that item's evidence on the handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
-   the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
-   holds its turn until that pass's reviewer has reported, however the reviewer was dispatched.
-   The orchestrator acts on the worker's line the moment it arrives, so work still running then
-   finishes after the run has already acted on a line that no longer describes it.
+   the worker's own turn. The `local-strict-review` pass is a wait like any other, so its reviewer
+   is dispatched in the foreground, in the worker's own turn. A worker able to dispatch it only in
+   the background returns `STOP`, since every later worker in the run would meet the same
+   harness. The orchestrator acts on the worker's line the moment it arrives. Work still running
+   then finishes after the run has acted on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
