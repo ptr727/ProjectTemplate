@@ -1964,7 +1964,9 @@ def findings_on(tail: str) -> int | None:
     return sum(counts) if counts else None
 
 
-DISCUSSION_LINK = re.compile(r"\]\(#discussion_r(\d+)\)")
+DISCUSSION_LINK = re.compile(
+    r"\]\((?:https://github\.com/[^/\s()]+/[^/\s()]+/pull/\d+)?#discussion_r(\d+)\)"
+)
 ENTRY_LINE = re.compile(r"[-*+]\s")
 OverviewSection = tuple[str, int | None, list[list[str]], int]
 

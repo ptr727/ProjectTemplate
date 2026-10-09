@@ -642,7 +642,7 @@ jobs:
           done
 ```
 
-A Docker repo's stub adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, `docker_image: ptr727/widget`, `enable_nuget: false` (dropping `nuget_project` with it) and `expect_release_assets: false`, maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under the `publish` job's `secrets:`, and drops the `publish-nuget` job, since Docker Hub has no OIDC equivalent and the hub task pushes the image itself. A PyPI repo sets `enable_pypi: true` with `pypi_project_dir` and `pypi_version_file`, `enable_nuget: false` (dropping `nuget_project`) and `expect_release_assets: false`, since PyPI contributes no release asset, and swaps `publish-nuget` for the same shape one registry over, verbatim as today's:
+A Docker repo's stub removes the `push:` block (its paths filter with it) and adds `schedule: - cron: '0 2 * * MON'` to the trigger block, sets `enable_docker: true`, `dockerhub: true`, `docker_image: ptr727/widget`, `enable_nuget: false` (dropping `nuget_project` with it) and `expect_release_assets: false`, maps `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` under the `publish` job's `secrets:`, and drops the `publish-nuget` job, since Docker Hub has no OIDC equivalent and the hub task pushes the image itself. A PyPI repo sets `enable_pypi: true` with `pypi_project_dir` and `pypi_version_file`, `enable_nuget: false` (dropping `nuget_project`) and `expect_release_assets: false`, since PyPI contributes no release asset, and swaps `publish-nuget` for the same shape one registry over, verbatim as today's:
 
 ```yaml
   publish-pypi:

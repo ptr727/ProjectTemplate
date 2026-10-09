@@ -6,11 +6,17 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+import local_review
 
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
@@ -123,6 +129,7 @@ def ls_files(
 ) -> list[str]:
     """Return tracked paths, plus unignored untracked ones unless told to skip those.
 
+    A tracked path deleted from disk is dropped, since a linter given it fails on a missing file.
     A local `npm install` is untracked and unignored in a repository whose `.gitignore` omits it,
     so its third-party files would otherwise be lint targets.
     Dropping them here rather than in a linter config is what reaches shellcheck and shfmt, which
@@ -148,7 +155,8 @@ def ls_files(
         raise CommandFailed(f"target discovery failed: {detail}") from error
     except OSError as error:
         raise CommandFailed(f"target discovery failed: {error}") from error
-    return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+    paths = [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+    return [path for path in paths if os.path.lexists(root / path)]
 
 
 # The env options below take a separate operand token, never mistaken for the command.
@@ -251,6 +259,52 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     if linter.discover_shebang:
         files = sorted(set(files) | set(extensionless_shell_scripts(root)))
     return files
+
+
+def snapshot_parent(root: Path) -> Path:
+    """Return the checkout's own git directory, where the snapshot is staged.
+
+    Any Docker setup that can mount the checkout reaches it, and git never lists it.
+    The system temporary directory is outside Docker Desktop for Linux's default file sharing.
+    """
+    try:
+        return local_review.git_dir(root)
+    except local_review.CannotRun as error:
+        raise CommandFailed(f"snapshot failed: {error}") from error
+
+
+def exit_on_sigterm(signum: int, _frame: object) -> None:
+    """Turn a termination signal into an exit, so the snapshot is still removed."""
+    raise SystemExit(128 + signum)
+
+
+def stage_snapshot(root: Path, snapshot: Path) -> int:
+    """Copy the tracked and unignored files into snapshot, the only tree a container mounts.
+
+    A git-ignored file, such as a local secrets file beside a tracked placeholder, stays behind.
+    A symlink is copied as a link and never followed.
+    A tracked path missing from disk never reaches it, since `ls_files` drops it.
+    An empty `.git` is added, since actionlint finds its project only where one sits beside
+    `.github/workflows`.
+    """
+    staged = 0
+    for relative_path in ls_files(root):
+        source = root / relative_path
+        destination = snapshot / relative_path
+        try:
+            if not source.is_symlink() and source.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination, follow_symlinks=False)
+        except OSError as error:
+            raise CommandFailed(
+                f"snapshot failed: could not copy {relative_path}: {error}"
+            ) from error
+        staged += 1
+    (snapshot / ".git").mkdir(exist_ok=True)
+    snapshot.chmod(stat.S_IMODE(root.stat().st_mode))
+    return staged
 
 
 def docker_mount(root: Path, destination: str) -> str:
@@ -441,23 +495,29 @@ def lint(
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
-        for linter, files in applicable:
-            if linter.name == "PSScriptAnalyzer":
-                install_psscriptanalyzer(digests[linter.name], timeout, runner)
-            batches = file_batches(linter, files)
-            for index, batch in enumerate(batches, start=1):
-                label = f"lint {linter.name} ({len(files)} file(s))"
-                if len(batches) > 1:
-                    label = (
-                        f"lint {linter.name} batch {index}/{len(batches)} "
-                        f"({len(batch)} of {len(files)} file(s))"
+        with tempfile.TemporaryDirectory(
+            prefix="docker-lint-snapshot-", dir=snapshot_parent(root)
+        ) as directory:
+            snapshot = Path(directory)
+            staged = stage_snapshot(root, snapshot)
+            print(f"SNAPSHOT {staged} tracked or unignored path(s) staged to mount", flush=True)
+            for linter, files in applicable:
+                if linter.name == "PSScriptAnalyzer":
+                    install_psscriptanalyzer(digests[linter.name], timeout, runner)
+                batches = file_batches(linter, files)
+                for index, batch in enumerate(batches, start=1):
+                    label = f"lint {linter.name} ({len(files)} file(s))"
+                    if len(batches) > 1:
+                        label = (
+                            f"lint {linter.name} batch {index}/{len(batches)} "
+                            f"({len(batch)} of {len(files)} file(s))"
+                        )
+                    run_step(
+                        label,
+                        container_command(snapshot, linter, digests[linter.name], batch),
+                        timeout,
+                        runner,
                     )
-                run_step(
-                    label,
-                    container_command(root, linter, digests[linter.name], batch),
-                    timeout,
-                    runner,
-                )
     except CommandFailed as error:
         print(f"RESULT failed: {error}", flush=True)
         return 1
@@ -485,6 +545,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line entry point."""
     args = parse_args(argv)
+    signal.signal(signal.SIGTERM, exit_on_sigterm)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be greater than zero")
     root = args.root.resolve()
