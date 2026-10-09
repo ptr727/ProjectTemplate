@@ -159,13 +159,13 @@ Subcommands
            `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
            trailing `+` saying the page was cut. The other is a finding an earlier round raised
            that the total still counts and no open entry links, its thread being none this round
-           opened. An open entry linking an earlier round's thread and none this round opened
-           is counted beside `M` before the two are compared, since the total counts what is
-           still open rather than what this round raised, so `T` above `M` can print no block,
-           and where a block prints it names how many it counted that way. A withheld finding is
-           owed the triage a suppressed one is. No exit code rides on it, the same as
-           `suppressed=` and `cr_outside_diff=`, since what an unread finding says is the
-           reader's to judge.
+           opened. An open entry whose title links an earlier round's thread, and which links
+           none this round opened, is counted beside `M` before the two are compared, since the
+           total counts what is still open rather than what this round raised. So `T` above `M`
+           can print no block, and where a block prints it names how many it counted that way.
+           A withheld finding is owed the triage a suppressed one is. No exit code rides on it,
+           the same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says is
+           the reader's to judge.
            Where the preamble states no total, the count opening the open-findings section is
            `T`, since that format's later revision writes the bare zero line only for a zero.
            Each entry an open section lists links its thread, and an entry linking no thread on
@@ -2085,9 +2085,9 @@ def round_threads(pr: dict, review: dict) -> int:
     It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
     was measured over, which is why that section's count is not read as a total. The preamble
     total counted those carried findings too, in both rounds measured where a total exceeded the
-    threads its round opened. So the shortfall adds each open entry standing for an earlier
-    round's thread, per `carried_open_threads`, rather than this count growing to include it,
-    which would move `M` off what the round itself opened.
+    threads its round opened. So the comparison counts each open entry standing for an earlier
+    round's thread beside `M`, per `carried_open_threads`, rather than this count growing to
+    include it, which would move `M` off what the round itself opened.
 
     A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
     That is the direction that reports, and `threads=` already prints a trailing `+` saying the
