@@ -2470,9 +2470,10 @@ def cell_paths(cell: str) -> list[str]:
     none of the files it lists. So a cell holding single-backtick spans with nothing but commas
     and whitespace outside them names each span.
 
-    Such a list can end in a note, as `note_split` finds one. Each span then keeps that note, so each reads as a noted row, since which file the note is
-    about is unknown. The note comes off before the spans are found, so a span quoted inside it
-    is never read as a path. Any other cell is read whole, its outer backticks dropped.
+    Such a list can end in a note, as `note_split` finds one. Each span then keeps that note, so
+    each reads as a noted row, since which file the note is about is unknown. The note comes off
+    before the spans are found, so a span quoted inside it is never read as a path. Any other
+    cell is read whole, its outer backticks dropped.
     """
     if spans := span_list(cell):
         return [s.strip() for s in spans]
@@ -2483,7 +2484,7 @@ def cell_paths(cell: str) -> list[str]:
 
 
 def span_list(text: str) -> list[str]:
-    """The code spans `text` lists, or none where anything but commas and whitespace is outside them."""
+    """The spans `text` lists, or none where it holds more than spans, commas, and whitespace."""
     spans = TABLE_SPAN.findall(text)
     return spans if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", text)) else []
 
