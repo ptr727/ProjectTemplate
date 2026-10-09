@@ -163,9 +163,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    "Disposing of Findings", the body lists each one still open once a push's edit budget is spent.
    It needs that outcome whichever head it was found on and whether or not a reviewer raises it
    again. `pr_review.py status` and `wait` do not read the pull request's body, so read the body
-   live for that list before judging this item. It has no thread, so answer it as "Answering a suppressed finding" below states. Cite
-   the body's list where that section links the review round, and the list's length where it
-   states the block's `(N)` count.
+   live for that list before judging this item. It has no thread, so answer it as
+   "Answering a suppressed finding" below states. Cite the body's list where that section links
+   the review round, and the list's length where it states the block's `(N)` count.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
