@@ -62,18 +62,18 @@ without trusting the parts of it that have gone stale.
 - **One open handoff issue per track per repository.** A track is a short kebab-case slug naming a
   lane of work, and a session that names no track uses `default`. Parallel lanes each name their
   own, so each closes its own predecessor and neither reads the other's state as current.
-- **A platform lane holds only work that needs its platform.** A track kept for one platform, such
-  as `wsl`, holds an issue only when no Linux host can both fix it and verify the fix.
-  A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or `wslpath`
-  needs WSL, and so does running a Windows `.exe` from Linux. Behavior that differs under Windows
-  PowerShell 5.1 or `winget` needs Windows, and so do Windows path and ACL semantics. Systemd user
-  scopes, apt, and a bash script need neither. Nor does a PowerShell script whose logic runs under
-  `pwsh` in a Linux container, unless its defect depends on Windows itself. An issue a Linux host
-  can fix and verify goes to the ordinary backlog, since a lane costs a separate chain and a
-  host-bound session. Where only part of an issue needs the platform, that part is filed as an
-  issue of its own for the lane. The original is narrowed to the rest and stays in the backlog. A
-  platform lane holding no qualifying issue is closed out with no successor. Its last link carries
-  the outcome as a comment, as `AGENTS.md` "Session Scope" closes a track whose work is complete.
+- **A platform lane holds only work that needs its platform.** A platform track, such as `wsl`,
+  holds an issue only when no Linux host outside WSL can both fix and verify it. A defect in WSL
+  interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or `wslpath` needs WSL, and so
+  does running a Windows `.exe` from Linux. Behavior that differs under Windows PowerShell 5.1 or
+  `winget` needs Windows, and so do Windows path and ACL semantics. Systemd user scopes and apt
+  need neither. A bash script, or a `pwsh` script run in a Linux container, needs a lane only where
+  its defect depends on WSL or Windows itself. An issue a Linux host outside WSL can fix and verify
+  goes to the backlog, a lane costing a separate chain and a host-bound session. Where
+  only part of an issue needs the platform, that part is filed as an issue of its own for the lane.
+  The original is narrowed to the rest and stays in the backlog. A platform lane holding no
+  qualifying issue is closed out with no successor. Its last link carries the outcome as a comment,
+  as `AGENTS.md` "Session Scope" closes a track whose work is complete.
 - **The title is for humans**, shaped `Session Handoff [<track>]: <subject>`, which `new` composes
   from the track and the subject it is given, so what a session writes is the subject alone.
   Nothing parses the title, so a maintainer is free to rename one.
