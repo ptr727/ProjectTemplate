@@ -80,9 +80,9 @@ separate permissions. Repository exposure needs explicit maintainer approval eve
 is read-only. Use the hub's `scripts/docker_lint.py` wrapper for the standard lint shape. It
 discovers targets, pulls images in a separate phase, resolves each digest, and announces the
 boundary before repository mounts begin. Each Docker command has a timeout and visible result.
-Lint containers disable networking and mount read-only a temporary snapshot of the tracked and
-unignored files, never the live checkout, so a git-ignored file stays on the host. Persist
-approval only when the executor constrains that whole shape. Never allow an unconstrained
+Lint containers disable networking and mount a read-only snapshot rather than the live checkout.
+The snapshot holds only the tracked and unignored files, so a git-ignored file stays on the host.
+Persist approval only when the executor constrains that whole shape. Never allow an unconstrained
 `docker run` prefix.
 PSScriptAnalyzer downloads its pinned module in a separate container that has network access and
 no repository mount. `GOVERNANCE.md`'s hub-only "Running the Linters Locally (Known-Working

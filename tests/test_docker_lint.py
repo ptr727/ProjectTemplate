@@ -326,6 +326,8 @@ class DockerLintCase(unittest.TestCase):
                 {".git", ".gitignore", "README.md", "docs", "docs/guide.md", "notes.md"},
                 set(mounted),
             )
+        git_dir = (self.root / ".git").resolve()
+        self.assertTrue(all(source.parent.resolve() == git_dir for source in runner.sources))
         self.assertFalse(any(source.exists() for source in runner.sources))
 
     @requires_symlink

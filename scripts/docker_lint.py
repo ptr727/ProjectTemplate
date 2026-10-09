@@ -256,6 +256,25 @@ def tracked_files(root: Path, linter: Linter) -> list[str]:
     return files
 
 
+def snapshot_parent(root: Path) -> Path:
+    """Return the checkout's own git directory, where the snapshot is staged.
+
+    Any Docker setup that can mount the checkout reaches it, and git never lists it.
+    The system temporary directory is outside Docker Desktop for Linux's default file sharing.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise CommandFailed(
+            f"snapshot failed: could not locate the git directory: {error}"
+        ) from error
+    return Path(os.fsdecode(result.stdout).strip())
+
+
 def stage_snapshot(root: Path, snapshot: Path) -> int:
     """Copy the tracked and unignored files into snapshot, the only tree a container mounts.
 
@@ -475,7 +494,9 @@ def lint(
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
-        with tempfile.TemporaryDirectory(prefix="docker-lint-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="docker-lint-snapshot-", dir=snapshot_parent(root)
+        ) as directory:
             snapshot = Path(directory)
             staged = stage_snapshot(root, snapshot)
             print(f"SNAPSHOT {staged} tracked or unignored path(s) staged to mount", flush=True)
