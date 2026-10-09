@@ -2144,9 +2144,11 @@ def unthreaded_entries(pr: dict) -> int:
     """How many findings the head round's open sections link to no thread on this pull request.
 
     Each entry links the database id of its thread's first comment, so an id no thread carries is
-    a finding named only in the review body, which no thread poll reaches. Distinct ids are
-    counted, and a resolved section's entries are not, being threads an earlier round raised. A
-    thread past the hundred the query reads counts here too, overstating rather than hiding.
+    a finding named only in the review body, which no thread poll reaches. An entry is read by its
+    first link, its title's own anchor, as `carried_open_threads` reads it, so a back-reference
+    beside a title anchor that is a thread adds nothing. Distinct title anchors are counted, and a
+    resolved section's entries are not, being threads an earlier round raised. A title anchor
+    past the hundred threads the query reads counts here too, overstating rather than hiding.
     An `Open (N)` section counting more entries than it has linked entries adds the difference.
     An entry carrying a link this reader does not recognize lands there too, overstating rather
     than hiding.
@@ -2227,12 +2229,12 @@ def total_section_entries(pr: dict) -> int:
 
 
 def open_entry_ids(pr: dict) -> set[str]:
-    """The distinct thread ids the head round's open sections link, resolved sections left out."""
+    """The distinct title anchors the head round's open entries link, resolved sections left out."""
     newest = second_format_head(pr)
     if newest is None:
         return set()
     sections = read_overview(newest.get("body") or "")[2]
-    return {i for role, _, ids, _ in sections if role != RESOLVED for entry in ids for i in entry}
+    return {entry[0] for role, _, ids, _ in sections if role != RESOLVED for entry in ids}
 
 
 PROSE_FINDINGS = re.compile(

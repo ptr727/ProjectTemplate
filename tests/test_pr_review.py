@@ -4528,6 +4528,30 @@ class TestOverviewSections(GqlCase):
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
         self.assertIn("open sections count carries no link this script reads to a thread", out)
 
+    def back_referenced(self, cid: str) -> dict:
+        """One open entry whose title anchors 6000000001 beside a back-reference to 6000000009,
+        on a pull request whose one thread read carries `cid`."""
+        title = "(#discussion_r6000000001) \u00b7 New"
+        body = revised_with(open_section(("6000000001",)))
+        self.assertIn(title, body)
+        body = body.replace(title, f"{title}, see [earlier](#discussion_r6000000009)")
+        return payload([review(body=body, rid="PRR_head")], [thread("T1", rid="PRR_head", cid=cid)])
+
+    def test_a_back_reference_beside_a_threaded_title_adds_no_unthreaded_entry(self) -> None:
+        """The entry is read by its title anchor, which is a thread, so a back-reference to an id
+        no thread read carries, such as one past the hundred threads read, adds nothing."""
+        pr = self.back_referenced("6000000001")
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_threaded_back_reference_beside_an_unthreaded_title_cancels_nothing(self) -> None:
+        """A title anchor naming no thread is still one entry with no thread, whatever thread a
+        back-reference beside it names."""
+        pr = self.back_referenced("6000000009")
+        self.assertEqual(1, pr_review.unthreaded_entries(pr))
+
     def test_a_resolved_section_s_entries_are_not_findings(self) -> None:
         """Its entries link threads an earlier round raised, so none needs a thread of its own."""
         pr = payload([review(body=revised_with("**0 open findings**", "### Approval recommended"))])
