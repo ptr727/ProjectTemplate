@@ -196,6 +196,7 @@ def overview_v2(
     covers: str = "<!-- fleet-review: reviewed=1 changed=1 findings=2 -->",
     effort: str = "**Review effort:** Lite",
     entries: int = 2,
+    verdict: str = "### Changes recommended",
 ) -> str:
     """The second overview format, whose markers differ from the first's throughout.
 
@@ -217,7 +218,7 @@ def overview_v2(
         f"- [Finding {i}](#discussion_r400000000{i}) New" for i in range(1, entries + 1)
     )
     return (
-        f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Changes recommended\n\n"
+        f"{CCR_MARKER}\n\n## Copilot review overview\n\n{verdict}\n\n"
         f"The change is narrow.\n\n{effort}\n{findings}\n\n"
         f"<details open>\n<summary><strong>Open ({entries})</strong></summary>\n\n"
         f"{listed}\n</details>\n\n"
@@ -228,25 +229,31 @@ def overview_v2(
     )
 
 
-def overview_v2_revised(open_line: str = "**0 open findings**", resolved: int = 3) -> str:
+def overview_v2_revised(
+    open_line: str = "**0 open findings**",
+    resolved: int = 3,
+    verdict: str = "### Approval recommended",
+    effort: str = "",
+) -> str:
     """The second format's later revision, carrying the same marker under a different preamble.
 
-    It drops the overview heading, the effort line, and the `**Findings:**` total, states its
-    total as a bare bold `open findings` line instead, and opens its resolved section's summary on
-    the count rather than closing it on one. Titles and anchors are constructed, as `overview_v2`'s
-    are.
+    It drops the overview heading and the `**Findings:**` total, states its total as a bare bold
+    `open findings` line instead, and opens its resolved section's summary on the count rather
+    than closing it on one. Its effort line, where `effort` supplies one, follows the last
+    collapsed section and opens on an emoji. Titles and anchors are constructed, as
+    `overview_v2`'s are.
     """
     listed = "\n".join(
         f"- [Fixed finding {i}](#discussion_r500000000{i})" for i in range(1, resolved + 1)
     )
     return (
-        f"{CCR_MARKER}\n\n### Needs a closer look\n\nOne reader still needs a look.\n\n"
+        f"{CCR_MARKER}\n\n{verdict}\n\nOne reader still needs a look.\n\n"
         f"{open_line}\n\n"
         f"<details>\n<summary><strong>{resolved} resolved since last review</strong></summary>\n\n"
         f"{listed}\n</details>\n\n"
         "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
         "This pull request narrows one reader.\n\n**Changes:**\n- Narrow the reader.\n"
-        "</details>\n"
+        f"</details>\n{effort}"
     )
 
 
@@ -315,8 +322,12 @@ def thread(
     path: str = "a.py",
     line: int = 1,
     rid: str | None = None,
+    cid: str | None = None,
 ) -> dict:
     """One `reviewThreads` node. `rid` is the review that opened it, which the manifest counts.
+
+    `cid` is its first comment's database id, which an overview entry's `#discussion_r` anchor
+    links, and None leaves the thread carrying none, as every case not reading those entries wants.
 
     None leaves the thread naming no round, which is the shape the reader has to survive rather
     than a claim about when GitHub returns it, and it is what every case not exercising the
@@ -334,6 +345,7 @@ def thread(
                     "line": line,
                     "body": body,
                     "pullRequestReview": {"id": rid} if rid else None,
+                    **({"fullDatabaseId": cid} if cid else {}),
                 }
             ]
         },
@@ -3065,6 +3077,44 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn(f"the newest round that does, on {OLD[:8]}, carries its table", out)
         self.assertIn("names exactly the 2 changed files", out)
 
+    def test_a_second_format_table_carries_to_a_lite_round_finding_nothing(self) -> None:
+        """Both rounds in the second format, the later one at Lite effort with no table.
+
+        The first round names every changed file and states no coverage, and the head then moves
+        while the pull request changes the same files. The round on the new head states its effort
+        and a total of none and carries no table, so only the earlier table can stand in.
+        """
+        rows = "| a.py | Narrows the reader. |\n| b.py | Narrows the writer. |\n"
+        first = (
+            f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Approval recommended\n\n"
+            "The change is narrow.\n\n**Review effort:** Balanced\n**Findings:** None\n\n"
+            "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+            "This pull request narrows two readers.\n\n"
+            f"| File | Description |\n| ---- | ----------- |\n{rows}\n</details>\n"
+        )
+        lite = (
+            f"{CCR_MARKER}\n\n## Copilot review overview\n\n### Approval recommended\n\n"
+            "The change is narrow.\n\n**Review effort:** Lite\n**Findings:** None\n"
+        )
+        pr = payload(
+            [
+                review(oid=OLD, body=first, at=EARLY, rid="A"),
+                review(oid=HEAD, body=lite, at=LATE, rid="B"),
+            ],
+            files=["a.py", "b.py"],
+        )
+        self.assertTrue(pr_review.second_format(first))
+        self.assertTrue(pr_review.second_format(lite))
+        self.assertEqual(["a.py", "b.py"], pr_review.file_table(first))
+        self.assertEqual([], pr_review.file_table(lite))
+        with self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}):
+            code, out = self.verdict(pr)
+        self.assertEqual(0, code)
+        self.assertIn("effort=lite ", out)
+        self.assertIn("overview=0/0 ", out)
+        self.assertIn("coverage=carried:table ", out)
+        self.assertNotIn("NO FILE TABLE STANDS IN", out)
+
     def test_a_moved_file_set_keeps_the_table_where_it_was(self) -> None:
         with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
             code, out = self.verdict(self.tabled())
@@ -3509,6 +3559,35 @@ class TestSecondOverviewFormat(GqlCase):
             ("lite", "explicit"), pr_review.review_effort(payload([review(body=bullet)]))
         )
 
+    def test_the_effort_line_reads_when_it_opens_on_an_emoji(self) -> None:
+        """The later revision states effort after its last collapsed section, opening on an emoji.
+
+        A reader allowing only a bullet before the label printed `effort=unknown` over it.
+
+        Escaped rather than typed, so the fixture stays inside the repository's charset rule.
+        An ASCII word before the label is prose about the line rather than the line itself.
+        """
+        brain = "\U0001f9e0"
+        for label, effort in (
+            ("emoji", f"{brain} **Review effort:** Lite"),
+            ("emoji with no space", f"{brain}**Review effort:** Lite"),
+        ):
+            with self.subTest(case=label):
+                pr = payload([review(body=overview_v2_revised(effort=effort))])
+                self.assertEqual(("lite", "explicit"), pr_review.review_effort(pr))
+        inherited = overview_v2_revised(effort=f"{brain} **Review effort:** Default (Max)")
+        self.assertEqual(
+            ("max", "default"), pr_review.review_effort(payload([review(body=inherited)]))
+        )
+        self.assertEqual([], pr_review.unrecognized_in(inherited))
+        self.answer(
+            payload([review(body=overview_v2_revised(effort=f"{brain} **Review effort:** Lite"))])
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("effort=lite effort_source=explicit", out)
+        prose = payload([review(body=overview_v2_revised(effort="See **Review effort:** Lite"))])
+        self.assertEqual(("unknown", "unknown"), pr_review.review_effort(prose))
+
     def test_the_format_is_recognized_by_its_marker_on_a_line_of_its_own(self) -> None:
         """The marker is an HTML comment, so a writer who wants a reader to see it has to quote it,
         which is why a fence and a code span are masked before the search.
@@ -3843,8 +3922,8 @@ class TestSecondOverviewFormat(GqlCase):
     def test_a_stated_total_larger_than_the_round_s_threads_is_reported(self) -> None:
         """A finding with no thread reaches no thread poll, and this format carries the first's
         `Suppressed comments` heading nowhere for `suppressed=` to find."""
-        rd = review(body=overview_v2(findings="**Findings:** 3"), rid="PRR_head")
-        self.answer(payload([rd], [thread("T1", rid="PRR_head")]))
+        rd = review(body=overview_v2(findings="**Findings:** 3", entries=1), rid="PRR_head")
+        self.answer(payload([rd], [thread("T1", rid="PRR_head", cid="4000000001")]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=3/1", out)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)
@@ -3854,14 +3933,15 @@ class TestSecondOverviewFormat(GqlCase):
 
     def test_a_single_withheld_finding_reads_as_one_finding(self) -> None:
         """The reachable `stated=1, threads=0` case rendered `them` twice for one finding."""
-        self.answer(payload([review(body=overview_v2(findings="**Findings:** 1"))]))
+        self.answer(payload([review(body=overview_v2(findings="**Findings:** 1", entries=0))]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("states 1 finding and opened 0 threads", out)
         self.assertIn("so 1 finding is raised", out)
 
     def test_a_round_accounting_for_every_finding_reports_the_pair_and_no_block(self) -> None:
         rd = review(body=overview_v2(), rid="PRR_head")
-        pr = payload([rd], [thread("T1", rid="PRR_head"), thread("T2", rid="PRR_head")])
+        opened = [thread(f"T{i}", rid="PRR_head", cid=f"400000000{i}") for i in (1, 2)]
+        pr = payload([rd], opened)
         self.answer(pr)
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=2/2", out)
@@ -3875,7 +3955,7 @@ class TestSecondOverviewFormat(GqlCase):
         other. `?` covers a total stated only after the first section opener too, the two being
         indistinguishable from the preamble."""
         self.assertEqual(0, pr_review.unlisted_findings((None, 2)))
-        self.answer(payload([review(body=overview_v2(findings=""))]))
+        self.answer(payload([review(body=overview_v2(findings="", entries=0))]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("overview=?/0", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
@@ -4005,6 +4085,7 @@ class TestSecondOverviewFormat(GqlCase):
         """
         self.assertIn("reviews(last:100){ nodes{ id ", pr_review.Q_FULL)
         self.assertIn("pullRequestReview{ id }", pr_review.Q_FULL)
+        self.assertIn("body fullDatabaseId pullRequestReview{ id }", pr_review.Q_FULL)
 
     def test_a_details_tag_named_in_the_preamble_prose_does_not_end_it(self) -> None:
         """The opener is a tag on a line of its own, for the reason the marker and the total are.
@@ -4098,6 +4179,448 @@ class TestSecondOverviewFormat(GqlCase):
         )
 
 
+COVERS_ONE = "<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
+
+
+def open_section(ids: tuple[str, ...], noun: str = "") -> str:
+    """The revision's open-findings section, one badged entry per thread id.
+
+    The summary opens on its count, singular for one finding. Titles and ids are constructed, per
+    GOVERNANCE.md "Representative Data in Agent-Authored Text".
+    """
+    badge = (
+        '<picture><source media="(prefers-color-scheme: dark)" srcset="medium-dark.svg">'
+        '<img src="medium-light.png" alt="Medium severity" width="16" height="16"></picture>'
+    )
+    noun = noun or ("finding" if len(ids) == 1 else "findings")
+    entries = "\n".join(
+        f"- {badge} [Constructed finding](#discussion_r{i}) \u00b7 New" for i in ids
+    )
+    return (
+        f"<details open>\n<summary><strong>{len(ids)} open {noun}</strong></summary>\n\n"
+        f"{entries}\n</details>"
+    )
+
+
+def revised_with(open_block: str, verdict: str = "### Changes recommended") -> str:
+    """The revision with its bare total replaced by `open_block`, covering its one changed file."""
+    return overview_v2_revised(open_line=open_block, verdict=verdict).replace(
+        "- Narrow the reader.\n", f"- Narrow the reader.\n\n{COVERS_ONE}\n"
+    )
+
+
+class TestOverviewSections(GqlCase):
+    """One reader for every section of the second format's overview, one primitive per class.
+
+    The open-findings section, the resolved section, and the verdict headline each arrived as a
+    shape nothing read. The first two stopped the loop at exit 43, and the third passed a round as
+    clean while its headline was the one place its findings were named.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def test_the_open_findings_section_is_vetted_in_both_numbers(self) -> None:
+        """`1 open finding` and `2 open findings` each exited 43 as an unvetted summary."""
+        for ids in (("6000000001",), ("6000000001", "6000000002")):
+            with self.subTest(count=len(ids)):
+                body = revised_with(open_section(ids))
+                self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_the_open_findings_section_states_the_round_s_total(self) -> None:
+        """The revision writes the bare line only for a zero, so a total above zero is the count
+        opening this section, and unread it printed `?`."""
+        body = revised_with(open_section(("6000000001", "6000000002", "6000000003")))
+        self.assertEqual(3, pr_review.stated_total(body))
+
+    def test_a_count_first_summary_outside_the_table_is_still_unvetted(self) -> None:
+        """The table vets spellings, not any summary that opens on a count."""
+        body = revised_with(open_section(("6000000001",), noun="questions"))
+        self.assertEqual(["summary: (N) open questions"], pr_review.unrecognized_in(body))
+
+    def test_every_entry_linking_a_thread_reports_no_block(self) -> None:
+        ids = ("6000000001", "6000000002")
+        rd = review(body=revised_with(open_section(ids)), rid="PRR_head")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        pr = payload([rd], threads)
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertIn("shapes=ok", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_earlier_round_s_thread_in_the_open_section_is_no_finding_without_one(self) -> None:
+        """The section supplied the total, so its entries decide, and both link threads."""
+        rd = review(body=revised_with(open_section(("6000000001", "6000000002"))), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_head", cid="6000000001"),
+            thread("T2", rid="PRR_old", cid="6000000002"),
+        ]
+        self.answer(payload([rd], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/1", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_finding_the_count_names_and_no_entry_links_is_counted(self) -> None:
+        """An entry carrying no link, or a link in another form, is still a finding no poll sees."""
+        ids = ("6000000001", "6000000002")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        for extra in ("- Constructed finding with no link", "- [Linked](https://x/pull/7#d)"):
+            with self.subTest(extra=extra):
+                block = (
+                    open_section(ids)
+                    .replace("2 open findings", "3 open findings")
+                    .replace("</details>", f"{extra}\n</details>")
+                )
+                rd = review(body=revised_with(block), rid="PRR_head")
+                self.answer(payload([rd], threads))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("overview=3/2", out)
+                self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+                self.assertIn("states 3 findings, its open section linking 2, so 1 finding", out)
+
+    def test_an_unthreaded_entry_under_no_stated_total_says_so(self) -> None:
+        """`Open (N)` is not a total, so a round stating none still counts its unthreaded entry."""
+        self.answer(payload([review(body=overview_v2(findings="", entries=1))]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=?/0", out)
+        self.assertIn(
+            "states no total and opened 0 threads, and 1 of the entries its open sections count "
+            "carries no link this script reads to a thread",
+            out,
+        )
+
+    def test_an_open_list_entry_carrying_no_link_is_counted(self) -> None:
+        """`Open (N)` is not a total, so an entry it counts with no thread link is counted here."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        self.assertIn("Open (1)", body)
+        body = body.replace("Open (1)", "Open (2)").replace(linked, f"{linked}\n- Finding 2 New")
+        self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("open sections count carries no link this script reads to a thread", out)
+
+    def test_a_second_link_on_one_entry_does_not_cover_an_unlinked_entry(self) -> None:
+        """An entry linking a thread beside its own is still one entry, so the unlinked one counts."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}, see [earlier](#discussion_r4000000007)\n- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_indented_back_reference_does_not_cover_an_unlinked_entry(self) -> None:
+        """A back-reference on its own line under an entry is not another entry."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n  - see [earlier](#discussion_r4000000007)\n- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_bullet_collapsed_within_an_entry_does_not_cover_an_unlinked_entry(self) -> None:
+        """A list collapsed inside an entry holds back-references rather than entries."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        nested = (
+            "<details><summary>Related</summary>\n\n"
+            "- see [earlier](#discussion_r4000000007)\n\n</details>\n"
+        )
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n{nested}- Finding 2 New"
+        )
+        threads = [thread("T1", cid="4000000001"), thread("T7", cid="4000000007")]
+        self.answer(payload([review(body=body)], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_collapsed_back_reference_to_no_thread_is_not_a_second_finding(self) -> None:
+        """A link inside a block collapsed within the section is no entry's, so it adds none."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        nested = (
+            "<details><summary>Related</summary>\n\n"
+            "- see [earlier](#discussion_r4000000009)\n\n</details>\n"
+        )
+        body = body.replace("Open (1)", "Open (2)").replace(
+            linked, f"{linked}\n{nested}- Finding 2 New"
+        )
+        self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_more_linked_entries_than_counted_cancel_no_unthreaded_entry(self) -> None:
+        """A section counting fewer entries than it links still counts an id no thread carries."""
+        linked = "- [Finding 1](#discussion_r4000000001) New"
+        body = overview_v2(findings="", entries=1)
+        self.assertIn(linked, body)
+        body = body.replace(linked, f"{linked}\n- [Finding 7](#discussion_r4000000007) New")
+        self.answer(payload([review(body=body)], [thread("T7", cid="4000000007")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_every_bullet_marker_reads_as_a_linked_entry(self) -> None:
+        """`*` and `+` open an entry as `-` does, so a list in either is fully linked."""
+        for marker in ("*", "+"):
+            with self.subTest(marker=marker):
+                linked = "- [Finding 1](#discussion_r4000000001) New"
+                body = overview_v2(findings="", entries=1)
+                self.assertIn(linked, body)
+                body = body.replace(linked, f"{marker}{linked[1:]}")
+                self.answer(payload([review(body=body)], [thread("T1", cid="4000000001")]))
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_entry_linking_no_thread_is_counted_where_the_totals_balance(self) -> None:
+        """The round opened as many threads as it states, and one entry links none of them, so
+        the totals alone pass a finding named only in the body."""
+        rd = review(body=revised_with(open_section(("6000000001", "6000000002"))), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_head", cid="6000000001"),
+            thread("T2", rid="PRR_head", cid="6000000009"),
+        ]
+        self.answer(payload([rd], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("open sections count carries no link this script reads to a thread", out)
+
+    def test_a_resolved_section_s_entries_are_not_findings(self) -> None:
+        """Its entries link threads an earlier round raised, so none needs a thread of its own."""
+        pr = payload([review(body=revised_with("**0 open findings**", "### Approval recommended"))])
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def headline(self, verdict: str = "### \U0001f535 Needs a closer look") -> str:
+        """A flagging verdict whose headline names findings beside a zero count."""
+        return revised_with("**0 open findings**", verdict).replace(
+            "One reader still needs a look.",
+            "Resolve the two outstanding parser-retry and timeout-handling findings.",
+        )
+
+    def test_a_flagging_verdict_counting_no_finding_exits_fifty(self) -> None:
+        self.answer(payload([review(body=self.headline())]))
+        self.assertEqual(50, pr_review.main(["status", "7", "--repo", "o/r"]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("VERDICT WITH NO COUNTED FINDING", printed)
+        self.assertIn("Resolve the two outstanding parser-retry", printed)
+        self.assertIn("status=VERDICT_NAMES_UNCOUNTED_FINDINGS", printed)
+
+    def test_partial_coverage_outranks_fifty(self) -> None:
+        """A part-reviewed diff is the larger gap, so 42 is what the round reports."""
+        body = self.headline().replace(COVERS_ONE, COVERS_ONE.replace("changed=1", "changed=2"))
+        self.answer(payload([review(body=body)]))
+        self.assertEqual(42, pr_review.main(["status", "7", "--repo", "o/r"]))
+
+    def test_fifty_outranks_a_stuck_check(self) -> None:
+        """`main` reads the real clock, so the check's age comes from it, as in the 44 case."""
+        stuck = check(name="gate", status="QUEUED", conclusion="", started=real_ago(900))
+        self.answer(payload([review(body=self.headline())], merge="BLOCKED", checks=[stuck]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        self.assertNotIn("status=CHECKS_NOT_MERGEABLE", self.out.getvalue())
+
+    def test_a_collapsed_finding_cancels_the_reading(self) -> None:
+        """A suppressed or previously-missed block is a counted finding the digest already prints."""
+        for summary in ("Previously missed (1)", "Suppressed comments (1)"):
+            with self.subTest(summary=summary):
+                block = (
+                    f"<details>\n<summary><strong>{summary}</strong></summary>\n\n"
+                    "- a.py:12 A constructed finding.\n</details>\n\n<details>"
+                )
+                body = self.headline().replace("<details>", block, 1)
+                self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)])))
+
+    def test_a_clean_verdict_counting_no_finding_exits_zero(self) -> None:
+        self.answer(payload([review(body=self.headline("### Approval recommended"))]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("VERDICT WITH NO COUNTED FINDING", self.out.getvalue())
+
+    def test_a_flagging_verdict_with_counted_findings_is_not_this_reading(self) -> None:
+        rd = review(body=revised_with(open_section(("6000000001",))), rid="PRR_head")
+        pr = payload([rd], [thread("T1", resolved=True, rid="PRR_head", cid="6000000001")])
+        self.assertIsNone(pr_review.uncounted_verdict(pr))
+
+    def test_an_open_list_carrying_an_earlier_round_s_thread_is_not_this_reading(self) -> None:
+        """`Open (N)` can list a thread an earlier round raised, with no total stated anywhere."""
+        body = overview_v2(findings="", entries=1)
+        earlier = thread("T1", resolved=True, rid="PRR_old", cid="4000000001")
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [earlier])))
+
+    def test_the_headline_keeps_the_code_span_it_names(self) -> None:
+        """Masking a quotation finds the verdict, and the reader still needs what the span says."""
+        body = self.headline().replace(
+            "Resolve the two outstanding parser-retry and timeout-handling findings.",
+            "The new `retry_loop()` never terminates on `None`.",
+        )
+        flagged = pr_review.uncounted_verdict(payload([review(body=body)]))
+        self.assertIsNotNone(flagged)
+        assert flagged is not None
+        self.assertEqual("The new `retry_loop()` never terminates on `None`.", flagged[1])
+
+    def test_a_badged_open_list_under_an_emoji_verdict_reads_whole(self) -> None:
+        """The shape a downstream repository's pull request showed: an emoji verdict, an open
+        list of a high and a medium entry each ending on a middle dot and `New`, and a narrative
+        section after it."""
+        ids = ("7000000001", "7000000002")
+        block = open_section(ids).replace("medium", "high", 2).replace("Medium", "High", 1)
+        body = revised_with(block, "### \U0001f7e1 Changes recommended")
+        self.assertIn('alt="High severity"', body)
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        rd = review(body=body, rid="PRR_head")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        pr = payload([rd], threads)
+        self.assertEqual((2, 2), pr_review.head_overview(pr))
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.assertIsNone(pr_review.uncounted_verdict(pr))
+
+    def test_an_open_thread_defers_the_reading_until_it_is_resolved(self) -> None:
+        """The headline may name that thread, which the loop already waits on."""
+        body = self.headline()
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [thread("T1")])))
+        resolved = payload([review(body=body)], [thread("T1", resolved=True)])
+        self.assertIsNotNone(pr_review.uncounted_verdict(resolved))
+
+
+def with_prose(listed: str, body: str | None = None) -> str:
+    """A second-format body whose overview prose lists findings under a `Review findings:` label.
+
+    The list sits in the narrative section, after its change bullets, where the shape was seen.
+    Paths and wording are constructed, per GOVERNANCE.md "Representative Data in Agent-Authored
+    Text".
+    """
+    body = overview_v2() if body is None else body
+    anchor = "- Narrow the reader.\n"
+    assert anchor in body
+    return body.replace(anchor, f"{anchor}\nReview findings:\n{listed}\n", 1)
+
+
+PROSE_LISTED = (
+    "- `lib/reader.py`: moderate retry issue (2 votes).\n"
+    "- `writer.py`: low naming issue (1 vote).\n"
+)
+
+
+def prose_threads(rid: str = "PRR_one") -> list[dict]:
+    """The two threads `overview_v2`'s open section links, one on each file `PROSE_LISTED` names."""
+    return [
+        thread("T1", rid=rid, cid="4000000001", path="lib/reader.py"),
+        thread("T2", rid=rid, cid="4000000002", path="lib/writer.py"),
+    ]
+
+
+class TestProseFindings(GqlCase):
+    """A finding a round names only in its overview prose, under a `Review findings:` label."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def digest(self, body: str, threads: list[dict] | None = None) -> str:
+        self.answer(payload([review(body=body)], prose_threads() if threads is None else threads))
+        return pr_review.digest("o", "r", 7)[0]
+
+    def test_an_entry_on_a_file_no_thread_is_on_is_counted_where_the_totals_balance(self) -> None:
+        out = self.digest(
+            with_prose(PROSE_LISTED + "- `lib/parser.py`: validation issue (1 vote).")
+        )
+        self.assertIn("overview=2/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn(
+            "1 of the entries under its `Review findings:` label names no file a thread of that "
+            "round is on",
+            out,
+        )
+
+    def test_every_entry_on_a_threaded_file_counts_none(self) -> None:
+        """A trailing part, a zero-width space after a slash, and a directory each name a file."""
+        for listed in (
+            PROSE_LISTED,
+            "- `lib/\u200breader.py` and `lib/writer.py`: one issue each (2 votes each).\n",
+            "- `lib/`: moderate retry issue (2 votes).\n",
+            "- A retry issue\n  in `lib/reader.py` (2 votes).\n",
+        ):
+            with self.subTest(listed=listed):
+                out = self.digest(with_prose(listed))
+                self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_bold_label_is_read(self) -> None:
+        body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(
+            "Review findings:", "**Review findings:**"
+        )
+        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
+
+    def test_an_entry_naming_no_file_is_counted(self) -> None:
+        out = self.digest(with_prose(PROSE_LISTED + "- A validation issue (1 vote)."))
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_earlier_round_s_thread_does_not_cover_an_entry(self) -> None:
+        """The list is this round's, so a thread another round opened on that file is not its."""
+        threads = [*prose_threads(), thread("T3", rid="PRR_old", path="lib/parser.py")]
+        out = self.digest(with_prose(PROSE_LISTED + "- `lib/parser.py`: issue (1 vote)."), threads)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_quoted_list_is_not_read(self) -> None:
+        listed = "- `lib/parser.py`: validation issue (1 vote)."
+        body = with_prose(PROSE_LISTED).replace(
+            "Review findings:\n", f"```text\nReview findings:\n{listed}\n```\n\nReview findings:\n"
+        )
+        self.assertEqual([["lib/reader.py"], ["writer.py"]], pr_review.prose_findings(body))
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_the_list_ends_at_its_first_line_that_is_not_an_entry(self) -> None:
+        body = with_prose(PROSE_LISTED + "\n- `lib/parser.py`: a change bullet, not a finding.")
+        self.assertEqual([["lib/reader.py"], ["writer.py"]], pr_review.prose_findings(body))
+
+    def test_the_prose_and_the_totals_naming_one_finding_count_it_once(self) -> None:
+        """A round stating three findings over two threads may be naming the third in prose."""
+        body = with_prose(
+            PROSE_LISTED + "- `lib/parser.py`: validation issue (1 vote).",
+            overview_v2(findings="**Findings:** 3"),
+        )
+        out = self.digest(body)
+        self.assertIn("overview=3/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_a_first_format_round_is_not_read(self) -> None:
+        body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(CCR_MARKER, "")
+        self.assertEqual(0, pr_review.unthreaded_prose_findings(payload([review(body=body)])))
+
+    def test_a_flagging_verdict_over_a_stated_zero_names_its_findings_in_the_headline(
+        self,
+    ) -> None:
+        """The other shape: a flagging verdict, a `**Findings:** None` total, a resolved section
+        only, and a headline naming what is still owed."""
+        body = revised_with("**Findings:** None", "### \U0001f535 Needs a closer look").replace(
+            "One reader still needs a look.",
+            "Address the constructed retry issue and the parser validation.",
+        )
+        earlier = [
+            thread(f"T{i}", resolved=True, rid="PRR_old", cid=f"500000000{i}") for i in (1, 2, 3)
+        ]
+        self.answer(payload([review(body=body)], earlier))
+        self.assertEqual(50, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("Address the constructed retry issue", self.out.getvalue())
+
+
 class TestEveryGqlCaseKeepsItsBaseSetUp(unittest.TestCase):
     """A subclass overriding `setUp` without chaining silently drops what the base installs.
 
@@ -4166,6 +4689,7 @@ class TestCoverageExitCodes(GqlCase):
             covers="",
             effort="**Review effort:** Balanced",
             entries=0,
+            verdict="### Approval recommended",
         ).replace("| a.py | Narrows the reader. |", table)
 
     def test_a_table_naming_exactly_the_changed_files_closes_an_unstated_head(self) -> None:
@@ -4196,6 +4720,145 @@ class TestCoverageExitCodes(GqlCase):
                 )
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def written(self, cells: list[str]) -> str:
+        """A Balanced round stating no coverage, its file table's first cells written as given."""
+        table = "\n".join(f"| {c} | Prose about the change. |" for c in cells)
+        return overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+            verdict="### Approval recommended",
+        ).replace("| a.py | Narrows the reader. |", table)
+
+    def test_a_cell_listing_several_paths_names_each_of_them(self) -> None:
+        """The table can group related files into one row, a code span each, a comma between.
+
+        The nested paths carry the zero-width space the format writes after a slash.
+        """
+        body = self.written(["`src/app.sh`", "`docs/\u200ba.md`, `docs/\u200bb.example`"])
+        files = ["src/app.sh", "docs/a.md", "docs/b.example"]
+        self.answer(payload([review(body=body)], files=files))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_each_path_a_split_cell_yields_reads_every_row_form(self) -> None:
+        """A listed path can be a wildcard or a shortened one, as a row of its own can."""
+        long = "docs/notes/2020-01-01 - Sample Topic - A Rather Long Descriptive Name.md"
+        body = self.written(["`lib/*.py`, `docs/notes/2020-01-01 - ... Descriptive Name.md`"])
+        pr = payload([review(body=body)], files=["lib/a.py", "lib/b.py", long])
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_split_cell_naming_a_path_the_diff_does_not_carry_still_refuses(self) -> None:
+        """Splitting reads each path on its own, so one the diff lacks is named as invented."""
+        body = self.written(["`docs/a.md`, `docs/c.md`"])
+        pr = payload([review(body=body)], files=["docs/a.md", "docs/b.md"])
+        shortfall = pr_review.table_shortfall(pr)
+        self.assertIn("leaves out docs/b.md", shortfall)
+        self.assertIn("names docs/c.md, which the diff does not carry", shortfall)
+
+    def test_a_cell_with_prose_between_its_spans_is_read_whole(self) -> None:
+        """Only commas and whitespace separate a list, so any other cell stays one path."""
+        self.assertEqual(
+            ["docs/a.md` and `docs/b.md"],
+            pr_review.file_table(self.written(["`docs/a.md` and `docs/b.md`"])),
+        )
+
+    def test_a_row_carrying_a_trailing_note_names_the_path_before_it(self) -> None:
+        """The format writes a second row for a file another row already names, with a note."""
+        body = self.written(["src/app.sh", "docs/a.md", "docs/a.md (cleanup)"])
+        self.answer(payload([review(body=body)], files=["src/app.sh", "docs/a.md"]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=table ", self.out.getvalue())
+
+    def test_a_trailing_note_is_read_past_on_every_row_form(self) -> None:
+        """A code span before the note, a wildcard, and a gap each stop refusing, covering nothing.
+
+        Beside bare rows naming the same files the table stands in, and alone it leaves them out.
+        """
+        long = "docs/x - one z.md"
+        for cell, files in (
+            ("`docs/a.md` (cleanup)", ["docs/a.md"]),
+            ("lib/*.py (moved)", ["lib/a.py", "lib/b.py"]),
+            ("docs/x - ... z.md (renamed)", [long]),
+            ("docs/a.md (one) (two)", ["docs/a.md"]),
+        ):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    f"the table names {', '.join(sorted(files))} only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
+
+    def test_a_grouped_cell_ending_in_a_note_names_each_path_as_noted(self) -> None:
+        """Each span keeps the note, so beside bare rows the table stands in and alone it refuses."""
+        files = ["docs/a.md", "docs/b.md"]
+        quoting = "`docs/a.md`, `docs/b.md` (moved from `old/`)"
+        self.assertEqual(
+            ["docs/a.md (moved from `old/`)", "docs/b.md (moved from `old/`)"],
+            pr_review.file_table(self.written([quoting])),
+        )
+        for cell in (quoting, "`docs/a.md`, `docs/b.md` (one) (two)"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([*files, cell]))], files=files)
+                self.assertEqual("", pr_review.table_shortfall(pr))
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(
+                    "the table names docs/a.md, docs/b.md only on a row with a note, "
+                    "which covers nothing",
+                    pr_review.table_shortfall(pr),
+                )
+
+    def test_a_span_quoted_in_a_single_paths_note_is_not_read_as_a_path(self) -> None:
+        """The note comes off before the spans are found, so a path it quotes is not read."""
+        files = ["docs/new.md", "docs/b.md"]
+        cell = "`docs/new.md` (renamed from `docs/old.md`)"
+        pr = payload([review(body=self.written([*files, cell]))], files=files)
+        self.assertEqual("", pr_review.table_shortfall(pr))
+
+    def test_a_grouped_cell_ending_in_anything_but_a_note_is_read_whole(self) -> None:
+        """A note set off by no whitespace, or holding a parenthesis of its own, is not peeled."""
+        for cell in ("`a.md`, `b.md`(moved)", "`a.md`, `b.md` (moved) extra)"):
+            with self.subTest(cell=cell):
+                self.assertEqual([cell.strip("`")], pr_review.cell_paths(cell))
+
+    def test_a_file_named_only_on_a_noted_row_refuses(self) -> None:
+        """A note is never read, so it could say the file went unreviewed, and the table refuses."""
+        body = self.written(["src/app.sh", "docs/a.md (not reviewed)"])
+        self.answer(payload([review(body=body)], files=["src/app.sh", "docs/a.md"]))
+        self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("coverage=unstated ", self.out.getvalue())
+
+    def test_a_note_is_kept_where_the_row_names_a_path_with_it(self) -> None:
+        """Parentheses that are part of a changed path or a shortened tail are kept.
+
+        A row naming a changed path reads as written, and trailing notes come off a row only while
+        it names none. Parentheses inside a path, as in `docs/a (draft).md`, are never trailing,
+        so they are never read as a note.
+        """
+        for cell, files, shortfall in (
+            (
+                "docs/a (draft).md (cleanup)",
+                ["docs/a (draft).md"],
+                "the table names docs/a (draft).md only on a row with a note, which covers nothing",
+            ),
+            ("docs/a (draft)", ["docs/a (draft)", "docs/a"], "the table leaves out docs/a"),
+            ("docs/Long ... (draft)", ["docs/Long name (draft)"], ""),
+        ):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([cell]))], files=files)
+                self.assertEqual(shortfall, pr_review.table_shortfall(pr))
+
+    def test_a_note_on_a_path_the_diff_does_not_carry_still_refuses(self) -> None:
+        """Dropping the note reads the path before it, which still has to be a changed one."""
+        for cell in ("docs/c.md (cleanup)", "(cleanup)", "docs/a.md(cleanup)", "docs/a.md (x) y)"):
+            with self.subTest(cell=cell):
+                pr = payload([review(body=self.written([cell]))], files=["docs/a.md"])
+                self.assertIn(f"names {cell}, which the diff", pr_review.table_shortfall(pr))
 
     def test_a_wildcard_row_covers_the_sibling_files_it_groups(self) -> None:
         """The table can collapse sibling files into one glob row rather than naming each."""
@@ -4726,6 +5389,20 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("omits exactly the 1 file", out)
         self.assertIn("c.yml", out)
         self.assertIn("lead to check rather than a verdict", out)
+
+    def test_a_file_named_only_past_a_note_disqualifies_the_naming(self) -> None:
+        """A noted row covers nothing, so its file sits in the omissions although the table names it.
+
+        Reading it as the unread file would point at a file the reviewer listed.
+        """
+        out = self.reading(
+            summarized(["a.py", "b.md", "c.yml (cleanup)"], covers=self.PART),
+            ["a.py", "b.md", "c.yml"],
+        )
+        self.assertNotIn("omits exactly", out)
+        self.assertIn("names 3 of the 3 changed files, omitting 0", out)
+        self.assertIn("naming c.yml only on a row with a note, which covers nothing", out)
+        self.assertIn("names no unread file", out)
 
     def test_a_path_the_diff_does_not_carry_disqualifies_the_naming(self) -> None:
         """One round names `GOVENANCE.md`, which no diff here carries.

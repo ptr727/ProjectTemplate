@@ -31,18 +31,37 @@ conflict between instructions instead of silently choosing one.
 ## Review the Change
 
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
-resource lifetime, tests, and contract drift. Follow data and control flow beyond the edited
+resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
 lines when the behavior depends on unchanged callers or consumers.
 
 For each candidate finding:
 
 1. Verify it against the current head tree, not an unfetched checkout or the base branch.
-2. Identify the concrete failing behavior and the conditions that reach it.
+2. Identify the concrete failing behavior and the conditions that reach it, or for a design
+   finding, what item 7 names.
 3. Confirm that the repository does not already prevent it elsewhere.
 4. Prefer one root-cause finding over several symptoms of the same defect.
 5. Omit pure preferences that no repository rule or user-visible risk supports.
 6. Omit a hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort",
    carried below, declines.
+7. Treat a design finding as backed by `GOVERNANCE.md` "Design Before Code", carried below,
+   rather than by a failing behavior. That covers logic an existing helper provides, a per-site
+   fix for a defect class seen elsewhere, and code no requirement or realistic threat calls for.
+   It names the existing helper, the class's other sites, or the code that answers neither, and
+   that backing keeps it out of item 5.
+
+<!-- include: GOVERNANCE.md > Design Before Code -->
+
+A change is cheapest to shape before it is written. Hardening nothing calls for, and a near-duplicate of an existing helper, each cost a review round to find and remove once the code exists. So the design questions are answered before the first edit.
+
+- **Model the threat before the first edit.** Name the change's inputs, the class of each under "Trust Boundaries and Hardening Effort", and the deployment the code runs in. That model sets the hardening budget, so hardening it does not call for is never written, rather than written and then declined in review.
+- **Reuse before building.** Search this repository and the hub for a primitive that already does the job. Start from the list of consolidated primitives this repository's `OPERATIONS.md` keeps under `Configuration Layout` once it has consolidated any. Extend one that exists rather than adding a sibling that does almost the same thing. A near-duplicate splits every later fix between two copies.
+- **A defect class seen a second time gets one primitive, and every site moves onto it.** A check written at each site repeats its own platform and edge-case defects at every site. A read that can block on a named pipe, for one, meets a new platform difference at each site that guards it alone. One reader that opens without blocking and judges the open descriptor closes that class everywhere. Sites in files a change does not touch move in a change of their own, filed as one issue naming each.
+- **Complexity is a cost that needs a reason.** Code that answers no requirement and no realistic threat is removed rather than maintained, since each later review and each later change reads it again.
+
+`GOVERNANCE.md` "Design Before Code" keeps the full rules, and the `fleet-code-review` Skill at `.agents/skills/fleet-code-review/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo, carries it whole as a generated include and surfaces it wherever a change is reviewed.
+
+<!-- /include -->
 
 <!-- include: GOVERNANCE.md > Trust Boundaries and Hardening Effort -->
 
@@ -74,8 +93,9 @@ Each finding states:
 
 - A concise imperative title with a severity.
 - The file and smallest useful line range.
-- The behavior that fails and the input or state that triggers it.
-- Why the change causes the failure.
+- The behavior that fails and the input or state that triggers it, or for a design finding,
+  what "Review the Change" item 7 names.
+- Why the change causes the failure, or the duplication or excess.
 - A bounded direction for the fix when one is known.
 
 Do not report a clean review until every changed file has been read. End the review body with

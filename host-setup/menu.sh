@@ -170,14 +170,23 @@ fetch_hub() {
 
 fetch_hub_locked() {
     step "Fetching $HUB_REPO at $REF"
-    if ! HUB_FETCH_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') || [[ -z $HUB_FETCH_TOKEN ]]; then
+    local token
+    if ! token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') || [[ -z $token ]]; then
         fail "Could not read /dev/urandom for the token marking this fetch as this session's."
         return 1
     fi
     remove_unowned_hub_check || return 1
     rm -rf "$DIR/hub"
+    if [[ -e "$DIR/hub" || -L "$DIR/hub" ]]; then
+        fail "Could not remove $DIR/hub to fetch it again. Check that nothing holds a file under it."
+        return 1
+    fi
     # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
-    printf '%s\n' "$HUB_FETCH_TOKEN" >"$(marker_path)"
+    if ! printf '%s\n' "$token" >"$(marker_path)"; then
+        fail "Could not write $(marker_path). Check that $DIR is writable."
+        return 1
+    fi
+    HUB_FETCH_TOKEN="$token"
     # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
         {
@@ -232,7 +241,18 @@ hub_root_clean_on_default_ref() {
     [[ $branch == "$DEFAULT_REF" ]]
 }
 
-# Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
+# A ref other than $DEFAULT_REF is fetched into a ref named for it rather than read from FETCH_HEAD, since another session sharing $DIR/hub can fetch a different ref into FETCH_HEAD between this fetch and its read.
+hub_ref_commit() {
+    if [[ $REF == "$DEFAULT_REF" ]]; then
+        git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" || return 1
+        git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF"
+        return
+    fi
+    git -C "$HUB_ROOT" fetch --quiet origin "+$REF:refs/menu/$REF" || return 1
+    git -C "$HUB_ROOT" rev-parse "refs/menu/$REF^{commit}"
+}
+
+# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
 # A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
     if [[ -n $HUB_ROOT ]]; then
@@ -241,13 +261,12 @@ ensure_hub_root() {
             hub_root_clean_on_default_ref && return 0
             HUB_ROOT=""
         else
-            # The freshness check below itself fetches, which updates FETCH_HEAD and the remote-tracking ref even though it touches no working file, so it is as much a change as fetch_hub's own clone.
-            local status head origin_head
-            if git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" &&
+            # The freshness check below itself fetches, which updates FETCH_HEAD and the ref it fetches into even though it touches no working file, so it is as much a change as fetch_hub's own clone.
+            local status head ref_head
+            if ref_head=$(hub_ref_commit) &&
                 status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
                 head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
-                origin_head=$(git -C "$HUB_ROOT" rev-parse "origin/$DEFAULT_REF") &&
-                [[ $head == "$origin_head" ]]; then
+                [[ $head == "$ref_head" ]]; then
                 return 0
             fi
             HUB_ROOT=""

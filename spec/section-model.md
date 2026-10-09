@@ -38,6 +38,7 @@ A section is one of the following. Fidelity is declared in [files.json][files], 
 | Pull Request Title and Commit Message Conventions | `GOVERNANCE.md` | verbatim | universal, with generic examples |
 | Documentation Style Conventions | `GOVERNANCE.md` | verbatim | all rule text, including the Line Endings *rule* (a repo's `.editorconfig` value is not here) |
 | Verification Discipline | `GOVERNANCE.md` | verbatim | universal verification law |
+| Design Before Code | `GOVERNANCE.md` | verbatim | universal law on threat modeling, reuse, and consolidation before code is written |
 | Trust Boundaries and Hardening Effort | `GOVERNANCE.md` | verbatim | universal law on where hardening effort is spent |
 | PR Review Etiquette | `GOVERNANCE.md` | verbatim | universal review-loop contract |
 | Communicating with the User | `GOVERNANCE.md` | verbatim | universal |
@@ -67,7 +68,7 @@ A repo's own content is not carried, and the hub declares where it goes rather t
 
 - [`CODESTYLE.md`][codestyle]: a repo's language and formatting conventions beyond the carried rules.
 - `ARCHITECTURE.md`: how a code repo is built, its module layout, data flow, and design decisions.
-- `OPERATIONS.md`: how a repo is run, under the headings `Local Verification`, `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half.
+- `OPERATIONS.md`: how a repo is run, under the headings `Local Verification`, `Runbooks`, `Backup and Recovery`, `Logs and Debugging`, `Tool Usage`, and `Configuration Layout`. It is the operational analogue of `ARCHITECTURE.md`, and it is where an `AGENTS.md` split puts the repo-specific half. Its `Configuration Layout` heading also holds the lists `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" and "Design Before Code" ask for. A list of shared helpers therefore goes there rather than in `ARCHITECTURE.md`.
 - `TODO.md`: the repo's running backlog, which keeps open work out of the README's section order where it does not belong and changes on a different cadence from everything around it.
 
 **`OPERATIONS.md` is required for every repo**, declared in [`files.json`][files] as `appliesTo: "*"` and checked for presence only, the same footing as `README.md` and `HISTORY.md`, so its content is entirely the repo's own. It is mandatory rather than advisory because the convention was already emerging unevenly: of the four operational-model repos, two wrote one unprompted and the others scattered the same material across ad-hoc names, which is the improvisation these destinations exist to prevent. That reasoning never depended on the workflow model. Every repo has operational surface, since publishing to a package registry needs trusted-publisher setup, shipping an image needs registry credentials, and serving a site needs a deploy path and a staging story. A repo with nothing to say still carries the file as a stub, meaning those six headings with no content under them, because a stub names the destination and its shape where a blank file names only the destination. This repo's own [`OPERATIONS.md`][operations] is the worked example.
