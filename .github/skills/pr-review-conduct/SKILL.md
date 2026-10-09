@@ -81,6 +81,32 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head
    read rather than counted and named to them, and their permission under item 5 is what allows
    the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
+
+   One further case satisfies this item where no coverage reaches the head, and it is the only
+   such case. The maintainer adopted it as a standing rule. It applies to a develop -> main
+   promotion on which `pr_review.py` exits `45`. That promotion satisfies item 2 where all three
+   of these hold on the live head:
+
+   - Every change it carries had full coverage on its own feature -> develop pull request. That
+     pull request met item 2 at its merged head by coverage, not by permission. Failing that,
+     each file it changed has positive evidence of a full read, at the head that last changed
+     the file or a later one. A Copilot table row with no note is such evidence. It counts only
+     where no Copilot round on that pull request, on any commit, states or appears to state
+     partial coverage. A round stating full coverage is evidence for every file. So is a
+     `local-strict-review` pass recorded for that pull request, for every file its diff held.
+   - Every review thread on the promotion is resolved, and every check passes.
+   - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
+     from the digest's lines rather than from the exit code, since exit `45` returns before the
+     exit `50` check runs. A `VERDICT WITH NO COUNTED FINDING` headline is a second reason until
+     it is answered under item 3, and not after.
+
+   The merge then runs with `--match-head-commit` set to the head those were checked on. The
+   evidence names each constituent pull request and how its coverage was stated. An
+   `unattended-handoff` worker records it on the handoff, and an attended merge reports it to the
+   maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
+   carrying a change whose own pull request lacked that coverage, such as one another lane merged
+   with no review round. The case answers item 2 alone, so item 5's permission is still owed.
+   Every pull request other than a promotion owes this item's coverage in full.
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
    in the review body investigated and answered. Those appear in no thread, so polling threads
