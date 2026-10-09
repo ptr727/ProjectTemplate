@@ -91,8 +91,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 
    - Every change it carries had full coverage on its own feature -> develop pull request. Each
      file that pull request changed is covered at the head that last changed it, or at a later
-     one. A Copilot file table or a round's own coverage statement covers a file. So does a
-     `local-strict-review` pass recorded for that pull request.
+     one. A Copilot file table covers a file it names on a row with no note. A round stating full
+     coverage covers every file. So does a `local-strict-review` pass recorded for that pull
+     request.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code. Exit `45` returns before the exit
