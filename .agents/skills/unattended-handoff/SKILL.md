@@ -241,12 +241,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    and the worker records that item's evidence on the handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
-   replies only after its reviewer has reported. A reviewer dispatched in the background satisfies
-   that only where the harness wakes the worker on its completion before any reply is sent. A
-   worker with neither a foreground dispatch nor that wake returns `STOP`, since every later worker
-   in the run would meet the same harness. The orchestrator acts on the worker's line the moment
-   it arrives. Work still running then finishes after the run has acted on a line that no longer
-   describes it.
+   replies only after its reviewer has reported. It dispatches the reviewer in the background only
+   where the harness wakes the worker on its completion before any reply is sent. A worker with
+   neither a foreground dispatch nor that wake returns `STOP` before dispatching the reviewer at
+   all. Every later worker in the run would meet the same harness. The orchestrator acts on the
+   worker's line the moment it arrives. Work still running then finishes after the run has acted
+   on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
