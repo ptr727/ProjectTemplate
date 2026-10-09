@@ -173,7 +173,7 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 - **Gap** - A host bootstrapped end to end via `host-setup/` had every tool and no fleet skills, because no provisioning step ran [`scripts/skills_install.py`][skills-install].
 - **Resolution** - The bootstrap host mode ends with a skills step: `install-skills.sh` and `install-skills.ps1` drive the installer from the fetched tree, a `--skills` action runs the step on its own, and the bootstrap report reads `--report` beside the other status lines. Each loader hands the commit it resolved to the installer via `SKILLS_SOURCE_COMMIT`, so the stamp written from a tarball tree stays checkable and `--report` exits zero on a fresh host, which is this row's closing test. [`docs/host-setup.md`][host-setup-doc] carries the "Fleet Skills Install" section with the verify line, and [`README.md`][readme] "Using This Repo" names four deployed things.
 - **Decisions** - The `claude` CLI stays out of [`spec/host-tools.json`][host-tools]: a Codex-only machine is a complete machine, so the installer degrades where the CLI is absent, landing the overlay half and recording the partial install in the stamp. The skills step is the recorded exception to `host-setup/`'s no-Python and independent-fetchability rules, and it runs last in a stand-up so `install-tools` provides its interpreter first.
-- **Cross-links** - [#671][issue-671] and [#673][issue-673] touch the same `host-setup/` scripts and stay open on their own tracks.
+- **Cross-links** - [#671][issue-671] and [#673][issue-673] touch the same `host-setup/` scripts.
 
 ### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
 
@@ -314,7 +314,7 @@ Design-doc first: this doc merges, then each unchecked item becomes an issue lin
 
 ### P1: Close the Install Model
 
-- [x] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the open host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
+- [x] G1 bootstrap skills step, host-setup section, README fourth deployed thing (cross-links the host-tooling issues [#671][issue-671] and [#673][issue-673], which touch the same scripts)
 - [x] G2 `host_gate.py` bare-run warning
 - [x] G3 failed-floor remedy output
 - [x] G6 staleness cadence wording
