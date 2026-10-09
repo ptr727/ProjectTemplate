@@ -4348,6 +4348,41 @@ class TestOverviewSections(GqlCase):
         self.assertIn("shapes=ok", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
+    def absolute(self, ids: tuple[str, ...]) -> str:
+        """The revision whose open entries link their threads by an absolute pull request URL."""
+        body = revised_with(open_section(ids))
+        for i in ids:
+            relative = f"(#discussion_r{i})"
+            self.assertIn(relative, body)
+            body = body.replace(
+                relative, f"(https://github.com/example-owner/example-repo/pull/1#discussion_r{i})"
+            )
+        return body
+
+    def test_an_absolute_thread_link_reports_no_block(self) -> None:
+        """Every entry linked by its absolute URL read as unlinked, a false block on each round."""
+        ids = ("6000000001", "6000000002")
+        rd = review(body=self.absolute(ids), rid="PRR_head")
+        threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+        pr = payload([rd], threads)
+        self.assertEqual(0, pr_review.unthreaded_entries(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_absolute_link_to_no_thread_here_is_counted(self) -> None:
+        """The URL's pull request is not compared with the one read, since an id no thread here
+        carries is still counted by that id."""
+        rd = review(body=self.absolute(("6000000001", "6000000002")), rid="PRR_head")
+        threads = [
+            thread("T1", rid="PRR_head", cid="6000000001"),
+            thread("T2", rid="PRR_head", cid="6000000009"),
+        ]
+        self.answer(payload([rd], threads))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_an_earlier_round_s_thread_in_the_open_section_is_no_finding_without_one(self) -> None:
         """The section supplied the total, so its entries decide, and both link threads."""
         rd = review(body=revised_with(open_section(("6000000001", "6000000002"))), rid="PRR_head")
