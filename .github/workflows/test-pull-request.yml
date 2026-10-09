@@ -22,12 +22,44 @@ jobs:
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # Windows is a supported fleet host, so the suite has to pass there as well as on Linux before a change merges.
+  # The suite runs from Git Bash, the shell a Windows host runs it from, and without coverage, since the Linux leg owns the report.
+  windows-test:
+    name: Windows unit test job
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout code step
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup python step
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+
+      # The repo gate's action reader falls back to uvx, a declared host tool, where PyYAML does not import.
+      - name: Setup uv step
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          ignore-nothing-to-cache: true
+
+      - name: Run Python tests step
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m unittest discover -s tests
+
   # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
   # Its name is the ruleset-bound required status-check context, so rename it and the ruleset context together.
   check-workflow-status:
     name: Check pull request workflow status job
     runs-on: ubuntu-latest
-    needs: [ validate ]
+    needs: [ validate, windows-test ]
     if: always()
     steps:
       - name: Check workflow results step
@@ -35,5 +67,9 @@ jobs:
           set -Eeuo pipefail
           if [[ "${{ needs.validate.result }}" != "success" ]]; then
             echo "Job 'validate' did not succeed (${{ needs.validate.result }}); refusing to pass."
+            exit 1
+          fi
+          if [[ "${{ needs.windows-test.result }}" != "success" ]]; then
+            echo "Job 'windows-test' did not succeed (${{ needs.windows-test.result }}); refusing to pass."
             exit 1
           fi

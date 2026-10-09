@@ -2124,5 +2124,33 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
         self.assertEqual(status, 0, "\n".join(fails))
 
 
+@unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
+class TestContainmentHookSelftests(unittest.TestCase):
+    """The prefix's and the sweep's own matrices, the session tree's cases included, run in this suite.
+
+    Both run every systemd and process-table answer from a synthetic fixture, so neither starts a
+    scope, sets a slice's ceiling, or stops anything on the machine running the suite.
+    """
+
+    def _selftest(self, name):
+        done = subprocess.run(
+            [sys.executable, str(HERE / name), "--selftest"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        fails = [line for line in done.stdout.splitlines() if "FAIL" in line]
+        self.assertEqual(done.returncode, 0, "\n".join(fails) + done.stderr)
+        self.assertIn("SELFTEST PASS", done.stdout)
+
+    def test_the_prefix_selftest_passes(self):
+        self._selftest(install.CONTAIN_NAME)
+
+    def test_the_sweep_selftest_passes(self):
+        self._selftest(install.SWEEP_NAME)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

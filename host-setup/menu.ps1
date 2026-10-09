@@ -38,6 +38,7 @@ $WANT_HELP = [bool]$Help
 # No placeholder for $DIR here, matching bootstrap.ps1: PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable, and Resolve-Directory's own assignment in main is what gives it its resolved value.
 $HUB_ROOT = ''
 $HUB_FETCHED = $false
+$HUB_FETCH_TOKEN = ''
 $IS_HUB_CHECKOUT = $false
 $DOWNSTREAM_ROOT = ''
 $DOWNSTREAM_NAME = ''
@@ -178,6 +179,12 @@ function Test-HubRemovable {
     return $false
 }
 
+function Test-HubFetchedHere {
+    if (-not $script:HUB_FETCH_TOKEN) { return $false }
+    $recorded = Get-Content -LiteralPath (Get-MarkerPath) -Raw -ErrorAction SilentlyContinue
+    return ("$recorded".Trim() -eq $script:HUB_FETCH_TOKEN)
+}
+
 function Get-HubLockPath { Join-Path $script:DIR 'hub.lock' }
 
 # The file menu.sh locks, held with FileShare.None, which .NET implements as an exclusive flock on Linux and which on Windows refuses any other open handle, so the two menus sharing one -Dir serialize against each other.
@@ -250,9 +257,23 @@ function Invoke-FetchHubLocked {
     step "Fetching $script:HUB_REPO at $script:REF"
     if (-not (Test-HubRemovable)) { return $false }
     $hubPath = Join-Path $script:DIR 'hub'
-    if (Test-Path -LiteralPath $hubPath) { Remove-Item -LiteralPath $hubPath -Recurse -Force }
+    if (Test-Path -LiteralPath $hubPath) {
+        try {
+            Remove-Item -LiteralPath $hubPath -Recurse -Force
+        } catch {
+            fail "Could not remove $hubPath to fetch it again. Check that nothing holds a file under it: $($_.Exception.Message)"
+            return $false
+        }
+    }
     # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
-    New-Item -ItemType File -Path (Get-MarkerPath) -Force | Out-Null
+    $token = [guid]::NewGuid().ToString('N')
+    try {
+        Set-Content -LiteralPath (Get-MarkerPath) -Value $token
+    } catch {
+        fail "Could not write $(Get-MarkerPath). Check that $script:DIR is writable: $($_.Exception.Message)"
+        return $false
+    }
+    $script:HUB_FETCH_TOKEN = $token
     # A full clone of the default branch first, whatever -Ref names: spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary.
     # Piped to Out-Host rather than left bare: an unassigned native call's stdout otherwise joins this function's own return value, which return $true/$false below would then be appended to instead of replacing.
     & git clone --quiet --branch $script:DEFAULT_REF --single-branch $script:HUB_URL $hubPath | Out-Host
@@ -303,7 +324,21 @@ function Test-HubCleanOnDefaultRef {
     return ("$branch".Trim() -eq $script:DEFAULT_REF)
 }
 
-# Confirms a tentative local HUB_ROOT still matches a clean, freshly fetched origin/main before any tool reads it.
+function Get-HubRefCommit {
+    if ($script:REF -eq $script:DEFAULT_REF) {
+        & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
+        $resolve = "origin/$script:DEFAULT_REF"
+    } else {
+        & git -C $script:HUB_ROOT fetch --quiet origin "+$($script:REF):refs/menu/$($script:REF)" | Out-Host
+        $resolve = "refs/menu/$($script:REF)^{commit}"
+    }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $commit = & git -C $script:HUB_ROOT rev-parse $resolve
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return "$commit".Trim()
+}
+
+# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it.
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 function Confirm-HubRoot {
     if ($script:HUB_ROOT) {
@@ -312,16 +347,12 @@ function Confirm-HubRoot {
             if (Test-HubCleanOnDefaultRef) { return $true }
             $script:HUB_ROOT = ''
         } else {
-            & git -C $script:HUB_ROOT fetch --quiet origin $script:DEFAULT_REF | Out-Host
-            if ($LASTEXITCODE -eq 0) {
+            $refHead = Get-HubRefCommit
+            if ($refHead) {
                 $status = & git -C $script:HUB_ROOT status --porcelain
                 if ($LASTEXITCODE -eq 0 -and -not $status) {
                     $head = & git -C $script:HUB_ROOT rev-parse HEAD
-                    $headOk = ($LASTEXITCODE -eq 0)
-                    if ($headOk) {
-                        $originHead = & git -C $script:HUB_ROOT rev-parse "origin/$script:DEFAULT_REF"
-                        if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq "$originHead".Trim()) { return $true }
-                    }
+                    if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq $refHead) { return $true }
                 }
             }
             $script:HUB_ROOT = ''
@@ -353,6 +384,7 @@ function Invoke-Cleanup {
     # Same exclusive lock every reader and writer takes, via Invoke-WithHubLock, so this waits out another session still mid-use rather than deleting the tree out from under it.
     # No -ArgumentList needed: the scriptblock only reads script-scoped state ($script:DIR, Get-MarkerPath), not a local parameter of this function, so there is nothing for PSReviewUnusedParameter to flag here the way Invoke-HostTool's own $Tool/$Arguments needed forwarding.
     Invoke-WithHubLock -ScriptBlock {
+        if (-not (Test-HubFetchedHere)) { return }
         $hubPath = Join-Path $script:DIR 'hub'
         # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
         Remove-Item -LiteralPath $hubPath -Recurse -Force -ErrorAction SilentlyContinue

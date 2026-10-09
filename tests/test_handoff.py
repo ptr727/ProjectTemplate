@@ -1219,7 +1219,8 @@ class ChainCase(unittest.TestCase):
             }
         )
         first = run(fake, "link", "--repo", "o/r", "--new", "3", "--previous", "15")
-        self.assertEqual(first[0], 0)
+        self.assertEqual(first[0], 1)
+        self.assertIn("#56 also holds round 5", first[2])
         second = run(
             fake,
             "new",
@@ -2130,6 +2131,48 @@ class LinkCase(unittest.TestCase):
         code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
         self.assertEqual(code, 0)
         self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "11")
+
+    def test_a_predecessor_the_round_checks_question_refuses(self) -> None:
+        """`link` runs the round checks `new` runs, so it cannot adopt onto a head `new` refuses."""
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, 10, state="CLOSED"),
+                12: link(12, "lane", 3, None, state="CLOSED"),
+                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
+        self.assertEqual(code, 1)
+        self.assertIn("#12 holds round 3, above #11's 2", err)
+        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
+        self.assertEqual(fake.issues[13]["state"], "OPEN")
+
+    def test_an_orphan_with_successors_can_still_be_adopted(self) -> None:
+        """Links that descend from `--new` are not evidence against `--previous`."""
+        fake = FakeGh(
+            {
+                10: link(10, "lane", 1, None, state="CLOSED"),
+                11: link(11, "lane", 2, None, state="CLOSED"),
+                12: link(12, "lane", 3, 11),
+            }
+        )
+        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
+        self.assertEqual(code, 0)
+        self.assertEqual(read_marker(fake.issues[11]["body"], 11)["previous"], "10")
+
+    def test_a_predecessor_that_descends_from_the_new_link_refuses(self) -> None:
+        fake = FakeGh(
+            {
+                20: link(20, "lane", 5, None),
+                21: link(21, "lane", 2, 20, state="CLOSED"),
+                22: link(22, "lane", 3, 21, state="CLOSED"),
+            }
+        )
+        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "20", "--previous", "22")
+        self.assertEqual(code, 1)
+        self.assertIn("cycle", err)
+        self.assertEqual(read_marker(fake.issues[20]["body"], 20)["previous"], "none")
 
     def test_a_full_closed_window_refuses_rather_than_reading_as_no_successor(self) -> None:
         """A reader that answers None for "could not look" hands the caller a guard that passes."""

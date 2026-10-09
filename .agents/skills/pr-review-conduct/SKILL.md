@@ -103,7 +103,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    nothing else does, so read it and dispose of what it holds as this section's outcomes require.
    `T` reads `?` where no total was found, which is a round stating none and equally one the digest
    could not locate, so a `?` leaves this item unsatisfied and sends you to the body exactly as a
-   shortfall does.
+   shortfall does. The digest's `FINDINGS WITH NO THREAD` block also counts an open-findings entry
+   linking no thread, whatever the totals say. A round with a verdict other than the clean one
+   that counts no finding prints its headline under `VERDICT WITH NO COUNTED FINDING`, and
+   `status` and `wait` exit `50`. The
+   headline is the one place that round names what it flags, so answer it as a suppressed finding.
+   The exit code repeats on that head after the answer.
    The body read in that format so far carried no `Suppressed comments` heading, so `suppressed=`
    finds nothing in it and there is no collapsed block to quote a count from: the digest's
    shortfall and the body's own prose are what an answer cites instead. A later body that does
@@ -288,6 +293,11 @@ never against its confidence label. Classify before responding:
 - **Bug**, wrong behavior, missing coverage, a real code or doc divergence. Fix it.
 - **Hardening that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out**, including
   a test it says not to write. Decline it under outcome 2, even where it reads as missing coverage.
+- **Design finding that `GOVERNANCE.md` "Design Before Code" backs**, such as logic an existing
+  helper provides or a per-site fix for a class seen elsewhere. It is not an architectural
+  opinion. Fix it, extending the existing helper where this repository holds it, and move the
+  class's sites in the touched files onto it. File the other sites as one issue naming each, and
+  an extension a helper in another repository needs as an issue in that repository.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**, and take it to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.

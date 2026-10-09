@@ -24,18 +24,22 @@ Run as `python3 tests/test_bootstrap.py`, or under `python3 -m unittest discover
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
+
+from host_capability import bash_or_skip
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
@@ -632,6 +636,25 @@ def bootstrap_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
+REGISTRATION_RECORDER = """\
+import os
+from pathlib import Path
+
+Path(os.environ["REGISTERED_RECORD"]).write_text(str(Path(__file__).resolve().parent.parent), encoding="utf-8")
+"""
+
+
+def installer_tree(root: Path, platform: str, wrapper: str) -> Path:
+    """A tree holding the real skills wrapper for `platform`, its installer replaced by one recording the ROOT it would register."""
+    target = root / "host-setup" / platform / wrapper
+    target.parent.mkdir(parents=True)
+    shutil.copy2(ROOT / "host-setup" / platform / wrapper, target)
+    recorder = root / "scripts" / "skills_install.py"
+    recorder.parent.mkdir()
+    recorder.write_text(REGISTRATION_RECORDER, encoding="utf-8")
+    return root
+
+
 class TestDirectoryLockOrder(unittest.TestCase):
     """A run refused the directory lock stops before anything that removes a tree.
 
@@ -874,6 +897,27 @@ class TestKeptTreeHandling(unittest.TestCase):
         self.assertIn("this loader did not create it", result.stderr)
         self.assertTrue((foreign / "theirs").exists())
 
+    def test_the_directory_the_skills_installer_registers_outlives_the_run(self) -> None:
+        """The marketplace loads the directory the installer ran from, so that has to be the tree the run keeps."""
+        work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        top = installer_tree(work / "ProjectTemplate-0123456", "linux", "install-skills.sh")
+        archive = work / "archive.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(top, arcname=top.name)
+        record = work / "registered"
+        result = self.run_loader(
+            f'export REGISTERED_RECORD="{record}"\n'
+            f'fetch() {{ cp "{archive}" "$2"; }}\n'
+            "RESOLVED=0123456789abcdef0123456789abcdef01234567\n"
+            "lock_dir\ntrap cleanup EXIT\ndownload_tree\ninstall_skills"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        registered = Path(record.read_text(encoding="utf-8"))
+        self.assertEqual(registered, (self.dir / "skills-tree").resolve())
+        self.assertTrue((registered / "scripts" / "skills_install.py").is_file())
+        self.assertFalse((self.dir / "skills-tree.new").exists())
+        self.assertFalse((self.dir / "skills-tree.old").exists())
+
 
 POWERSHELL_TREE_HARNESS = r"""
 param([string]$Loader, [string]$Dir, [string]$BodyFile)
@@ -886,7 +930,7 @@ $wanted = @(
     'log', 'info', 'step', 'warn', 'die',
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
-    'Resolve-Directory'
+    'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -894,7 +938,9 @@ foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management
 $script:DIR = $Dir
 $script:MODE = 'skills'
 $script:DRY_RUN = $false
+$script:ASSUME_YES = $false
 $script:KEEP = $false
+$script:PWSH_PATH = (Get-Process -Id $PID).Path
 $script:REPO = 'ptr727/ProjectTemplate'
 $script:REF = 'main'
 $script:RESOLVED = ''
@@ -980,7 +1026,10 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
             str(body_file),
         ]
 
-    def run_loader(self, body: str) -> subprocess.CompletedProcess[str]:
+    def run_loader(
+        self, body: str, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs `body` in the harness, `env` reaching it as environment so a path is never quoted into the script."""
         with tempfile.TemporaryDirectory() as directory:
             return subprocess.run(
                 self.loader_command(Path(directory), body),
@@ -989,6 +1038,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
                 encoding="utf-8",
                 check=False,
                 timeout=120,
+                env={**os.environ, **(env or {})},
             )
 
     def hold_lock(self) -> subprocess.Popen[str]:
@@ -1164,14 +1214,14 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("-Dir takes an absolute path", result.stderr)
 
-    def fetch(self, tar: str) -> str:
-        """Harness lines that stand in for the download and the extract, then run a kept-tree fetch and its cleanup."""
+    def fetch(self, tar: str, then: str = "Invoke-SwapIn") -> str:
+        """Harness lines that stand in for the download and the extract, then run a kept-tree fetch, `then`, and the cleanup."""
         return (
             "function Invoke-WebRequest { param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile, [int]$TimeoutSec) Set-Content -LiteralPath $OutFile -Value 'archive' }\n"
             f"function Invoke-FakeTar {{ {tar} }}\n"
             "function Get-TarPath { 'Invoke-FakeTar' }\n"
             "$script:RESOLVED = '0123456789abcdef0123456789abcdef01234567'\n"
-            "try { Get-Tree; Invoke-SwapIn } finally { Invoke-Cleanup }"
+            f"try {{ Get-Tree; {then} }} finally {{ Invoke-Cleanup }}"
         )
 
     def test_a_kept_tree_fetch_swaps_the_new_tree_in_and_records_its_commit(self) -> None:
@@ -1189,6 +1239,26 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
             (self.dir / "skills-tree" / ".bootstrap-commit").read_text(encoding="ascii").strip(),
             "0123456789abcdef0123456789abcdef01234567",
         )
+        self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
+
+    def test_the_directory_the_skills_installer_registers_outlives_the_run(self) -> None:
+        """The marketplace loads the directory the installer ran from, so that has to be the tree the run keeps."""
+        work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        source = installer_tree(work / "source", "windows", "install-skills.ps1")
+        record = work / "registered"
+        extract = (
+            "$into = $args[[array]::IndexOf($args, '-C') + 1]; "
+            "Copy-Item -Path (Join-Path $env:FIXTURE_SOURCE '*') -Destination $into -Recurse; "
+            "$global:LASTEXITCODE = 0"
+        )
+        result = self.run_loader(
+            self.fetch(extract, then="Invoke-SkillsInstall"),
+            env={"FIXTURE_SOURCE": str(source), "REGISTERED_RECORD": str(record)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        registered = Path(record.read_text(encoding="utf-8"))
+        self.assertEqual(registered, (self.dir / "skills-tree").resolve())
+        self.assertTrue((registered / "scripts" / "skills_install.py").is_file())
         self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["skills-tree"])
 
     def test_a_failed_extract_leaves_the_kept_tree_as_it_was(self) -> None:
@@ -1291,6 +1361,217 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         self.assertFalse((self.dir / "skills-tree.old").exists())
 
 
+STUB_TOOL = """\
+#!/usr/bin/env bash
+arg="${1:-}"
+[[ $arg == --yes ]] && arg=""
+step="$(basename "$0") $arg"
+step="${step% }"
+kept=absent
+[[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
+printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")" "$kept" >>"$STEP_LOG"
+[[ $step == "$FAIL_STEP" ]] && exit 7
+exit 0
+"""
+
+STUB_CURL = """\
+#!/usr/bin/env bash
+out="" url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    -o) out="$2"; shift ;;
+    -H | --retry | --connect-timeout) shift ;;
+    -*) ;;
+    *) url="$1" ;;
+    esac
+    shift
+done
+case "$url" in
+https://api.github.com/*) printf '%s' "$STUB_COMMIT" ;;
+https://codeload.github.com/*) cp "$STUB_TARBALL" "$out" ;;
+*) echo "stub curl refuses $url" >&2; exit 22 ;;
+esac
+"""
+
+STUB_MV = """\
+#!/usr/bin/env bash
+if [[ "${!#}" == "$KEPT_TREE" ]]; then
+    retired=absent
+    [[ -e "$KEPT_TREE.old/VERSION" ]] && retired=$(cat "$KEPT_TREE.old/VERSION")
+    printf '%s\\n' "$retired" >>"$MV_LOG"
+fi
+exec /bin/mv "$@"
+"""
+
+STAND_UP_STEPS = (
+    "install-tools.sh --sudo-timestamp",
+    "upgrade-host.sh --packages",
+    "install-tools.sh --install",
+    "setup-github.sh --configure",
+    "install-skills.sh",
+)
+
+
+@unittest.skipUnless(
+    sys.platform == "linux" and shutil.which("flock") and shutil.which("tar"),
+    "runs the Linux loader's whole main flow, which needs flock and tar",
+)
+class TestKeptTreeEndToEnd(unittest.TestCase):
+    """`bootstrap.sh --host` run whole, with a stub curl serving a local tarball and stub tools failing at a chosen step.
+
+    The tree the plugin loads is asserted from disk afterwards, so this holds the loader's own
+    ordering to the property rather than restating it: a failed stand-up leaves the previous tree
+    loading, and a successful one leaves only the new tree.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.home = self.root / "home"
+        self.stubs = self.root / "bin"
+        self.log = self.root / "steps.log"
+        self.data = self.root / "data"
+        for directory in (self.home, self.stubs, self.data):
+            directory.mkdir()
+        curl = self.stubs / "curl"
+        curl.write_text(STUB_CURL, encoding="utf-8")
+        curl.chmod(0o755)
+        mv = self.stubs / "mv"
+        mv.write_text(STUB_MV, encoding="utf-8")
+        mv.chmod(0o755)
+        self.mv_log = self.root / "mv.log"
+        self.tarball = self.root / "source.tar.gz"
+        with tarfile.open(self.tarball, "w:gz") as archive:
+            for tool in sorted({step.split()[0] for step in STAND_UP_STEPS}):
+                self.add_member(
+                    archive, f"ProjectTemplate-abc/host-setup/linux/{tool}", STUB_TOOL, 0o755
+                )
+            self.add_member(archive, "ProjectTemplate-abc/VERSION", "new", 0o644)
+
+    @staticmethod
+    def add_member(archive: tarfile.TarFile, name: str, content: str, mode: int) -> None:
+        data = content.encode("utf-8")
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        info.mode = mode
+        archive.addfile(info, io.BytesIO(data))
+
+    @property
+    def kept(self) -> Path:
+        return self.data / "skills-tree"
+
+    def previous_tree(self) -> None:
+        self.kept.mkdir()
+        (self.kept / ".bootstrap-owned").touch()
+        (self.kept / "VERSION").write_text("old", encoding="utf-8")
+
+    def run_main(self, fail_step: str = "") -> subprocess.CompletedProcess[str]:
+        env = {
+            "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(self.home),
+            "KEPT_TREE": str(self.kept),
+            "STEP_LOG": str(self.log),
+            "MV_LOG": str(self.mv_log),
+            "FAIL_STEP": fail_step,
+            "STUB_TARBALL": str(self.tarball),
+            "STUB_COMMIT": "0123456789abcdef0123456789abcdef01234567",
+        }
+        return subprocess.run(
+            [bash_or_skip(), str(BOOTSTRAP), "--host", "--yes", "--dir", str(self.data)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=60,
+        )
+
+    def steps(self) -> list[list[str]]:
+        """Each tool run as [step, tree it ran from, version the kept tree held at that moment]."""
+        if not self.log.exists():
+            return []
+        return [line.split("|") for line in self.log.read_text(encoding="utf-8").splitlines()]
+
+    def version(self) -> str:
+        return (self.kept / "VERSION").read_text(encoding="utf-8")
+
+    def leftovers(self) -> list[str]:
+        """Everything under the directory except the kept tree and the lock file the loader leaves by design."""
+        return sorted(
+            path.name
+            for path in self.data.iterdir()
+            if path.name not in ("skills-tree", "skills-tree.lock")
+        )
+
+    def test_a_successful_run_swaps_the_new_tree_in_and_leaves_nothing_beside_it(self) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.version(), "new")
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_the_previous_tree_is_still_held_aside_when_the_new_one_moves_into_place(self) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.mv_log.read_text(encoding="utf-8").split(), ["old"], result.stderr)
+
+    def test_a_first_run_with_no_previous_tree_installs_one(self) -> None:
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.version(), "new")
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_the_previous_tree_is_untouched_until_the_skills_step_and_replaced_before_it_runs(
+        self,
+    ) -> None:
+        self.previous_tree()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.steps()
+        self.assertEqual([step for step, _, _ in steps], list(STAND_UP_STEPS), result.stderr)
+        *before, last = steps
+        for step, tree, kept in before:
+            self.assertEqual(kept, "old", f"{step} found the previous tree gone or replaced")
+            self.assertEqual(tree, "skills-tree.new", f"{step} ran from {tree}")
+        self.assertEqual(
+            last[1:], ["skills-tree", "new"], "the skills step must run from the swapped-in tree"
+        )
+
+    def test_a_stand_up_failing_before_the_skills_step_leaves_the_previous_tree_loading(
+        self,
+    ) -> None:
+        for fail_step in STAND_UP_STEPS[:-1]:
+            with self.subTest(fail_step=fail_step):
+                shutil.rmtree(self.data)
+                self.data.mkdir()
+                self.log.unlink(missing_ok=True)
+                self.previous_tree()
+                result = self.run_main(fail_step)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.version(), "old", result.stderr)
+                self.assertEqual(self.leftovers(), [], result.stderr)
+                self.assertEqual(
+                    self.steps()[-1][0], fail_step, "the run went on past the failed step"
+                )
+
+    def test_a_first_run_failing_before_the_skills_step_leaves_no_tree(self) -> None:
+        result = self.run_main("install-tools.sh --install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.kept.exists(), result.stderr)
+        self.assertEqual(self.leftovers(), [], result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-tools.sh --install")
+
+    def test_a_failing_skills_installer_leaves_the_new_tree_whole_and_no_old_one_beside_it(
+        self,
+    ) -> None:
+        self.previous_tree()
+        result = self.run_main("install-skills.sh")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.steps()[-1][0], "install-skills.sh")
+        self.assertEqual(self.version(), "new", result.stderr)
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+
 def menu_functions() -> str:
     """`menu.sh` without its closing `main "$@"`, so a test can source its functions alone."""
     lines = MENU.read_text(encoding="utf-8").rstrip("\n").split("\n")
@@ -1355,6 +1636,153 @@ class TestMenuSkillsInstall(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "host-setup/linux/install-skills.sh")
 
 
+class HubCleanupCases:
+    """Which hub cache a menu's exit removes, the same cases for both menus.
+
+    A session removes only the tree whose marker still records its own fetch's token, since another
+    session sharing the directory may have fetched again since, and the tree is then that session's.
+    """
+
+    TOKEN = "0123456789abcdef0123456789abcdef"
+    LINE_BREAK = "\n"
+
+    dir: Path
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        raise NotImplementedError
+
+    def cleanup_body(self, token: str) -> str:
+        """The menu's lines setting this session's token and running its exit cleanup."""
+        raise NotImplementedError
+
+    def fetch_body(self, refetched: bool) -> str:
+        """The menu's lines fetching, and fetching again as another session where asked, then exiting.
+
+        git is stubbed to create the clone's directory, so no case reaches the network.
+        """
+        raise NotImplementedError
+
+    def make_cache(self, marker: str) -> None:
+        (self.dir / "hub").mkdir()
+        (self.dir / "hub" / "README.md").write_text("hub\n", encoding="utf-8")
+        (self.dir / "hub.owned").write_text(marker, encoding="utf-8", newline="")
+
+    def assert_removed(self, body: str, removed: bool) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(body)
+        test.assertEqual(result.returncode, 0, result.stderr)
+        test.assertEqual((self.dir / "hub").exists(), not removed)
+        test.assertEqual((self.dir / "hub.owned").exists(), not removed)
+
+    def assert_cleaned(self, token: str, removed: bool) -> None:
+        self.assert_removed(self.cleanup_body(token), removed)
+
+    def test_a_sessions_own_fetch_is_removed_at_its_exit(self) -> None:
+        """The token the fetch writes is the one cleanup reads back."""
+        self.assert_removed(self.fetch_body(refetched=False), removed=True)
+
+    def test_a_fetch_another_session_made_since_survives_the_first_sessions_exit(self) -> None:
+        self.assert_removed(self.fetch_body(refetched=True), removed=False)
+
+    def test_the_tree_this_sessions_fetch_marked_is_removed(self) -> None:
+        self.make_cache(self.TOKEN)
+        self.assert_cleaned(self.TOKEN, removed=True)
+
+    def test_a_marker_ending_in_the_line_break_its_menu_writes_still_matches(self) -> None:
+        self.make_cache(f"{self.TOKEN}{self.LINE_BREAK}")
+        self.assert_cleaned(self.TOKEN, removed=True)
+
+    def test_a_tree_another_session_fetched_since_is_left_in_place(self) -> None:
+        self.make_cache("fedcba9876543210fedcba9876543210")
+        self.assert_cleaned(self.TOKEN, removed=False)
+
+    def test_a_marker_recording_no_token_is_left_in_place(self) -> None:
+        self.make_cache("")
+        self.assert_cleaned(self.TOKEN, removed=False)
+
+    def test_a_session_with_no_token_of_its_own_removes_nothing(self) -> None:
+        self.make_cache("")
+        self.assert_cleaned("", removed=False)
+
+
+class TestMenuHubCleanup(HubCleanupCases, unittest.TestCase):
+    """`menu.sh`'s `cleanup`, with `flock` stubbed, since its lock is covered on Linux alone."""
+
+    def setUp(self) -> None:
+        self.bash = bash_or_skip()
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.scripts = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.scripts / "functions.sh").write_text(menu_functions(), encoding="utf-8", newline="\n")
+
+    def cleanup_body(self, token: str) -> str:
+        return f'HUB_FETCHED=true\nHUB_FETCH_TOKEN="{token}"\ncleanup\n'
+
+    def fetch_body(self, refetched: bool) -> str:
+        again = 'mine=$HUB_FETCH_TOKEN\nfetch_hub_locked\nHUB_FETCH_TOKEN="$mine"\n'
+        return (
+            'git() { mkdir -p "${!#}"; }\nfetch_hub_locked\n'
+            + (again if refetched else "")
+            + "cleanup\n"
+        )
+
+    def test_a_token_that_cannot_be_read_fails_the_fetch_before_it_changes_anything(self) -> None:
+        """errexit is suspended inside the fetch, so a failed read would otherwise mark it empty."""
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            'git() { mkdir -p "${!#}"; }\nod() { return 1; }\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
+        self.assertIn("Could not read /dev/urandom", result.stderr)
+        self.assertTrue((self.dir / "hub" / "README.md").exists())
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """A clone into the surviving tree would fail, and its cleanup would then drop the marker."""
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            'git() { mkdir -p "${!#}"; }\nrm() { return 0; }\n'
+            f"HUB_FETCH_TOKEN={self.TOKEN}\nrc=0\nfetch_hub_locked || rc=$?\n"
+            'printf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
+        """A directory at the marker's name refuses the write, which errexit would not catch here."""
+        (self.dir / "hub.owned").mkdir()
+        result = self.run_body(
+            f'git() {{ mkdir -p "${{!#}}"; }}\nHUB_FETCH_TOKEN={self.TOKEN}\nrc=0\n'
+            'fetch_hub_locked || rc=$?\nprintf "rc=%s token=%s\\n" "$rc" "$HUB_FETCH_TOKEN"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"rc=1 token={self.TOKEN}", result.stdout)
+        self.assertIn("Could not write", result.stderr)
+        self.assertFalse((self.dir / "hub").exists())
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = self.scripts / "body.sh"
+        script.write_text(
+            f'source "{(self.scripts / "functions.sh").as_posix()}"\n'
+            "flock() { return 0; }\n"
+            f'DIR="{self.dir.as_posix()}"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        return subprocess.run(
+            [self.bash, str(script)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+
+
 MENU_PS = ROOT / "host-setup" / "menu.ps1"
 
 POWERSHELL_MENU_LOCK_HARNESS = r"""
@@ -1364,13 +1792,16 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Confirm-HubRoot')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 $script:DIR = $Dir
 $script:HUB_LOCK = $null
 $script:DRY_RUN = $false
+$script:KEEP = $false
+$script:HUB_FETCHED = $false
+$script:HUB_FETCH_TOKEN = ''
 . ([scriptblock]::Create((Get-Content -Raw -LiteralPath $BodyFile)))
 """
 
@@ -1525,6 +1956,306 @@ class TestPowerShellMenuHubLock(unittest.TestCase):
                 fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
             holder.communicate(input="\n", timeout=60)
             fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
+class TestPowerShellMenuHubCleanup(HubCleanupCases, unittest.TestCase):
+    """`menu.ps1`'s `Invoke-Cleanup`, under its real lock, its marker ending CRLF as on Windows."""
+
+    LINE_BREAK = "\r\n"
+    FETCH_SETUP = (
+        "$script:HUB_REPO = 'owner/hub'\n$script:HUB_URL = 'https://example.invalid/hub'\n"
+        "$script:DEFAULT_REF = 'main'\n$script:REF = 'main'\n$script:HUB_ROOT = ''\n"
+        "function step { param([string]$Message) }\n"
+        "function git { New-Item -ItemType Directory -Path $args[-1] -Force | Out-Null; "
+        "$global:LASTEXITCODE = 0 }\n"
+    )
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.scripts = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.scripts / "harness.ps1").write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
+
+    def cleanup_body(self, token: str) -> str:
+        return f"$script:HUB_FETCHED = $true\n$script:HUB_FETCH_TOKEN = '{token}'\nInvoke-Cleanup\n"
+
+    def fetch_body(self, refetched: bool) -> str:
+        again = (
+            "$mine = $script:HUB_FETCH_TOKEN\n"
+            "[void](Invoke-FetchHubLocked)\n"
+            "$script:HUB_FETCH_TOKEN = $mine\n"
+        )
+        return (
+            self.FETCH_SETUP
+            + "[void](Invoke-FetchHubLocked)\n"
+            + (again if refetched else "")
+            + "Invoke-Cleanup\n"
+        )
+
+    def test_a_tree_that_cannot_be_removed_fails_the_fetch_and_keeps_its_marker(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what holds a file open differs by platform.
+        """
+        self.make_cache(self.TOKEN)
+        result = self.run_body(
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Remove-Item { throw 'held' }\n"
+            "$ok = Invoke-FetchHubLocked\n"
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
+        self.assertIn("Could not remove", result.stderr)
+        self.assertEqual((self.dir / "hub.owned").read_text(encoding="utf-8"), self.TOKEN)
+
+    def test_a_marker_that_cannot_be_written_fails_the_fetch_without_cloning(self) -> None:
+        """It fails the one task rather than ending the menu's whole session.
+
+        The refusal is stubbed, since what refuses a write differs by platform and by account.
+        """
+        result = self.run_body(
+            self.FETCH_SETUP
+            + f"$script:HUB_FETCH_TOKEN = '{self.TOKEN}'\n"
+            + "function Set-Content { throw 'refused' }\n"
+            "$ok = Invoke-FetchHubLocked\n"
+            '[Console]::Out.WriteLine("ok=$ok token=$script:HUB_FETCH_TOKEN")\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], f"ok=False token={self.TOKEN}")
+        self.assertIn("Could not write", result.stderr)
+        self.assertFalse((self.dir / "hub").exists())
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        body_file = self.scripts / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        return subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(self.scripts / "harness.ps1"),
+                "-Menu",
+                str(MENU_PS),
+                "-Dir",
+                str(self.dir),
+                "-BodyFile",
+                str(body_file),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=60,
+        )
+
+
+class HubRefFreshnessCases:
+    """Whether a menu reuses the cached hub tree for its session's own ref, the same cases for both menus.
+
+    Each run is one session sharing the cache directory, cloning from a local origin whose `main`
+    and `develop` sit on different commits, reached through `insteadOf` so the menus' own hub URL
+    resolves to it.
+    """
+
+    dir: Path
+    work: Path
+    env: dict[str, str]
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        raise NotImplementedError
+
+    def fetch_body(self, ref: str) -> str:
+        """The menu's lines fetching the hub at the given ref."""
+        raise NotImplementedError
+
+    def check_body(self, ref: str) -> str:
+        """The menu's lines confirming the cached tree for the given ref, printing which way it went.
+
+        `fresh` where the tree is reused, and `refetched` where the menu would fetch again.
+        """
+        raise NotImplementedError
+
+    def make_origin(self, root: Path) -> None:
+        self.work = root / "work"
+        origin = root / "origin.git"
+        self.git("init", "--quiet", "--initial-branch=main", str(self.work), cwd=root)
+        self.commit("main")
+        self.git("checkout", "--quiet", "-b", "develop")
+        self.commit("develop")
+        self.git("clone", "--quiet", "--bare", str(self.work), str(origin), cwd=root)
+        self.git("remote", "add", "origin", str(origin))
+        self.env = {
+            **os.environ,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{origin.as_posix()}.insteadOf",
+            "GIT_CONFIG_VALUE_0": "https://github.com/ptr727/ProjectTemplate",
+        }
+
+    def git(self, *args: str, cwd: Path | None = None) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd or self.work,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+
+    def commit(self, message: str) -> None:
+        self.git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            message,
+        )
+
+    def assert_check(self, ref: str, expected: str) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(self.check_body(ref))
+        test.assertEqual(result.returncode, 0, result.stderr)
+        test.assertEqual(result.stdout.strip().splitlines()[-1:], [expected], result.stderr)
+
+    def fetch(self, ref: str) -> None:
+        test = cast("unittest.TestCase", self)
+        result = self.run_body(self.fetch_body(ref))
+        test.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_tree_fetched_at_main_is_reused_by_a_main_session(self) -> None:
+        self.fetch("main")
+        self.assert_check("main", "fresh")
+
+    def test_a_tree_fetched_at_another_ref_is_reused_by_a_session_on_that_ref(self) -> None:
+        """Compared against main alone, it read as stale and was cloned again on every task."""
+        self.fetch("develop")
+        self.assert_check("develop", "fresh")
+
+    def test_a_tree_another_session_replaced_with_main_is_stale_for_another_ref(self) -> None:
+        """Compared against main alone, the session ran its next task from main without saying so."""
+        self.fetch("develop")
+        self.fetch("main")
+        self.assert_check("develop", "refetched")
+
+    def test_a_tree_fetched_at_another_ref_is_stale_for_a_main_session(self) -> None:
+        self.fetch("develop")
+        self.assert_check("main", "refetched")
+
+    def test_a_tree_whose_ref_moved_on_origin_since_its_fetch_is_stale(self) -> None:
+        self.fetch("develop")
+        self.commit("develop again")
+        self.git("push", "--quiet", "origin", "develop")
+        self.assert_check("develop", "refetched")
+
+
+class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
+    """`menu.sh`'s `ensure_hub_root`, with `flock` stubbed, since its lock is covered on Linux alone."""
+
+    def setUp(self) -> None:
+        self.bash = bash_or_skip()
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.dir = root / "cache"
+        self.dir.mkdir()
+        self.scripts = root / "scripts"
+        self.scripts.mkdir()
+        (self.scripts / "functions.sh").write_text(menu_functions(), encoding="utf-8", newline="\n")
+        self.make_origin(root)
+
+    def fetch_body(self, ref: str) -> str:
+        return f"REF={ref}\nfetch_hub_locked\n"
+
+    def check_body(self, ref: str) -> str:
+        return (
+            f'REF={ref}\nHUB_ROOT="$DIR/hub"\n'
+            "fetch_hub() { echo refetched; return 1; }\n"
+            "if ensure_hub_root; then echo fresh; fi\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = self.scripts / "body.sh"
+        script.write_text(
+            f'source "{(self.scripts / "functions.sh").as_posix()}"\n'
+            "flock() { return 0; }\n"
+            f'DIR="{self.dir.as_posix()}"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        return subprocess.run(
+            [self.bash, str(script)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
+            timeout=60,
+        )
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows menu's own functions")
+class TestPowerShellMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
+    """`menu.ps1`'s `Confirm-HubRoot`, driven through its own functions."""
+
+    SETUP = (
+        "$script:HUB_REPO = 'ptr727/ProjectTemplate'\n"
+        "$script:HUB_URL = 'https://github.com/ptr727/ProjectTemplate'\n"
+        "$script:DEFAULT_REF = 'main'\n$script:HUB_ROOT = ''\n"
+        "function step { param([string]$Message) }\n"
+    )
+
+    def setUp(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.dir = root / "cache"
+        self.dir.mkdir()
+        self.scripts = root / "scripts"
+        self.scripts.mkdir()
+        (self.scripts / "harness.ps1").write_text(POWERSHELL_MENU_LOCK_HARNESS, encoding="utf-8")
+        self.make_origin(root)
+
+    def fetch_body(self, ref: str) -> str:
+        return (
+            self.SETUP
+            + f"$script:REF = '{ref}'\n"
+            + "if (-not (Invoke-FetchHubLocked)) { exit 1 }\n"
+        )
+
+    def check_body(self, ref: str) -> str:
+        return (
+            self.SETUP + f"$script:REF = '{ref}'\n$script:HUB_ROOT = Join-Path $script:DIR 'hub'\n"
+            "function Invoke-FetchHub { [Console]::Out.WriteLine('refetched'); return $false }\n"
+            "if (Confirm-HubRoot) { [Console]::Out.WriteLine('fresh') }\n"
+        )
+
+    def run_body(self, body: str) -> subprocess.CompletedProcess[str]:
+        body_file = self.scripts / "body.ps1"
+        body_file.write_text(body, encoding="utf-8")
+        return subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                str(self.scripts / "harness.ps1"),
+                "-Menu",
+                str(MENU_PS),
+                "-Dir",
+                str(self.dir),
+                "-BodyFile",
+                str(body_file),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
+            timeout=60,
+        )
 
 
 class TestHarness(unittest.TestCase):

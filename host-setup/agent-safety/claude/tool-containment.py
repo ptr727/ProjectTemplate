@@ -13,8 +13,16 @@ command the guard denies go ahead. An MCP server is long-lived and started outsi
 scope would bound it for its whole life and outlive the session that named it. A tool call is told
 apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last,
 either one enough. Where a later Claude Code drops both, tool calls run bare too, and the SessionEnd
-sweep's report of surviving processes is what remains. A `claude` session started from a tool call
-runs its own tool calls in scopes of its own, named for it, each under its own ceiling.
+sweep's report of surviving processes is what remains.
+
+A `claude` session started from a tool call runs its own tool calls in scopes of its own, named for it,
+each under its own ceiling, since sharing the parent's one ceiling would let a heavy build make the
+kernel kill the nested `claude` instead. Every scope of the tree also joins one slice named for the
+root session, which carries a total ceiling for the whole tree, so a chain of agents calling agents
+meets that ceiling however few processes each level adds. The root's id travels to nested sessions in
+`AGENT_CONTAINMENT_ROOT`, which the command inherits and a nested `claude` passes to its own tool calls.
+Each scope also records the pid of the agent that ran it, so the sweep can tell a scope whose session
+has ended from one whose session still runs.
 
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
 host has to be reset. The ceiling belongs to the scope's cgroup rather than to the foreground wait, so
@@ -22,9 +30,12 @@ it still holds after the tool moves a timed-out command to the background, and a
 own shell has exited and its children were reparented to init. See
 host-setup/agent-safety/README.md requirement 9.
 
-The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX`. The maintainer raises them with
-`AGENT_CONTAINMENT_TASKS_MAX` and `AGENT_CONTAINMENT_MEMORY_MAX` in the same `env` block, which an inline
-`VAR=x` in the command cannot change, since this process reads them before the command runs. The
+The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX` per scope, and to
+`DEFAULT_TREE_TASKS_MAX` and `DEFAULT_TREE_MEMORY_MAX` for the tree. The maintainer raises them with
+`AGENT_CONTAINMENT_TASKS_MAX`, `AGENT_CONTAINMENT_MEMORY_MAX`, `AGENT_CONTAINMENT_TREE_TASKS_MAX`, and
+`AGENT_CONTAINMENT_TREE_MEMORY_MAX` in the same `env` block, which an inline `VAR=x` in the command
+cannot change, since this process reads them before the command runs. The tree's ceiling is applied
+when its slice is first created, so a changed tree override reaches the next root session. The
 ceilings bound an accident rather than an adversary: a command can still raise its own scope's
 properties through `systemctl --user set-property`, or start a scope of its own outside this one.
 
@@ -44,7 +55,17 @@ import sys
 DEFAULT_TASKS_MAX = "8192"
 DEFAULT_MEMORY_MAX = "25%"
 
+# The tree's ceilings sit above one scope's, so a single scope always meets its own ceiling first.
+# Twice the memory means one heavy build alone never trips the tree's out-of-memory kill, which could pick a nested `claude`.
+# Four times the tasks leaves room for several workers building at once, while still ending a recursive chain far below the host's pid limit.
+DEFAULT_TREE_TASKS_MAX = "32768"
+DEFAULT_TREE_MEMORY_MAX = "50%"
+
 TOOL_UNIT = "claude-tool"
+TREE_UNIT = "claude-tree"
+TREE_PARENTS = "claude.slice/claude-tree.slice"
+
+ROOT_VAR = "AGENT_CONTAINMENT_ROOT"
 
 # Since version 254, systemd-run expands `${VAR}` in a scope's arguments by default, rewriting a command before its shell sees it.
 # The flag turning that off is an error on an older systemd, so the command travels in the environment instead.
@@ -62,6 +83,61 @@ STOP_TIMEOUT = "2s"
 _SNAPSHOT = "/shell-snapshots/snapshot-"
 
 
+_SHELLS = ("sh", "bash", "zsh", "ksh", "dash", "fish")
+_AGENT_EXE = ("claude", "claude.exe")
+_AGENT_PARTS = {f"{n}{x}" for n in ("claude", "claude-code") for x in ("", ".js", ".exe")}
+
+
+def is_agent(args):
+    """Whether a process with these arguments is an agent, judged as the sweep judges it.
+
+    Its executable is named for the agent, or, for a launcher that is not a shell, a path component of
+    an argument is. A shell is never the agent, since every tool shell names a `.claude` path.
+    """
+    if not args:
+        return False
+    first = args[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if first in _AGENT_EXE:
+        return True
+    if first.removesuffix(".exe").lstrip("-") in _SHELLS:
+        return False
+    return any(
+        part in _AGENT_PARTS
+        for arg in args
+        for word in arg.lower().split()
+        for part in word.replace("\\", "/").split("/")
+    )
+
+
+def _proc(pid):
+    """(parent pid, arguments) of a running process read from /proc, or None where it cannot be read."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = f.read().decode("utf-8", "replace").split("\0")
+    except (OSError, ValueError, IndexError):
+        return None
+    return ppid, [a for a in args if a]
+
+
+def find_agent(start, proc=_proc, depth=4):
+    """The pid of the nearest agent among `start` and its ancestors, or None where none is near.
+
+    Claude Code runs this file as its own child, so the first step is the usual answer. A scope that
+    records no agent is never judged ended, so a miss costs a report rather than a wrong stop.
+    """
+    pid = start
+    for _ in range(depth):
+        found = proc(pid) if pid > 1 else None
+        if found is None:
+            return None
+        if is_agent(found[1]):
+            return pid
+        pid = found[0]
+    return None
+
+
 def which(name, path=None):
     """The executable `name` resolves to on PATH, or None, without importing `shutil`."""
     for d in (path if path is not None else os.environ.get("PATH", "")).split(os.pathsep):
@@ -74,6 +150,21 @@ def which(name, path=None):
 def session_token(session_id):
     """The session id as it appears in a unit name, or "" where there is none to name."""
     return "".join(c for c in session_id or "" if c.isascii() and (c.isalnum() or c == "-"))[:64]
+
+
+def tree_root(env):
+    """The token of the session at the root of this command's tree: the inherited root, else this session."""
+    return session_token(env.get(ROOT_VAR)) or session_token(env.get("CLAUDE_CODE_SESSION_ID"))
+
+
+def tree_slice(root):
+    """The slice holding every scope of the tree rooted at `root`, or None where there is no root to name.
+
+    A dash in a slice name is a level of the slice hierarchy, so the id's own dashes are dropped, or each
+    root would leave a chain of empty parent slices behind.
+    """
+    name = (root or "").replace("-", "")
+    return f"{TREE_UNIT}-{name}.slice" if name else None
 
 
 def snapshot_shell(command):
@@ -152,21 +243,24 @@ def valid_memory(value):
     return unit is not None and MIN_MEMORY <= count * unit < MAX_LIMIT
 
 
-def ceilings(env):
-    """(tasks, memory, notices): the ceilings to apply, and a line for each override refused.
+def ceilings(env, tree=False):
+    """(tasks, memory, notices): the scope's ceilings, or the tree's, and a line for each override refused.
 
     A malformed override falls back to the default rather than to no ceiling, and says so, since
     systemd would otherwise reject it and the command would not run at all.
     """
+    prefix = "AGENT_CONTAINMENT_TREE_" if tree else "AGENT_CONTAINMENT_"
+    tasks_default = DEFAULT_TREE_TASKS_MAX if tree else DEFAULT_TASKS_MAX
+    memory_default = DEFAULT_TREE_MEMORY_MAX if tree else DEFAULT_MEMORY_MAX
     notices = []
-    tasks = env.get("AGENT_CONTAINMENT_TASKS_MAX") or DEFAULT_TASKS_MAX
+    tasks = env.get(f"{prefix}TASKS_MAX") or tasks_default
     if not valid_tasks(tasks):
-        notices.append(f"AGENT_CONTAINMENT_TASKS_MAX={tasks!r} is not a task count")
-        tasks = DEFAULT_TASKS_MAX
-    memory = env.get("AGENT_CONTAINMENT_MEMORY_MAX") or DEFAULT_MEMORY_MAX
+        notices.append(f"{prefix}TASKS_MAX={tasks!r} is not a task count")
+        tasks = tasks_default
+    memory = env.get(f"{prefix}MEMORY_MAX") or memory_default
     if not valid_memory(memory):
-        notices.append(f"AGENT_CONTAINMENT_MEMORY_MAX={memory!r} is not a memory size")
-        memory = DEFAULT_MEMORY_MAX
+        notices.append(f"{prefix}MEMORY_MAX={memory!r} is not a memory size")
+        memory = memory_default
     return tasks, memory, notices
 
 
@@ -200,12 +294,55 @@ def delegated(uid=None, read=None):
     return {"pids", "memory"} <= set(text.split())
 
 
-def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
+def _spawn(argv, env):
+    """The exit code of `argv` run to completion, without importing `subprocess`."""
+    try:
+        pid = os.posix_spawn(argv[0], argv, env)
+        return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+    except OSError as e:
+        return f"{argv[0]}: {e.strerror}"
+
+
+def ensure_tree(
+    name, tasks, memory, runtime, which=which, exists=os.path.isdir, spawn=_spawn, uid=None
+):
+    """An empty string once the tree's slice carries its ceiling, else why it does not.
+
+    The ceiling goes on before the first scope joins, as a runtime drop-in the sweep reverts when the
+    root session ends. A slice whose cgroup already exists was set up by an earlier command, since a
+    scope joins it only after this succeeds, so the common case costs one `stat` and no process.
+    """
+    uid = os.getuid() if uid is None else uid
+    if exists(
+        f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/{TREE_PARENTS}/{name}"
+    ):
+        return ""
+    systemctl = which("systemctl")
+    if not systemctl:
+        return "systemctl is not installed"
+    code = spawn(
+        [
+            systemctl,
+            "--user",
+            "--no-ask-password",
+            "set-property",
+            "--runtime",
+            name,
+            f"TasksMax={tasks}",
+            f"MemoryMax={memory}",
+        ],
+        {**os.environ, "XDG_RUNTIME_DIR": runtime},
+    )
+    return "" if code == 0 else f"setting the ceiling on {name} failed ({code})"
+
+
+def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE, tree=None, agent=None):
     """(argv, extra_env, notices) for the outer stage, which the caller execs.
 
     For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage,
     the command and its shell carried in `extra_env`. A hook command, or a tool call with no manager,
-    gets the shell itself, and only the tool call is told it runs with no ceiling.
+    gets the shell itself, and only the tool call is told it runs with no ceiling. `tree` is the slice
+    the scope joins, already carrying its ceiling, and `agent` the pid recorded as the scope's agent.
     """
     shell = pick_shell(command, which)
     if not is_tool_call(command):
@@ -218,6 +355,7 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
         )
     tasks, memory, notices = ceilings(env)
     token = session_token(env.get("CLAUDE_CODE_SESSION_ID")) or "nosession"
+    described = f"Claude Code command, agent pid {agent}" if agent else "Claude Code command"
     argv = [
         which("systemd-run") or "systemd-run",
         "--user",
@@ -225,7 +363,8 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
         "--collect",
         "--quiet",
         f"--unit={TOOL_UNIT}-{token}-{suffix}",
-        "--description=Claude Code command",
+        *([f"--slice={tree}"] if tree else []),
+        f"--description={described}",
         f"--property=TasksMax={tasks}",
         f"--property=MemoryMax={memory}",
         # Without it a runaway at the memory ceiling spills into the host's swap rather than being killed.
@@ -239,6 +378,10 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
         "--inner",
     ]
     extra = {COMMAND_VAR: command, SHELL_VAR: shell}
+    # A `claude` this command starts reads it, so its own commands join this tree rather than starting one.
+    root = tree_root(env)
+    if root:
+        extra[ROOT_VAR] = root
     # The scope finds the manager through this variable, and the command gets its original value back.
     if env.get("XDG_RUNTIME_DIR") != runtime:
         extra["XDG_RUNTIME_DIR"] = runtime
@@ -248,12 +391,26 @@ def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE):
     return argv, extra, notices
 
 
-def decide(command, env, suffix, runtime, is_delegated, which=which):
-    """`plan` for this host: a tool call that cannot be contained runs bare, and says which reason applies."""
+def decide(command, env, suffix, runtime, is_delegated, which=which, ensure=None, agent=None):
+    """`plan` for this host: a tool call that cannot be contained runs bare, and says which reason applies.
+
+    A contained tool call joins its tree's slice once `ensure` has put the tree's ceiling on it. Where
+    that fails, the command still runs under its own scope's ceiling, and says the tree has none.
+    """
     why = UNREACHABLE if which("systemd-run") else NO_SYSTEMD_RUN
     if runtime and is_tool_call(command) and not is_delegated():
         runtime, why = None, UNDELEGATED
-    return plan(command, env, suffix, runtime, which, why=why)
+    tree, notices = None, []
+    name = tree_slice(tree_root(env))
+    if runtime and name and is_tool_call(command):
+        tasks, memory, notices = ceilings(env, tree=True)
+        failed = (ensure or ensure_tree)(name, tasks, memory, runtime)
+        if failed:
+            notices.append(f"{failed}, so this command's session tree has no total ceiling")
+        else:
+            tree = name
+    argv, extra, more = plan(command, env, suffix, runtime, which, why=why, tree=tree, agent=agent)
+    return argv, extra, notices + more
 
 
 def inner(env):
@@ -283,7 +440,12 @@ def main(argv):
         return 2
     suffix = f"{os.getpid()}-{os.urandom(4).hex()}"
     run, extra, notices = decide(
-        argv[1], os.environ, suffix, manager_runtime(os.environ), delegated
+        argv[1],
+        os.environ,
+        suffix,
+        manager_runtime(os.environ),
+        delegated,
+        agent=find_agent(os.getppid()),
     )
     for note in notices:
         print(f"tool-containment: {note}", file=sys.stderr)
@@ -305,6 +467,7 @@ def _selftest():
             "bash": "/usr/bin/bash",
             "zsh": "/usr/bin/zsh",
             "systemd-run": "/usr/bin/systemd-run",
+            "systemctl": "/usr/bin/systemctl",
         }.get(name)
 
     import shutil
@@ -340,7 +503,180 @@ def _selftest():
     )
     refused = ceilings({"AGENT_CONTAINMENT_TASKS_MAX": "0", "AGENT_CONTAINMENT_MEMORY_MAX": "lots"})
     inner_argv, inner_env = inner({"PATH": "/bin", COMMAND_VAR: tool, SHELL_VAR: "/usr/bin/bash"})
-    checks = [
+
+    # The tree: a root session, then a session nested in one of its commands, as the nested `claude` runs it.
+    ensured = []
+
+    def fine(*args):
+        ensured.append(args)
+        return ""
+
+    root_run, root_extra, root_notes = decide(
+        tool, env, "60", RUN, lambda: True, which=fake_which, ensure=fine, agent=4242
+    )
+    nested_env = {**env, **root_extra, "CLAUDE_CODE_SESSION_ID": "5e6f-7a8b"}
+    nested_run, nested_extra, _ = decide(
+        tool, nested_env, "61", RUN, lambda: True, which=fake_which, ensure=fine, agent=4343
+    )
+    deeper_env = {**nested_env, **nested_extra, "CLAUDE_CODE_SESSION_ID": "9c0d"}
+    deeper_run = decide(tool, deeper_env, "62", RUN, lambda: True, which=fake_which, ensure=fine)[0]
+    unset_tree = decide(
+        tool, env, "63", RUN, lambda: True, which=fake_which, ensure=lambda *a: "boom (exit 1)"
+    )
+    spawned = []
+
+    def spawn_ok(argv, env):
+        spawned.append((argv, env))
+        return 0
+
+    made = ensure_tree(
+        "claude-tree-x.slice", "32768", "50%", RUN, fake_which, lambda p: False, spawn_ok, uid=1000
+    )
+    procs = {
+        40: (30, ["/usr/bin/systemd-run", "--user"]),
+        30: (20, ["claude", "--resume"]),
+        41: (31, ["sh", "-c", "x"]),
+        31: (1, ["/usr/lib/systemd/systemd", "--user"]),
+        50: (51, ["/bin/bash", "-c", "cd /x/claude/y"]),
+        51: (1, ["tmux"]),
+    }
+    tree_checks = [
+        (
+            "--slice=claude-tree-0a1b2c3d.slice" in root_run
+            and root_extra[ROOT_VAR] == "0a1b-2c3d",
+            "a root session's command joins a slice named for it, and hands its id down",
+        ),
+        (
+            "--unit=claude-tool-5e6f-7a8b-61" in nested_run
+            and "--slice=claude-tree-0a1b2c3d.slice" in nested_run
+            and nested_extra[ROOT_VAR] == "0a1b-2c3d",
+            "a nested session's command keeps its own scope name and joins the root's slice",
+        ),
+        (
+            "--slice=claude-tree-0a1b2c3d.slice" in deeper_run,
+            "and so does one nested two levels down",
+        ),
+        (
+            all(
+                a[:3]
+                == ("claude-tree-0a1b2c3d.slice", DEFAULT_TREE_TASKS_MAX, DEFAULT_TREE_MEMORY_MAX)
+                for a in ensured
+            )
+            and len(ensured) == 3,
+            "every command puts the tree's own ceiling on the root's slice before joining it",
+        ),
+        (
+            "--description=Claude Code command, agent pid 4242" in root_run,
+            "each scope records the agent that ran it",
+        ),
+        (
+            f"--property=TasksMax={DEFAULT_TASKS_MAX}" in nested_run,
+            "and keeps its own ceiling inside the tree",
+        ),
+        (
+            not any(a.startswith("--slice=") for a in unset_tree[0])
+            and "--unit=claude-tool-0a1b-2c3d-63" in unset_tree[0]
+            and any("no total ceiling" in n for n in unset_tree[2]),
+            "a tree whose ceiling cannot be set is never joined uncapped, and the command says so",
+        ),
+        (root_notes == [], "a command joining its tree prints nothing extra"),
+        (
+            tree_root({ROOT_VAR: "r00t-1", "CLAUDE_CODE_SESSION_ID": "own"}) == "r00t-1"
+            and tree_root({"CLAUDE_CODE_SESSION_ID": "own"}) == "own"
+            and tree_root({ROOT_VAR: "/;", "CLAUDE_CODE_SESSION_ID": "own"}) == "own",
+            "an inherited root wins, and an unusable one falls back to the session itself",
+        ),
+        (
+            tree_slice("a-b-c") == "claude-tree-abc.slice"
+            and tree_slice("--") is None
+            and tree_slice("") is None,
+            "the id's dashes are dropped, so no root leaves parent slices behind",
+        ),
+        (
+            ensured.clear() is None
+            and "--slice"
+            not in " ".join(decide(tool, {}, "64", RUN, lambda: True, fake_which, fine)[0])
+            and ensured == [],
+            "a command with no session id joins no tree",
+        ),
+        (
+            decide(hook, hook_env, "65", RUN, lambda: True, fake_which, lambda *a: 1 / 0)[1] == {},
+            "a hook command never sets up a tree, nor hands a root down",
+        ),
+        (
+            made == ""
+            and spawned[0][0]
+            == [
+                "/usr/bin/systemctl",
+                "--user",
+                "--no-ask-password",
+                "set-property",
+                "--runtime",
+                "claude-tree-x.slice",
+                "TasksMax=32768",
+                "MemoryMax=50%",
+            ]
+            and spawned[0][1]["XDG_RUNTIME_DIR"] == RUN,
+            "a new tree's ceiling is set as a runtime drop-in, through the manager found",
+        ),
+        (
+            ensure_tree(
+                "s.slice", "1", "1", RUN, fake_which, lambda p: True, lambda *a: 1 / 0, uid=1000
+            )
+            == "",
+            "a tree whose slice already runs costs no process",
+        ),
+        (
+            "failed (1)"
+            in ensure_tree(
+                "s.slice", "1", "1", RUN, fake_which, lambda p: False, lambda *a: 1, uid=1000
+            ),
+            "a failed set-property is reported",
+        ),
+        (
+            ensure_tree(
+                "s.slice", "1", "1", RUN, lambda n: None, lambda p: False, spawn_ok, uid=1000
+            )
+            == "systemctl is not installed",
+            "and so is a missing systemctl",
+        ),
+        (
+            ceilings({}, tree=True)[:2] == (DEFAULT_TREE_TASKS_MAX, DEFAULT_TREE_MEMORY_MAX)
+            and ceilings(
+                {"AGENT_CONTAINMENT_TREE_TASKS_MAX": "65536", "AGENT_CONTAINMENT_TASKS_MAX": "100"},
+                tree=True,
+            )[0]
+            == "65536"
+            and len(ceilings({"AGENT_CONTAINMENT_TREE_MEMORY_MAX": "lots"}, tree=True)[2]) == 1,
+            "the tree's ceilings are overridden apart from a scope's, with the same refusals",
+        ),
+        (
+            int(DEFAULT_TREE_TASKS_MAX) > int(DEFAULT_TASKS_MAX)
+            and int(DEFAULT_TREE_MEMORY_MAX[:-1]) > int(DEFAULT_MEMORY_MAX[:-1]),
+            "the tree's defaults sit above a scope's, so one scope meets its own ceiling first",
+        ),
+        (
+            ROOT_VAR in inner({"PATH": "/bin", ROOT_VAR: "r", COMMAND_VAR: tool})[1],
+            "the inner stage passes the root on to the command",
+        ),
+        (
+            find_agent(40, procs.get) == 30 and find_agent(41, procs.get) is None,
+            "the agent is the nearest ancestor named for it, and a chain naming none records none",
+        ),
+        (
+            find_agent(50, procs.get) is None,
+            "a shell naming a claude path is never taken for the agent",
+        ),
+        (
+            is_agent(["node", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"])
+            and is_agent(["/opt/agent/bin/claude", "-p"])
+            and not is_agent(["/bin/bash", "-c", "cd /x/claude && make"])
+            and not is_agent(["python3", "/h/.claude/hooks/x.py"])
+            and not is_agent([]),
+            "an agent is named by its executable or a launcher's path, never by a .claude directory",
+        ),
+    ]
+    checks = tree_checks + [
         (
             "--unit=claude-tool-0a1b-2c3d-42-ab" in argv,
             "a tool call's scope is named for its session",
@@ -400,7 +736,7 @@ def _selftest():
         ),
         (
             "--unit=claude-tool-0a1b-2c3d-54"
-            in decide(tool, env, "54", RUN, lambda: True, which=fake_which)[0],
+            in decide(tool, env, "54", RUN, lambda: True, which=fake_which, ensure=fine)[0],
             "a manager holding them contains it",
         ),
         (
