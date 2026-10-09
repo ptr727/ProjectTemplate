@@ -1228,9 +1228,9 @@ def cmd_link(a: argparse.Namespace) -> int:
             and int(r["marker"]["round"]) > int(marker["round"])
         ]
         order = (
-            f" Repair a chain of orphans later first: link {', '.join(later)} before "
-            f"#{new['number']}, since a later orphan reads as a higher round that does not yet "
-            f"descend from #{new['number']}."
+            f" Repair the later orphans first, highest round first, each pointed at the link "
+            f"just below it, in this order: {', '.join(later)}. Do that before linking #{new['number']}. A later orphan reads "
+            f"as a higher round that does not yet descend from #{new['number']}."
             if later
             else ""
         )

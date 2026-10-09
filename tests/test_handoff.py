@@ -1987,21 +1987,24 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(fake.issues[20]["state"], "CLOSED")
 
     def test_adjacent_orphans_name_the_later_first_repair_order(self) -> None:
-        """Closed round 1, closed orphan round 2, open orphan round 3: repair the later orphan first."""
+        """Closed round 1, orphans at rounds 2, 3, 4: repair the highest orphan first."""
         fake = FakeGh(
             {
                 10: link(10, "default", 1, None, state="CLOSED"),
                 11: link(11, "default", 2, None, state="CLOSED"),
-                12: link(12, "default", 3, None),
+                12: link(12, "default", 3, None, state="CLOSED"),
+                13: link(13, "default", 4, None),
             }
         )
         code, _, err = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
         self.assertEqual(code, 1)
-        self.assertIn("link #12 before #11", err)
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "12", "--previous", "11")
-        self.assertEqual(code, 0)
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
-        self.assertEqual(code, 0)
+        self.assertIn("#13, #12. Do that before linking #11", err)
+        self.assertLess(err.index("Repair the later orphans"), err.index("holds round"))
+        for new, previous in ((13, 12), (12, 11), (11, 10)):
+            code, _, _ = run(
+                fake, "link", "--repo", "o/r", "--new", str(new), "--previous", str(previous)
+            )
+            self.assertEqual(code, 0)
 
     def test_an_issue_cannot_succeed_itself(self) -> None:
         """Otherwise the track's only open link closes into a cycle and the run exits 0."""
