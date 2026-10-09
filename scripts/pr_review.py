@@ -153,7 +153,7 @@ Subcommands
            A total larger than the thread count is findings the round raised that polling threads
            cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall, except
            where a count-first open section supplied the total, as stated below, or where open
-           entries standing for an earlier round's threads account for it, as stated next. Two
+           entries standing for an earlier round's threads account for it, as stated below. Two
            things overstate that shortfall rather than hiding it, so it is confirmed against the
            body rather than acted on from the number. One is a thread past the hundred
            `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
@@ -2177,8 +2177,9 @@ def carried_open_threads(pr: dict) -> int:
     Counted per entry rather than per link, since one entry can link a thread beside its own. An
     entry linking any thread this round opened is that round's finding, already in `M`, so a
     back-reference on it to an earlier thread cancels no shortfall. Only a link to a thread on
-    this pull request counts, an entry linking none being `unthreaded_entries`'s to count, and
-    two entries standing for one earlier thread count once.
+    this pull request counts, an entry linking none being `unthreaded_entries`'s to count. An
+    entry stands for the first such thread it links, its title's own anchor ahead of any
+    back-reference, and two entries standing for one earlier thread count once.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2188,7 +2189,7 @@ def carried_open_threads(pr: dict) -> int:
     sections = read_overview(newest.get("body") or "")[2]
     return len(
         {
-            min(set(entry) & known)
+            next(i for i in entry if i in known)
             for role, _, ids, _ in sections
             if role != RESOLVED
             for entry in ids

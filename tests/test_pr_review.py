@@ -3975,6 +3975,23 @@ class TestSecondOverviewFormat(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("FINDINGS WITH NO THREAD (2)", out)
 
+    def test_two_entries_standing_for_one_earlier_thread_count_once(self) -> None:
+        """An entry stands for the first thread it links, so a back-reference on the second entry
+        to another earlier thread changes nothing, whichever of the two ids sorts first."""
+        body = overview_v2(findings="**Findings:** 2", entries=2).replace(
+            "(#discussion_r4000000002) New",
+            "(#discussion_r4000000001) New, same cause as [earlier](#discussion_r4000000000)",
+        )
+        threads = [
+            thread("T1", rid="PRR_old", cid="4000000001"),
+            thread("T0", rid="PRR_old", cid="4000000000"),
+        ]
+        pr = payload([review(body=body, rid="PRR_head")], threads)
+        self.assertEqual(1, pr_review.carried_open_threads(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
     def test_a_back_reference_beside_an_entry_s_own_thread_cancels_no_shortfall(self) -> None:
         """An entry linking a thread this round opened is that round's finding, so an earlier
         thread it also links is a back-reference rather than a carried finding."""
