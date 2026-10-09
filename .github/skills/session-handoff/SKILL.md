@@ -72,16 +72,16 @@ without trusting the parts of it that have gone stale.
   `winget`, or in Windows path and ACL semantics, reproduces only on Windows. Either still goes to
   the backlog where a Linux host outside WSL verifies its fix, as a plain unit test of a path
   translation can. Systemd user scopes, apt, and bash scripts are not platform work, since a Linux
-  host verifies them, except in the WSL cases above. Nor is a `pwsh` script whose logic runs in a
-  Linux container, unless its defect depends on Windows itself. Where only part of an issue needs a
-  platform, the session finding it files each such part as its own issue for its platform's lane.
-  The original is narrowed to the rest, or closed in favor of those issues where nothing is left. A
-  session that may not write issues names the unsplit issue in its report or handoff instead. An
-  issue for a platform whose lane was closed out reopens that lane with `new`, which chains onto the
-  closed link. A platform lane is closed out with no successor once none of its next steps needs its
-  platform. Before that, each remaining step with no issue of its own is filed as one. Its last link
-  carries the outcome as a comment, as `AGENTS.md` "Session Scope" closes a track whose work is
-  complete.
+  host verifies them. A defect in one that reproduces on one platform alone is the exception. Nor is
+  a `pwsh` script whose logic runs in a Linux container, unless its defect depends on Windows
+  itself. Where only part of an issue needs a platform, the session finding it files each such part
+  as its own issue for its platform's lane. The original is narrowed to the rest, or closed in favor
+  of those issues where nothing is left. A session that may not write issues names the unsplit issue
+  in its report or handoff instead. An issue for a platform whose lane was closed out reopens that
+  lane with `new`, which chains onto the closed link. A platform lane is closed out with no
+  successor once none of its next steps needs its platform. Before that, each remaining step with no
+  issue of its own is filed as one. Its last link carries the outcome as a comment, as `AGENTS.md`
+  "Session Scope" closes a track whose work is complete.
 - **The title is for humans**, shaped `Session Handoff [<track>]: <subject>`, which `new` composes
   from the track and the subject it is given, so what a session writes is the subject alone.
   Nothing parses the title, so a maintainer is free to rename one.
