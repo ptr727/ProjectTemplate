@@ -228,9 +228,9 @@ Subcommands
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead while they can still move its
-           merge, as 30 below lists, ending once the merge reads CLEAN, UNSTABLE, or HAS_HOOKS or
-           the pull request closes, and one with no attestation exits 49 naming the `attest` step.
+           covered at once, so the wait polls its checks instead only while they can still move
+           its merge, as 30 below lists, and one with no attestation exits 49 naming the `attest`
+           step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -5345,6 +5345,7 @@ def main(argv: list[str] | None = None) -> int:
         while (
             holds(final)
             and local_cover(final)
+            and not unrecognized_shapes(final)
             and held_checks_open(
                 final,
                 check_nodes(final),

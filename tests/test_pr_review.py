@@ -7378,6 +7378,17 @@ class TestCli(GqlCase):
             self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
         self.assertNotIn("status=PENDING", self.out.getvalue())
 
+    def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
+        """The 43 outranks every check reading, so polling the checks cannot change it."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        odd = review(oid=OLD, body=OVERVIEW + "\n### Confidence assessment\n")
+        pr = self.into(payload([odd], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(43, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
     def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
         """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
         pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)
