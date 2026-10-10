@@ -224,6 +224,33 @@ def marketplace_entry():
     )
 
 
+def plugin_state():
+    """Whether the fleet plugin is installed and enabled, as {"installed", "enabled"}, each None where unreadable.
+
+    A registered marketplace serves nothing until its plugin is installed, and a plugin the user
+    later disabled or uninstalled leaves the marketplace registered, so the listing alone proves neither.
+    """
+    try:
+        listing = subprocess.run(
+            ["claude", "plugin", "list", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        entries = None
+    if not isinstance(entries, list):
+        return {"installed": None, "enabled": None}
+    plugin_id = f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
+    entry = next((e for e in entries if isinstance(e, dict) and e.get("id") == plugin_id), None)
+    if entry is None:
+        return {"installed": False, "enabled": False}
+    return {"installed": True, "enabled": entry.get("enabled") is True}
+
+
 def entry_location(entry):
     """The directory a listing entry names, or None where it names none."""
     location = entry.get("installLocation") or entry.get("path")
@@ -383,7 +410,18 @@ def intended_commit(rev=None):
 
 
 def live_channel():
-    """What the Claude Code channel serves now, read from the checkout the marketplace names.
+    """What the Claude Code channel serves now, with whether its plugin is installed and enabled.
+
+    A registered marketplace carries a `plugin` field, since the channel serves nothing otherwise.
+    """
+    live = marketplace_channel()
+    if live.get("registered") is True:
+        live["plugin"] = plugin_state()
+    return live
+
+
+def marketplace_channel():
+    """What the registered marketplace serves now, read from the checkout the marketplace names.
 
     The checkout running this report is not necessarily the one registered, a worktree or a fresh
     clone being the ordinary cases, so the registered path is read back from the CLI.

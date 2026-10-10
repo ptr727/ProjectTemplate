@@ -484,6 +484,10 @@ class LiveChannelCase(unittest.TestCase):
     def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
         mock.patch("skills_install.claude_available", return_value=True).start()
+        mock.patch(
+            "skills_install.plugin_state",
+            return_value={"installed": True, "enabled": True},
+        ).start()
 
     def listing(self, stdout: str, returncode: int = 0) -> None:
         result = mock.Mock(returncode=returncode, stdout=stdout)
@@ -607,6 +611,7 @@ class LiveChannelCase(unittest.TestCase):
                 "branch": "develop",
                 "commit": "dev",
                 "dirty": False,
+                "plugin": {"installed": True, "enabled": True},
             },
         )
         self.assertEqual(set(roots), {Path("/hub/checkout")})
@@ -668,6 +673,7 @@ class LiveChannelCase(unittest.TestCase):
                 "branch": None,
                 "commit": "cafe1234",
                 "dirty": None,
+                "plugin": {"installed": True, "enabled": True},
             },
         )
 
@@ -687,6 +693,50 @@ class LiveChannelCase(unittest.TestCase):
             live = skills_install.live_channel()
         self.assertIsNone(live["commit"])
         self.assertEqual(live["vcs"], "archive")
+
+
+class PluginStateCase(unittest.TestCase):
+    """The marketplace listing proves the directory is registered, not that Claude Code loads
+    its plugin, so the plugin's install and enabled state is read from `claude plugin list`."""
+
+    def setUp(self) -> None:
+        self.addCleanup(mock.patch.stopall)
+
+    def plugin_list(self, stdout: str, returncode: int = 0) -> None:
+        result = mock.Mock(returncode=returncode, stdout=stdout)
+        mock.patch("subprocess.run", return_value=result).start()
+
+    def plugin_id(self) -> str:
+        return f"{skills_install.PLUGIN_NAME}@{skills_install.MARKETPLACE_NAME}"
+
+    def test_an_installed_and_enabled_plugin_reads_as_both(self) -> None:
+        self.plugin_list(json.dumps([{"id": self.plugin_id(), "enabled": True}]))
+        self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
+
+    def test_an_installed_but_disabled_plugin_reads_as_not_enabled(self) -> None:
+        self.plugin_list(json.dumps([{"id": self.plugin_id(), "enabled": False}]))
+        self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": False})
+
+    def test_a_plugin_absent_from_the_listing_reads_as_not_installed(self) -> None:
+        self.plugin_list(json.dumps([{"id": "other@elsewhere", "enabled": True}]))
+        self.assertEqual(skills_install.plugin_state(), {"installed": False, "enabled": False})
+
+    def test_an_unreadable_listing_is_unknown_rather_than_not_installed(self) -> None:
+        self.plugin_list("", returncode=1)
+        self.assertEqual(skills_install.plugin_state(), {"installed": None, "enabled": None})
+        mock.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)
+        ).start()
+        self.assertEqual(skills_install.plugin_state(), {"installed": None, "enabled": None})
+
+    def test_the_live_channel_carries_the_state_only_where_registered(self) -> None:
+        mock.patch("skills_install.claude_available", return_value=True).start()
+        state = {"installed": True, "enabled": False}
+        mock.patch("skills_install.plugin_state", return_value=state).start()
+        mock.patch("skills_install.marketplace_channel", return_value={"registered": True}).start()
+        self.assertEqual(skills_install.live_channel()["plugin"], state)
+        mock.patch("skills_install.marketplace_channel", return_value={"registered": False}).start()
+        self.assertNotIn("plugin", skills_install.live_channel())
 
 
 class MainExitCodeCase(unittest.TestCase):
