@@ -4293,6 +4293,16 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
+    def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
+        """Collapsing whitespace alone would leave the second line's marker inside the phrase."""
+        wrapped = (
+            "x = 1\n    # the output is regular: 10 headings, 10\n    # summaries and 4 labels.\n"
+        )
+        self.assertIn(
+            "the output is regular: 10 headings, 10 summaries and 4 labels.",
+            comment_flowed_text(wrapped),
+        )
+
     def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
         """The comment states the sizes, and adding an entry without it is how it goes stale."""
         source = comment_flowed_text(Path(pr_review.__file__).read_text(encoding="utf-8"))
