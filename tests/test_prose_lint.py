@@ -604,13 +604,17 @@ class TestSemicolon2(BaitCase):
             ),
         )
 
-    def test_a_colon_introduced_list_whose_items_carry_commas_keeps_its_semicolon(self) -> None:
-        """The colon arm earns its place: dropping it flagged this, the use the rule names.
+    def test_a_colon_that_explains_does_not_exempt_a_lone_semicolon(self) -> None:
+        """A colon and a comma once exempted any one semicolon after them, joining two clauses.
 
-        Measured over the tree, dropping it reported 14 further lines, and the shapes below are
-        what they were, so the arm is scoped rather than removed.
+        No structure tells an explanatory colon from a list colon, so a lone semicolon needs a
+        labeled item after it. The first shape is the one the colon arm let through.
         """
         for text in (
+            (
+                "The gate runs once, at merge: it reads the head, the base, and the label; "
+                "the result stays on the pull request.\n"
+            ),
             (
                 "Match the heading style: title case with short bind words (a, an, the, of); "
                 "hyphenated compounds capitalize both parts.\n"
@@ -621,6 +625,16 @@ class TestSemicolon2(BaitCase):
             ),
         ):
             with self.subTest(text=text.split(":")[0]):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_lone_semicolon_between_labeled_items_keeps_its_place(self) -> None:
+        """A label after the separator is what marks a two-item list, emphasis or code span aside."""
+        for text in (
+            "Inputs: a, b, and c; outputs: d and e.\n",
+            "Inputs: a, b, and c; **Outputs**: d and e.\n",
+            "Inputs: a, b, and c; `out` paths: d and e.\n",
+        ):
+            with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
 
     def test_a_bullet_label_colon_inside_the_emphasis_is_the_same_opener(self) -> None:
@@ -669,7 +683,7 @@ class TestSemicolon2(BaitCase):
         self.assertEqual(
             [],
             self.kinds(
-                "Pinned by path: a script, a hook (e.g. a shebang); vanilla files stay as they are.\n",
+                "Pinned by path: a script; a hook (e.g. a shebang); a config, as written.\n",
                 {"semicolon"},
             ),
         )

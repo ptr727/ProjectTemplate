@@ -1046,6 +1046,10 @@ NUMERIC = re.compile(r"[0-9]")
 # A pronoun-keyed pattern found 170 of 493 and missed every imperative splice.
 SEMICOLON = re.compile(r";")
 
+# A lone semicolon separates a list only between labeled items, as in `Inputs: a; outputs: b`.
+# A colon that explains rather than labels otherwise exempted the splice after it.
+LABELED_ITEM = re.compile(r"^\s*[*_]*[\w`-]+(?:\s+[\w`-]+){0,2}[*_]*:(?:\s|$)")
+
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
 # A compound word carries no spaces, and a range is digit-bounded.
 # A list marker has only whitespace before it, once QUOTE_PREFIX blanks a blockquote's `>`.
@@ -2618,11 +2622,14 @@ def check_file(
                     # The sentence is the unit, since the list an exemption protects lives in one.
                     # Judged over a whole bullet, one colon exempted every semicolon after it.
                     for sentence in sentences(span):
-                        # A list keeps its semicolons, announced by a colon or a second separator.
+                        # A list keeps its semicolons, announced by a second separator or a label.
                         # The comma qualifies the list rather than one separator's position.
                         # An enumeration whose commas fall in a later item keeps every semicolon.
                         # Read positionally, it split one series and flagged that series' openers.
-                        listish = sentence.count(";") > 1 or ":" in sentence.split(";")[0]
+                        head, _, tail = sentence.partition(";")
+                        listish = sentence.count(";") > 1 or (
+                            ":" in head and LABELED_ITEM.match(tail) is not None
+                        )
                         if listish and "," in sentence:
                             continue
                         for _ in SEMICOLON.finditer(sentence):
