@@ -3211,6 +3211,23 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn("coverage=carried:table ", out.getvalue())
         self.assertEqual(3, served.call_count)
 
+    def test_a_payload_handed_in_is_read_again_where_its_changed_file_list_is_unread(self) -> None:
+        """`wait` hands over a payload a poll already read, which can carry the unread list too."""
+        served = self.answer(self.tabled())
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            read = pr_review.full_read("o", "r", 7, self.tabled(files=[]))
+        self.assertEqual(1, served.call_count)
+        self.assertFalse(pr_review.files_shortfall(read))
+
+    def test_backoff_with_neither_a_schedule_nor_a_clock_ends(self) -> None:
+        """The default schedule repeats its last delay only under a clock, so this cannot hang."""
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            pr_review.backoff(0, lambda: 0, lambda _: True)
+        self.assertEqual(len(pr_review.POLL_DELAYS), slept.call_count)
+
     def test_a_head_stating_coverage_needs_no_changed_file_list(self) -> None:
         """The table reading never runs on such a head, so an empty list there is not re-read."""
         self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))

@@ -4866,22 +4866,20 @@ def backoff[Polled](
 ) -> Polled:
     """Re-read `value` on a schedule of delays while `keep` holds and the bound allows.
 
-    `delays` defaults to `POLL_DELAYS` with its last delay repeated, so only the clock ends it.
-    A finite schedule ends the loop by running out, with no clock where `start` is None. Otherwise
-    `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked before
-    each sleep, so the poll can run past it by up to one delay. Returns the last value read, or
-    `value` itself where the poll never sleeps.
+    `delays` defaults to `POLL_DELAYS`, its last delay repeated only where a clock bounds the loop,
+    so no call runs unbounded. A finite schedule ends the loop by running out, with no clock where
+    `start` is None. Otherwise `start` is a `time.monotonic` reading and `timeout` is in seconds.
+    The bound is checked before each sleep, so the poll can run past it by up to one delay.
+    Returns the last value read, or `value` itself where the poll never sleeps.
 
     One loop for every re-read here, since a fix applied to one inline copy and not another
     makes one wait time out differently from another.
     The backoff runs in-process, so the whole wait costs one agent turn.
     """
-    schedule = (
-        itertools.chain(POLL_DELAYS, itertools.repeat(POLL_DELAYS[-1]))
-        if delays is None
-        else delays
-    )
-    for delay in schedule:
+    if delays is None:
+        repeated = itertools.repeat(POLL_DELAYS[-1]) if start is not None else ()
+        delays = itertools.chain(POLL_DELAYS, repeated)
+    for delay in delays:
         if not keep(value) or (start is not None and time.monotonic() - start > timeout):
             break
         time.sleep(delay)
