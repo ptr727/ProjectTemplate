@@ -608,7 +608,7 @@ class TestSemicolon2(BaitCase):
         """A colon and a comma once exempted any one semicolon after them, joining two clauses.
 
         No structure tells an explanatory colon from a list colon, so a lone semicolon needs a
-        labeled item after it. The colon arm let all three through.
+        labeled item on each side of it. The colon arm let the first three through.
         """
         for text in (
             (
@@ -622,6 +622,10 @@ class TestSemicolon2(BaitCase):
             (
                 "- **Python** (the script profile): lint, format, and type check; "
                 "format-on-save and import organization via the formatter.\n"
+            ),
+            (
+                "The gate runs once, at merge: it reads, checks, and records the label; "
+                "outputs: d and e.\n"
             ),
         ):
             with self.subTest(text=text.split(":")[0]):
