@@ -95,11 +95,12 @@ Subcommands
            file-count refusal is spent by coverage of the same head. `wait` is where that state gets
            its own exit codes, 46 and 47 below, because only `wait` is the command a caller might
            otherwise poll out a timeout on.
-           `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
-           CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
-           tracked at the identity and thread-resolution level, since an open thread blocks a
-           ruleset-gated merge whoever opened it and `unresolved=0` once hid one of theirs that
-           still did.
+           `unresolved` counts every open thread whoever opened it, since an open thread blocks
+           a ruleset-gated merge whatever its author, and a filter on known reviewer logins
+           once read `unresolved=0` over a qodo thread posted under a login it did not know.
+           The known logins, Copilot, CodeRabbit (`coderabbitai`), and qodo
+           (`qodo-free-for-open-source-projects`), only attribute a thread in the breakdown
+           beside the count, where any other author reads as `other`.
            Both `threads=` and `unresolved=` are read from a single 100-thread page with no
            further pagination, so a pull request carrying more than that undercounts silently
            past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
@@ -332,8 +333,6 @@ REVIEWER = "copilot-pull-request-reviewer"
 # Other review bots this repository has trialed alongside Copilot.
 # Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly.
 # Each format read here is its own reader, and doing that well is a separate task per bot.
-# What generalizes without reading any of their prose is thread resolution.
-# An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one.
 CODERABBIT_LOGIN = "coderabbitai"
 QODO_LOGIN = "qodo-free-for-open-source-projects"
 # Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing.
@@ -1304,7 +1303,7 @@ def threads_truncated(pr: dict) -> bool:
     open. That inversion is why this is its own guard rather than a second use of `window_blind`:
     that one settles the question from what is already in view, and there is no such settling
     available here, only the fact that something was cut, undercounted ever since `unresolved`
-    widened from Copilot's own threads to every tracked reviewer's.
+    widened from Copilot's own threads to every open thread.
     """
     return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
 
@@ -2338,14 +2337,18 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
         return None
     if suppressed_blocks(body) or previously_missed_blocks(body):
         return None
-    if open_reviewer_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
+    if open_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
         return None
     return verdict, headline
 
 
-def open_reviewer_threads(threads: list[dict]) -> list[dict]:
-    """The unresolved threads a known reviewer opened, which block a ruleset-gated merge."""
-    return [t for t in threads if not t.get("isResolved") and thread_author(t) in KNOWN_REVIEWERS]
+def open_threads(threads: list[dict]) -> list[dict]:
+    """Every unresolved thread, whoever opened it, since each one blocks a ruleset-gated merge.
+
+    The author decides only how `status` attributes a thread, never whether it counts, because a
+    login set read off past history misses the next spelling a reviewer posts under.
+    """
+    return [t for t in threads if not t.get("isResolved")]
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
@@ -3794,20 +3797,15 @@ def digest(
     truncated = threads_truncated(pr)
     # Same reasoning, the `reviews` connection rather than `reviewThreads`, feeding `suppressed=` and `cr_outside_diff=` below.
     revs_truncated = reviews_truncated(pr)
-    # Any known reviewer's own thread, not only Copilot's.
-    # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one.
-    # `thread_author` carries the deleted-account default this needs.
-    unresolved = open_reviewer_threads(threads)
-    # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
-    # A single reviewer's own count is what `unresolved=N` already meant before this generalized.
-    # Printing one name beside its own total says nothing the number did not already say.
+    unresolved = open_threads(threads)
     by_login = {
         login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
     }
+    by_login["other"] = sum(1 for t in unresolved if thread_author(t) not in KNOWN_REVIEWERS)
     contributors = {login: n for login, n in by_login.items() if n}
     breakdown = (
         " (" + " ".join(f"{login}={n}" for login, n in contributors.items()) + ")"
-        if len(contributors) > 1
+        if len(contributors) > 1 or "other" in contributors
         else ""
     )
 
