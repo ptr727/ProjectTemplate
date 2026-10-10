@@ -242,10 +242,10 @@ Subcommands
            polling only) where both windows come up empty, since a repository with no Copilot review
            in either has nothing to read the id from and a fabricated one is never an option. The
            loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
-           Exit 0 = review present, or on a held head an attested local pass with its checks
-           settled as far as the rollup window reads them, or with the merge reading CLEAN,
+           Exit 0 = review present, or on a held head an attested local pass with its required
+           checks settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a required check not yet concluded, any check while no required one has
+           held head a required check still settling, any check while no required one has
            posted, none posted on a BLOCKED merge, or the merge still UNKNOWN, printed as
            `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
            `status=PENDING` unless 46's or 47's quota reading outranks it,
