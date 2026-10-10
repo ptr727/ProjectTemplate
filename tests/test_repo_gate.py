@@ -66,10 +66,12 @@ class TestChecksTable(TreeCase):
         self.assertGreaterEqual(len(repo_gate.CHECKS), 3)
 
     def test_the_patterns_compile_and_carry_no_invisible_characters(self) -> None:
-        """A shell heredoc turns a backslash escape into a control character no diff shows."""
+        """printf, echo -e, and $'...' turn an escape into a control character no diff shows."""
         for name in ("USES", "PIN", "WORKFLOW", "HTTP_STATUS"):
             with self.subTest(pattern=name):
-                self.assertTrue(re.compile(getattr(repo_gate, name).pattern))
+                pattern = getattr(repo_gate, name).pattern
+                self.assertTrue(re.compile(pattern))
+                self.assertTrue(pattern.isascii() and pattern.isprintable())
         for action in repo_gate.SHA_EXCEPTIONS:
             with self.subTest(exception=action):
                 self.assertTrue(action.isascii() and action.isprintable())
