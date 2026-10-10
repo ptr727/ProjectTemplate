@@ -3235,6 +3235,26 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))
         self.assertTrue(pr_review.files_unread(self.tabled(files=[])))
 
+    def test_a_file_list_no_table_could_use_is_not_read_again(self) -> None:
+        """Re-reading a list changes nothing where the table reading refuses before reaching it."""
+        untabled = payload(
+            [
+                review(oid=OLD, body=self.NONE, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE),
+            ],
+            files=[],
+        )
+        partial = self.tabled(files=[])
+        partial["reviews"]["nodes"].append(
+            review(oid=OLD, body=OVERVIEW + "\n" + COVERED.replace("3 out of", "2 out of"), rid="P")
+        )
+        cut = self.tabled(files=[])
+        cut["reviews"]["pageInfo"]["hasPreviousPage"] = True
+        for name, pr in (("no table", untabled), ("partial", partial), ("cut", cut)):
+            with self.subTest(name=name):
+                self.assertTrue(pr_review.files_shortfall(pr))
+                self.assertFalse(pr_review.files_unread(pr))
+
     def test_every_changed_file_list_the_table_cannot_match_is_unread(self) -> None:
         """The re-read and the table reading's reason share one predicate, arm by arm."""
         cases = {

@@ -1863,15 +1863,21 @@ def files_shortfall(pr: dict) -> str:
 
 
 def files_unread(pr: dict) -> bool:
-    """Whether the table reading needs this head's changed-file list and the list falls short.
+    """Whether the changed-file list is the reason a file table cannot stand in for this head.
 
-    Only a head that a round covers and states no coverage of sends the table reading here. An
+    Only a head that a round covers and states no coverage of sends the table reading here, and
+    only a table on the head or an earlier round can use the list. `table_shortfall` is asked
+    rather than restated, so a partial on record or a cut review history re-reads nothing. An
     empty list counts as unread too. A diff that is really empty costs one schedule of re-reads,
     where an empty list from a failed read decides the coverage.
     """
     if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
         return False
-    return bool(files_shortfall(pr))
+    short = files_shortfall(pr)
+    if not short:
+        return False
+    named = head_table(pr) or (carried_table(pr) or ([], ""))[0]
+    return bool(named) and table_shortfall(pr, named) == short
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
