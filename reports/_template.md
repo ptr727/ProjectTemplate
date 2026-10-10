@@ -30,7 +30,7 @@
 | readme-structure | | | | |
 | workflow (WORKFLOW.md 5A/5B) | | | | |
 
-Verdict values: pass | drift | defect | N/A. Remove rows that are N/A for the repo's types, or mark them N/A.
+Verdict values: pass | drift | defect | N/A. Mark a row N/A for a dimension the repo's types do not carry, never delete it, so the report shows the dimension was judged.
 
 ## Defects (most severe first)
 
