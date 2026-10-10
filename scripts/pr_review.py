@@ -814,11 +814,10 @@ query($o:String!,$r:String!,$n:Int!){
 # A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt`, `createdAt`, and `body` ride along for a reader that does not stop at the first bot id.
 # Ordered by `UPDATED_AT` rather than `CREATED_AT`, since a fresh review round bumps a pull request's own update time regardless of how long ago it was opened, where creation order can leave a re-reviewed older pull request outside the window entirely.
 # `reviews(last:$reviews)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:$comments)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
-# It resolves even on a pull request whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
 # `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE.
 # One document read at two widths costs nothing a second document would not, and it keeps the two reads provably identical apart from that one number.
 # `pullRequests` names no `states` argument, because the connection's omitted default is every state rather than `OPEN`.
-# The id therefore still resolves in a repository whose reviewed pull requests have all merged.
+# Merged pull requests therefore fill the window alongside open ones.
 Q_BOT_ID = """
 query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
   repository(owner:$o,name:$r){
