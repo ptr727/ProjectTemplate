@@ -35,7 +35,9 @@ repo.
    content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that. For a
    Claude Code session, read `live` as well, since that channel loads the registered directory in
    place rather than the copy. A registered directory that is missing is an answer there whatever
-   the exit code says.
+   the exit code says. So is a `live.plugin` reading `installed: false` or `enabled: false`, which
+   describes the user-scope install the installer makes, as Claude Code reports it for the
+   directory the report runs in, and a project-level install does not count. A null there means the plugin listing could not be read.
    - Where `live` carries `vcs: archive`, the channel serves the tree the hub's
      `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps, which has no git, so `branch: null` there
      is not a detached checkout. A `live.commit` behind the hub's `main` is the answer, and so is
