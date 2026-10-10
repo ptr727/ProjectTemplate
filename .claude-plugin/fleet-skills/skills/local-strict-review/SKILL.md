@@ -2,8 +2,9 @@
 name: local-strict-review
 description: >-
   Runs a read-only, adversarial review pass against this branch's current diff against its
-  target branch, full file context included, at the `frontier` model tier, before a unit of work is pushed toward a pull request or claimed done. Use this whenever staged,
-  committed, or untracked work is about to be pushed on a PR-bound branch, and whenever
+  target branch, full file context included, at the `frontier` model tier, before a unit of work
+  is pushed toward a pull request or claimed done. Use this whenever staged, committed, or
+  untracked work is about to be pushed on a PR-bound branch, and whenever
   `agent-conduct`'s "about to claim work is done, verified, green, or fixed" trigger fires for
   PR-bound work. Triggers even when the change looks small or the same session already judged its
   own diff ready, because a self-review pass judging its own diff inherits its own blind spots,
