@@ -228,9 +228,9 @@ Subcommands
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead until no required check is still
-           settling, any check holding it until a required one posts, or the merge reads CLEAN,
-           UNSTABLE, or HAS_HOOKS, and one with no attestation exits 49 naming the `attest` step.
+           covered at once, so the wait polls its checks instead while they can still move its
+           merge, as 30 below lists, ending once the merge reads CLEAN, UNSTABLE, or HAS_HOOKS or
+           the pull request closes, and one with no attestation exits 49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -245,8 +245,9 @@ Subcommands
            Exit 0 = review present, or on a held head an attested local pass with its checks
            settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a check not yet concluded, none posted on a BLOCKED merge, or the merge
-           still UNKNOWN, printed as `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
+           held head a required check not yet concluded, any check while no required one has
+           posted, none posted on a BLOCKED merge, or the merge still UNKNOWN, printed as
+           `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
            `status=PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
@@ -855,7 +856,7 @@ mutation($pr:ID!,$bot:ID!){
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    headRefOid baseRefName mergeable mergeStateStatus
+    headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     reviewThreads(first:100){ nodes{ id isResolved
@@ -3383,8 +3384,11 @@ def held_checks_open(
     rollup only once its dependencies finish. A rollup carrying no check at all holds it while the
     merge reads BLOCKED, since that is a push whose check suites have not registered. A merge
     reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
-    the exit code is chosen by.
+    the exit code is chosen by. A pull request no longer open has no merge left to move, and
+    GitHub reads UNKNOWN on it for good.
     """
+    if pr.get("state", "OPEN") != "OPEN":
+        return False
     merge = pr.get("mergeStateStatus")
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
         return False
@@ -5333,8 +5337,8 @@ def main(argv: list[str] | None = None) -> int:
             "note: this pull request merges into a branch other than the default and Copilot "
             "has reviewed it already, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
-            "for a round anyway. An attested head has its checks polled instead, until no "
-            "required check is still settling or the merge reads CLEAN, UNSTABLE, or HAS_HOOKS."
+            "for a round anyway. An attested head has its checks polled instead, while they can "
+            "still move its merge."
         )
         i = 0
         final = gql(Q_FULL, owner, repo, a.number)
