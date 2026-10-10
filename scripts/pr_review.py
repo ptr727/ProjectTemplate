@@ -3376,11 +3376,16 @@ def held_checks_open(
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
     A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
-    GitHub's own reading, so on such a merge a check nothing requires does not hold the wait.
-    Otherwise every check still settling holds it, required or not, and so does a rollup carrying no check at all inside the pickup
-    grace, since that is a push whose check suites have not registered yet.
+    GitHub's own reading, so on such a merge a check nothing requires does not hold the wait. A
+    BLOCKED merge carrying a stuck check has its exit, 44, decided already, so nothing holds it.
+    Otherwise every check still settling holds it, required or not, and so does a rollup carrying
+    no check at all inside the pickup grace, since that is a push whose check suites have not
+    registered yet.
     """
-    if pr.get("mergeStateStatus") in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+    merge = pr.get("mergeStateStatus")
+    if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+        return False
+    if merge == "BLOCKED" and checks_stuck(nodes, now, grace, stall):
         return False
     return bool(checks_settling(nodes, now, grace, stall)) or (not nodes and waited < grace)
 

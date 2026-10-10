@@ -7229,6 +7229,19 @@ class TestCli(GqlCase):
             self.assertEqual(44, self.cli(["wait", "7"]))
         slept.assert_not_called()
 
+    def test_a_failed_check_ends_the_poll_while_another_still_runs(self) -> None:
+        """The 44 is decided by the failure, so waiting on the running check changes nothing."""
+        running = check(name="test", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        failed = check(name="lint", conclusion="FAILURE", started=real_ago(60))
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[failed, running]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
     def test_an_unattested_held_head_is_not_polled_for_its_checks(self) -> None:
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
         self.answer(self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running])))
