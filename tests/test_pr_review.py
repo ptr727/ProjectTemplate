@@ -6451,6 +6451,24 @@ class TestCli(GqlCase):
         self.assertIn("stuck=NOT_PICKED_UP", out)
         self.assertNotIn("status=CHECKS_NOT_MERGEABLE", out)
 
+    def test_only_a_required_stuck_check_on_a_blocked_merge_takes_forty_four(self) -> None:
+        """`BLOCKED` is also worn by an open thread, so it cannot say a stuck check is required.
+
+        The rollup's `isRequired` can, so a failed check it marks optional exits 0 on a merge
+        blocked for another reason, and the same check marked required still exits 44.
+        """
+        for required, code in ((False, 0), (True, 44)):
+            with self.subTest(required=required):
+                self.out.seek(0)
+                self.out.truncate()
+                failed = {**check(name="scan", conclusion="FAILURE"), "isRequired": required}
+                self.answer(payload([review()], merge="BLOCKED", checks=[failed]))
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7"]))
+                out = self.out.getvalue()
+                self.assertIn("stuck=FAILED", out)
+                self.assertEqual(code == 44, "status=CHECKS_NOT_MERGEABLE" in out)
+
     def test_wait_exits_zero_where_a_check_is_merely_still_running(self) -> None:
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.
 
