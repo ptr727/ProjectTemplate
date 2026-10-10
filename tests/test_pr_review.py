@@ -7389,6 +7389,16 @@ class TestCli(GqlCase):
             self.assertEqual(43, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
 
+    def test_a_required_check_running_long_holds_the_poll_rather_than_ending_it(self) -> None:
+        """Duration alone cannot tell a stalled job from a slow one, so waiting may clear it."""
+        slow = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(2000))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[slow]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
     def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
         """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
         pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)
@@ -7435,6 +7445,7 @@ class TestCli(GqlCase):
                     check(name="queued", status="QUEUED", conclusion=""),
                     check(name="concluding", status="COMPLETED", conclusion=""),
                     check(name="starved", status="QUEUED", conclusion="", started=ago(900)),
+                    check(name="long", status="IN_PROGRESS", conclusion="", started=ago(2000)),
                     check(name="passed"),
                     check(name="failed", conclusion="FAILURE"),
                     status_context("ci/building", state="PENDING"),
@@ -7446,7 +7457,7 @@ class TestCli(GqlCase):
         )
         settling = pr_review.checks_settling(nodes, NOW, 300, 1800)
         self.assertEqual(
-            ["running", "queued", "concluding", "ci/building", "ci/expected"],
+            ["running", "queued", "concluding", "long", "ci/building", "ci/expected"],
             [n["name"] for n in settling],
         )
 

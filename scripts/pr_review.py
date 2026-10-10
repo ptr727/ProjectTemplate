@@ -3358,15 +3358,16 @@ def checks_stuck(
 def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[dict]:
     """Every check still on its way to a conclusion that waiting can reach.
 
-    A stuck check is left out, since its shape is the one no wait clears and polling it only runs
-    the timeout out. Of the rest, a check is settling where it has not passed, which leaves the
+    A stuck check is left out, since its shape is one no wait clears and polling it only runs the
+    timeout out. RUNNING_LONG is the exception, since duration alone cannot tell a stalled job
+    from a slow one. Of the rest, a check is settling where it has not passed, which leaves the
     state taxonomy to `check_shape` alone.
     """
     return [
         n
         for n in nodes
         if not n.get("unreadable")
-        and not check_shape(n, now, grace, stall)
+        and check_shape(n, now, grace, stall) in ("", "RUNNING_LONG")
         and (n.get("conclusion") or "") not in CHECK_OK
     ]
 
@@ -3378,14 +3379,14 @@ def held_checks_open(
 
     A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
     GitHub's own reading, so on such a merge a check nothing requires does not hold the wait. A
-    BLOCKED merge carrying a stuck required check has its exit, 44, decided already, so nothing
-    holds it. Otherwise a required check still settling holds it. So does any check still settling
-    while no required check has posted, since a required aggregator behind `needs:` enters the
-    rollup only once its dependencies finish. A rollup carrying no check at all holds it while the
-    merge reads BLOCKED, since that is a push whose check suites have not registered. A merge
-    reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
-    the exit code is chosen by. A pull request no longer open has no merge left to move, and
-    GitHub reads UNKNOWN on it for good.
+    BLOCKED merge carrying a stuck required check, other than one running long, has its exit, 44,
+    decided already, so nothing holds it. Otherwise a required check still settling holds it. So
+    does any check still settling while no required check has posted, since a required aggregator
+    behind `needs:` enters the rollup only once its dependencies finish. A rollup carrying no check
+    at all holds it while the merge reads BLOCKED, since that is a push whose check suites have not
+    registered. A merge reading UNKNOWN holds it whatever the rollup carries, since GitHub has not
+    yet decided the word the exit code is chosen by. A pull request no longer open has no merge left
+    to move, and GitHub reads UNKNOWN on it for good.
     """
     if pr.get("state", "OPEN") != "OPEN":
         return False
@@ -3395,7 +3396,8 @@ def held_checks_open(
     if merge == "UNKNOWN":
         return True
     if merge == "BLOCKED" and any(
-        n.get("required") for n, _ in checks_stuck(nodes, now, grace, stall)
+        n.get("required") and shape != "RUNNING_LONG"
+        for n, shape in checks_stuck(nodes, now, grace, stall)
     ):
         return False
     settling = checks_settling(nodes, now, grace, stall)
