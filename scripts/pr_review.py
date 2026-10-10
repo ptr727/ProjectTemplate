@@ -5461,12 +5461,12 @@ def main(argv: list[str] | None = None) -> int:
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
         if final.get("mergeStateStatus") == "BLOCKED" and gates:
             # The block above prints optional stuck checks too, so the required ones are named.
-            # They are one cause of the block, not the only one.
+            # They need not be all that blocks it.
             # `BLOCKED` is also worn by an open thread or a missing approval.
             print(
                 "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
-                f"required stuck {', '.join(repr(g) for g in gates)}: read its line in the "
+                f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
                 "a long one a judgment, and a failed one a fix. It need not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
