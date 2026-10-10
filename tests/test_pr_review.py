@@ -3250,7 +3250,10 @@ class TestFileTableCarriesForward(CarryCase):
         )
         cut = self.tabled(files=[])
         cut["reviews"]["pageInfo"]["hasPreviousPage"] = True
-        for name, pr in (("no table", untabled), ("partial", partial), ("cut", cut)):
+        unnamed = self.tabled(files=[])
+        unnamed["reviews"]["nodes"][0]["commit"] = None
+        cases = {"no table": untabled, "partial": partial, "cut": cut, "no commit": unnamed}
+        for name, pr in cases.items():
             with self.subTest(name=name):
                 self.assertTrue(pr_review.files_shortfall(pr))
                 self.assertFalse(pr_review.files_unread(pr))
