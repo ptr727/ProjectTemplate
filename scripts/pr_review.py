@@ -261,12 +261,13 @@ Subcommands
            head carrying a 50 a stuck check shows only in the digest. A 42 can
            be decided by an earlier round whose partial coverage carries to a head stating none,
            in which case the round the wait ended on is not the round the code came from.
-           44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
-           wait clears: queued with nothing acting on it, expected and never posted, running
-           far past what the job costs, or failed. A check merely still running normally is
-           not this and exits 0, or on a held head is polled while it can still move the merge,
-           and neither is a stuck check on a merge that is not BLOCKED, since the rollup carries
-           checks no ruleset requires. The digest reports the check in both cases, so a shape outside 44 is still
+           44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no wait
+           clears: queued with nothing acting on it, expected and never posted, running far past
+           what the job costs, or failed, though on a held head a required check running long is
+           still polled, as 30 states. A check merely still running normally is not this and exits
+           0, or on a held head is polled while it can still move the merge, and neither is a stuck
+           check on a merge that is not BLOCKED, since the rollup carries checks no ruleset
+           requires. The digest reports the check in both cases, so a shape outside 44 is still
            named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,

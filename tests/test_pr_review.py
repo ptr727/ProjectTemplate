@@ -6082,6 +6082,18 @@ class TestCheckShapes(unittest.TestCase):
             "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
         )
 
+    def test_the_full_query_asks_which_checks_are_required_and_whether_the_pr_is_open(self) -> None:
+        """A dropped field reads as required or open, which holds a held wait to its timeout."""
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn("headRefOid baseRefName state mergeable", query)
+        self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", query)
+        self.assertIn("context state createdAt isRequired(pullRequestNumber:$n)", query)
+
+    def test_a_status_context_reads_its_own_required_flag(self) -> None:
+        optional = {**status_context("ci/external", state="PENDING"), "isRequired": False}
+        nodes = pr_review.check_nodes(payload([review()], checks=[optional, check()]))
+        self.assertEqual([False, True], [n["required"] for n in nodes])
+
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
         """A node missing its suite reads as suite zero under no workflow and no app."""
         bare = check(name="lint")
