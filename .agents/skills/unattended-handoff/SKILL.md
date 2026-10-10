@@ -96,8 +96,8 @@ Each round runs:
    picker line below. A handoff number already dispatched in this run ends it too, since a handoff
    a worker neither closed nor parked means the worker failed in a way this seat must not
    investigate.
-3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" maps
-   the tier in the picker's line to. Wait the same way. Dispatch at `highest` instead only where
+3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" names
+   for the tier in the picker's line. Wait the same way. Dispatch at `highest` instead only where
    the maintainer's invocation named that tier or its model.
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
