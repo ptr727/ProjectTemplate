@@ -713,6 +713,8 @@ class PluginStateCase(unittest.TestCase):
         self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": True}]))
         self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
         self.assertEqual(self.runner.call_args.args[0], ["claude", "plugin", "list", "--json"])
+        self.assertEqual(self.runner.call_args.kwargs["timeout"], skills_install.SUBPROCESS_TIMEOUT)
+        self.assertEqual(self.runner.call_args.kwargs["cwd"], Path.home())
 
     def test_only_the_user_scope_install_counts(self) -> None:
         """A project install of the same id is not what the installer put in place."""
