@@ -3167,8 +3167,8 @@ class TestFileTableCarriesForward(CarryCase):
     def test_status_reads_again_where_the_changed_file_list_came_back_empty(self) -> None:
         """One run read `unstated` between two runs reading `carried:table` on an unchanged head.
 
-        Under a head round stating nothing, the table reading cannot tell an empty changed-file
-        list from a failed read, so the whole payload is read again.
+        Under a head round stating nothing, the table reading cannot tell an empty file list from
+        a failed read, so the payload is read again.
         """
         served = self.answer(self.tabled(files=[]), self.tabled())
         out = io.StringIO()
@@ -3195,10 +3195,46 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertEqual(1, served.call_count)
         slept.assert_not_called()
 
+    def test_wait_reads_its_final_payload_again_where_the_changed_file_list_came_back_empty(
+        self,
+    ) -> None:
+        served = self.answer(self.tabled(), self.tabled(files=[]), self.tabled())
+        out = io.StringIO()
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(out),
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out.getvalue())
+        self.assertEqual(3, served.call_count)
+
     def test_a_head_stating_coverage_needs_no_changed_file_list(self) -> None:
         """The table reading never runs on such a head, so an empty list there is not re-read."""
         self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))
         self.assertTrue(pr_review.files_unread(self.tabled(files=[])))
+
+    def test_every_changed_file_list_the_table_cannot_match_is_unread(self) -> None:
+        """The re-read and the table reading's reason share one predicate, arm by arm."""
+        cases = {
+            "absent": lambda pr: pr.update(files=None),
+            "nodes not a list": lambda pr: pr["files"].update(nodes=None),
+            "no page info": lambda pr: pr["files"].update(pageInfo=None),
+            "page info without a flag": lambda pr: pr["files"].update(pageInfo={}),
+            "a node with no path": lambda pr: pr["files"]["nodes"].append({"path": None}),
+        }
+        for name, spoil in cases.items():
+            with self.subTest(name=name):
+                pr = self.tabled()
+                self.assertFalse(pr_review.files_unread(pr))
+                spoil(pr)
+                self.assertTrue(pr_review.files_unread(pr))
+                self.assertTrue(pr_review.files_shortfall(pr))
+        cut = self.tabled(files=[])
+        cut["files"]["pageInfo"]["hasNextPage"] = True
+        self.assertFalse(pr_review.files_unread(cut))
 
     def test_a_compare_that_failed_is_read_again_before_it_refuses_the_carry(self) -> None:
         replies = iter(

@@ -324,6 +324,7 @@ import fnmatch
 import functools
 import html
 import io
+import itertools
 import json
 import os
 import re
@@ -332,7 +333,7 @@ import sys
 import tarfile
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1250,11 +1251,13 @@ def request_copilot_review(
     before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
     answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
     after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
-    recorded = request_recorded(before, after)
-    if recorded is False:
-        time.sleep(settle)
-        again = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
-        recorded = request_recorded(before, again or {})
+    state = backoff(
+        after,
+        lambda: gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"],
+        lambda p: request_recorded(before, p or {}) is False,
+        delays=(settle,),
+    )
+    recorded = request_recorded(before, state or {})
     line = f"requested a Copilot review on the current head (bot {bot_id})"
     return line, recorded
 
@@ -1835,54 +1838,50 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
     )
 
 
-def reread[Read](read: Callable[[], Read], unread: Callable[[Read], bool]) -> Read:
-    """Read once, and again on the `READ_RETRY_DELAYS` schedule while `unread` holds.
+def files_shortfall(pr: dict) -> str:
+    """Why the payload's changed-file list cannot be matched against a table, or "" where it can.
 
-    The schedule is in seconds, and re-reading is the "run status again" the exit-45 remedy names,
-    taken before the verdict rather than after it. Returns the last value read, unread or not, so the caller still decides what a read that
-    never happened means. Bounded by the schedule rather than by a clock, since this runs inside
-    one `status` and the whole of it is a few seconds.
+    One predicate for the table reading's reason and for `files_unread`'s re-read, so the two
+    cannot disagree about which lists were read. A list the query cut short is not a shortfall
+    here, since that list was read, and `table_shortfall` names it separately.
     """
-    value = read()
-    for delay in READ_RETRY_DELAYS:
-        if not unread(value):
-            break
-        time.sleep(delay)
-        value = read()
-    return value
-
-
-def files_unread(pr: dict) -> bool:
-    """Whether a head the table reading needs carries a changed-file list that was not read.
-
-    True only where a round covers the head and states no coverage, the one case the table
-    reading consults this list, and the list is absent, malformed, or empty. Empty counts too.
-    A diff that is really empty costs the schedule's few seconds, where an empty list from a
-    failed read decides the coverage.
-    """
-    if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
-        return False
     files = pr.get("files")
     if not isinstance(files, dict):
-        return True
+        return "the changed-file list is absent from the query, so the table has nothing to match"
     nodes = files.get("nodes")
     page = files.get("pageInfo")
-    return (
+    if (
         not isinstance(nodes, list)
-        or not nodes
         or not isinstance(page, dict)
         or not isinstance(page.get("hasNextPage"), bool)
         or any(not (n or {}).get("path") for n in nodes)
-    )
+    ):
+        return "the changed-file list is malformed, so the table cannot be matched against it"
+    if not nodes and not page["hasNextPage"]:
+        return "the pull request changes no files, so the table has nothing to match"
+    return ""
 
 
-def full_read(owner: str, repo: str, num: int) -> dict:
-    """The full payload, read again while the changed-file list the coverage reading needs is unread.
+def files_unread(pr: dict) -> bool:
+    """Whether the table reading needs this head's changed-file list and the list falls short.
 
-    The whole payload is read again rather than the one connection, so the digest and the exit
-    code still come from one read of the pull request.
+    Only a head that a round covers and states no coverage of sends the table reading here. An
+    empty list counts as unread too. A diff that is really empty costs one schedule of re-reads,
+    where an empty list from a failed read decides the coverage.
     """
-    return reread(lambda: gql(Q_FULL, owner, repo, num), files_unread)
+    if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
+        return False
+    return bool(files_shortfall(pr))
+
+
+def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
+    """The full payload, `pr` where one was read already, read again while `files_unread` holds.
+
+    The whole payload is read again rather than the one connection. The digest and the exit code
+    then still come from one read of the pull request.
+    """
+    read = functools.partial(gql, Q_FULL, owner, repo, num)
+    return backoff(read() if pr is None else pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
 @functools.cache
@@ -1903,9 +1902,9 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     and compare equal to another round's null, so an entry that is not a non-empty string makes
     the whole reading unreadable rather than a set with a fabricated member in it.
 
-    A read that did not happen is taken again under `reread` before it is returned as None. One
-    run read `unstated` on a head where the runs either side of it carried a table. A 404 is not
-    taken again, being GitHub's answer rather than a read that failed.
+    A read that did not happen is taken again on the `READ_RETRY_DELAYS` schedule before it is
+    returned as None. One run read `unstated` on a head where the runs either side of it carried a
+    table. An absence `answered_absent` recognizes is not taken again, being GitHub's own answer.
 
     Memoized for the run, which is what makes `digest` and `report_verdict` agree. Each computes
     the bound from its own reads, so an unmemoized transient failure in one and not the other
@@ -1937,12 +1936,16 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
         except json.JSONDecodeError:
             return None
 
-    proc = reread(
-        lambda: gh_rest(
-            f"repos/{owner}/{repo}/compare/{base}...{commit}",
-            r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
-        ),
+    compare = functools.partial(
+        gh_rest,
+        f"repos/{owner}/{repo}/compare/{base}...{commit}",
+        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+    )
+    proc = backoff(
+        compare(),
+        compare,
         lambda p: not answered_absent(p) and listed(p) is None,
+        delays=READ_RETRY_DELAYS,
     )
     names = listed(proc)
     if names is None:
@@ -2851,17 +2854,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
         named = head_table(pr)
     if not named:
         return NO_HEAD_TABLE
-    files = pr.get("files")
-    if files is None:
-        return "the changed-file list is absent from the query, so the table has nothing to match"
-    nodes = files.get("nodes") or []
-    page = files.get("pageInfo")
-    if (
-        not isinstance(page, dict)
-        or not isinstance(page.get("hasNextPage"), bool)
-        or any(not (n or {}).get("path") for n in nodes)
-    ):
-        return "the changed-file list is malformed, so the table cannot be matched against it"
+    if short := files_shortfall(pr):
+        return short
     changed, truncated = changed_paths(pr)
     if truncated:
         return (
@@ -2869,8 +2863,6 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
             f"table cannot be compared against all of them until a push brings the pull request "
             f"back within that window"
         )
-    if not changed:
-        return "the pull request changes no files, so the table has nothing to match"
     diff = {bare_path(p) for p in changed}
     if len(diff) != len(set(changed)):
         return (
@@ -4868,23 +4860,31 @@ def backoff[Polled](
     value: Polled,
     read: Callable[[], Polled],
     keep: Callable[[Polled], bool],
-    start: float,
-    timeout: float,
+    start: float | None = None,
+    timeout: float = 0.0,
+    delays: Iterable[float] | None = None,
 ) -> Polled:
-    """Re-read `value` on the `POLL_DELAYS` schedule while `keep` holds and `timeout` allows.
+    """Re-read `value` on a schedule of delays while `keep` holds and the bound allows.
 
-    `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked
-    before each sleep, so the poll can run past it by up to one delay. Returns the last value
-    read, or `value` itself where the poll never sleeps.
+    `delays` defaults to `POLL_DELAYS` with its last delay repeated, so only the clock ends it.
+    A finite schedule ends the loop by running out, with no clock where `start` is None. Otherwise
+    `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked before
+    each sleep, so the poll can run past it by up to one delay. Returns the last value read, or
+    `value` itself where the poll never sleeps.
 
-    One loop for both of `wait`'s polls, since a fix to the bound or the schedule applied to one
-    inline copy and not the other is a wait that times out differently depending on its arm.
+    One loop for every re-read here, since a fix applied to one inline copy and not another
+    makes one wait time out differently from another.
     The backoff runs in-process, so the whole wait costs one agent turn.
     """
-    i = 0
-    while keep(value) and time.monotonic() - start <= timeout:
-        time.sleep(POLL_DELAYS[min(i, len(POLL_DELAYS) - 1)])
-        i += 1
+    schedule = (
+        itertools.chain(POLL_DELAYS, itertools.repeat(POLL_DELAYS[-1]))
+        if delays is None
+        else delays
+    )
+    for delay in schedule:
+        if not keep(value) or (start is not None and time.monotonic() - start > timeout):
+            break
+        time.sleep(delay)
         value = read()
     return value
 
@@ -5516,8 +5516,7 @@ def main(argv: list[str] | None = None) -> int:
     # A reader resolves that by believing the code, dropping the review it was just shown.
     # The digest also earns its call at the timeout.
     # A bare PENDING line reports a broken wait and a slow reviewer identically.
-    if final is None or files_unread(final):
-        final = full_read(owner, repo, a.number)
+    final = full_read(owner, repo, a.number, final)
     now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
