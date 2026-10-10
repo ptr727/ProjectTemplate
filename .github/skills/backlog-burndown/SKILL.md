@@ -172,9 +172,9 @@ for, and it binds harder than any throughput target.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round: the files changed by every open **feature** pull request on this repository, and the
   claim comments of every group still holding a branch, parked groups from earlier rounds included.
-  `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main") | .number'`
-  lists the open pull requests, its filter applying the promotion exclusion below, and
-  `gh pr diff <number> --name-only` reads each one's files. `git worktree list` reports the
+  `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
+  lists the open pull requests, its filter applying the promotion exclusion below.
+  `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
   registered worktrees and the branch checked out in each, which is not the same as every branch
   that exists, so pair it with `git branch -r`, after `git fetch --prune origin`, for one that was
   pushed and whose worktree is already gone, and with `git branch` for one that was never pushed
