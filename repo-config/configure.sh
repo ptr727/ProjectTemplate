@@ -367,7 +367,6 @@ apply_project() { # project-node-id
     number="$(jqr '.number' "$project_file")"
     title="$(jqr '.title' "$project_file")"
     live="$(repo_projects)"
-    # shellcheck disable=SC2016  # $p is a jq --arg variable, not a shell expansion
     if jq -e --arg p "$pid" '.projects | index($p) != null' <<<"$live" >/dev/null 2>&1; then
         echo "Already linked to project '$title' ($owner, number $number)"
         return
@@ -555,9 +554,7 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     ptypes="$(jqr '[.rules[] | select(has("parameters")) | .type] | .[]' "$file")"
     while IFS= read -r t; do
         [ -z "$t" ] && continue
-        # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
         want="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" "$file")"
-        # shellcheck disable=SC2016  # $t is a jq --arg variable, not a shell expansion
         got="$(jq -S -c --arg t "$t" "[.rules[] | select(.type==\$t) | .parameters] | first | $norm" <<<"$live")"
         assert "'$rname' rule '$t' parameters match the payload" test "$got" = "$want"
     done <<<"$ptypes"
@@ -711,7 +708,6 @@ check_environments() {
         return
     fi
     # The declared value is emitted verbatim, invalid shapes included, so each one reaches the test that judges it rather than being defaulted away here.
-    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
     if ! entries="$(jq -c --arg n "$name" '[.repos[] | select(.name == $n)][0] | if has("environments") then .environments else [] end' "$registry")"; then
         fail "could not read the declared deployment environments from $registry"
         return
@@ -746,7 +742,6 @@ check_environments() {
         fi
         ename="$(jqr '.name' <<<"$row")"
         policy="$(jqr '.branchPolicy' <<<"$row")"
-        # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
         env_live="$(jq -c --arg n "$ename" '[.[] | select(.name == $n)] | first // empty' <<<"$live_envs")"
         if [ -z "$env_live" ]; then
             fail "environment '$ename' missing"
