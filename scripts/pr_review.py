@@ -5458,12 +5458,15 @@ def main(argv: list[str] | None = None) -> int:
         # Without that, a stuck optional check on a merge a thread blocks returns 44.
         # `BLOCKED` is required as well, since `CLEAN` proves no required gate is outstanding.
         # The digest reports every stuck check either way, so the narrower code costs nothing.
-        if final.get("mergeStateStatus") == "BLOCKED" and any(n.get("required") for n, _ in stuck):
-            # The required check is named as one cause of the block, not the only one.
+        gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
+        if final.get("mergeStateStatus") == "BLOCKED" and gates:
+            # The block above prints optional stuck checks too, so the required ones are named.
+            # They are one cause of the block, not the only one.
             # `BLOCKED` is also worn by an open thread or a missing approval.
             print(
                 "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
-                "BLOCKED, and a required check is in a shape waiting does not clear: read the "
+                "BLOCKED, and a required check is in a shape waiting does not clear, "
+                f"required stuck {', '.join(repr(g) for g in gates)}: read its line in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
                 "a long one a judgment, and a failed one a fix. It need not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
