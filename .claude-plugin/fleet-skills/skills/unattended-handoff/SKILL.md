@@ -40,9 +40,6 @@ no reminder.
   what it holds, whatever tier it runs on.
 - **The picker** is a subagent dispatched once per round. It chooses one handoff whose work needs
   no maintainer decision, creating one where none is waiting, and returns its number and track.
-  It runs at `frontier`, since ranking the backlog, judging which issue needs no decision, and
-  choosing the worker's tier are the calls `backlog-burndown` keeps in its orchestrator, and here
-  no maintainer reviews them.
 - **The worker** is a subagent dispatched once per round on the handoff the picker returned. It
   does the work in its own worktree and ends the handoff as done or parked.
 
@@ -92,15 +89,16 @@ and each round's one-line outcome.
 Each round runs:
 
 1. **Dispatch the picker** at `frontier` with the brief below, or at `highest` where the
-   maintainer's invocation named that tier or its model, and wait on the dispatch mechanism's own
-   completion signal rather than polling.
+   maintainer's invocation named that tier or its model. Its ranking, decision, and worker-tier
+   calls are the ones `backlog-burndown` keeps in its orchestrator, and here no maintainer reviews
+   them. Wait on the dispatch mechanism's own completion signal rather than polling.
 2. **Read its one line.** `NONE` or `STOP` ends the run, and so does any reply that is not a
    picker line below. A handoff number already dispatched in this run ends it too, since a handoff
    a worker neither closed nor parked means the worker failed in a way this seat must not
    investigate.
 3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" maps
-   the tier in the picker's line to, and wait the same way. Dispatch at `highest` instead only
-   where the maintainer's invocation named that tier or its model.
+   the tier in the picker's line to. Wait the same way. Dispatch at `highest` instead only where
+   the maintainer's invocation named that tier or its model.
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
 
