@@ -773,6 +773,7 @@ WINDOW = 100
 FILES_WINDOW = 100
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
+READ_RETRY_DELAYS = (2, 5)
 # What a git ref may not hold before it is interpolated into a REST path.
 # Refused rather than allow-listed, git permitting more than a branch name usually carries.
 # An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
@@ -1834,6 +1835,56 @@ def delta_since(owner: str, repo: str, base: str, head: str) -> str:
     )
 
 
+def reread[Read](read: Callable[[], Read], unread: Callable[[Read], bool]) -> Read:
+    """Read once, and again on the `READ_RETRY_DELAYS` schedule while `unread` holds.
+
+    The schedule is in seconds, and re-reading is the "run status again" the exit-45 remedy names,
+    taken before the verdict rather than after it. Returns the last value read, unread or not, so the caller still decides what a read that
+    never happened means. Bounded by the schedule rather than by a clock, since this runs inside
+    one `status` and the whole of it is a few seconds.
+    """
+    value = read()
+    for delay in READ_RETRY_DELAYS:
+        if not unread(value):
+            break
+        time.sleep(delay)
+        value = read()
+    return value
+
+
+def files_unread(pr: dict) -> bool:
+    """Whether a head the table reading needs carries a changed-file list that was not read.
+
+    True only where a round covers the head and states no coverage, the one case the table
+    reading consults this list, and the list is absent, malformed, or empty. Empty counts too.
+    A diff that is really empty costs the schedule's few seconds, where an empty list from a
+    failed read decides the coverage.
+    """
+    if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
+        return False
+    files = pr.get("files")
+    if not isinstance(files, dict):
+        return True
+    nodes = files.get("nodes")
+    page = files.get("pageInfo")
+    return (
+        not isinstance(nodes, list)
+        or not nodes
+        or not isinstance(page, dict)
+        or not isinstance(page.get("hasNextPage"), bool)
+        or any(not (n or {}).get("path") for n in nodes)
+    )
+
+
+def full_read(owner: str, repo: str, num: int) -> dict:
+    """The full payload, read again while the changed-file list the coverage reading needs is unread.
+
+    The whole payload is read again rather than the one connection, so the digest and the exit
+    code still come from one read of the pull request.
+    """
+    return reread(lambda: gql(Q_FULL, owner, repo, num), files_unread)
+
+
 @functools.cache
 def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
     """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
@@ -1851,6 +1902,10 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     is probably short. A name the response leaves null would coerce to the literal path `None`
     and compare equal to another round's null, so an entry that is not a non-empty string makes
     the whole reading unreadable rather than a set with a fabricated member in it.
+
+    A read that did not happen is taken again under `reread` before it is returned as None. One
+    run read `unstated` on a head where the runs either side of it carried a table. A 404 is not
+    taken again, being GitHub's answer rather than a read that failed.
 
     Memoized for the run, which is what makes `digest` and `report_verdict` agree. Each computes
     the bound from its own reads, so an unmemoized transient failure in one and not the other
@@ -1873,15 +1928,24 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     refs = (base, commit)
     if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
         return None
-    proc = gh_rest(
-        f"repos/{owner}/{repo}/compare/{base}...{commit}",
-        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+
+    def listed(proc: subprocess.CompletedProcess) -> object:
+        if proc.returncode != 0:
+            return None
+        try:
+            return json.loads(proc.stdout.strip())
+        except json.JSONDecodeError:
+            return None
+
+    proc = reread(
+        lambda: gh_rest(
+            f"repos/{owner}/{repo}/compare/{base}...{commit}",
+            r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+        ),
+        lambda p: not answered_absent(p) and listed(p) is None,
     )
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    try:
-        names = json.loads(proc.stdout.strip())
-    except json.JSONDecodeError:
+    names = listed(proc)
+    if names is None:
         return None
     if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
         return None
@@ -5309,7 +5373,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "status":
         # One payload renders the digest and decides the code, for the reason `wait` reads one.
         # Fetched twice, a round landing between them prints one pull request and grades another.
-        pr = gql(Q_FULL, owner, repo, a.number)
+        pr = full_read(owner, repo, a.number)
         out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
         print(out)
         return report_verdict(pr, owner, repo)
@@ -5452,8 +5516,8 @@ def main(argv: list[str] | None = None) -> int:
     # A reader resolves that by believing the code, dropping the review it was just shown.
     # The digest also earns its call at the timeout.
     # A bare PENDING line reports a broken wait and a slow reviewer identically.
-    if final is None:
-        final = gql(Q_FULL, owner, repo, a.number)
+    if final is None or files_unread(final):
+        final = full_read(owner, repo, a.number)
     now = datetime.now(UTC)
     # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
     # Deriving the stuck shapes from that list costs no parse, which is what was doubled.

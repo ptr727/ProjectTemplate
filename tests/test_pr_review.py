@@ -490,6 +490,9 @@ class GqlCase(unittest.TestCase):
         heads over REST. Patched inside `answer` instead, a case building its own payload and
         never calling it spawned a real `gh` against a pull request that does not exist, which
         is what this suite exists not to do. A case wanting a delta patches over this itself.
+
+        The re-read schedule is emptied too, so a case answering a failed read is not slept on or
+        asked again. A case about the re-read sets its own schedule.
         """
         super().setUp()
         # `changed_at` is memoized for the run, and these cases share their commit constants.
@@ -505,8 +508,9 @@ class GqlCase(unittest.TestCase):
                 return_value=subprocess.CompletedProcess([], 1, "", "no read in this suite"),
             )
         )
+        self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
 
-    def answer(self, *responses: dict) -> mock._patch:
+    def answer(self, *responses: dict) -> mock.MagicMock:
         """Patch `gql` to return each response in turn, repeating the last one.
 
         Also patches `gh_graphql` directly with a default reporting no Copilot review anywhere
@@ -3159,6 +3163,67 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn("overview=0/0 ", out)
         self.assertIn("coverage=carried:table ", out)
         self.assertNotIn("NO FILE TABLE STANDS IN", out)
+
+    def test_status_reads_again_where_the_changed_file_list_came_back_empty(self) -> None:
+        """One run read `unstated` between two runs reading `carried:table` on an unchanged head.
+
+        Under a head round stating nothing, the table reading cannot tell an empty changed-file
+        list from a failed read, so the whole payload is read again.
+        """
+        served = self.answer(self.tabled(files=[]), self.tabled())
+        out = io.StringIO()
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(out),
+        ):
+            code = pr_review.main(["status", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out.getvalue())
+        self.assertEqual(2, served.call_count)
+
+    def test_status_reads_once_where_the_changed_file_list_was_read(self) -> None:
+        served = self.answer(self.tabled())
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertEqual(1, served.call_count)
+        slept.assert_not_called()
+
+    def test_a_head_stating_coverage_needs_no_changed_file_list(self) -> None:
+        """The table reading never runs on such a head, so an empty list there is not re-read."""
+        self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))
+        self.assertTrue(pr_review.files_unread(self.tabled(files=[])))
+
+    def test_a_compare_that_failed_is_read_again_before_it_refuses_the_carry(self) -> None:
+        replies = iter(
+            [
+                subprocess.CompletedProcess([], 1, "", "gh: Bad Gateway (HTTP 502)"),
+                subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), ""),
+            ]
+        )
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review, "gh_rest", side_effect=lambda *_a, **_k: next(replies)),
+        ):
+            self.assertEqual(frozenset({"a.py"}), pr_review.changed_at("o", "r", "develop", OLD))
+
+    def test_a_compare_answered_absent_is_not_read_again(self) -> None:
+        """A 404 is GitHub's answer, so the schedule is not spent asking it again."""
+        absent = subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review, "gh_rest", return_value=absent) as rest,
+        ):
+            self.assertIsNone(pr_review.changed_at("o", "r", "develop", OLD))
+        self.assertEqual(1, rest.call_count)
 
     def test_a_moved_file_set_keeps_the_table_where_it_was(self) -> None:
         with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
