@@ -4377,7 +4377,7 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
         conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"][
             "reviewThreads"
         ]
-        out += [t for t in conn["nodes"] if not t["isResolved"]]
+        out += open_threads(conn["nodes"])
         page = conn.get("pageInfo") or {}
         if not page.get("hasNextPage"):
             return out
