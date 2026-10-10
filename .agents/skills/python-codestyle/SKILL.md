@@ -133,9 +133,13 @@ uvx ruff@latest format --check            # verify format clean
 Its type checker runs against that environment. mypy runs as `.venv/bin/python -m mypy` where the
 environment installs it, and otherwise as `uvx mypy@latest --python-executable .venv/bin/python`,
 adding `--python-version` with the environment's version unless the mypy config pins one. pyright
-runs as `uvx pyright@latest --pythonpath .venv/bin/python`. On Windows the environment's interpreter
-is `.venv\Scripts\python.exe` instead. Those ruff commands and that type checker are the pip form's
-clean-compile, run with pytest before committing.
+runs as `uvx pyright@latest --pythonpath .venv/bin/python`. Where the config sits in the project
+directory, CI runs the checker there with no path, as in the uv form. A declared subdirectory with
+no config of its own uses the repository root's instead. CI then runs the checker from the root
+with the directory as its path and the interpreter as `<dir>/.venv/bin/python`, as in
+`<dir>/.venv/bin/python -m mypy <dir>`, so run it the same way. On Windows each interpreter path
+ends in `.venv\Scripts\python.exe` instead. Those ruff commands and that type checker are the pip
+form's clean-compile, run with pytest before committing.
 
 A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest` equivalents, per Two
 Profiles above, and has no such command to run before committing beyond those. These are documented
