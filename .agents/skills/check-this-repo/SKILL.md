@@ -74,7 +74,7 @@ per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from 
 This skill refreshes only when `--report` exits non-zero, and only with the `--snapshot-only` run
 above, from its own freshly fetched `main` checkout. A copy taken from `develop` reads not current
 by design, since the snapshot is judged against the promoted revision. Session entry runs no
-automatic check, by design: the trigger is suspicion, and the restated-rule symptom this skill
+automatic check, by design. The trigger is suspicion, and the restated-rule symptom this skill
 triggers on is the loudest form of it. The refresh from the maintainer's own long-lived hub
 checkout is a different run, and `docs/host-setup.md` "Fleet Skills Install" in the hub states its
 cadence.
