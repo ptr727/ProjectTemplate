@@ -993,7 +993,7 @@ class LinuxWrapperSudoGuardCase(unittest.TestCase):
 
     def run_wrapper(self, root: bool, sudo_user: str | None) -> subprocess.CompletedProcess[str]:
         argv = ["unshare", "-r"] if root else []
-        env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+        env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": os.environ.get("HOME", "")}
         if sudo_user is not None:
             env["SUDO_USER"] = sudo_user
         return subprocess.run(
@@ -1042,7 +1042,7 @@ class LinuxWrapperSudoGuardCase(unittest.TestCase):
             encoding="utf-8",
             timeout=60,
             check=False,
-            env={"PATH": os.environ.get("PATH", ""), "SUDO_USER": "someone"},
+            env={"PATH": os.environ.get("PATH", os.defpath), "SUDO_USER": "someone"},
         )
         self.assertEqual(r.returncode, 0)
         self.assertIn("never under sudo", r.stdout)
