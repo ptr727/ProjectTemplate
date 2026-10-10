@@ -9,7 +9,8 @@ than copying verbatim (a verbatim copy that misdescribes the repo is inaccurate 
 in review). The axes that commonly vary per repo:
 
 - **Type checker in CI**: pyright strict, mypy with its strict flags (run in CI and the editor, with
-  pyright kept editor-only through Pylance), or both. The clean-compile runs every checker CI runs.
+  pyright kept editor-only through Pylance), or both. A repo running both runs pyright itself,
+  per `SKILL.md` "Toolchain". The clean-compile runs every checker CI runs.
 - **Dependency declaration**: the uv form declares the dev tools CI runs in the `dev` group of
   `[dependency-groups]`, the one group a plain local `uv sync` or `uv run` installs, and which CI's
   `uv sync --all-groups --frozen` installs too, since it takes every group and no extra. PEP 621
