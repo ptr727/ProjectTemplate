@@ -242,8 +242,10 @@ Subcommands
            in either has nothing to read the id from and a fabricated one is never an option. The
            loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its checks
-           settled, 30 = still pending at timeout (pending is not failure), on a held head a check
-           not yet concluded, printed as `status=CHECKS_PENDING`,
+           settled as far as the rollup window reads them, or with the merge reading CLEAN,
+           UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
+           held head a check not yet concluded or none posted, printed as
+           `status=CHECKS_PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -3367,6 +3369,21 @@ def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float
     ]
 
 
+def held_checks_open(
+    pr: dict, nodes: list[dict], now: datetime, waited: float, grace: float, stall: float
+) -> bool:
+    """True where a covered head's checks can still move its merge, so a held wait polls on.
+
+    A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
+    GitHub's own reading, so a check nothing requires does not hold the wait. Otherwise a check
+    still settling holds it, and so does a rollup carrying no check at all inside the pickup
+    grace, since that is a push whose check suites have not registered yet.
+    """
+    if pr.get("mergeStateStatus") in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+        return False
+    return bool(checks_settling(nodes, now, grace, stall)) or (not nodes and waited < grace)
+
+
 def checks_truncated(pr: dict) -> bool:
     """True where the head's rollup carries more contexts than the query asked for.
 
@@ -5306,7 +5323,14 @@ def main(argv: list[str] | None = None) -> int:
         while (
             holds(final)
             and local_cover(final)
-            and checks_settling(check_nodes(final), datetime.now(UTC), a.check_grace, a.check_stall)
+            and held_checks_open(
+                final,
+                check_nodes(final),
+                datetime.now(UTC),
+                time.monotonic() - start,
+                a.check_grace,
+                a.check_stall,
+            )
             and time.monotonic() - start <= a.timeout
         ):
             time.sleep(delays[min(i, len(delays) - 1)])
@@ -5416,11 +5440,12 @@ def main(argv: list[str] | None = None) -> int:
                 "not read here, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
-        if covered and checks_settling(checks, now, a.check_grace, a.check_stall):
+        waited = time.monotonic() - start
+        if covered and held_checks_open(final, checks, now, waited, a.check_grace, a.check_stall):
             print(
-                "status=CHECKS_PENDING an attested local pass covers this head, and a check had "
-                "not concluded by the timeout, so the merge is not ready yet: wait again, or read "
-                "the checks above"
+                "status=CHECKS_PENDING an attested local pass covers this head, and by the "
+                "timeout a check had not concluded or none had posted yet, so the merge is not "
+                "ready yet: wait again, or read the checks above"
             )
             return 30
         return 0

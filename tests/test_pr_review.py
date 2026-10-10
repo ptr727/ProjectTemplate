@@ -7229,6 +7229,45 @@ class TestCli(GqlCase):
             self.assertEqual(44, self.cli(["wait", "7"]))
         slept.assert_not_called()
 
+    def test_an_unattested_held_head_is_not_polled_for_its_checks(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        self.answer(self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running])))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_a_check_nothing_requires_does_not_hold_an_attested_head(self) -> None:
+        """A merge reading CLEAN or UNSTABLE has no required check outstanding."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        for merge in ("CLEAN", "UNSTABLE"):
+            with self.subTest(merge=merge):
+                pr = self.into(
+                    payload([review(oid=OLD)], merge=merge, checks=[running]), attest=True
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep") as slept:
+                    self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+                slept.assert_not_called()
+
+    def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
+        """A wait run right after the push reads an empty rollup, which is CI not started."""
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(empty, empty, empty, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(empty)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
     def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
         nodes = pr_review.check_nodes(
             payload(
