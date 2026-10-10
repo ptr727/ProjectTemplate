@@ -243,12 +243,12 @@ Subcommands
            in either has nothing to read the id from and a fabricated one is never an option. The
            loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled as far as the rollup window reads them, or with the merge reading CLEAN,
-           UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a required check still settling, any check while no required one has
-           posted, none posted on a BLOCKED merge, or the merge still UNKNOWN, printed as
-           `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
-           `status=PENDING` unless 46's or 47's quota reading outranks it,
+           checks settled as far as the rollup window reads them, with the merge reading CLEAN,
+           UNSTABLE, or HAS_HOOKS, or with the pull request closed, 30 = still pending at timeout
+           (pending is not failure), on a held head a required check still settling, any check while
+           no required one has posted, none posted on a BLOCKED merge, or the merge still UNKNOWN,
+           printed as `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed
+           as `status=PENDING` unless 46's or 47's quota reading outranks it,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -3405,7 +3405,7 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    return not nodes and merge == "BLOCKED"
+    return not nodes and merge == "BLOCKED" and not checks_unreadable(pr)
 
 
 def checks_truncated(pr: dict) -> bool:

@@ -7399,6 +7399,15 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
+    def test_an_unreadable_rollup_is_not_held_as_one_not_yet_registered(self) -> None:
+        """A rollup read off another commit is empty here, and waiting does not clear that."""
+        pr = payload([review(oid=OLD)], merge="BLOCKED", checks=[check()], rollup_oid="d" * 40)
+        self.answer(self.into(pr, attest=True))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
     def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
         """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
         pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)
