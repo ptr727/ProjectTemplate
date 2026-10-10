@@ -736,21 +736,26 @@ class TestDigest(GqlCase):
         self.assertIn("coverage=full", out)
 
     def test_a_thread_from_a_deleted_account_does_not_crash_the_digest(self) -> None:
-        """GraphQL sends `author` present and null, which a defaulted lookup returns as None."""
+        """GraphQL sends `author` present and null, which a defaulted lookup returns as None.
+
+        The thread still blocks the merge, so it counts, attributed as `other`.
+        """
         orphan = thread("T1")
         orphan["comments"]["nodes"][0]["author"] = None
         self.answer(payload([review()], [orphan, thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(1, unresolved)
+        self.assertEqual(2, unresolved)
+        self.assertIn(f"unresolved=2 ({pr_review.REVIEWER}=1 other=1)", out)
+        self.assertIn("T1", out)
         self.assertIn("T2", out)
 
-    def test_only_the_reviewer_s_own_unresolved_threads_are_listed(self) -> None:
-        """A maintainer's own open thread is not a review finding to answer."""
+    def test_every_open_thread_is_listed_whoever_opened_it(self) -> None:
+        """An open thread blocks a ruleset-gated merge whatever its author."""
         self.answer(payload([review()], [thread("T1", login="ptr727"), thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(1, unresolved)
+        self.assertEqual(2, unresolved)
+        self.assertIn("T1", out)
         self.assertIn("T2", out)
-        self.assertNotIn("T1", out)
 
     def test_a_seen_set_marks_each_thread_new_exactly_once(self) -> None:
         """The seen set is what tells a second round's findings from the ones already answered."""
@@ -784,10 +789,11 @@ class TestOtherReviewers(GqlCase):
     in `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below, not here.
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
-    ruleset-gated merge, since only Copilot's own threads
-    counted. Coverage and refusal reading stay Copilot-only: `review_on_head` above names
-    Copilot's own coverage specifically, the reviewer this script requests and waits for, not
-    "no review of any kind covers this head".
+    ruleset-gated merge, first since only Copilot's own threads counted and then since only known
+    reviewer logins did, so every open thread now counts and a login only attributes it. Coverage
+    and refusal reading stay Copilot-only: `review_on_head` above names Copilot's own coverage
+    specifically, the reviewer this script requests and waits for, not "no review of any kind
+    covers this head".
     """
 
     def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
@@ -818,14 +824,34 @@ class TestOtherReviewers(GqlCase):
         self.assertIn("T2", out)
         self.assertNotIn("T3", out)
 
-    def test_a_human_thread_still_does_not_count(self) -> None:
-        """Generalizing past Copilot means the other tracked bots, not every account."""
-        self.answer(payload([review()], [thread("T1", login="ptr727")]))
-        out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(0, unresolved)
-        self.assertNotIn("T1", out)
+    def test_a_thread_from_an_unknown_login_counts_and_is_named_other(self) -> None:
+        """A reviewer posting under a login missing from the known set once read `unresolved=0`.
 
-    def test_the_breakdown_appears_only_once_more_than_one_reviewer_contributes(self) -> None:
+        The known logins attribute a thread and never decide whether it counts, and `other` is
+        named even where it is the only contributor, since it is the count a reader cannot assume.
+        """
+        self.answer(payload([review()], [thread("T1", login="example-review-bot")]))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, unresolved)
+        self.assertIn("unresolved=1 (other=1)", out)
+        self.assertIn("T1", out)
+
+    def test_status_and_wait_print_an_unknown_login_s_thread_in_the_digest(self) -> None:
+        """`status` and `wait` print the digest a Merge Gate decision is read from."""
+        unknown = thread("T1", login="example-review-bot")
+        for command in (["status", "7"], ["wait", "7"]):
+            with self.subTest(command=command[0]):
+                self.answer(payload([review()], [unknown]))
+                out = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(out),
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    pr_review.main([*command, "--repo", "o/r"])
+                self.assertIn("unresolved=1 (other=1)", out.getvalue())
+                self.assertIn("T1", out.getvalue())
+
+    def test_one_known_reviewer_alone_prints_no_breakdown_and_two_print_one(self) -> None:
         self.answer(payload([review()], [thread("T1"), thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
         self.assertEqual(2, unresolved)
@@ -4678,6 +4704,8 @@ class TestOverviewSections(GqlCase):
         """The headline may name that thread, which the loop already waits on."""
         body = self.headline()
         self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [thread("T1")])))
+        unknown = thread("T1", login="example-review-bot")
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [unknown])))
         resolved = payload([review(body=body)], [thread("T1", resolved=True)])
         self.assertIsNotNone(pr_review.uncounted_verdict(resolved))
 
