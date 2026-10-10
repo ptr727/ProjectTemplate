@@ -166,7 +166,7 @@ Two of those are guards rather than previews. `--release --dry-run` on a Proxmox
 
 `--repo` adds the repository's `install.linux` entries to the report or action. Only `apt` package names are accepted. The script does not execute the declaration's `remedy` text. Reading the JSON needs `jq`, which the ordinary fleet install provides.
 
-The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every `.sh` file `git ls-files` returns, plus a tracked, extension-less file whose shebang names bash or sh. A local run uses the same `koalaman/shellcheck:stable` and `mvdan/shfmt:latest` containers. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
+The scripts are checked by `shellcheck` and `shfmt`, which run in CI over every `.sh` file `git ls-files` returns, plus a tracked, extension-less file whose shebang names bash or sh. A local run uses the same `mirror.gcr.io/koalaman/shellcheck:stable` and `mirror.gcr.io/mvdan/shfmt:latest` containers. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires on Linux is one `install-tools.sh` can provide, or a recorded exception. It also asserts each script here is tracked executable, so a fresh checkout can run it.
 
 <!-- Repo -->
 
