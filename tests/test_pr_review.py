@@ -3258,6 +3258,14 @@ class TestFileTableCarriesForward(CarryCase):
                 self.assertTrue(pr_review.files_shortfall(pr))
                 self.assertFalse(pr_review.files_unread(pr))
 
+    def test_the_head_s_own_table_is_read_again_past_a_newer_round_naming_no_commit(self) -> None:
+        """The table reading takes the head's own table before any carried one, so must this."""
+        pr = self.tabled(head_body=summarized(["a.py", "b.py"], covers=""), files=[])
+        newer = review(oid=OLD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="C")
+        newer["commit"] = None
+        pr["reviews"]["nodes"].append(newer)
+        self.assertTrue(pr_review.files_unread(pr))
+
     def test_every_changed_file_list_the_table_cannot_match_is_unread(self) -> None:
         """The re-read and the table reading's reason share one predicate, arm by arm."""
         cases = {

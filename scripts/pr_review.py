@@ -1866,7 +1866,8 @@ def files_unread(pr: dict) -> bool:
     """Whether the changed-file list is the reason a file table cannot stand in for this head.
 
     Only a head that a round covers and states no coverage of sends the table reading here. The
-    list is used only by the newest table, on the head or carried, where its round names a commit.
+    list is used by the head's own table, or else by the newest carried one whose round names a
+    commit, which is the order `table_reading` reads them in.
     `table_shortfall` is asked rather than restated, so a partial on record or a cut review
     history re-reads nothing. An empty list counts as unread too. A diff that is really empty
     costs one schedule of re-reads, where an empty list from a failed read decides the coverage.
@@ -1876,10 +1877,9 @@ def files_unread(pr: dict) -> bool:
     short = files_shortfall(pr)
     if not short:
         return False
-    tabled = carried_table(pr)
-    if tabled is None or not tabled[1]:
-        return False
-    return table_shortfall(pr, tabled[0]) == short
+    carried = carried_table(pr)
+    named = head_table(pr) or (carried[0] if carried is not None and carried[1] else [])
+    return bool(named) and table_shortfall(pr, named) == short
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
