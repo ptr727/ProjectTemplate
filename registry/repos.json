@@ -33,8 +33,7 @@
             "publish": [{ "target": "nuget", "mechanism": "oidc" }],
             "requiredSecrets": ["NUGET_USERNAME", "CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "two-phase",
-            "driftNotes": ["No get-version-task, relying on validate-task instead."]
+            "releaseTrigger": "two-phase"
         },
         {
             "name": "LanguageTags",
