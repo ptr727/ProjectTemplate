@@ -7408,6 +7408,23 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
 
+    def test_an_outside_answer_outranks_pending_after_a_mid_poll_request(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        rounds = payload(
+            [review(oid=OLD, at=EARLY)],
+            merge="BLOCKED",
+            checks=[running],
+            comments=[comment(at=LATE)],
+        )
+        held = self.into(rounds, attest=True)
+        held["comments"]["nodes"].append(comment(at=LATE))
+        requested = {**held, "reviewRequests": payload([], pending=True)["reviewRequests"]}
+        self.answer(held, held, held, requested)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(40, self.cli(["wait", "7", "--timeout", "1"]))
+        self.assertNotIn("status=PENDING", self.out.getvalue())
+
     def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
         """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
         pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)
