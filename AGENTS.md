@@ -56,12 +56,12 @@ An agent session is billed on the context it carries, not the work it does. Ever
 
 ### Delegation
 
-A rule, a Skill, or a brief names a model tier, never a model, so a model release is an edit to the table below and nowhere else. There are four tiers, and reasoning effort is a separate axis stated beside the tier, so `bulk` at low effort and `frontier` at high effort are both expressible.
+A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below alone. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
 
 - **`frontier`** is the strongest reasoning the fleet uses by default, for rule text, design, spec logic, and adversarial review.
 - **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above.
-- **`bulk`** is the cheapest model that does the work correctly, for high fan-out mechanical work such as a known-shape edit repeated across files, an extraction, or a status check.
-- **`highest`** is the most capable model available, and only the maintainer selects it, by that tier name or by the model's name, in the session or the invocation.
+- **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
+- **`highest`** is the most capable model available. Only the maintainer selects it, naming the tier or the model in the session or the invocation.
 
 | Tool | `highest` | `frontier` | `standard` | `bulk` |
 | --- | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ A tool with no row here, or one that cannot name a model per subagent, runs ever
 
 - **Delegate exploration, keep judgment.** A subagent starts from an empty context and returns only its conclusion, so a wide search, a multi-file audit, or a "which of these is affected" question costs a fraction of the same work inline. Delegate when the finding compresses to a short answer, and stay inline when the intermediate detail drives the next edit.
 - **Match the model tier to the judgment, not to the diff size.** Mechanical work (a known-shape edit repeated across files, an extraction, a status check, a lint fix) runs at `bulk`, at the lowest reasoning effort that holds. State the tier in the delegation itself rather than accepting the default. A change to a gate, a ruleset, a release condition, or a carried governance section is a design change however small it looks.
-- **Never tier down the seat holding the judgment.** Governance wording, spec logic, rulesets, repository visibility, and the decision to decline a review finding are fleet-wide and durable when wrong. Tier the subagents, not the main thread, and a subagent given such work runs at `frontier`.
+- **Never tier down the seat holding the judgment.** Governance wording, spec logic, rulesets, repository visibility, and the decision to decline a review finding are fleet-wide and durable when wrong. Tier the subagents, not the main thread.
 - **Brief a subagent so it never needs a governance file.** A subagent inherits no context, so anything it must honor has to be in its prompt. Reading `GOVERNANCE.md` to find out costs it the same tokens the main thread would have paid. Brief on this shape:
 
 ```text

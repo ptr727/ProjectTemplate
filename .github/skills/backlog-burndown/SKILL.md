@@ -310,10 +310,11 @@ round's cleanup step.
 ### Choosing the Worker's Model Tier
 
 `AGENTS.md` "Delegation" owns the model-tier rule and names the tiers. Read it there. This is only
-what it leaves to judgment here: the tier is one of `frontier`, `standard`, or `bulk`, chosen per
-group rather than defaulted, because a stronger tier produces better work up front and takes fewer
-review rounds to land it, which often costs less than a cheaper worker looping. `highest` is chosen
-only where the maintainer named it for this run. Three kinds of group run at `frontier`:
+what it leaves to judgment here. The tier is chosen per group rather than defaulted, since a
+stronger tier produces better work and takes fewer review rounds to land it. That often
+costs less than a cheaper worker looping. The tier is `frontier`, `standard`, or `bulk`, and
+`highest` only where the maintainer named it for this run. Three kinds of group are never tiered
+below `frontier`:
 
 - One touching **carried canonical content**, as `GOVERNANCE.md` "Verification Discipline" bounds
   it, since a wrong rule propagates to every carrier.

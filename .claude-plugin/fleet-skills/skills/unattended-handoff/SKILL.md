@@ -83,13 +83,15 @@ maintainer starts a second run on a repository only once the first has ended.
 ## The Loop
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
-invocation, which is the one command it runs. From then on it holds exactly four things: the scope,
-the round count, the handoff numbers dispatched so far, and the one-line outcome of each round.
+invocation, which is the one command it runs. From then on it holds exactly four things. They are the
+scope and any tier the invocation named, the round count, the dispatched handoff numbers, and each
+round's one-line outcome.
 Each round runs:
 
 1. **Dispatch the picker** with the brief below, and wait on the dispatch mechanism's own
    completion signal rather than polling.
-2. **Read its one line.** `NONE` or `STOP` ends the run. A handoff number already dispatched in
+2. **Read its one line.** `NONE` or `STOP` ends the run. So does a `PICK` naming a tier other than
+   `frontier`, `standard`, or `bulk`. A handoff number already dispatched in
    this run ends it too, since a handoff a worker neither closed nor parked means the worker failed
    in a way this seat must not investigate.
 3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" maps
