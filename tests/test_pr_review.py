@@ -7271,7 +7271,7 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
-    def test_an_empty_rollup_holds_only_a_blocked_merge(self) -> None:
+    def test_an_empty_rollup_holds_a_blocked_or_unknown_merge(self) -> None:
         """A conflicted pull request runs no `pull_request` workflow, so none is coming."""
         for merge, code in (("BLOCKED", 30), ("UNKNOWN", 30), ("DIRTY", 0)):
             with self.subTest(merge=merge):
@@ -7357,13 +7357,41 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
             attest=True,
         )
-        self.answer(held, held, requested)
+        self.answer(held, held, held, requested)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "1"]))
-        slept.assert_not_called()
+        slept.assert_called_once()
         self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
         self.assertIn("status=PENDING", self.out.getvalue())
+
+    def test_a_push_during_the_held_poll_ends_it_on_the_unattested_head(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        moved = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
+        )
+        moved["headRefOid"] = "c" * 40
+        self.answer(held, held, held, moved)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_called_once()
+
+    def test_an_unknown_merge_holds_the_poll_over_a_failed_required_check(self) -> None:
+        """GitHub recomputes the word after a check concludes, and the code is chosen by it."""
+        failed = check(name="gate", conclusion="FAILURE", started=real_ago(60))
+        unknown = self.into(
+            payload([review(oid=OLD)], merge="UNKNOWN", checks=[failed]), attest=True
+        )
+        blocked = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[failed]), attest=True
+        )
+        self.answer(unknown, unknown, unknown, blocked)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        slept.assert_called_once()
 
     def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
         nodes = pr_review.check_nodes(

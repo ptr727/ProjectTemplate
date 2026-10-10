@@ -245,8 +245,8 @@ Subcommands
            Exit 0 = review present, or on a held head an attested local pass with its checks
            settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a check not yet concluded, or none posted on a BLOCKED merge, printed as
-           `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
+           held head a check not yet concluded, none posted on a BLOCKED merge, or the merge
+           still UNKNOWN, printed as `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
            `status=PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
@@ -3381,11 +3381,15 @@ def held_checks_open(
     holds it. Otherwise a required check still settling holds it. So does any check still settling
     while no required check has posted, since a required aggregator behind `needs:` enters the
     rollup only once its dependencies finish. A rollup carrying no check at all holds it while the
-    merge reads BLOCKED or UNKNOWN, since that is a push whose check suites have not registered.
+    merge reads BLOCKED, since that is a push whose check suites have not registered. A merge
+    reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
+    the exit code is chosen by.
     """
     merge = pr.get("mergeStateStatus")
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
         return False
+    if merge == "UNKNOWN":
+        return True
     if merge == "BLOCKED" and any(
         n.get("required") for n, _ in checks_stuck(nodes, now, grace, stall)
     ):
@@ -3395,7 +3399,7 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    return not nodes and merge in ("BLOCKED", "UNKNOWN")
+    return not nodes and merge == "BLOCKED"
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -5430,8 +5434,8 @@ def main(argv: list[str] | None = None) -> int:
         if covered and held_checks_open(final, checks, now, a.check_grace, a.check_stall):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, or none had posted, so the merge is not "
-                "ready yet: wait again, or read the checks above"
+                "timeout a check had not concluded, none had posted, or the merge was still "
+                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
             )
             return 30
         # The review loop closing is not the merge gate, and 0 alone was saying it was.
