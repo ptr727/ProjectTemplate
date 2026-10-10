@@ -71,13 +71,13 @@ per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from 
 
 ## Refresh cadence
 
-Re-run the installer from a hub checkout on a freshly fetched `main` when `--report` exits
-non-zero, and after any promotion to `main` that touches `.agents/skills/`. A copy taken from
-`develop` reads not current by design, since the snapshot is judged against the promoted
-revision. Session entry runs no automatic check, by design: the trigger is suspicion,
-and the restated-rule symptom below is the loudest form of it. `docs/host-setup.md`
-"Fleet Skills Install" in the hub states the same cadence for the host side, and an automated
-refresh stays out of scope until the fleet has evidence the manual cadence fails.
+This skill refreshes only when `--report` exits non-zero, and only with the `--snapshot-only` run
+above, from its own freshly fetched `main` checkout. A copy taken from `develop` reads not current
+by design, since the snapshot is judged against the promoted revision. Session entry runs no
+automatic check, by design. The trigger is suspicion, and the restated-rule symptom this skill
+triggers on is the loudest form of it. The refresh from the maintainer's own long-lived hub
+checkout is a different run, and `docs/host-setup.md` "Fleet Skills Install" in the hub states its
+cadence.
 
 ## What it escalates instead of touching
 
