@@ -7271,9 +7271,15 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
-    def test_an_empty_rollup_holds_a_blocked_or_unknown_merge(self) -> None:
+    def test_an_empty_rollup_holds_any_merge_but_a_conflicted_one(self) -> None:
         """A conflicted pull request runs no `pull_request` workflow, so none is coming."""
-        for merge, code in (("BLOCKED", 30), ("UNKNOWN", 30), ("DIRTY", 0)):
+        for merge, code in (
+            ("BLOCKED", 30),
+            ("BEHIND", 30),
+            ("DRAFT", 30),
+            ("UNKNOWN", 30),
+            ("DIRTY", 0),
+        ):
             with self.subTest(merge=merge):
                 pr = self.into(payload([review(oid=OLD)], merge=merge, checks=[]), attest=True)
                 self.answer(pr)

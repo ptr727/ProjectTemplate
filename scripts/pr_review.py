@@ -246,9 +246,10 @@ Subcommands
            checks settled as far as the rollup window reads them, with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, or with the pull request closed, 30 = still pending at timeout
            (pending is not failure), on a held head a required check still settling, any check while
-           no required one has posted, none posted on a BLOCKED merge, or the merge still UNKNOWN,
-           printed as `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed
-           as `status=PENDING` unless 40's outside answer or 46's or 47's quota reading outranks it,
+           no required one has posted, none posted on a BLOCKED, BEHIND, or DRAFT merge, or the
+           merge still UNKNOWN, printed as `status=CHECKS_PENDING`, or a round requested while the
+           held poll ran, printed as `status=PENDING` unless 40's outside answer or 46's or 47's
+           quota reading outranks it,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -287,7 +288,8 @@ Subcommands
            a request already pending is still polled for. Pass --ignore-quota-signal to request and
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
-           this pull request outranks 47 whenever both would otherwise apply, and so does a 50.
+           this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
+           on a held head covered by an attested local pass a 30 or a 44.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -3383,10 +3385,11 @@ def held_checks_open(
     decided already, so nothing holds it. Otherwise a required check still settling holds it. So
     does any check still settling while no required check has posted, since a required aggregator
     behind `needs:` enters the rollup only once its dependencies finish. A rollup carrying no check
-    at all holds it while the merge reads BLOCKED, since that is a push whose check suites have not
-    registered. A merge reading UNKNOWN holds it whatever the rollup carries, since GitHub has not
-    yet decided the word the exit code is chosen by. A pull request no longer open has no merge left
-    to move, and GitHub reads UNKNOWN on it for good.
+    at all holds it while the merge reads BLOCKED, BEHIND, or DRAFT, since that is a push whose
+    check suites have not registered, where a conflicted, DIRTY one runs no workflow at all. A merge
+    reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
+    the exit code is chosen by. A pull request no longer open has no merge left to move, and GitHub
+    reads UNKNOWN on it for good.
     """
     if pr.get("state", "OPEN") != "OPEN":
         return False
@@ -3405,7 +3408,7 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    return not nodes and merge == "BLOCKED" and not checks_unreadable(pr)
+    return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
 def checks_truncated(pr: dict) -> bool:
