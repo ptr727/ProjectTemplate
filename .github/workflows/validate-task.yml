@@ -158,7 +158,7 @@ jobs:
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
       - name: Check EditorConfig step
-        run: docker run --rm --pull=always -v "$PWD":/check --workdir /check mstruebing/editorconfig-checker:latest
+        run: docker run --rm --pull=always -v "$PWD":/check --workdir /check ghcr.io/editorconfig-checker/editorconfig-checker:latest
 
       # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
       # That is how a repo with no shell scripts stays clean instead of failing on a linter's own no-file usage error.
@@ -226,8 +226,8 @@ jobs:
             fi
           done
           if [ "${#scripts[@]}" -gt 0 ]; then
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt koalaman/shellcheck:stable -- "${scripts[@]}"
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mvdan/shfmt:latest -d -- "${scripts[@]}"
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mirror.gcr.io/koalaman/shellcheck:stable -- "${scripts[@]}"
+            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mirror.gcr.io/mvdan/shfmt:latest -d -- "${scripts[@]}"
           else
             echo "no shell scripts are tracked"
           fi

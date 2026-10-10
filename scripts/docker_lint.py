@@ -41,7 +41,12 @@ class Linter:
 NODE_MODULES_EXCLUDE = ":(glob,exclude)**/node_modules/**"
 
 LINTERS = (
-    Linter("editorconfig-checker", "mstruebing/editorconfig-checker:latest", (), "/check"),
+    Linter(
+        "editorconfig-checker",
+        "ghcr.io/editorconfig-checker/editorconfig-checker:latest",
+        (),
+        "/check",
+    ),
     Linter(
         "actionlint",
         "rhysd/actionlint:latest",
@@ -62,10 +67,16 @@ LINTERS = (
         "/workdir",
         arguments=("--no-progress",),
     ),
-    Linter("shellcheck", "koalaman/shellcheck:stable", ("*.sh",), "/mnt", discover_shebang=True),
+    Linter(
+        "shellcheck",
+        "mirror.gcr.io/koalaman/shellcheck:stable",
+        ("*.sh",),
+        "/mnt",
+        discover_shebang=True,
+    ),
     Linter(
         "shfmt",
-        "mvdan/shfmt:latest",
+        "mirror.gcr.io/mvdan/shfmt:latest",
         ("*.sh",),
         "/mnt",
         arguments=("-d",),
