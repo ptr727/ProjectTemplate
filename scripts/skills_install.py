@@ -213,7 +213,6 @@ def claude_json(*args):
             encoding="utf-8",
             check=False,
             timeout=SUBPROCESS_TIMEOUT,
-            cwd=Path.home(),
         )
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
