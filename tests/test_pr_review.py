@@ -490,6 +490,9 @@ class GqlCase(unittest.TestCase):
         heads over REST. Patched inside `answer` instead, a case building its own payload and
         never calling it spawned a real `gh` against a pull request that does not exist, which
         is what this suite exists not to do. A case wanting a delta patches over this itself.
+
+        The re-read schedule is emptied too, so a case answering a failed read is not slept on or
+        asked again. A case about the re-read sets its own schedule.
         """
         super().setUp()
         # `changed_at` is memoized for the run, and these cases share their commit constants.
@@ -505,8 +508,9 @@ class GqlCase(unittest.TestCase):
                 return_value=subprocess.CompletedProcess([], 1, "", "no read in this suite"),
             )
         )
+        self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
 
-    def answer(self, *responses: dict) -> mock._patch:
+    def answer(self, *responses: dict) -> mock.MagicMock:
         """Patch `gql` to return each response in turn, repeating the last one.
 
         Also patches `gh_graphql` directly with a default reporting no Copilot review anywhere
@@ -3159,6 +3163,122 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertIn("overview=0/0 ", out)
         self.assertIn("coverage=carried:table ", out)
         self.assertNotIn("NO FILE TABLE STANDS IN", out)
+
+    def test_status_reads_again_where_the_changed_file_list_came_back_empty(self) -> None:
+        """One run read `unstated` between two runs reading `carried:table` on an unchanged head.
+
+        Under a head round stating nothing, the table reading cannot tell an empty file list from
+        a failed read, so the payload is read again.
+        """
+        served = self.answer(self.tabled(files=[]), self.tabled())
+        out = io.StringIO()
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(out),
+        ):
+            code = pr_review.main(["status", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out.getvalue())
+        self.assertEqual(2, served.call_count)
+
+    def test_status_reads_once_where_the_changed_file_list_was_read(self) -> None:
+        served = self.answer(self.tabled())
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertEqual(1, served.call_count)
+        slept.assert_not_called()
+
+    def test_wait_reads_its_final_payload_again_where_the_changed_file_list_came_back_empty(
+        self,
+    ) -> None:
+        served = self.answer(self.tabled(), self.tabled(files=[]), self.tabled())
+        out = io.StringIO()
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.compare(**{OLD: ["a.py", "b.py"], HEAD: ["a.py", "b.py"]}),
+            contextlib.redirect_stdout(out),
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out.getvalue())
+        self.assertEqual(3, served.call_count)
+
+    def test_a_payload_handed_in_is_read_again_where_its_changed_file_list_is_unread(self) -> None:
+        """`wait` hands over a payload a poll already read, which can carry the unread list too."""
+        served = self.answer(self.tabled())
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            read = pr_review.full_read("o", "r", 7, self.tabled(files=[]))
+        self.assertEqual(1, served.call_count)
+        self.assertFalse(pr_review.files_shortfall(read))
+
+    def test_backoff_with_neither_a_schedule_nor_a_clock_ends(self) -> None:
+        """The default schedule repeats its last delay only under a clock, so this cannot hang."""
+        bound = len(pr_review.POLL_DELAYS) + 1
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            slept.side_effect = lambda _s: self.assertLess(slept.call_count, bound)
+            pr_review.backoff(0, lambda: 0, lambda _: True)
+        self.assertEqual(len(pr_review.POLL_DELAYS), slept.call_count)
+
+    def test_a_head_stating_coverage_needs_no_changed_file_list(self) -> None:
+        """The table reading never runs on such a head, so an empty list there is not re-read."""
+        self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))
+        self.assertTrue(pr_review.files_unread(self.tabled(files=[])))
+
+    def test_every_changed_file_list_the_table_cannot_match_is_unread(self) -> None:
+        """The re-read and the table reading's reason share one predicate, arm by arm."""
+        cases = {
+            "absent": lambda pr: pr.update(files=None),
+            "nodes not a list": lambda pr: pr["files"].update(nodes=None),
+            "no page info": lambda pr: pr["files"].update(pageInfo=None),
+            "page info without a flag": lambda pr: pr["files"].update(pageInfo={}),
+            "a node with no path": lambda pr: pr["files"]["nodes"].append({"path": None}),
+        }
+        for name, spoil in cases.items():
+            with self.subTest(name=name):
+                pr = self.tabled()
+                self.assertFalse(pr_review.files_unread(pr))
+                spoil(pr)
+                self.assertTrue(pr_review.files_unread(pr))
+                self.assertTrue(pr_review.files_shortfall(pr))
+        cut = self.tabled(files=[])
+        cut["files"]["pageInfo"]["hasNextPage"] = True
+        self.assertFalse(pr_review.files_unread(cut))
+
+    def test_a_compare_that_failed_is_read_again_before_it_refuses_the_carry(self) -> None:
+        replies = iter(
+            [
+                subprocess.CompletedProcess([], 1, "", "gh: Bad Gateway (HTTP 502)"),
+                subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), ""),
+            ]
+        )
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review, "gh_rest", side_effect=lambda *_a, **_k: next(replies)),
+        ):
+            self.assertEqual(frozenset({"a.py"}), pr_review.changed_at("o", "r", "develop", OLD))
+
+    def test_a_compare_answered_absent_is_not_read_again(self) -> None:
+        """A 404 is GitHub's answer, so the schedule is not spent asking it again."""
+        absent = subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review, "gh_rest", return_value=absent) as rest,
+        ):
+            self.assertIsNone(pr_review.changed_at("o", "r", "develop", OLD))
+        self.assertEqual(1, rest.call_count)
 
     def test_a_moved_file_set_keeps_the_table_where_it_was(self) -> None:
         with self.compare(**{OLD: ["a.py"], HEAD: ["a.py", "b.py"]}):
@@ -7453,6 +7573,29 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertEqual(2, slept.call_count)
+
+    def test_a_held_poll_s_own_full_read_is_read_again_where_its_file_list_came_back_empty(
+        self,
+    ) -> None:
+        """A round landing mid-poll ends the hold, and the poll's own read becomes the verdict's."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        rounds = [
+            review(oid=OLD, body=summarized(["a.py"], covers=""), at=EARLY, rid="A"),
+            review(oid=HEAD, body=OVERVIEW + "\n**Findings:** None", at=LATE, rid="B"),
+        ]
+        landed = self.into(payload(rounds, checks=[check()], files=[]))
+        served = self.answer(held, held, landed, landed, self.into(payload(rounds, files=["a.py"])))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        compare = subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), "")
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review, "gh_rest", return_value=compare),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "600"]))
+        self.assertIn("coverage=carried:table ", self.out.getvalue())
+        self.assertEqual(5, served.call_count)
 
     def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
         """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
