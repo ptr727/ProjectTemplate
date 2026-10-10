@@ -5,7 +5,7 @@ markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose tha
 these rules, so nothing enforced them before this script. Rules implemented:
   charset        Non-ASCII judged against the three tiers the charset rule defines.
   charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
-  semicolon      No semicolon in prose, outside a list that already carries commas.
+  semicolon      No semicolon in prose, outside a comma-bearing series or two labeled items.
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
@@ -48,7 +48,7 @@ from typing import NamedTuple, TypedDict
 RULES = {
     "charset": "a non-ASCII character its tier does not permit here",
     "charset-unknown": "non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics",
-    "semicolon": "a semicolon in prose, outside a list that already carries commas",
+    "semicolon": "a semicolon in prose, outside a comma-bearing series or two labeled items",
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
@@ -1048,7 +1048,8 @@ SEMICOLON = re.compile(r";")
 
 # A lone semicolon separates a list only between labeled items, as in `Inputs: a, b; outputs: c`.
 # A colon that explains rather than labels otherwise exempted the splice after it.
-LABELED_ITEM = re.compile(r"^\s*[*_]*[\w`./\"-]+(?:\s+[\w`./\"-]+){0,2}[*_]*:[*_]*(?:\s|$)")
+LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
+LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
 # A compound word carries no spaces, and a range is digit-bounded.

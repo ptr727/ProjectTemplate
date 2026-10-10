@@ -628,23 +628,25 @@ class TestSemicolon2(BaitCase):
                 self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_lone_semicolon_between_labeled_items_keeps_its_place(self) -> None:
-        """A label after the separator marks a two-item list, however the label is spelled."""
+        """A label after the separator marks a two-item list, emphasized or carrying a dotted id."""
         for text in (
             "Inputs: a, b, and c; **Outputs**: d and e.\n",
             "Inputs: a, b, and c; **Outputs:** d and e.\n",
             "Inputs: a, b, and c; `out` paths: d and e.\n",
             "Guarantees: D1.1 holds, always; D1.2: the gate runs.\n",
             "Inputs: a, b, and c; read/write paths: d and e.\n",
-            'Inputs: a, b, and c; "out" paths: d and e.\n',
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
 
     def test_a_lone_semicolon_needs_a_label_on_each_side(self) -> None:
-        """A label after the semicolon is not enough alone, and a long clause is not a label."""
+        """A label after the semicolon is not enough alone, and a clause is not a label."""
         for text in (
             "It runs on push, always; outputs: d and e.\n",
             "Inputs: a, b, and c; the four word label: d and e.\n",
+            'It runs, at merge: it gates; it says "stop": the run halts.\n',
+            "It runs, at merge: it gates; e.g. this one: the run halts.\n",
+            "It runs, at merge: it gates; see /tmp: the run halts.\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
