@@ -5387,11 +5387,9 @@ def main(argv: list[str] | None = None) -> int:
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
         )
-        first = gql(Q_FULL, owner, repo, a.number)
-        polled = backoff(
-            first,
-            lambda: gql(Q_HELD, owner, repo, a.number),
-            lambda polled: (
+
+        def still_held(polled: dict) -> bool:
+            return (
                 holds(polled)
                 and local_cover(polled)
                 and not unrecognized_shapes(polled)
@@ -5402,11 +5400,19 @@ def main(argv: list[str] | None = None) -> int:
                     a.check_grace,
                     a.check_stall,
                 )
-            ),
-            start,
-            a.timeout,
-        )
-        final = first if polled is first else None
+            )
+
+        fulls = [gql(Q_FULL, owner, repo, a.number)]
+
+        def held_read() -> dict:
+            polled = gql(Q_HELD, owner, repo, a.number)
+            if still_held(polled):
+                return polled
+            fulls.append(gql(Q_FULL, owner, repo, a.number))
+            return fulls[-1]
+
+        polled = backoff(fulls[0], held_read, still_held, start, a.timeout)
+        final = polled if any(polled is f for f in fulls) else None
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "

@@ -7421,6 +7421,23 @@ class TestCli(GqlCase):
             [c.args[0] for c in gql.call_args_list],
         )
 
+    def test_a_held_poll_stops_only_on_a_full_read_that_agrees(self) -> None:
+        """A narrow read ending the poll is confirmed by the full read the verdict grades.
+
+        A merge reading UNKNOWN on that full read keeps the poll going, rather than returning 30
+        with time left on a payload the poll never judged.
+        """
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        unknown = self.into(
+            payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True
+        )
+        self.answer(empty, empty, empty, green, unknown, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(2, slept.call_count)
+
     def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
         """A wait run right after the push reads an empty rollup, which is CI not started."""
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
