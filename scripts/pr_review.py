@@ -3203,7 +3203,11 @@ def head_commit(pr: dict) -> dict:
 
 
 def check_nodes(pr: dict) -> list[dict]:
-    """The head commit's checks, each as {name, state, conclusion, since}.
+    """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
+
+    A readable node also carries `required`, true unless the rollup marks it `isRequired: false`,
+    which `held_checks_open` and the stuck reading decide on. A node of an unrecognized union
+    member carries empty values for the four and an `unreadable` key naming its type instead.
 
     A rollup carries two node shapes and they spell every field differently: a CheckRun has a
     `name`, a `status` and a `conclusion`, while a StatusContext has a `context` and a single
