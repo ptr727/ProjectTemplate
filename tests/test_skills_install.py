@@ -704,17 +704,17 @@ class PluginStateCase(unittest.TestCase):
 
     def plugin_list(self, stdout: str, returncode: int = 0) -> None:
         result = mock.Mock(returncode=returncode, stdout=stdout)
-        mock.patch("subprocess.run", return_value=result).start()
+        self.runner = mock.patch("subprocess.run", return_value=result).start()
 
     def plugin_id(self) -> str:
         return f"{skills_install.PLUGIN_NAME}@{skills_install.MARKETPLACE_NAME}"
 
     def test_an_installed_and_enabled_plugin_reads_as_both(self) -> None:
-        self.plugin_list(json.dumps([{"id": self.plugin_id(), "enabled": True}]))
+        self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": True}]))
         self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
 
     def test_an_installed_but_disabled_plugin_reads_as_not_enabled(self) -> None:
-        self.plugin_list(json.dumps([{"id": self.plugin_id(), "enabled": False}]))
+        self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": False}]))
         self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": False})
 
     def test_a_plugin_absent_from_the_listing_reads_as_not_installed(self) -> None:
@@ -722,8 +722,15 @@ class PluginStateCase(unittest.TestCase):
         self.assertEqual(skills_install.plugin_state(), {"installed": False, "enabled": False})
 
     def test_an_unreadable_listing_is_unknown_rather_than_not_installed(self) -> None:
+        unknown = {"installed": None, "enabled": None}
         self.plugin_list("", returncode=1)
-        self.assertEqual(skills_install.plugin_state(), {"installed": None, "enabled": None})
+        self.assertEqual(skills_install.plugin_state(), unknown)
+        self.plugin_list("not json")
+        self.assertEqual(skills_install.plugin_state(), unknown)
+        self.plugin_list("{}")
+        self.assertEqual(skills_install.plugin_state(), unknown)
+        mock.patch("subprocess.run", side_effect=OSError).start()
+        self.assertEqual(skills_install.plugin_state(), unknown)
         mock.patch(
             "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)
         ).start()

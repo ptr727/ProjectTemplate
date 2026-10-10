@@ -203,11 +203,11 @@ def claude_available():
     return shutil.which("claude") is not None
 
 
-def marketplace_entry():
-    """This marketplace's entry in the CLI's listing, {} when it is not registered, None when there is no listing."""
+def claude_json(*args):
+    """The JSON list `claude <args>` prints, or None where it cannot be run or read as one."""
     try:
         listing = subprocess.run(
-            ["claude", "plugin", "marketplace", "list", "--json"],
+            ["claude", *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -216,8 +216,14 @@ def marketplace_entry():
         )
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        entries = None
-    if not isinstance(entries, list):
+        return None
+    return entries if isinstance(entries, list) else None
+
+
+def marketplace_entry():
+    """This marketplace's entry in the CLI's listing, {} when it is not registered, None when there is no listing."""
+    entries = claude_json("plugin", "marketplace", "list", "--json")
+    if entries is None:
         return None
     return next(
         (e for e in entries if isinstance(e, dict) and e.get("name") == MARKETPLACE_NAME), {}
@@ -225,27 +231,24 @@ def marketplace_entry():
 
 
 def plugin_state():
-    """Whether the fleet plugin is installed and enabled, as {"installed", "enabled"}, each None where unreadable.
+    """Whether the fleet plugin is installed and enabled at user scope, each None where unreadable.
 
     A registered marketplace serves nothing until its plugin is installed, and a plugin the user
     later disabled or uninstalled leaves the marketplace registered, so the listing alone proves neither.
+    The installer installs at user scope, so a project or local install of the same id says nothing here.
     """
-    try:
-        listing = subprocess.run(
-            ["claude", "plugin", "list", "--json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
-        entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        entries = None
-    if not isinstance(entries, list):
+    entries = claude_json("plugin", "list", "--json")
+    if entries is None:
         return {"installed": None, "enabled": None}
     plugin_id = f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
-    entry = next((e for e in entries if isinstance(e, dict) and e.get("id") == plugin_id), None)
+    entry = next(
+        (
+            e
+            for e in entries
+            if isinstance(e, dict) and e.get("id") == plugin_id and e.get("scope") == "user"
+        ),
+        None,
+    )
     if entry is None:
         return {"installed": False, "enabled": False}
     return {"installed": True, "enabled": entry.get("enabled") is True}
