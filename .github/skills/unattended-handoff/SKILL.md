@@ -83,24 +83,27 @@ maintainer starts a second run on a repository only once the first has ended.
 ## The Loop
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
-invocation, which is the one command it runs. From then on it holds exactly four things: the scope,
-the round count, the handoff numbers dispatched so far, and the one-line outcome of each round.
+invocation, which is the one command it runs. From then on it holds exactly four things. They are
+the scope and any `highest` the invocation named, the round count, the dispatched handoff numbers,
+and each round's one-line outcome.
 Each round runs:
 
 1. **Dispatch the picker** with the brief below, and wait on the dispatch mechanism's own
    completion signal rather than polling.
-2. **Read its one line.** `NONE` or `STOP` ends the run. A handoff number already dispatched in
-   this run ends it too, since a handoff a worker neither closed nor parked means the worker failed
-   in a way this seat must not investigate.
-3. **Dispatch the worker** on that handoff and track, at the tier the picker named, and wait the
-   same way.
+2. **Read its one line.** `NONE` or `STOP` ends the run, and so does any reply that is not a
+   picker line below. A handoff number already dispatched in this run ends it too, since a handoff
+   a worker neither closed nor parked means the worker failed in a way this seat must not
+   investigate.
+3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" maps
+   the picker's tier to, and wait the same way. Dispatch at `highest` instead only where the
+   maintainer's invocation named that tier or its model.
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
 
-The run ends at `NONE`, at `STOP`, at the round cap, or at the repeat stop above. Its final message
-lists every round's outcome line, then the count of parked handoffs, and names the attended session
-(`session-handoff`, "resume the handoff") as where they get answered. It writes nothing else
-and asks nothing.
+The run ends at `NONE`, `STOP`, an unlisted reply, the round cap, or the repeat stop above. Its
+final message lists every round's outcome line, then the count of parked handoffs, and names the
+attended session (`session-handoff`, "resume the handoff") as where they get answered. It writes
+nothing else and asks nothing.
 
 ### The Briefs
 
@@ -122,7 +125,7 @@ invoking the run. Reply with exactly one line, in the worker return form that sk
 
 | Seat | Line | Means |
 | --- | --- | --- |
-| picker | `PICK #<n> track=<track> tier=<tier>` | work handoff `#<n>` on that model tier |
+| picker | `PICK #<n> track=<track> tier=<frontier\|standard>` | work handoff `#<n>` at that model tier |
 | picker | `NONE <reason>` | nothing left that needs no decision |
 | worker | `DONE #<n> <pull request numbers>` | merged as far as the scope and any decision blocking the promotion allow, lane closed out |
 | worker | `PARKED #<n> decision #<d>` | parked on decision issue `#<d>` |
@@ -199,7 +202,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    shows, and `--dry-run` first. The body carries the sections `session-handoff` "What Goes in the
    Body" names, with the next steps naming the issue and what done looks like. That skill's rules on
    the body bind it.
-5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier".
+5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier", naming
+   `frontier` or `standard` and never a model.
 6. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
    where a read it needs cannot run.
 
