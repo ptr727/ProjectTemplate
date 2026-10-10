@@ -10,6 +10,8 @@ name: Merge bot task
 #   This is safe because no job checks out PR code, and each one calls gh or pushes from an empty scratch repo.
 # - The github context in a called workflow is the caller's, so github.event.pull_request is the caller's pull_request_target payload.
 # - Concurrency lives in the caller, keyed on the PR number with cancel-in-progress false, so no group is declared here.
+# - Hyphenated inputs read with dot notation, such as inputs.app-login, since an expression property name may contain `-`.
+#   Index syntax is needed only for a name outside letters, digits, `-`, and `_`, as steps.app-token.outputs.token already shows.
 on:
   workflow_call:
     inputs:
