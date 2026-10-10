@@ -712,6 +712,14 @@ class PluginStateCase(unittest.TestCase):
     def test_an_installed_and_enabled_plugin_reads_as_both(self) -> None:
         self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": True}]))
         self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
+        self.assertEqual(self.runner.call_args.args[0], ["claude", "plugin", "list", "--json"])
+
+    def test_only_the_user_scope_install_counts(self) -> None:
+        """A project install of the same id is not what the installer put in place."""
+        self.plugin_list(
+            json.dumps([{"id": self.plugin_id(), "scope": "project", "enabled": True}])
+        )
+        self.assertEqual(skills_install.plugin_state(), {"installed": False, "enabled": False})
 
     def test_an_installed_but_disabled_plugin_reads_as_not_enabled(self) -> None:
         self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": False}]))
