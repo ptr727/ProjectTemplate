@@ -7193,6 +7193,65 @@ class TestCli(GqlCase):
         self.assertIn("review_on_head=local", out)
         self.assertIn("coverage=local", out)
 
+    def test_an_attested_head_with_a_check_running_at_the_timeout_is_pending(self) -> None:
+        """Covered at once, the wait ended while CI ran and exit 0 read as a mergeable head."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(pr)
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("coverage=local", out)
+        self.assertIn("status=CHECKS_PENDING", out)
+
+    def test_an_attested_head_polls_its_checks_until_they_settle(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pending = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
+        )
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(pending, pending, pending, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
+        """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
+        starved = check(status="QUEUED", conclusion="", started=real_ago(900))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[starved]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+
+    def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="running", status="IN_PROGRESS", conclusion=""),
+                    check(name="queued", status="QUEUED", conclusion=""),
+                    check(name="concluding", status="COMPLETED", conclusion=""),
+                    check(name="starved", status="QUEUED", conclusion="", started=ago(900)),
+                    check(name="passed"),
+                    check(name="failed", conclusion="FAILURE"),
+                    status_context("ci/building", state="PENDING"),
+                    status_context("ci/expected", state="EXPECTED"),
+                    status_context("ci/done"),
+                ],
+            )
+        )
+        settling = pr_review.checks_settling(nodes, NOW, 300, 1800)
+        self.assertEqual(
+            ["running", "queued", "concluding", "ci/building", "ci/expected"],
+            [n["name"] for n in settling],
+        )
+
     def test_request_asks_for_a_round_on_a_fix_push(self) -> None:
         self.answer(self.into(payload([review(oid=OLD)])))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
