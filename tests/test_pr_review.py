@@ -3224,7 +3224,9 @@ class TestFileTableCarriesForward(CarryCase):
 
     def test_backoff_with_neither_a_schedule_nor_a_clock_ends(self) -> None:
         """The default schedule repeats its last delay only under a clock, so this cannot hang."""
+        bound = len(pr_review.POLL_DELAYS) + 1
         with mock.patch.object(pr_review.time, "sleep") as slept:
+            slept.side_effect = lambda _s: self.assertLess(slept.call_count, bound)
             pr_review.backoff(0, lambda: 0, lambda _: True)
         self.assertEqual(len(pr_review.POLL_DELAYS), slept.call_count)
 
@@ -7571,6 +7573,29 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertEqual(2, slept.call_count)
+
+    def test_a_held_poll_s_own_full_read_is_read_again_where_its_file_list_came_back_empty(
+        self,
+    ) -> None:
+        """A round landing mid-poll ends the hold, and the poll's own read becomes the verdict's."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        rounds = [
+            review(oid=OLD, body=summarized(["a.py"], covers=""), at=EARLY, rid="A"),
+            review(oid=HEAD, body=OVERVIEW + "\n**Findings:** None", at=LATE, rid="B"),
+        ]
+        landed = self.into(payload(rounds, checks=[check()], files=[]))
+        served = self.answer(held, held, landed, landed, self.into(payload(rounds, files=["a.py"])))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        compare = subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), "")
+        with (
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review, "gh_rest", return_value=compare),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "600"]))
+        self.assertIn("coverage=carried:table ", self.out.getvalue())
+        self.assertEqual(5, served.call_count)
 
     def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
         """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
