@@ -69,7 +69,9 @@ class TestChecksTable(TreeCase):
         """printf, echo -e, and $'...' turn an escape into a control character no diff shows."""
         for name in ("USES", "PIN", "WORKFLOW", "HTTP_STATUS"):
             with self.subTest(pattern=name):
-                self.assertTrue(re.compile(getattr(repo_gate, name).pattern))
+                pattern = getattr(repo_gate, name).pattern
+                self.assertTrue(re.compile(pattern))
+                self.assertTrue(pattern.isascii() and pattern.isprintable())
         for action in repo_gate.SHA_EXCEPTIONS:
             with self.subTest(exception=action):
                 self.assertTrue(action.isascii() and action.isprintable())
