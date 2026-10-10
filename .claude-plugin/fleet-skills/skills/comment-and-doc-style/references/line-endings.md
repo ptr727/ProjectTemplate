@@ -113,8 +113,10 @@ JSONC (it has `//` comments), so strip them before JSON-parsing it.
 
 Editing CRLF files programmatically with a regex has a sharper trap: `.` matches `\r`, so a
 captured line keeps its carriage return and rejoining with `\r\n` yields `CRCRLF`. A text-mode
-rewrite has the mirror failure, silently flattening CRLF to LF. Prefer line-based edits
-(`splitlines(keepends=True)`) or literal replacement over regex reassembly. In Python the
-text-mode failure is the default: `Path.read_text()` decodes through universal newlines and
-`write_text()` writes `\n` back, so a read-edit-write round trip flattens the whole file while the
-edit itself looks correct. Pass `newline=''` to both, or work in bytes.
+rewrite has the mirror failure, silently rewriting every line ending to the host's own. Prefer
+line-based edits (`splitlines(keepends=True)`) or literal replacement over regex reassembly. In
+Python the text-mode failure is the default: `Path.read_text()` decodes through universal newlines
+and `write_text()` translates each `\n` to `os.linesep`, so a read-edit-write round trip rewrites
+every ending in the file while the edit itself looks correct. Work in bytes, or use `open()` with
+`newline=''` on both the read and the write, since `Path.read_text()` accepts `newline` only on
+Python 3.13 and newer and raises `TypeError` below it.
