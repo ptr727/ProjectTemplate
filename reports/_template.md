@@ -17,10 +17,14 @@
 | nuget | | | | |
 | pypi | | | | |
 | python | | | | |
-| console | | | | |
+| dotnet-publish | | | | |
+| hugo | | | | |
 | docker | | | | |
 | branch-model | | | | |
+| carried-scope | | | | |
 | repo-setup | | | | |
+| runtime-secrets | | | | |
+| verbatim-tree | | | | |
 | linter-parity | | | | |
 | recurring-violations | | | | |
 | readme-structure | | | | |
