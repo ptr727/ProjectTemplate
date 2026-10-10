@@ -264,9 +264,9 @@ Subcommands
            44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
            wait clears: queued with nothing acting on it, expected and never posted, running
            far past what the job costs, or failed. A check merely still running normally is
-           not this and exits 0, or on a held head is polled to its end, and neither is a stuck
-           check on a merge that is not BLOCKED, since the rollup carries checks no ruleset
-           requires. The digest reports the check in both cases, so a shape outside 44 is still
+           not this and exits 0, or on a held head is polled while it can still move the merge,
+           and neither is a stuck check on a merge that is not BLOCKED, since the rollup carries
+           checks no ruleset requires. The digest reports the check in both cases, so a shape outside 44 is still
            named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
@@ -851,7 +851,6 @@ mutation($pr:ID!,$bot:ID!){
   requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id __REQUEST_STATE__ } }}
 """.replace("__REQUEST_STATE__", REQUEST_STATE)
 
-# Full query: run once on transition, not per poll.
 # The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
 # It is asked of the last commit because a rollup hangs off a commit object.
 # A case holds that commit equal to `headRefOid`, since a rollup a push ago still renders whole.
