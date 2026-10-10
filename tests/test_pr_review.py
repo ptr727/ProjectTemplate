@@ -7238,9 +7238,9 @@ class TestCli(GqlCase):
         slept.assert_not_called()
 
     def test_a_check_nothing_requires_does_not_hold_an_attested_head(self) -> None:
-        """A merge reading CLEAN or UNSTABLE has no required check outstanding."""
+        """A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
-        for merge in ("CLEAN", "UNSTABLE"):
+        for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
             with self.subTest(merge=merge):
                 pr = self.into(
                     payload([review(oid=OLD)], merge=merge, checks=[running]), attest=True
@@ -7268,6 +7268,21 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
+    def test_a_review_requested_during_a_held_wait_ends_the_poll(self) -> None:
+        """A requested round is no longer held, so its checks are not what the wait is for."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        requested = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
+            attest=True,
+        )
+        self.answer(held, held, requested)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
     def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
         nodes = pr_review.check_nodes(
             payload(
@@ -7282,6 +7297,7 @@ class TestCli(GqlCase):
                     status_context("ci/building", state="PENDING"),
                     status_context("ci/expected", state="EXPECTED"),
                     status_context("ci/done"),
+                    {"__typename": "UnknownContext"},
                 ],
             )
         )

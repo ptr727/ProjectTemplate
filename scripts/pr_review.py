@@ -228,8 +228,9 @@ Subcommands
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead until none is still settling, and
-           one with no attestation exits 49 naming the `attest` step.
+           covered at once, so the wait polls its checks instead until none is still settling or
+           the merge reads CLEAN, UNSTABLE, or HAS_HOOKS, and one with no attestation exits 49
+           naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -244,8 +245,8 @@ Subcommands
            Exit 0 = review present, or on a held head an attested local pass with its checks
            settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a check not yet concluded or none posted, printed as
-           `status=CHECKS_PENDING`,
+           held head a check not yet concluded, or none posted while the wait was still inside the
+           pickup grace, printed as `status=CHECKS_PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -3375,8 +3376,8 @@ def held_checks_open(
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
     A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
-    GitHub's own reading, so a check nothing requires does not hold the wait. Otherwise a check
-    still settling holds it, and so does a rollup carrying no check at all inside the pickup
+    GitHub's own reading, so on such a merge a check nothing requires does not hold the wait.
+    Otherwise every check still settling holds it, required or not, and so does a rollup carrying no check at all inside the pickup
     grace, since that is a push whose check suites have not registered yet.
     """
     if pr.get("mergeStateStatus") in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
@@ -5316,7 +5317,7 @@ def main(argv: list[str] | None = None) -> int:
             "has reviewed it already, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, until none is "
-            "still settling."
+            "still settling or the merge reads CLEAN, UNSTABLE, or HAS_HOOKS."
         )
         i = 0
         final = gql(Q_FULL, owner, repo, a.number)
@@ -5444,8 +5445,8 @@ def main(argv: list[str] | None = None) -> int:
         if covered and held_checks_open(final, checks, now, waited, a.check_grace, a.check_stall):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded or none had posted yet, so the merge is not "
-                "ready yet: wait again, or read the checks above"
+                "timeout a check had not concluded, or none had posted inside the pickup grace, "
+                "so the merge is not ready yet: wait again, or read the checks above"
             )
             return 30
         return 0
