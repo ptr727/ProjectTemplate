@@ -1865,12 +1865,12 @@ def files_shortfall(pr: dict) -> str:
 def files_unread(pr: dict) -> bool:
     """Whether the changed-file list is the reason a file table cannot stand in for this head.
 
-    Only a head that a round covers and states no coverage of sends the table reading here. The
-    list is used by the head's own table, or else by the newest carried one whose round names a
-    commit, which is the order `table_reading` reads them in.
-    `table_shortfall` is asked rather than restated, so a partial on record or a cut review
-    history re-reads nothing. An empty list counts as unread too. A diff that is really empty
-    costs one schedule of re-reads, where an empty list from a failed read decides the coverage.
+    The table reading runs only where a round covers the head and states no coverage. It reads
+    the head's own table first, and otherwise the newest tabled round, which counts only where
+    that round names a commit. This takes the table in that same order. `table_shortfall` is
+    asked rather than restated, so a partial on record or a cut review history re-reads nothing.
+    An empty list counts as unread too. A diff that is really empty costs one schedule of
+    re-reads, where an empty list from a failed read decides the coverage.
     """
     if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
         return False

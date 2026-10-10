@@ -3259,7 +3259,7 @@ class TestFileTableCarriesForward(CarryCase):
                 self.assertFalse(pr_review.files_unread(pr))
 
     def test_the_head_s_own_table_is_read_again_past_a_newer_round_naming_no_commit(self) -> None:
-        """The table reading takes the head's own table before any carried one, so must this."""
+        """The table reading takes the head's own table first, so the re-read check does too."""
         pr = self.tabled(head_body=summarized(["a.py", "b.py"], covers=""), files=[])
         newer = review(oid=OLD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="C")
         newer["commit"] = None
