@@ -7365,6 +7365,19 @@ class TestCli(GqlCase):
         self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
         self.assertIn("status=PENDING", self.out.getvalue())
 
+    def test_a_quota_reading_outranks_pending_after_a_mid_poll_request(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        requested = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
+            attest=True,
+        )
+        self.answer(held, held, held, requested)
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
+        self.assertNotIn("status=PENDING", self.out.getvalue())
+
     def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
         """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
         pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)

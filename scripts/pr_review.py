@@ -248,7 +248,7 @@ Subcommands
            held head a required check not yet concluded, any check while no required one has
            posted, none posted on a BLOCKED merge, or the merge still UNKNOWN, printed as
            `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
-           `status=PENDING`,
+           `status=PENDING` unless 46's or 47's quota reading outranks it,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
