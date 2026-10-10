@@ -7258,6 +7258,29 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_called_once()
 
+    def test_a_required_check_running_at_the_timeout_outranks_an_optional_failure(self) -> None:
+        """Waiting can still clear the merge, so the code is 30 rather than 44."""
+        optional = {**check(name="coverage", conclusion="FAILURE"), "isRequired": False}
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[optional, gate]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_an_empty_rollup_holds_only_a_blocked_merge(self) -> None:
+        """A conflicted pull request runs no `pull_request` workflow, so none is coming."""
+        for merge, code in (("BLOCKED", 30), ("UNKNOWN", 30), ("DIRTY", 0)):
+            with self.subTest(merge=merge):
+                pr = self.into(payload([review(oid=OLD)], merge=merge, checks=[]), attest=True)
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+
     def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
         """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
         optional = {
@@ -7340,6 +7363,7 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
         self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+        self.assertIn("status=PENDING", self.out.getvalue())
 
     def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
         nodes = pr_review.check_nodes(

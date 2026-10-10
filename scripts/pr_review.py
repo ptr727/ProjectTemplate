@@ -245,7 +245,7 @@ Subcommands
            Exit 0 = review present, or on a held head an attested local pass with its checks
            settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a check not yet concluded, or none posted inside --check-grace, printed as
+           held head a check not yet concluded, or none posted on a BLOCKED merge, printed as
            `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
            `status=PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
@@ -3358,23 +3358,20 @@ def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float
     """Every check still on its way to a conclusion that waiting can reach.
 
     A stuck check is left out, since its shape is the one no wait clears and polling it only runs
-    the timeout out. A finished check carrying no conclusion is in, since `check_shape` reads it
-    as still settling rather than as a verdict.
+    the timeout out. Of the rest, a check is settling where it has not passed, which leaves the
+    state taxonomy to `check_shape` alone.
     """
     return [
         n
         for n in nodes
         if not n.get("unreadable")
         and not check_shape(n, now, grace, stall)
-        and (
-            (n.get("state") or "") in NOT_STARTED | NOT_POSTED | {"IN_PROGRESS"}
-            or not n.get("conclusion")
-        )
+        and (n.get("conclusion") or "") not in CHECK_OK
     ]
 
 
 def held_checks_open(
-    pr: dict, nodes: list[dict], now: datetime, waited: float, grace: float, stall: float
+    pr: dict, nodes: list[dict], now: datetime, grace: float, stall: float
 ) -> bool:
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
@@ -3383,8 +3380,8 @@ def held_checks_open(
     BLOCKED merge carrying a stuck required check has its exit, 44, decided already, so nothing
     holds it. Otherwise a required check still settling holds it. So does any check still settling
     while no required check has posted, since a required aggregator behind `needs:` enters the
-    rollup only once its dependencies finish. A rollup carrying no check at all holds it inside the
-    check grace, since that is a push whose check suites have not registered yet.
+    rollup only once its dependencies finish. A rollup carrying no check at all holds it while the
+    merge reads BLOCKED or UNKNOWN, since that is a push whose check suites have not registered.
     """
     merge = pr.get("mergeStateStatus")
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
@@ -3398,7 +3395,7 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    return not nodes and waited < grace
+    return not nodes and merge in ("BLOCKED", "UNKNOWN")
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -5344,7 +5341,6 @@ def main(argv: list[str] | None = None) -> int:
                 final,
                 check_nodes(final),
                 datetime.now(UTC),
-                time.monotonic() - start,
                 a.check_grace,
                 a.check_stall,
             )
@@ -5431,6 +5427,13 @@ def main(argv: list[str] | None = None) -> int:
         # Only once the review itself is sound does a stuck required check decide the code.
         if verdict:
             return verdict
+        if covered and held_checks_open(final, checks, now, a.check_grace, a.check_stall):
+            print(
+                "status=CHECKS_PENDING an attested local pass covers this head, and by the "
+                "timeout a check had not concluded, or none had posted, so the merge is not "
+                "ready yet: wait again, or read the checks above"
+            )
+            return 30
         # The review loop closing is not the merge gate, and 0 alone was saying it was.
         # A wait ends the moment coverage lands, which leaves the checks mid-flight nearly always.
         # So a merely pending check is not this code, or the code would be the usual outcome.
@@ -5457,14 +5460,6 @@ def main(argv: list[str] | None = None) -> int:
                 "not read here, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
-        waited = time.monotonic() - start
-        if covered and held_checks_open(final, checks, now, waited, a.check_grace, a.check_stall):
-            print(
-                "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, or none had posted inside --check-grace, "
-                "so the merge is not ready yet: wait again, or read the checks above"
-            )
-            return 30
         return 0
     # A refusal before an answer, since it names the round that declined where 40 names none.
     # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
