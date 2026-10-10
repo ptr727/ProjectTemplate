@@ -14,8 +14,8 @@ The standard set holds only extensions that work without a separately installed 
 
 ## Language and Target Additions
 
-- **.NET / C#** (`dotnet.jsonc`): `ms-dotnettools.csdevkit`, `csharpier.csharpier-vscode`; format-on-save for `[csharp]` via CSharpier.
-- **Python** (`python.jsonc`): `ms-python.python`, `ms-python.vscode-pylance`, `charliermarsh.ruff`, `ms-python.mypy-type-checker`; format-on-save and import organization for `[python]` via Ruff.
+- **.NET / C#** (`dotnet.jsonc`): `ms-dotnettools.csdevkit` and `csharpier.csharpier-vscode`. Format-on-save for `[csharp]` runs via CSharpier.
+- **Python** (`python.jsonc`): `ms-python.python`, `ms-python.vscode-pylance`, `charliermarsh.ruff`, and `ms-python.mypy-type-checker`. Format-on-save and import organization for `[python]` run via Ruff.
 - **Docker** (`docker.jsonc`): `ms-azuretools.vscode-docker`.
 
 ## Settings

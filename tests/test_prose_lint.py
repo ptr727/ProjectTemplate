@@ -604,13 +604,17 @@ class TestSemicolon2(BaitCase):
             ),
         )
 
-    def test_a_colon_introduced_list_whose_items_carry_commas_keeps_its_semicolon(self) -> None:
-        """The colon arm earns its place: dropping it flagged this, the use the rule names.
+    def test_a_colon_that_explains_does_not_exempt_a_lone_semicolon(self) -> None:
+        """A colon and a comma once exempted any one semicolon after them, joining two clauses.
 
-        Measured over the tree, dropping it reported 14 further lines, and the shapes below are
-        what they were, so the arm is scoped rather than removed.
+        No structure tells an explanatory colon from a list colon, so a lone semicolon needs a
+        labeled item on each side of it. The colon arm let all four through.
         """
         for text in (
+            (
+                "The gate runs once, at merge: it reads the head, the base, and the label; "
+                "the result stays on the pull request.\n"
+            ),
             (
                 "Match the heading style: title case with short bind words (a, an, the, of); "
                 "hyphenated compounds capitalize both parts.\n"
@@ -619,9 +623,46 @@ class TestSemicolon2(BaitCase):
                 "- **Python** (the script profile): lint, format, and type check; "
                 "format-on-save and import organization via the formatter.\n"
             ),
+            (
+                "The gate runs once, at merge: it reads, checks, and records the label; "
+                "outputs: d and e.\n"
+            ),
         ):
             with self.subTest(text=text.split(":")[0]):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_lone_semicolon_between_labeled_items_keeps_its_place(self) -> None:
+        """A label marks a two-item list, in emphasis or code, or as a dotted or slashed name."""
+        for text in (
+            "Inputs: a, b, and c; **Outputs**: d and e.\n",
+            "Inputs: a, b, and c; **Outputs:** d and e.\n",
+            "Inputs: a, b, and c; `out` paths: d and e.\n",
+            "Guarantees: D1.1 holds, always; D1.2: the gate runs.\n",
+            "Inputs: a, b, and c; read/write paths: d and e.\n",
+        ):
+            with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_list_marker_is_not_part_of_the_first_label(self) -> None:
+        """A plain label opening a list item labels it, whichever marker opens the item."""
+        for marker in ("-", "*", "+", "1.", "1)", "> -"):
+            with self.subTest(marker=marker):
+                self.assertEqual(
+                    [], self.kinds(f"{marker} Inputs: a, b; outputs: c and d.\n", {"semicolon"})
+                )
+
+    def test_a_lone_semicolon_needs_a_label_on_each_side(self) -> None:
+        """A labeled pair still needs a colon and a comma, and these shapes are not labels."""
+        for text in (
+            "It runs on push, always; outputs: d and e.\n",
+            "Inputs: a; outputs: b.\n",
+            "Inputs: a, b, and c; the four word label: d and e.\n",
+            'Inputs: a, b; it says "stop": the run halts.\n',
+            "Inputs: a, b; e.g. this one: the run halts.\n",
+            "Inputs: a, b; see /tmp: the run halts.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_bullet_label_colon_inside_the_emphasis_is_the_same_opener(self) -> None:
         """`- **D3:**` and `- **D3**:` are one construct, and only one spelling was stripped."""
@@ -669,7 +710,7 @@ class TestSemicolon2(BaitCase):
         self.assertEqual(
             [],
             self.kinds(
-                "Pinned by path: a script, a hook (e.g. a shebang); vanilla files stay as they are.\n",
+                "Pinned by path: a script; a hook (e.g. a shebang); a config, as written.\n",
                 {"semicolon"},
             ),
         )

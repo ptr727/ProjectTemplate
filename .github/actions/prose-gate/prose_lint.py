@@ -5,7 +5,7 @@ markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose tha
 these rules, so nothing enforced them before this script. Rules implemented:
   charset        Non-ASCII judged against the three tiers the charset rule defines.
   charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
-  semicolon      No semicolon in prose, outside a list that already carries commas.
+  semicolon      No semicolon in prose, outside a series or labeled pair carrying a comma.
   dash           No spaced hyphen joining or interrupting a sentence.
   comment-wrap   One sentence per comment line, never wrapped and never two on a line.
   comment-case   A comment sentence starts with a capital, not a lowercase word.
@@ -48,7 +48,7 @@ from typing import NamedTuple, TypedDict
 RULES = {
     "charset": "a non-ASCII character its tier does not permit here",
     "charset-unknown": "non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics",
-    "semicolon": "a semicolon in prose, outside a list that already carries commas",
+    "semicolon": "a semicolon in prose, outside a series or labeled pair carrying a comma",
     "dash": "a spaced hyphen joining or interrupting a sentence",
     "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
     "comment-case": "a comment sentence opening in lowercase",
@@ -1045,6 +1045,11 @@ NUMERIC = re.compile(r"[0-9]")
 # The rule bans the construction, not a detectable subset, so a prose semicolon flags by default.
 # A pronoun-keyed pattern found 170 of 493 and missed every imperative splice.
 SEMICOLON = re.compile(r";")
+
+# A lone semicolon separates a list only between labeled items, as in `Inputs: a, b; outputs: c`.
+# A colon that explains rather than labels otherwise exempted the splice after it.
+LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
+LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
 # A compound word carries no spaces, and a range is digit-bounded.
@@ -2618,11 +2623,15 @@ def check_file(
                     # The sentence is the unit, since the list an exemption protects lives in one.
                     # Judged over a whole bullet, one colon exempted every semicolon after it.
                     for sentence in sentences(span):
-                        # A list keeps its semicolons, announced by a colon or a second separator.
+                        # A list keeps its semicolons, announced by a second separator or a label.
                         # The comma qualifies the list rather than one separator's position.
                         # An enumeration whose commas fall in a later item keeps every semicolon.
                         # Read positionally, it split one series and flagged that series' openers.
-                        listish = sentence.count(";") > 1 or ":" in sentence.split(";")[0]
+                        head, _, tail = sentence.partition(";")
+                        listish = sentence.count(";") > 1 or (
+                            LABELED_ITEM.match(LIST_MARKER.sub("", head, count=1)) is not None
+                            and LABELED_ITEM.match(tail) is not None
+                        )
                         if listish and "," in sentence:
                             continue
                         for _ in SEMICOLON.finditer(sentence):
