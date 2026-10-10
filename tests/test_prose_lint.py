@@ -628,7 +628,7 @@ class TestSemicolon2(BaitCase):
                 self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_lone_semicolon_between_labeled_items_keeps_its_place(self) -> None:
-        """A label after the separator marks a two-item list, in emphasis, code, or a dotted id."""
+        """A label marks a two-item list, in emphasis or code, or as a dotted or slashed name."""
         for text in (
             "Inputs: a, b, and c; **Outputs**: d and e.\n",
             "Inputs: a, b, and c; **Outputs:** d and e.\n",
