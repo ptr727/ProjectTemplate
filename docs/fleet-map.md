@@ -210,7 +210,7 @@ flowchart LR
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
 
 - **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
-- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `check-this-repo` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
+- **Resolution** - The cadence has one home, and the other place the row asked for points to it. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `check-this-repo` skill points there from its own "Refresh cadence" section, which keeps its own `--snapshot-only` refresh for the checkout it fetches and routes the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced (Closed)
 
