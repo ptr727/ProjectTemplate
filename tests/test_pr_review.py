@@ -6426,13 +6426,12 @@ class TestCli(GqlCase):
         self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
         self.assertIn("CHECK NOT PICKED UP", out)
 
-    def test_a_stuck_check_nothing_requires_does_not_take_forty_four(self) -> None:
-        """A rollup carries checks the ruleset does not require, four of six on a green run here.
+    def test_a_stuck_check_on_a_clean_merge_does_not_take_forty_four(self) -> None:
+        """`CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
 
-        So the code borrows GitHub's own reading of which checks gate a merge, and `CLEAN` proves
-        no required gate is outstanding whatever else the rollup is doing. Without that, a stuck
-        check nothing requires returns 44 on a mergeable pull request. Raised in review on this
-        change. The digest still names the check, so the narrower code costs the reader nothing.
+        The node carries no `isRequired`, which reads as required, so this pins the `BLOCKED`
+        half of the condition. The digest still names the check, so the narrower code costs the
+        reader nothing.
         """
         self.answer(
             payload(
@@ -6450,6 +6449,42 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("stuck=NOT_PICKED_UP", out)
         self.assertNotIn("status=CHECKS_NOT_MERGEABLE", out)
+
+    def test_only_a_required_stuck_check_on_a_blocked_merge_takes_forty_four(self) -> None:
+        """`BLOCKED` is also worn by an open thread, so it cannot say a stuck check is required.
+
+        The rollup's `isRequired` can, so a failed check it marks optional exits 0 on a merge
+        blocked for another reason, and the same check marked required still exits 44.
+        """
+        for required, code in ((False, 0), (True, 44)):
+            with self.subTest(required=required):
+                self.out.seek(0)
+                self.out.truncate()
+                failed = {**check(name="scan", conclusion="FAILURE"), "isRequired": required}
+                self.answer(payload([review()], merge="BLOCKED", checks=[failed]))
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7"]))
+                out = self.out.getvalue()
+                self.assertIn("stuck=FAILED", out)
+                self.assertEqual(code == 44, "status=CHECKS_NOT_MERGEABLE" in out)
+
+    def test_the_forty_four_line_names_only_the_required_stuck_check(self) -> None:
+        """The block above prints every stuck check, so the 44 line says which one is required.
+
+        Otherwise a reader fixes the optional failure the block lists first and meets 44 again.
+        """
+        optional = {**check(name="scan", conclusion="FAILURE"), "isRequired": False}
+        gate = {**check(name="gate", conclusion="FAILURE", suite=2), "isRequired": True}
+        self.answer(payload([review()], merge="BLOCKED", checks=[optional, gate]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        status = next(
+            line
+            for line in self.out.getvalue().splitlines()
+            if line.startswith("status=CHECKS_NOT_MERGEABLE")
+        )
+        self.assertIn("required stuck 'gate':", status)
+        self.assertNotIn("'scan'", status)
 
     def test_wait_exits_zero_where_a_check_is_merely_still_running(self) -> None:
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.

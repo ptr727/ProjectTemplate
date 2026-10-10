@@ -261,14 +261,14 @@ Subcommands
            head carrying a 50 a stuck check shows only in the digest. A 42 can
            be decided by an earlier round whose partial coverage carries to a head stating none,
            in which case the round the wait ended on is not the round the code came from.
-           44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no wait
-           clears: queued with nothing acting on it, expected and never posted, running far past
-           what the job costs, or failed, though on a held head a required check running long is
-           still polled, as 30 states. A check merely still running normally is not this and exits
-           0, or on a held head is polled while it can still move the merge, and neither is a stuck
-           check on a merge that is not BLOCKED, since the rollup carries checks no ruleset
-           requires. The digest reports the check in both cases, so a shape outside 44 is still
-           named rather than lost.
+           44 = the review loop closed, the merge reads BLOCKED, and a required check is in a shape
+           no wait clears: queued with nothing acting on it, expected and never posted, running far
+           past what the job costs, or failed, though on a held head a required check running long
+           is still polled, as 30 states. A check merely still running normally is not this and
+           exits 0, or on a held head is polled while it can still move the merge. Neither is a
+           stuck check its rollup node reads as not required, since the rollup carries checks no
+           ruleset requires, nor any stuck check on a merge that is not BLOCKED. The digest reports
+           the check in every case, so a shape outside 44 is still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
            printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
@@ -5454,24 +5454,22 @@ def main(argv: list[str] | None = None) -> int:
         # Only a shape no waiting clears earns it, which is what the stuck field already prints.
         # It is read from the same payload the digest was, so the two can never disagree.
         # A rollup carries checks the ruleset does not require, four of six on a green run here.
-        # So `BLOCKED` is required of the code as well, borrowing GitHub's own reading.
-        # That is cheaper than reading the ruleset's contexts over another call.
-        # Without it, a stuck check nothing requires returns 44 on a mergeable pull request.
-        # `CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
-        # The digest reports the check either way, so the narrower code costs the reader nothing.
-        if stuck and final.get("mergeStateStatus") == "BLOCKED":
-            # Worded as a coincidence rather than a cause.
-            # Nothing here proves the stuck check is what blocks the merge.
+        # So only a stuck check whose rollup node reads `isRequired` counts toward the code.
+        # Without that, a stuck optional check on a merge a thread blocks returns 44.
+        # `BLOCKED` is required as well, since `CLEAN` proves no required gate is outstanding.
+        # The digest reports every stuck check either way, so the narrower code costs nothing.
+        gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
+        if final.get("mergeStateStatus") == "BLOCKED" and gates:
+            # The block above prints optional stuck checks too, so the required ones are named.
+            # They need not be all that blocks it.
             # `BLOCKED` is also worn by an open thread or a missing approval.
-            # The rollup also carries checks no ruleset requires.
-            # So naming the check as the blocker would assert a link this cannot read.
-            # Both facts are true, and both are printed.
             print(
                 "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
-                "BLOCKED, and a check is in a shape waiting does not clear: read the block "
-                "above, since a starved check wants a re-run, an unposted one its poster, a "
-                "long one a judgment, and a failed one a fix. Which of them gates the merge is "
-                "not read here, because BLOCKED is also worn by a thread or a missing approval"
+                "BLOCKED, and a required check is in a shape waiting does not clear, "
+                f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
+                "block above, since a starved check wants a re-run, an unposted one its poster, "
+                "a long one a judgment, and a failed one a fix. It need not be all that blocks "
+                "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
         return 0
