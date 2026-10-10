@@ -3235,6 +3235,37 @@ class TestFileTableCarriesForward(CarryCase):
         self.assertFalse(pr_review.files_unread(self.tabled(head_body=self.FULL, files=[])))
         self.assertTrue(pr_review.files_unread(self.tabled(files=[])))
 
+    def test_a_file_list_no_table_could_use_is_not_read_again(self) -> None:
+        """Re-reading a list changes nothing where the table reading refuses before reaching it."""
+        untabled = payload(
+            [
+                review(oid=OLD, body=self.NONE, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE),
+            ],
+            files=[],
+        )
+        partial = self.tabled(files=[])
+        partial["reviews"]["nodes"].append(
+            review(oid=OLD, body=OVERVIEW + "\n" + COVERED.replace("3 out of", "2 out of"), rid="P")
+        )
+        cut = self.tabled(files=[])
+        cut["reviews"]["pageInfo"]["hasPreviousPage"] = True
+        unnamed = self.tabled(files=[])
+        unnamed["reviews"]["nodes"][0]["commit"] = None
+        cases = {"no table": untabled, "partial": partial, "cut": cut, "no commit": unnamed}
+        for name, pr in cases.items():
+            with self.subTest(name=name):
+                self.assertTrue(pr_review.files_shortfall(pr))
+                self.assertFalse(pr_review.files_unread(pr))
+
+    def test_the_head_s_own_table_is_read_again_past_a_newer_round_naming_no_commit(self) -> None:
+        """The table reading takes the head's own table first, so the re-read check does too."""
+        pr = self.tabled(head_body=summarized(["a.py", "b.py"], covers=""), files=[])
+        newer = review(oid=OLD, body=summarized(["a.py", "b.py"], covers=""), at=LATE, rid="C")
+        newer["commit"] = None
+        pr["reviews"]["nodes"].append(newer)
+        self.assertTrue(pr_review.files_unread(pr))
+
     def test_every_changed_file_list_the_table_cannot_match_is_unread(self) -> None:
         """The re-read and the table reading's reason share one predicate, arm by arm."""
         cases = {
