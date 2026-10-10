@@ -1046,9 +1046,9 @@ NUMERIC = re.compile(r"[0-9]")
 # A pronoun-keyed pattern found 170 of 493 and missed every imperative splice.
 SEMICOLON = re.compile(r";")
 
-# A lone semicolon separates a list only between labeled items, as in `Inputs: a; outputs: b`.
+# A lone semicolon separates a list only between labeled items, as in `Inputs: a, b; outputs: c`.
 # A colon that explains rather than labels otherwise exempted the splice after it.
-LABELED_ITEM = re.compile(r"^\s*[*_]*[\w`-]+(?:\s+[\w`-]+){0,2}[*_]*:(?:\s|$)")
+LABELED_ITEM = re.compile(r"^\s*[*_]*[\w`./\"-]+(?:\s+[\w`./\"-]+){0,2}[*_]*:[*_]*(?:\s|$)")
 
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
 # A compound word carries no spaces, and a range is digit-bounded.
