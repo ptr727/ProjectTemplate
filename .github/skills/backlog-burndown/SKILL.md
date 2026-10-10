@@ -170,9 +170,11 @@ for, and it binds harder than any throughput target.
   invisible to the round that has to respect it, and recording it on the issue is what makes the
   next bullet a read of durable state rather than of the orchestrator's memory.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
-  this round: the files changed by every open **feature** pull request on this repository (`gh pr
-  diff <number> --name-only` per open pull request), and the claim comments of every group still
-  holding a branch, parked groups from earlier rounds included. `git worktree list` reports the
+  this round: the files changed by every open **feature** pull request on this repository, and the
+  claim comments of every group still holding a branch, parked groups from earlier rounds included.
+  The open pull requests other than the `develop -> main` promotion pull request are listed by
+  `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main") | .number'`,
+  and `gh pr diff <number> --name-only` reads each one's files. `git worktree list` reports the
   registered worktrees and the branch checked out in each, which is not the same as every branch
   that exists, so pair it with `git branch -r`, after `git fetch --prune origin`, for one that was
   pushed and whose worktree is already gone, and with `git branch` for one that was never pushed
