@@ -900,6 +900,7 @@ BODY_USES = re.compile(r'uses:\s*(?P<ref>[A-Za-z0-9_.\-]+/[^\s`"\']+@[^\s`"\']+)
 # Those were a develop commit named as history, a SHA in quoted output, and two in another repo.
 # Nothing in the shape of a bare SHA separates one of those from a genuine claim.
 # Separating them by meaning is the similarity heuristic `spec/section-model.md` rejects.
+# A path arm measured on the same corpus did worse, flagging 54 of 215 backticked candidates, mostly bare basenames and other repos.
 # The verb is what makes a SHA a claim about this branch rather than a mention of one.
 # This alternation raises exactly one reference over the same 25, and that one is true.
 # The vocabulary is an inclusion list, so a phrasing nobody thought of costs a detection.
