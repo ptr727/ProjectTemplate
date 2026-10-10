@@ -543,9 +543,9 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     local ptypes norm
     # The walk/1 builtin arrived in jq 1.6, which the declared floor makes available, and it is defined here rather than called so the filter also compiles below the floor.
     # A host on jq 1.5 would otherwise not degrade, it would fail to compile the filter.
-    # The keys_unsorted builtin the definition calls needs no such stand-in, since jq-1.5-1-a5b5cbe evaluates it where walk(.) fails to compile.
     # The check_ruleset function would then report drift on every parameterized rule it never actually compared.
     # That is the inverse of the false clean this comparison was written to close, so the portable definition is worth its length.
+    # The keys_unsorted builtin the definition calls needs no such stand-in, since jq-1.5-1-a5b5cbe evaluates it where walk(.) fails to compile.
     # shellcheck disable=SC2016  # $in and $k are jq's variables, not shell expansions
     norm='def w(f): . as $in
             | if type == "object" then reduce keys_unsorted[] as $k ({}; . + { ($k): ($in[$k] | w(f)) }) | f
