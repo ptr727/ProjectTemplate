@@ -7230,7 +7230,7 @@ class TestCli(GqlCase):
         slept.assert_not_called()
 
     def test_a_failed_check_ends_the_poll_while_another_still_runs(self) -> None:
-        """The 44 is decided by the failure, so waiting on the running check changes nothing."""
+        """A BLOCKED merge carrying a stuck check is the 44 the review path returns too."""
         running = check(name="test", status="IN_PROGRESS", conclusion="", started=real_ago(60))
         failed = check(name="lint", conclusion="FAILURE", started=real_ago(60))
         pr = self.into(
@@ -7241,6 +7241,51 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(44, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
+
+    def test_an_optional_failure_does_not_end_the_poll_on_a_required_check(self) -> None:
+        optional = {**check(name="lint", conclusion="FAILURE"), "isRequired": False}
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        blocked = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[optional, gate]), attest=True
+        )
+        passed = self.into(
+            payload([review(oid=OLD)], merge="UNSTABLE", checks=[optional, check(name="gate")]),
+            attest=True,
+        )
+        self.answer(blocked, blocked, blocked, passed)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+
+    def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
+        """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
+        optional = {
+            **check(name="coverage", status="IN_PROGRESS", conclusion="", started=real_ago(60)),
+            "isRequired": False,
+        }
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[check(name="gate"), optional]),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_optional_checks_hold_until_a_required_one_posts(self) -> None:
+        """A required aggregator behind `needs:` is absent until the jobs it waits on finish."""
+        optional = {
+            **check(name="lint", status="IN_PROGRESS", conclusion="", started=real_ago(60)),
+            "isRequired": False,
+        }
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[optional]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
     def test_an_unattested_held_head_is_not_polled_for_its_checks(self) -> None:
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))

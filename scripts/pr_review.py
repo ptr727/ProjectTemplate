@@ -228,9 +228,9 @@ Subcommands
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead until none is still settling or
-           the merge reads CLEAN, UNSTABLE, or HAS_HOOKS, and one with no attestation exits 49
-           naming the `attest` step.
+           covered at once, so the wait polls its checks instead until no required check is still
+           settling, any check holding it until a required one posts, or the merge reads CLEAN,
+           UNSTABLE, or HAS_HOOKS, and one with no attestation exits 49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -245,8 +245,9 @@ Subcommands
            Exit 0 = review present, or on a held head an attested local pass with its checks
            settled as far as the rollup window reads them, or with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, 30 = still pending at timeout (pending is not failure), on a
-           held head a check not yet concluded, or none posted while the wait was still inside the
-           pickup grace, printed as `status=CHECKS_PENDING`,
+           held head a check not yet concluded, or none posted inside --check-grace, printed as
+           `status=CHECKS_PENDING`, or a round requested while the held poll ran, printed as
+           `status=PENDING`,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -865,9 +866,9 @@ query($o:String!,$r:String!,$n:Int!){
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ name status conclusion startedAt
+        ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
-        ... on StatusContext{ context state createdAt }
+        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}}}}
   }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW)).replace("__FILES_WINDOW__", str(FILES_WINDOW))
@@ -3245,6 +3246,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "state": n.get("status") or "",
                     "conclusion": n.get("conclusion") or "",
                     "since": n.get("startedAt") or "",
+                    "required": n.get("isRequired") is not False,
                 }
             )
         elif n.get("__typename") == "StatusContext":
@@ -3261,6 +3263,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "state": "IN_PROGRESS" if state == "PENDING" else state,
                     "conclusion": state,
                     "since": n.get("createdAt") or "",
+                    "required": n.get("isRequired") is not False,
                 }
             )
         else:
@@ -3377,17 +3380,25 @@ def held_checks_open(
 
     A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
     GitHub's own reading, so on such a merge a check nothing requires does not hold the wait. A
-    BLOCKED merge carrying a stuck check has its exit, 44, decided already, so nothing holds it.
-    Otherwise every check still settling holds it, required or not, and so does a rollup carrying
-    no check at all inside the pickup grace, since that is a push whose check suites have not
-    registered yet.
+    BLOCKED merge carrying a stuck required check has its exit, 44, decided already, so nothing
+    holds it. Otherwise a required check still settling holds it. So does any check still settling
+    while no required check has posted, since a required aggregator behind `needs:` enters the
+    rollup only once its dependencies finish. A rollup carrying no check at all holds it inside the
+    check grace, since that is a push whose check suites have not registered yet.
     """
     merge = pr.get("mergeStateStatus")
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
         return False
-    if merge == "BLOCKED" and checks_stuck(nodes, now, grace, stall):
+    if merge == "BLOCKED" and any(
+        n.get("required") for n, _ in checks_stuck(nodes, now, grace, stall)
+    ):
         return False
-    return bool(checks_settling(nodes, now, grace, stall)) or (not nodes and waited < grace)
+    settling = checks_settling(nodes, now, grace, stall)
+    if any(n.get("required") for n in settling):
+        return True
+    if settling and not any(n.get("required") for n in nodes):
+        return True
+    return not nodes and waited < grace
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -5321,8 +5332,8 @@ def main(argv: list[str] | None = None) -> int:
             "note: this pull request merges into a branch other than the default and Copilot "
             "has reviewed it already, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
-            "for a round anyway. An attested head has its checks polled instead, until none is "
-            "still settling or the merge reads CLEAN, UNSTABLE, or HAS_HOOKS."
+            "for a round anyway. An attested head has its checks polled instead, until no "
+            "required check is still settling or the merge reads CLEAN, UNSTABLE, or HAS_HOOKS."
         )
         i = 0
         final = gql(Q_FULL, owner, repo, a.number)
@@ -5450,7 +5461,7 @@ def main(argv: list[str] | None = None) -> int:
         if covered and held_checks_open(final, checks, now, waited, a.check_grace, a.check_stall):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, or none had posted inside the pickup grace, "
+                "timeout a check had not concluded, or none had posted inside --check-grace, "
                 "so the merge is not ready yet: wait again, or read the checks above"
             )
             return 30
