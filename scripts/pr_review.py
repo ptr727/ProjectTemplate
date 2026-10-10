@@ -3464,16 +3464,24 @@ def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     return sum(1 for n in read if (n.get("conclusion") or "") in CHECK_OK), len(read)
 
 
+def liveness(pr: dict, min_rounds: int = 0) -> tuple[bool, dict | None, list[str]]:
+    """Return (head_review_done, answered_outside_review, reviewer_login_drift) off one payload.
+
+    These are the three readings `wait`'s Copilot poll stops on. Its first evaluation and every
+    re-read both come here, so a reading added to one cannot be missing from the other. A
+    drifted login matches no filter, so `head_review_done` stays false however long the wait
+    runs, and waiting it out reports a review that landed as one that never did. `Q_LIVE`
+    carries the authors, so the drift costs the poll no extra call. A `min_rounds` of 0 reads
+    as `reviewed_head`.
+    """
+    return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
+
+
 def live_state(
     owner: str, repo: str, num: int, min_rounds: int = 0
 ) -> tuple[bool, dict | None, list[str]]:
-    """Return (head_review_done, answered_outside_review, reviewer_login_drift) off one `Q_LIVE`.
-
-    These are the three readings `wait`'s Copilot poll stops on, re-read on every iteration
-    because a push during the wait moves the head. A `min_rounds` of 0 reads as `reviewed_head`.
-    """
-    pr = gql(Q_LIVE, owner, repo, num)
-    return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
+    """Return `liveness` off one fresh `Q_LIVE`, since a push during the wait moves the head."""
+    return liveness(gql(Q_LIVE, owner, repo, num), min_rounds)
 
 
 def heading_of(block: str) -> str:
@@ -5319,16 +5327,12 @@ def main(argv: list[str] | None = None) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
-    done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
+    done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
         full = gql(Q_FULL, owner, repo, a.number)
         if refusing_review(full) and not reviewed_head(full):
             a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
             done = False
-    # A drifted login matches no filter here, so `done` stays false however long this runs.
-    # Waiting it out reports a review that landed as one that never did, at the timeout.
-    # The liveness query carries the authors, so this costs the loop no extra call.
-    drift = reviewer_login_drift(pr)
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
@@ -5402,7 +5406,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
 
-        last_full = [gql(Q_FULL, owner, repo, a.number)]
+        assert snapshot is not None
+        last_full = [snapshot]
 
         def held_read() -> dict:
             polled = gql(Q_HELD, owner, repo, a.number)

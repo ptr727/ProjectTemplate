@@ -559,6 +559,16 @@ class TestLiveState(GqlCase):
         self.answer(payload([{"author": None, "state": "COMMENTED", "commit": None}]))
         self.assertEqual((False, None, []), pr_review.live_state("o", "r", 1))
 
+    def test_a_poll_reads_the_same_three_readings_its_payload_gives(self) -> None:
+        for label, pr in (
+            ("on head", payload([review()])),
+            ("stale", payload([review(oid=OLD)])),
+            ("answered outside", payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)])),
+        ):
+            with self.subTest(case=label):
+                self.answer(pr)
+                self.assertEqual(pr_review.liveness(pr), pr_review.live_state("o", "r", 1))
+
 
 class TestAnsweredOutsideReview(unittest.TestCase):
     """A refusal answers the request without covering the head, so a wait cannot read it as pending."""
@@ -7149,6 +7159,19 @@ class TestCli(GqlCase):
         """A liveness payload, whose reviews carry no body, as `Q_LIVE` asks for none."""
         return payload([{k: v for k, v in review(oid=oid).items() if k != "body"}])
 
+    def test_the_first_stop_reading_and_every_poll_share_one_helper(self) -> None:
+        """A stop reading added to one site and not the other splits the first decision off."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD), review(rid="PRR_new")]),
+        )
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        spy = self.enterContext(mock.patch.object(pr_review, "liveness", wraps=pr_review.liveness))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(slept.call_count + 1, spy.call_count)
+
     def test_a_pending_request_past_an_error_round_is_still_polled_for(self) -> None:
         """The stop withholds a request, and a review already on its way still lands."""
         self.answer(
@@ -7259,7 +7282,7 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
         )
         green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
-        self.answer(pending, pending, pending, green)
+        self.answer(pending, pending, green)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
@@ -7299,7 +7322,7 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="UNSTABLE", checks=[optional, check(name="gate")]),
             attest=True,
         )
-        self.answer(blocked, blocked, blocked, passed)
+        self.answer(blocked, blocked, passed)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
@@ -7392,20 +7415,14 @@ class TestCli(GqlCase):
         """
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
         green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
-        self.answer(empty, empty, empty, green)
+        self.answer(empty, empty, green)
         gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7"]))
         queries = [c.args[0] for c in gql.call_args_list]
         self.assertEqual(
-            [
-                pr_review.Q_LIVE,
-                pr_review.Q_FULL,
-                pr_review.Q_FULL,
-                pr_review.Q_HELD,
-                pr_review.Q_FULL,
-            ],
+            [pr_review.Q_LIVE, pr_review.Q_FULL, pr_review.Q_HELD, pr_review.Q_FULL],
             queries,
         )
         self.out.seek(0)
@@ -7417,8 +7434,7 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_not_called()
         self.assertEqual(
-            [pr_review.Q_LIVE, pr_review.Q_FULL, pr_review.Q_FULL],
-            [c.args[0] for c in gql.call_args_list],
+            [pr_review.Q_LIVE, pr_review.Q_FULL], [c.args[0] for c in gql.call_args_list]
         )
 
     def test_a_held_poll_stops_only_on_a_full_read_that_agrees(self) -> None:
@@ -7432,7 +7448,7 @@ class TestCli(GqlCase):
         unknown = self.into(
             payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True
         )
-        self.answer(empty, empty, empty, green, unknown, green)
+        self.answer(empty, empty, green, unknown, green)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
@@ -7466,7 +7482,7 @@ class TestCli(GqlCase):
         """A wait run right after the push reads an empty rollup, which is CI not started."""
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
         green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
-        self.answer(empty, empty, empty, green)
+        self.answer(empty, empty, green)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
@@ -7487,7 +7503,7 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
             attest=True,
         )
-        self.answer(held, held, held, requested)
+        self.answer(held, held, requested)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "1"]))
@@ -7502,7 +7518,7 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
             attest=True,
         )
-        self.answer(held, held, held, requested)
+        self.answer(held, held, requested)
         self.wire_history([hist_review(962, QUOTA_REFUSED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
@@ -7549,7 +7565,7 @@ class TestCli(GqlCase):
         held = self.into(rounds, attest=True)
         held["comments"]["nodes"].append(comment(at=LATE))
         requested = {**held, "reviewRequests": payload([], pending=True)["reviewRequests"]}
-        self.answer(held, held, held, requested)
+        self.answer(held, held, requested)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(40, self.cli(["wait", "7", "--timeout", "1"]))
@@ -7571,7 +7587,7 @@ class TestCli(GqlCase):
             payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
         )
         moved["headRefOid"] = "c" * 40
-        self.answer(held, held, held, moved)
+        self.answer(held, held, moved)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
@@ -7586,7 +7602,7 @@ class TestCli(GqlCase):
         blocked = self.into(
             payload([review(oid=OLD)], merge="BLOCKED", checks=[failed]), attest=True
         )
-        self.answer(unknown, unknown, unknown, blocked)
+        self.answer(unknown, unknown, blocked)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(44, self.cli(["wait", "7"]))
@@ -7673,12 +7689,15 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def test_a_push_during_a_held_wait_grades_the_new_head(self) -> None:
-        """An attestation of the head read first does not cover the head the verdict reads."""
+    def test_a_hold_decided_on_a_pushed_unattested_head_grades_that_head(self) -> None:
+        """A push before the snapshot read moves the head the hold is decided for.
+
+        No local pass attests the moved head, so the verdict is 49 and nothing is requested.
+        """
         first = self.into(payload([review(oid=OLD)]), attest=True)
         moved = self.into(payload([review(oid=OLD)]), attest=True)
         moved["headRefOid"] = "c" * 40
-        self.answer(first, first, moved)
+        self.answer(first, moved)
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(49, self.cli(["wait", "7", "--timeout", "0"]))
