@@ -49,6 +49,15 @@ def flowed_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def comment_flowed_text(text: str) -> str:
+    """Strip each line's leading `#` marker, then collapse as `flowed_text` does.
+
+    A `#` comment that rewraps gains a marker on its new line as well as a newline, so
+    collapsing whitespace alone leaves the marker between two words of a pinned phrase.
+    """
+    return flowed_text(" ".join(line.lstrip().removeprefix("#") for line in text.splitlines()))
+
+
 HEAD = "a" * 40
 OLD = "b" * 40
 
@@ -4284,9 +4293,19 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
+    def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
+        """Collapsing whitespace alone would leave the second line's marker inside the phrase."""
+        wrapped = (
+            "x = 1\n    # the output is regular: 10 headings, 10\n    # summaries and 4 labels.\n"
+        )
+        self.assertIn(
+            "the output is regular: 10 headings, 10 summaries and 4 labels.",
+            comment_flowed_text(wrapped),
+        )
+
     def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
         """The comment states the sizes, and adding an entry without it is how it goes stale."""
-        source = Path(pr_review.__file__).read_text(encoding="utf-8")
+        source = comment_flowed_text(Path(pr_review.__file__).read_text(encoding="utf-8"))
         stated = re.search(
             r"the output is regular: (\d+) headings, (\d+) summaries and (\d+) labels", source
         )
@@ -8378,7 +8397,7 @@ class TestClaimsIsReadOnly(unittest.TestCase):
     def test_a_ref_is_matched_as_bytes_so_an_undecodable_file_is_still_searched(self) -> None:
         """Skipping a file this cannot decode is how a present ref reads as absent."""
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
-        self.assertIn("n in blob", source)
+        self.assertIn("n in blob", flowed_text(source))
 
     def test_an_absent_status_is_absence_and_a_rate_limit_is_not(self) -> None:
         """Reading a 403 as a missing commit reports a correct description as contradicting itself."""
@@ -8647,9 +8666,10 @@ class TestContract(unittest.TestCase):
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
-        delays = [
-            int(n) for n in source.split("delays = [")[1].split("]")[0].replace(" ", "").split(",")
-        ]
+        assigned = re.search(r"\bdelays\b[^=\n]*=\s*\[([^\]]*)\]", source)
+        if assigned is None:
+            self.fail("the backoff delays list assignment is no longer in pr_review.py")
+        delays = [int(n) for n in assigned.group(1).replace(" ", "").split(",") if n.strip()]
         self.assertGreaterEqual(len(delays), 3)
         self.assertTrue(all(d > 0 for d in delays))
         self.assertEqual(delays, sorted(delays))
