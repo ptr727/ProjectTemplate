@@ -322,8 +322,8 @@ silent pass, a letter of a recorded name excepted per the bullet below.
   before using it. A letter of a recorded name is the one exception, per the bullet above.
 - **No semicolon in agent-authored prose.** Recast a mid-sentence semicolon as a comma or as two
   sentences. A semicolon separating items in a list that already contains commas, or a statement
-  terminator in code, is unaffected. A single semicolon separates a list only between two labeled
-  items in running text, as in `Inputs: a, b; outputs: c`.
+  terminator in code, is unaffected. A single semicolon separates such a list only between two
+  labeled items, as in `Inputs: a, b; outputs: c`, and a bullet's opening `**Label**:` is not one.
 - **No spaced hyphen joining or interrupting a sentence** (` - `, or the paired aside ` - x - `).
   Recast as a comma, two sentences, or parentheses. A hyphen inside a compound word, a leading
   list marker, a range, and the `- **Label** - explanation` bullet separator are unaffected.
