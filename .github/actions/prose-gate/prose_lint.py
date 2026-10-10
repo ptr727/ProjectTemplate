@@ -2629,7 +2629,7 @@ def check_file(
                         # Read positionally, it split one series and flagged that series' openers.
                         head, _, tail = sentence.partition(";")
                         listish = sentence.count(";") > 1 or (
-                            LABELED_ITEM.match(head) is not None
+                            LABELED_ITEM.match(LIST_MARKER.sub("", head, count=1)) is not None
                             and LABELED_ITEM.match(tail) is not None
                         )
                         if listish and "," in sentence:

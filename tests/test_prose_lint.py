@@ -608,7 +608,7 @@ class TestSemicolon2(BaitCase):
         """A colon and a comma once exempted any one semicolon after them, joining two clauses.
 
         No structure tells an explanatory colon from a list colon, so a lone semicolon needs a
-        labeled item on each side of it. The colon arm let the first three through.
+        labeled item on each side of it. The colon arm let all four through.
         """
         for text in (
             (
@@ -643,15 +643,23 @@ class TestSemicolon2(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
 
+    def test_a_list_marker_is_not_part_of_the_first_label(self) -> None:
+        """A plain label opening a list item labels it, whichever marker opens the item."""
+        for marker in ("-", "*", "+", "1.", "1)", "> -"):
+            with self.subTest(marker=marker):
+                self.assertEqual(
+                    [], self.kinds(f"{marker} Inputs: a, b; outputs: c and d.\n", {"semicolon"})
+                )
+
     def test_a_lone_semicolon_needs_a_label_on_each_side(self) -> None:
         """A labeled pair still needs a colon and a comma, and these shapes are not labels."""
         for text in (
             "It runs on push, always; outputs: d and e.\n",
             "Inputs: a; outputs: b.\n",
             "Inputs: a, b, and c; the four word label: d and e.\n",
-            'It runs, at merge: it gates; it says "stop": the run halts.\n',
-            "It runs, at merge: it gates; e.g. this one: the run halts.\n",
-            "It runs, at merge: it gates; see /tmp: the run halts.\n",
+            'Inputs: a, b; it says "stop": the run halts.\n',
+            "Inputs: a, b; e.g. this one: the run halts.\n",
+            "Inputs: a, b; see /tmp: the run halts.\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
