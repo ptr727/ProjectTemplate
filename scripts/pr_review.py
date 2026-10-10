@@ -855,17 +855,12 @@ mutation($pr:ID!,$bot:ID!){
 # The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
 # It is asked of the last commit because a rollup hangs off a commit object.
 # A case holds that commit equal to `headRefOid`, since a rollup a push ago still renders whole.
-Q_FULL = """
-query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){ pullRequest(number:$n){
+HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
-    reviewThreads(first:100){ nodes{ id isResolved
-      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
@@ -873,8 +868,19 @@ query($o:String!,$r:String!,$n:Int!){
           checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}}}}
+""".replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
+Q_HELD = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__ }}}
+""".replace("__HELD_FIELDS__", HELD_FIELDS)
+Q_FULL = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
+    reviewThreads(first:100){ nodes{ id isResolved
+      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
   }}}
-""".replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW)).replace("__FILES_WINDOW__", str(FILES_WINDOW))
+""".replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -4776,6 +4782,30 @@ def local_cover(pr: dict) -> bool:
     )
 
 
+POLL_DELAYS = (15, 20, 30, 45, 60, 120)
+
+
+def backoff[T](
+    value: T, read: Callable[[], T], keep: Callable[[T], bool], start: float, timeout: float
+) -> T:
+    """Re-read `value` on the `POLL_DELAYS` schedule while `keep` holds and `timeout` allows.
+
+    `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked
+    before each sleep, so the poll can run past it by up to one delay. Returns the last value
+    read, or `value` itself where the poll never sleeps.
+
+    One loop for both of `wait`'s polls, since a fix to the bound or the schedule applied to one
+    inline copy and not the other is a wait that times out differently depending on its arm.
+    The backoff runs in-process, so the whole wait costs one agent turn.
+    """
+    i = 0
+    while keep(value) and time.monotonic() - start <= timeout:
+        time.sleep(POLL_DELAYS[min(i, len(POLL_DELAYS) - 1)])
+        i += 1
+        value = read()
+    return value
+
+
 def reply_to_thread(
     owner: str,
     repo: str,
@@ -5277,8 +5307,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"status=OUT_OF_SCOPE nothing was written: {why}")
         return 64
 
-    # In-process backoff, so the whole wait costs one agent turn.
-    delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
     done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
@@ -5326,7 +5354,7 @@ def main(argv: list[str] | None = None) -> int:
         and not reviewer_requested(pr)
     ):
         line, recorded = request_copilot_review(
-            owner, repo, a.number, pr["id"], copilot_bot_id(history), delays[0]
+            owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
         )
         if recorded is False:
             final = gql(Q_FULL, owner, repo, a.number)
@@ -5349,24 +5377,24 @@ def main(argv: list[str] | None = None) -> int:
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
         )
-        i = 0
-        final = gql(Q_FULL, owner, repo, a.number)
-        while (
-            holds(final)
-            and local_cover(final)
-            and not unrecognized_shapes(final)
-            and held_checks_open(
-                final,
-                check_nodes(final),
-                datetime.now(UTC),
-                a.check_grace,
-                a.check_stall,
-            )
-            and time.monotonic() - start <= a.timeout
-        ):
-            time.sleep(delays[min(i, len(delays) - 1)])
-            i += 1
-            final = gql(Q_FULL, owner, repo, a.number)
+        backoff(
+            gql(Q_HELD, owner, repo, a.number),
+            lambda: gql(Q_HELD, owner, repo, a.number),
+            lambda polled: (
+                holds(polled)
+                and local_cover(polled)
+                and not unrecognized_shapes(polled)
+                and held_checks_open(
+                    polled,
+                    check_nodes(polled),
+                    datetime.now(UTC),
+                    a.check_grace,
+                    a.check_stall,
+                )
+            ),
+            start,
+            a.timeout,
+        )
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "
@@ -5387,17 +5415,16 @@ def main(argv: list[str] | None = None) -> int:
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
         )
     else:
-        i = 0
-        while not done and not answer and not drift:
-            elapsed = time.monotonic() - start
-            if elapsed > a.timeout:
-                break
-            time.sleep(delays[min(i, len(delays) - 1)])
-            i += 1
-            # Re-read head each iteration: a push during the wait moves it.
-            pr = gql(Q_LIVE, owner, repo, a.number)
-            done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
-            drift = reviewer_login_drift(pr)
+
+        def live() -> tuple[bool, dict | None, list[str]]:
+            polled = gql(Q_LIVE, owner, repo, a.number)
+            return (
+                head_review_done(polled, a.min_rounds),
+                answered_outside_review(polled),
+                reviewer_login_drift(polled),
+            )
+
+        backoff((done, answer, drift), live, lambda s: not any(s), start, a.timeout)
 
     # One payload decides the digest and the exit code together.
     # Read separately, a review landing between them prints coverage and returns a timeout code.
