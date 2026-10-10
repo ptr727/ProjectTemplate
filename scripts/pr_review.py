@@ -3464,10 +3464,16 @@ def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     return sum(1 for n in read if (n.get("conclusion") or "") in CHECK_OK), len(read)
 
 
-def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
-    """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
+def live_state(
+    owner: str, repo: str, num: int, min_rounds: int = 0
+) -> tuple[bool, dict | None, list[str]]:
+    """Return (head_review_done, answered_outside_review, reviewer_login_drift) off one `Q_LIVE`.
+
+    These are the three readings `wait`'s Copilot poll stops on, re-read on every iteration
+    because a push during the wait moves the head. A `min_rounds` of 0 reads as `reviewed_head`.
+    """
     pr = gql(Q_LIVE, owner, repo, num)
-    return pr["headRefOid"], reviewed_head(pr), answered_outside_review(pr)
+    return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
 
 
 def heading_of(block: str) -> str:
@@ -4785,9 +4791,13 @@ def local_cover(pr: dict) -> bool:
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)
 
 
-def backoff[T](
-    value: T, read: Callable[[], T], keep: Callable[[T], bool], start: float, timeout: float
-) -> T:
+def backoff[Polled](
+    value: Polled,
+    read: Callable[[], Polled],
+    keep: Callable[[Polled], bool],
+    start: float,
+    timeout: float,
+) -> Polled:
     """Re-read `value` on the `POLL_DELAYS` schedule while `keep` holds and `timeout` allows.
 
     `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked
@@ -5377,8 +5387,9 @@ def main(argv: list[str] | None = None) -> int:
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
         )
-        backoff(
-            gql(Q_HELD, owner, repo, a.number),
+        first = gql(Q_FULL, owner, repo, a.number)
+        polled = backoff(
+            first,
             lambda: gql(Q_HELD, owner, repo, a.number),
             lambda polled: (
                 holds(polled)
@@ -5395,6 +5406,7 @@ def main(argv: list[str] | None = None) -> int:
             start,
             a.timeout,
         )
+        final = first if polled is first else None
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "
@@ -5415,16 +5427,13 @@ def main(argv: list[str] | None = None) -> int:
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
         )
     else:
-
-        def live() -> tuple[bool, dict | None, list[str]]:
-            polled = gql(Q_LIVE, owner, repo, a.number)
-            return (
-                head_review_done(polled, a.min_rounds),
-                answered_outside_review(polled),
-                reviewer_login_drift(polled),
-            )
-
-        backoff((done, answer, drift), live, lambda s: not any(s), start, a.timeout)
+        backoff(
+            (done, answer, drift),
+            lambda: live_state(owner, repo, a.number, a.min_rounds),
+            lambda s: not any(s),
+            start,
+            a.timeout,
+        )
 
     # One payload decides the digest and the exit code together.
     # Read separately, a review landing between them prints coverage and returns a timeout code.

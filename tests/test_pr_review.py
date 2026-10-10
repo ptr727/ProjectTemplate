@@ -552,12 +552,12 @@ class TestLiveState(GqlCase):
         ):
             with self.subTest(case=label):
                 self.answer(payload(reviews))
-                self.assertEqual((HEAD, want, None), pr_review.live_state("o", "r", 1))
+                self.assertEqual((want, None, []), pr_review.live_state("o", "r", 1))
 
     def test_a_null_author_or_commit_does_not_raise(self) -> None:
         """GraphQL returns null for a deleted account, and a crash there stalls the whole wait."""
         self.answer(payload([{"author": None, "state": "COMMENTED", "commit": None}]))
-        self.assertEqual((HEAD, False, None), pr_review.live_state("o", "r", 1))
+        self.assertEqual((False, None, []), pr_review.live_state("o", "r", 1))
 
 
 class TestAnsweredOutsideReview(unittest.TestCase):
@@ -7386,7 +7386,10 @@ class TestCli(GqlCase):
                 slept.assert_not_called()
 
     def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
-        """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`."""
+        """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
+
+        A poll that never sleeps grades its first read, so the narrow query costs it no call.
+        """
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
         green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
         self.answer(empty, empty, empty, green)
@@ -7399,11 +7402,23 @@ class TestCli(GqlCase):
             [
                 pr_review.Q_LIVE,
                 pr_review.Q_FULL,
-                pr_review.Q_HELD,
+                pr_review.Q_FULL,
                 pr_review.Q_HELD,
                 pr_review.Q_FULL,
             ],
             queries,
+        )
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(green)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+        self.assertEqual(
+            [pr_review.Q_LIVE, pr_review.Q_FULL, pr_review.Q_FULL],
+            [c.args[0] for c in gql.call_args_list],
         )
 
     def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
