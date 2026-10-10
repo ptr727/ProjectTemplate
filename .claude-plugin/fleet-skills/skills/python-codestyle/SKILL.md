@@ -77,12 +77,13 @@ than one checker is normal when each serves a purpose (the .NET side pairs CShar
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
 editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
-command joins the clean-compile. The hub validator runs one checker in each Python directory,
-mypy where both are configured. A repo enforcing pyright beside mypy runs it from its own
-`.github/actions/validate/action.yml` hook. That hook starts from a bare checkout, so it sets up
-its own Python environment. mypy may also be a build repo's only CI checker, run with its strict
-flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A pyright-only
-repo is the lightest and is inherently consistent, since the editor and CI run one engine.
+command joins the clean-compile. The hub validator runs at most one checker in each Python
+directory, mypy where both are configured. A repo enforcing pyright beside mypy runs pyright from
+its own `.github/actions/validate/action.yml` hook. That hook starts from a bare checkout, so it
+sets up its own Python environment. mypy may also be a build repo's only CI checker, run with its
+strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A
+pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
+engine.
 
 ## Local development loop
 
@@ -232,10 +233,10 @@ Before pushing or opening a PR:
 - VS Code's Problems pane should be quiet for the files you touched. The relevant linters are ruff
   (via the `charliermarsh.ruff` extension) and pyright (via the `ms-python.python` extension's
   bundled Pylance).
-- The **build**-profile CI gate, in its uv form, is `uv run ruff check`,
-  `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy`), and
-  `uv run pytest`, the same commands as the local loop above, run from the Python project directory
-  (invoked as separate steps, not `&&`-chained, so the runner shell is irrelevant). The pip form's
+- The **build**-profile CI gate, in its uv form, runs the local loop's commands above, each from
+  where that loop runs it. Those are `uv run ruff check`, `uv run ruff format --check`, the repo's
+  type checker, and `uv run pytest`. CI invokes them as separate steps, not `&&`-chained, so the
+  runner shell is irrelevant. The pip form's
   CI gate is its commands in the local loop above, and a **lint-only** profile's is its `uvx`
   equivalents plus its `unittest` suite, each per `references/profiles.md`. The local loop names
   what CI relaxes for an undeclared root.
