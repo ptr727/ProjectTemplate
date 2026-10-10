@@ -552,12 +552,12 @@ class TestLiveState(GqlCase):
         ):
             with self.subTest(case=label):
                 self.answer(payload(reviews))
-                self.assertEqual((HEAD, want, None), pr_review.live_state("o", "r", 1))
+                self.assertEqual((want, None, []), pr_review.live_state("o", "r", 1))
 
     def test_a_null_author_or_commit_does_not_raise(self) -> None:
         """GraphQL returns null for a deleted account, and a crash there stalls the whole wait."""
         self.answer(payload([{"author": None, "state": "COMMENTED", "commit": None}]))
-        self.assertEqual((HEAD, False, None), pr_review.live_state("o", "r", 1))
+        self.assertEqual((False, None, []), pr_review.live_state("o", "r", 1))
 
 
 class TestAnsweredOutsideReview(unittest.TestCase):
@@ -7385,6 +7385,83 @@ class TestCli(GqlCase):
                     self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
                 slept.assert_not_called()
 
+    def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
+        """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
+
+        A poll that never sleeps grades its first read, so the narrow query costs it no call.
+        """
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(empty, empty, empty, green)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        queries = [c.args[0] for c in gql.call_args_list]
+        self.assertEqual(
+            [
+                pr_review.Q_LIVE,
+                pr_review.Q_FULL,
+                pr_review.Q_FULL,
+                pr_review.Q_HELD,
+                pr_review.Q_FULL,
+            ],
+            queries,
+        )
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(green)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+        self.assertEqual(
+            [pr_review.Q_LIVE, pr_review.Q_FULL, pr_review.Q_FULL],
+            [c.args[0] for c in gql.call_args_list],
+        )
+
+    def test_a_held_poll_stops_only_on_a_full_read_that_agrees(self) -> None:
+        """A narrow read ending the poll is confirmed by the full read the verdict grades.
+
+        A merge reading UNKNOWN on that full read keeps the poll going, rather than returning 30
+        with time left on a payload the poll never judged.
+        """
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        unknown = self.into(
+            payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True
+        )
+        self.answer(empty, empty, empty, green, unknown, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(2, slept.call_count)
+
+    def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
+        """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(held)
+        served = pr_review.gql
+
+        def narrow(query: str, owner: str, repo: str, num: int) -> dict:
+            pr = served(query, owner, repo, num)
+            if query is pr_review.Q_HELD:
+                return {k: v for k, v in pr.items() if k not in ("reviewThreads", "files")}
+            return pr
+
+        self.enterContext(mock.patch.object(pr_review, "gql", side_effect=narrow))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        clock = iter([0.0, 0.0])
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: next(clock, 1e9)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_called_once()
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
     def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
         """A wait run right after the push reads an empty rollup, which is CI not started."""
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
@@ -9012,14 +9089,52 @@ class TestContract(unittest.TestCase):
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
-        source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
-        assigned = re.search(r"\bdelays\b[^=\n]*=\s*\[([^\]]*)\]", source)
-        if assigned is None:
-            self.fail("the backoff delays list assignment is no longer in pr_review.py")
-        delays = [int(n) for n in assigned.group(1).replace(" ", "").split(",") if n.strip()]
+        delays = list(pr_review.POLL_DELAYS)
         self.assertGreaterEqual(len(delays), 3)
         self.assertTrue(all(d > 0 for d in delays))
         self.assertEqual(delays, sorted(delays))
+
+    def test_the_backoff_sleeps_the_schedule_until_the_timeout(self) -> None:
+        """The last delay repeats, and the bound is read before each sleep rather than after.
+
+        Six sleeps reach 290 seconds and a seventh 410, so with a 400-second bound the eighth is
+        never taken.
+        """
+        clock = [0.0]
+        slept: list[int] = []
+
+        def sleep(seconds: int) -> None:
+            slept.append(seconds)
+            clock[0] += seconds
+
+        reads = iter(range(1, 100))
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(pr_review.time, "sleep", side_effect=sleep),
+        ):
+            last = pr_review.backoff(0, lambda: next(reads), lambda _: True, 0.0, 400)
+        self.assertEqual([15, 20, 30, 45, 60, 120, 120], slept)
+        self.assertEqual(7, last)
+
+    def test_the_backoff_returns_the_first_value_it_does_not_keep(self) -> None:
+        """A met condition ends the poll without a sleep, and a later one ends it on that read."""
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual("done", pr_review.backoff("done", str, lambda v: v != "done", 0.0, 9))
+        slept.assert_not_called()
+        reads = iter(["more", "done", "never"])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            last = pr_review.backoff("start", lambda: next(reads), lambda v: v != "done", 0.0, 1e9)
+        self.assertEqual("done", last)
+        self.assertEqual([mock.call(15), mock.call(20)], slept.call_args_list)
+
+    def test_the_held_poll_reads_neither_threads_nor_files(self) -> None:
+        """The poll re-reads every iteration, and only the final digest read needs the two."""
+        poll = " ".join(pr_review.Q_HELD.split())
+        self.assertNotIn("reviewThreads", poll)
+        self.assertNotIn("files(", poll)
+        self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
+        self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
+        self.assertIn("authorAssociation createdAt body", poll)
 
 
 class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
