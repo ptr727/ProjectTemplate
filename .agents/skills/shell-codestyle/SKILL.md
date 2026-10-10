@@ -70,8 +70,8 @@ depend on Python either. Everything else is Python, with a test under its own sc
 - **`shellcheck` clean, and a deliberate exception carries its reason inline.** A
   `# shellcheck disable=SCxxxx` names why the rule does not apply here, so the next reader can
   tell a considered exception from an unread warning. The hub's own `repo-config/configure.sh` is
-  the worked example, carrying `SC2016` disables where a single-quoted `jq` program must stay
-  unexpanded, each with its reason on the same line.
+  the worked example. Its `SC2016` disables sit only where shellcheck flags a single-quoted `jq`
+  program or GraphQL query that must stay unexpanded. Each carries its reason on the same line.
 - **Comments say why, never what.** The code states what it does. A comment restating it goes
   stale silently, where a comment carrying a reason fails visibly when the reason stops being
   true.
