@@ -7689,8 +7689,11 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def test_a_push_during_a_held_wait_grades_the_new_head(self) -> None:
-        """An attestation of the head read first does not cover the head the verdict reads."""
+    def test_a_hold_decided_on_a_pushed_unattested_head_grades_that_head(self) -> None:
+        """A push before the snapshot read moves the head the hold is decided for.
+
+        No local pass attests the moved head, so the verdict is 49 and nothing is requested.
+        """
         first = self.into(payload([review(oid=OLD)]), attest=True)
         moved = self.into(payload([review(oid=OLD)]), attest=True)
         moved["headRefOid"] = "c" * 40
