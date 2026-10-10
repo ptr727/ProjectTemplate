@@ -817,6 +817,8 @@ query($o:String!,$r:String!,$n:Int!){
 # It resolves even on a pull request whose own round 1 carries no review yet, per the fleet's standing rule against fabricating or reusing a GitHub node id.
 # `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE.
 # One document read at two widths costs nothing a second document would not, and it keeps the two reads provably identical apart from that one number.
+# `pullRequests` names no `states` argument, because the connection's omitted default is every state rather than `OPEN`.
+# The id therefore still resolves in a repository whose reviewed pull requests have all merged.
 Q_BOT_ID = """
 query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
   repository(owner:$o,name:$r){
