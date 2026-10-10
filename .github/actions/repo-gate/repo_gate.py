@@ -412,7 +412,7 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION_START = "${{"
-SHELLCHECK_IMAGE = "koalaman/shellcheck:stable"
+SHELLCHECK_IMAGE = "mirror.gcr.io/koalaman/shellcheck:stable"
 SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
