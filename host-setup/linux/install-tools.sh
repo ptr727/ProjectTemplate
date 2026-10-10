@@ -1469,6 +1469,7 @@ EOF
 
 # Every installed sudo implementation, as "sudo-path visudo-path".
 # The original sudo hides behind update-alternatives wherever sudo-rs holds the link, and it is the alternative rather than the link that names it.
+# The --query form prints each slave as "visudo /usr/sbin/visudo.ws", two space-separated fields with no colon, which is the shape the awk matches.
 sudo_implementations() {
     command -v update-alternatives >/dev/null || return 0
     local query
