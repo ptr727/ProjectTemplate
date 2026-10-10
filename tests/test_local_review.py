@@ -1249,8 +1249,8 @@ class BackendCase(RepoCase):
             script = bin_dir / "coderabbit"
         script.write_text(body, encoding="utf-8")
         script.chmod(0o755)
-        prev = os.environ.get("PATH", "")
-        os.environ["PATH"] = f"{bin_dir}{os.pathsep}{prev}"
+        prev = os.environ.get("PATH")
+        os.environ["PATH"] = f"{bin_dir}{os.pathsep}{prev if prev is not None else os.defpath}"
         self.addCleanup(self.restore_env, "PATH", prev)
 
     def test_a_completed_run_counts_findings(self) -> None:
