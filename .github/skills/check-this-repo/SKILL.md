@@ -35,7 +35,9 @@ repo.
    content in the first place, and no amount of re-reading `GOVERNANCE.md` fixes that. For a
    Claude Code session, read `live` as well, since that channel loads the registered directory in
    place rather than the copy. A registered directory that is missing is an answer there whatever
-   the exit code says.
+   the exit code says. So is a `live.plugin` reading `installed: false` or `enabled: false`, which
+   describes the user-scope install the installer makes, as Claude Code reports it for the
+   directory the report runs in, and a project-level install does not count. A null there means the plugin listing could not be read.
    - Where `live` carries `vcs: archive`, the channel serves the tree the hub's
      `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps, which has no git, so `branch: null` there
      is not a detached checkout. A `live.commit` behind the hub's `main` is the answer, and so is
@@ -69,13 +71,13 @@ per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from 
 
 ## Refresh cadence
 
-Re-run the installer from a hub checkout on a freshly fetched `main` when `--report` exits
-non-zero, and after any promotion to `main` that touches `.agents/skills/`. A copy taken from
-`develop` reads not current by design, since the snapshot is judged against the promoted
-revision. Session entry runs no automatic check, by design: the trigger is suspicion,
-and the restated-rule symptom below is the loudest form of it. `docs/host-setup.md`
-"Fleet Skills Install" in the hub states the same cadence for the host side, and an automated
-refresh stays out of scope until the fleet has evidence the manual cadence fails.
+This skill refreshes only when `--report` exits non-zero, and only with the `--snapshot-only` run
+above, from its own freshly fetched `main` checkout. A copy taken from `develop` reads not current
+by design, since the snapshot is judged against the promoted revision. Session entry runs no
+automatic check, by design. The trigger is suspicion, and the restated-rule symptom this skill
+triggers on is the loudest form of it. The refresh from the maintainer's own long-lived hub
+checkout is a different run, and `docs/host-setup.md` "Fleet Skills Install" in the hub states its
+cadence.
 
 ## What it escalates instead of touching
 

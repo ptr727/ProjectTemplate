@@ -145,7 +145,7 @@ Four wiring points close the model, and each is in place:
 
 1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories, degrading gracefully when the `claude` CLI is absent (the overlay half still lands, and the stamp records the partial install). Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
 2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section, and the [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
-3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install, and the `check-this-repo` skill runs the report and states the cadence, so the symptom routes to the check without new tooling.
+3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install. The `check-this-repo` skill runs the report and points to [`docs/host-setup.md`][host-setup-doc] for the cadence, so the symptom routes to the check without new tooling.
 4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it: re-run the installer from a freshly fetched `main` when `--report` exits non-zero, and after any promotion to `main` that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
 
 ## Gap Register
@@ -210,7 +210,7 @@ flowchart LR
 ### G6: Session Entry Never Checks Skill Staleness (Closed)
 
 - **Gap** - A machine with stale or missing skills behaves like a machine that never installed them, and nothing at session entry said so. The symptom is a rule that keeps needing to be restated.
-- **Resolution** - The cadence is stated in both places the row asked for. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`, and the `check-this-repo` skill carries the same cadence in its own "Refresh cadence" section, routing the restated-rule symptom to the report it already runs. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
+- **Resolution** - The cadence has one home, and the other place the row asked for points to it. [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" directs a re-run of the installer from a freshly fetched `main` when `--report` exits non-zero and after any promotion to `main` touching `.agents/skills/`. The `check-this-repo` skill points there from its own "Refresh cadence" section and routes the restated-rule symptom to the report it already runs. Its own `--snapshot-only` refresh covers only the checkout it fetches. No new tooling, by design: the trigger is suspicion, and session entry stays uninstrumented until the fleet has evidence the manual cadence fails.
 
 ### G7: Operational Develop PR-Only Is Prose-Enforced (Closed)
 
@@ -226,7 +226,7 @@ flowchart LR
 
 ### G9: WORKFLOW.md and AUDIT.md Have No Skill (Closed)
 
-- **Gap** - The largest law doc ([`WORKFLOW.md`][workflow], the D1-D9 contract) and the measurement procedure ([`AUDIT.md`][audit]) had no skill surface, while every other procedure and language did. Thirteen [`GOVERNANCE.md`][governance] sections were likewise doc-only.
+- **Gap** - The CI/CD law doc ([`WORKFLOW.md`][workflow], the D1-D9 contract) and the measurement procedure ([`AUDIT.md`][audit]) had no skill surface, while every other procedure and language did. Thirteen [`GOVERNANCE.md`][governance] sections were likewise doc-only.
 - **Resolution** - `audit-a-repo` packages `AUDIT.md` in the kept-authority shape, the doc keeping the full rules and the skill routing into it. `workflow-ci-contract` packages `WORKFLOW.md` sections 3, 4, and 5 as generated includes and the rest of that document in the same kept-authority shape. The [`AGENTS.md`][agents] rule map carries a disposition per section: `Workflow YAML Conventions` and the three conduct sections are annotated with their surfacing skill, and a paragraph after the table states why each remaining unannotated section is doc-only by decision, so absence reads as a choice rather than an oversight. Both closing tests hold: the skills ship, and the map carries the dispositions.
 - **Provenance** - All four phase-2 skills shipped in one pull request at the maintainer's direction, superseding the one-pull-request-per-skill note this doc carried, with `skill-lifecycle` authored first inside it so the others follow its procedure.
 
@@ -265,7 +265,7 @@ Four skills close G9, G10, and G12, shipped through the [`.agents/skills/`][skil
 ### workflow-ci-contract
 
 - **Scope** - The [`WORKFLOW.md`][workflow] behavioral contract: the D-guarantees, the seam contract, artifact lifecycle, NBGV versioning, and validate-at-entry, with the architecture, the guarantee catalog, and the test methodology carried as references.
-- **Trigger** - Writing or editing workflow YAML, adding or dropping a release target, or reasoning about why a publish did or did not fire.
+- **Trigger** - Writing or editing anything under `.github/workflows/`, a composite action under `.github/actions/`, or `version.json`, adding or dropping a release target, auditing a repository's workflows, or tracing which job, input, or condition made a publish run or skip.
 - **Packages** - The YAML half of the pipeline. `branching-and-release-model` keeps the git half (branching, promotion, publish policy), and the two descriptions state the split.
 - **Overlap** - The source doc is large, so the skill is a summary with `references/` splits, the shape `comment-and-doc-style` already uses. Sections 3, 4, and 5 are each carried whole as a generated include.
 

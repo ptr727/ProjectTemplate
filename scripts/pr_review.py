@@ -95,11 +95,12 @@ Subcommands
            file-count refusal is spent by coverage of the same head. `wait` is where that state gets
            its own exit codes, 46 and 47 below, because only `wait` is the command a caller might
            otherwise poll out a timeout on.
-           `unresolved` counts every tracked reviewer's own open thread, not only Copilot's:
-           CodeRabbit (`coderabbitai`) and qodo (`qodo-free-for-open-source-projects`) are
-           tracked at the identity and thread-resolution level, since an open thread blocks a
-           ruleset-gated merge whoever opened it and `unresolved=0` once hid one of theirs that
-           still did.
+           `unresolved` counts every open thread whoever opened it, since an open thread blocks
+           a ruleset-gated merge whatever its author, and a filter on known reviewer logins
+           once read `unresolved=0` over a qodo thread posted under a login it did not know.
+           The known logins, Copilot, CodeRabbit (`coderabbitai`), and qodo
+           (`qodo-free-for-open-source-projects`), only attribute a thread in the breakdown
+           beside the count, where any other author reads as `other`.
            Both `threads=` and `unresolved=` are read from a single 100-thread page with no
            further pagination, so a pull request carrying more than that undercounts silently
            past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
@@ -226,8 +227,10 @@ Subcommands
            double-requests. It is also skipped under 46's and 47's quota readings below, since a
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
-           all, since a fix push there is covered by an attested local pass: an attested head ends
-           the wait as covered, and one with no attestation exits 49 naming the `attest` step.
+           all, since a fix push there is covered by an attested local pass: an attested head is
+           covered at once, so the wait polls its checks instead only while they can still move
+           its merge, as 30 below lists, and one with no attestation exits 49 naming the `attest`
+           step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -239,8 +242,14 @@ Subcommands
            polling only) where both windows come up empty, since a repository with no Copilot review
            in either has nothing to read the id from and a fabricated one is never an option. The
            loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
-           Exit 0 = review present, or on a held head an attested local pass, 30 = still pending at
-           timeout (pending is not failure),
+           Exit 0 = review present, or on a held head an attested local pass with its required
+           checks settled as far as the rollup window reads them, with the merge reading CLEAN,
+           UNSTABLE, or HAS_HOOKS, or with the pull request closed, 30 = still pending at timeout
+           (pending is not failure), on a held head a required check still settling, any check while
+           no required one has posted, none posted on a BLOCKED, BEHIND, or DRAFT merge, or the
+           merge still UNKNOWN, printed as `status=CHECKS_PENDING`, or a round requested while the
+           held poll ran, printed as `status=PENDING` unless 40's outside answer or 46's or 47's
+           quota reading outranks it,
            40 = Copilot answered outside a formal review, so read the printed body.
            40 reports the shape of that answer and reads nothing of its cause: an answer
            carrying no commit covers no head, so the wait ends and the reader decides.
@@ -252,12 +261,14 @@ Subcommands
            head carrying a 50 a stuck check shows only in the digest. A 42 can
            be decided by an earlier round whose partial coverage carries to a head stating none,
            in which case the round the wait ended on is not the round the code came from.
-           44 = the review loop closed, the merge reads BLOCKED, and a check is in a shape no
-           wait clears: queued with nothing acting on it, expected and never posted, running
-           far past what the job costs, or failed. A check merely still running normally is
-           not this and exits 0, and neither is a stuck check on a merge that is not BLOCKED,
-           since the rollup carries checks no ruleset requires. The digest reports the check
-           in both cases, so a shape outside 44 is still named rather than lost.
+           44 = the review loop closed, the merge reads BLOCKED, and a required check is in a shape
+           no wait clears: queued with nothing acting on it, expected and never posted, running far
+           past what the job costs, or failed, though on a held head a required check running long
+           is still polled, as 30 states. A check merely still running normally is not this and
+           exits 0, or on a held head is polled while it can still move the merge. Neither is a
+           stuck check its rollup node reads as not required, since the rollup carries checks no
+           ruleset requires, nor any stuck check on a merge that is not BLOCKED. The digest reports
+           the check in every case, so a shape outside 44 is still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
            printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
@@ -278,7 +289,8 @@ Subcommands
            a request already pending is still polled for. Pass --ignore-quota-signal to request and
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
-           this pull request outranks 47 whenever both would otherwise apply, and so does a 50.
+           this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
+           on a held head covered by an attested local pass a 30 or a 44.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -332,8 +344,6 @@ REVIEWER = "copilot-pull-request-reviewer"
 # Other review bots this repository has trialed alongside Copilot.
 # Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly.
 # Each format read here is its own reader, and doing that well is a separate task per bot.
-# What generalizes without reading any of their prose is thread resolution.
-# An open thread blocks a ruleset-gated merge whoever opened it, and `status`'s `unresolved=0` once silently hid a CodeRabbit/qodo thread that did block one.
 CODERABBIT_LOGIN = "coderabbitai"
 QODO_LOGIN = "qodo-free-for-open-source-projects"
 # Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing.
@@ -842,30 +852,35 @@ mutation($pr:ID!,$bot:ID!){
   requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id __REQUEST_STATE__ } }}
 """.replace("__REQUEST_STATE__", REQUEST_STATE)
 
-# Full query: run once on transition, not per poll.
 # The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
 # It is asked of the last commit because a rollup hangs off a commit object.
 # A case holds that commit equal to `headRefOid`, since a rollup a push ago still renders whole.
-Q_FULL = """
-query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){ pullRequest(number:$n){
-    headRefOid baseRefName mergeable mergeStateStatus
+HELD_FIELDS = """
+    headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
-    reviewThreads(first:100){ nodes{ id isResolved
-      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ name status conclusion startedAt
+        ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
-        ... on StatusContext{ context state createdAt }
+        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}}}}
+""".replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
+Q_HELD = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__ }}}
+""".replace("__HELD_FIELDS__", HELD_FIELDS)
+Q_FULL = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
+    reviewThreads(first:100){ nodes{ id isResolved
+      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
   }}}
-""".replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW)).replace("__FILES_WINDOW__", str(FILES_WINDOW))
+""".replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -1304,7 +1319,7 @@ def threads_truncated(pr: dict) -> bool:
     open. That inversion is why this is its own guard rather than a second use of `window_blind`:
     that one settles the question from what is already in view, and there is no such settling
     available here, only the fact that something was cut, undercounted ever since `unresolved`
-    widened from Copilot's own threads to every tracked reviewer's.
+    widened from Copilot's own threads to every open thread.
     """
     return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
 
@@ -2338,14 +2353,18 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
         return None
     if suppressed_blocks(body) or previously_missed_blocks(body):
         return None
-    if open_reviewer_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
+    if open_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
         return None
     return verdict, headline
 
 
-def open_reviewer_threads(threads: list[dict]) -> list[dict]:
-    """The unresolved threads a known reviewer opened, which block a ruleset-gated merge."""
-    return [t for t in threads if not t.get("isResolved") and thread_author(t) in KNOWN_REVIEWERS]
+def open_threads(threads: list[dict]) -> list[dict]:
+    """Every unresolved thread, whoever opened it, since each one blocks a ruleset-gated merge.
+
+    The author decides only how `status` attributes a thread, never whether it counts, because a
+    login set read off past history misses the next spelling a reviewer posts under.
+    """
+    return [t for t in threads if not t.get("isResolved")]
 
 
 def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
@@ -3190,7 +3209,11 @@ def head_commit(pr: dict) -> dict:
 
 
 def check_nodes(pr: dict) -> list[dict]:
-    """The head commit's checks, each as {name, state, conclusion, since}.
+    """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
+
+    A readable node also carries `required`, true unless the rollup marks it `isRequired: false`,
+    which `held_checks_open` and `wait`'s exit `44` decide on. A node of an unrecognized union
+    member carries empty values for the four and an `unreadable` key naming its type instead.
 
     A rollup carries two node shapes and they spell every field differently: a CheckRun has a
     `name`, a `status` and a `conclusion`, while a StatusContext has a `context` and a single
@@ -3236,6 +3259,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "state": n.get("status") or "",
                     "conclusion": n.get("conclusion") or "",
                     "since": n.get("startedAt") or "",
+                    "required": n.get("isRequired") is not False,
                 }
             )
         elif n.get("__typename") == "StatusContext":
@@ -3252,6 +3276,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "state": "IN_PROGRESS" if state == "PENDING" else state,
                     "conclusion": state,
                     "since": n.get("createdAt") or "",
+                    "required": n.get("isRequired") is not False,
                 }
             )
         else:
@@ -3342,6 +3367,60 @@ def checks_stuck(
     ]
 
 
+def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[dict]:
+    """Every check still on its way to a conclusion that waiting can reach.
+
+    A stuck check is left out, since its shape is one no wait clears and polling it only runs the
+    timeout out. RUNNING_LONG is the exception, since duration alone cannot tell a stalled job
+    from a slow one. Of the rest, a check is settling where it has not passed, which leaves the
+    state taxonomy to `check_shape` alone.
+    """
+    return [
+        n
+        for n in nodes
+        if not n.get("unreadable")
+        and check_shape(n, now, grace, stall) in ("", "RUNNING_LONG")
+        and (n.get("conclusion") or "") not in CHECK_OK
+    ]
+
+
+def held_checks_open(
+    pr: dict, nodes: list[dict], now: datetime, grace: float, stall: float
+) -> bool:
+    """True where a covered head's checks can still move its merge, so a held wait polls on.
+
+    A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
+    GitHub's own reading, so on such a merge a check nothing requires does not hold the wait. A
+    BLOCKED merge carrying a stuck required check, other than one running long, has its exit, 44,
+    decided already, so nothing holds it. Otherwise a required check still settling holds it. So
+    does any check still settling while no required check has posted, since a required aggregator
+    behind `needs:` enters the rollup only once its dependencies finish. A rollup carrying no check
+    at all holds it while the merge reads BLOCKED, BEHIND, or DRAFT, since that is a push whose
+    check suites have not registered, where a conflicted, DIRTY one runs no workflow at all. A merge
+    reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
+    the exit code is chosen by. A pull request no longer open has no merge left to move, and GitHub
+    reads UNKNOWN on it for good.
+    """
+    if pr.get("state", "OPEN") != "OPEN":
+        return False
+    merge = pr.get("mergeStateStatus")
+    if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+        return False
+    if merge == "UNKNOWN":
+        return True
+    if merge == "BLOCKED" and any(
+        n.get("required") and shape != "RUNNING_LONG"
+        for n, shape in checks_stuck(nodes, now, grace, stall)
+    ):
+        return False
+    settling = checks_settling(nodes, now, grace, stall)
+    if any(n.get("required") for n in settling):
+        return True
+    if settling and not any(n.get("required") for n in nodes):
+        return True
+    return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+
+
 def checks_truncated(pr: dict) -> bool:
     """True where the head's rollup carries more contexts than the query asked for.
 
@@ -3385,10 +3464,24 @@ def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     return sum(1 for n in read if (n.get("conclusion") or "") in CHECK_OK), len(read)
 
 
-def live_state(owner: str, repo: str, num: int) -> tuple[str, bool, dict | None]:
-    """Return (head_sha, copilot_reviewed_current_head, copilot_answer_outside_a_review)."""
-    pr = gql(Q_LIVE, owner, repo, num)
-    return pr["headRefOid"], reviewed_head(pr), answered_outside_review(pr)
+def liveness(pr: dict, min_rounds: int = 0) -> tuple[bool, dict | None, list[str]]:
+    """Return (head_review_done, answered_outside_review, reviewer_login_drift) off one payload.
+
+    These are the three readings `wait`'s Copilot poll stops on. Its first evaluation and every
+    re-read both come here, so a reading added to one cannot be missing from the other. A
+    drifted login matches no filter, so `head_review_done` stays false however long the wait
+    runs, and waiting it out reports a review that landed as one that never did. `Q_LIVE`
+    carries the authors, so the drift costs the poll no extra call. A `min_rounds` of 0 reads
+    as `reviewed_head`.
+    """
+    return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
+
+
+def live_state(
+    owner: str, repo: str, num: int, min_rounds: int = 0
+) -> tuple[bool, dict | None, list[str]]:
+    """Return `liveness` off one fresh `Q_LIVE`, since a push during the wait moves the head."""
+    return liveness(gql(Q_LIVE, owner, repo, num), min_rounds)
 
 
 def heading_of(block: str) -> str:
@@ -3794,20 +3887,15 @@ def digest(
     truncated = threads_truncated(pr)
     # Same reasoning, the `reviews` connection rather than `reviewThreads`, feeding `suppressed=` and `cr_outside_diff=` below.
     revs_truncated = reviews_truncated(pr)
-    # Any known reviewer's own thread, not only Copilot's.
-    # An open thread blocks a ruleset-gated merge whoever opened it, and counting Copilot's alone hid a CodeRabbit/qodo thread that did block one.
-    # `thread_author` carries the deleted-account default this needs.
-    unresolved = open_reviewer_threads(threads)
-    # A breakdown beside the raw count, but only where more than one reviewer contributes to it.
-    # A single reviewer's own count is what `unresolved=N` already meant before this generalized.
-    # Printing one name beside its own total says nothing the number did not already say.
+    unresolved = open_threads(threads)
     by_login = {
         login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
     }
+    by_login["other"] = sum(1 for t in unresolved if thread_author(t) not in KNOWN_REVIEWERS)
     contributors = {login: n for login, n in by_login.items() if n}
     breakdown = (
         " (" + " ".join(f"{login}={n}" for login, n in contributors.items()) + ")"
-        if len(contributors) > 1
+        if len(contributors) > 1 or "other" in contributors
         else ""
     )
 
@@ -4379,7 +4467,7 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
         conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"][
             "reviewThreads"
         ]
-        out += [t for t in conn["nodes"] if not t["isResolved"]]
+        out += open_threads(conn["nodes"])
         page = conn.get("pageInfo") or {}
         if not page.get("hasNextPage"):
             return out
@@ -4706,6 +4794,34 @@ def local_cover(pr: dict) -> bool:
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
     )
+
+
+POLL_DELAYS = (15, 20, 30, 45, 60, 120)
+
+
+def backoff[Polled](
+    value: Polled,
+    read: Callable[[], Polled],
+    keep: Callable[[Polled], bool],
+    start: float,
+    timeout: float,
+) -> Polled:
+    """Re-read `value` on the `POLL_DELAYS` schedule while `keep` holds and `timeout` allows.
+
+    `start` is a `time.monotonic` reading and `timeout` is in seconds. The bound is checked
+    before each sleep, so the poll can run past it by up to one delay. Returns the last value
+    read, or `value` itself where the poll never sleeps.
+
+    One loop for both of `wait`'s polls, since a fix to the bound or the schedule applied to one
+    inline copy and not the other is a wait that times out differently depending on its arm.
+    The backoff runs in-process, so the whole wait costs one agent turn.
+    """
+    i = 0
+    while keep(value) and time.monotonic() - start <= timeout:
+        time.sleep(POLL_DELAYS[min(i, len(POLL_DELAYS) - 1)])
+        i += 1
+        value = read()
+    return value
 
 
 def reply_to_thread(
@@ -5209,20 +5325,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"status=OUT_OF_SCOPE nothing was written: {why}")
         return 64
 
-    # In-process backoff, so the whole wait costs one agent turn.
-    delays = [15, 20, 30, 45, 60, 120]
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
-    done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
+    done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
         full = gql(Q_FULL, owner, repo, a.number)
         if refusing_review(full) and not reviewed_head(full):
             a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
             done = False
-    # A drifted login matches no filter here, so `done` stays false however long this runs.
-    # Waiting it out reports a review that landed as one that never did, at the timeout.
-    # The liveness query carries the authors, so this costs the loop no extra call.
-    drift = reviewer_login_drift(pr)
     # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
@@ -5258,7 +5368,7 @@ def main(argv: list[str] | None = None) -> int:
         and not reviewer_requested(pr)
     ):
         line, recorded = request_copilot_review(
-            owner, repo, a.number, pr["id"], copilot_bot_id(history), delays[0]
+            owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
         )
         if recorded is False:
             final = gql(Q_FULL, owner, repo, a.number)
@@ -5278,8 +5388,36 @@ def main(argv: list[str] | None = None) -> int:
             "note: this pull request merges into a branch other than the default and Copilot "
             "has reviewed it already, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
-            "for a round anyway."
+            "for a round anyway. An attested head has its checks polled instead, while they can "
+            "still move its merge."
         )
+
+        def still_held(polled: dict) -> bool:
+            return (
+                holds(polled)
+                and local_cover(polled)
+                and not unrecognized_shapes(polled)
+                and held_checks_open(
+                    polled,
+                    check_nodes(polled),
+                    datetime.now(UTC),
+                    a.check_grace,
+                    a.check_stall,
+                )
+            )
+
+        assert snapshot is not None
+        last_full = [snapshot]
+
+        def held_read() -> dict:
+            polled = gql(Q_HELD, owner, repo, a.number)
+            if still_held(polled):
+                return polled
+            last_full[0] = gql(Q_FULL, owner, repo, a.number)
+            return last_full[0]
+
+        polled = backoff(last_full[0], held_read, still_held, start, a.timeout)
+        final = polled if polled is last_full[0] else None
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "
@@ -5300,17 +5438,13 @@ def main(argv: list[str] | None = None) -> int:
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
         )
     else:
-        i = 0
-        while not done and not answer and not drift:
-            elapsed = time.monotonic() - start
-            if elapsed > a.timeout:
-                break
-            time.sleep(delays[min(i, len(delays) - 1)])
-            i += 1
-            # Re-read head each iteration: a push during the wait moves it.
-            pr = gql(Q_LIVE, owner, repo, a.number)
-            done, answer = head_review_done(pr, a.min_rounds), answered_outside_review(pr)
-            drift = reviewer_login_drift(pr)
+        backoff(
+            (done, answer, drift),
+            lambda: live_state(owner, repo, a.number, a.min_rounds),
+            lambda s: not any(s),
+            start,
+            a.timeout,
+        )
 
     # One payload decides the digest and the exit code together.
     # Read separately, a review landing between them prints coverage and returns a timeout code.
@@ -5358,30 +5492,35 @@ def main(argv: list[str] | None = None) -> int:
         # Only once the review itself is sound does a stuck required check decide the code.
         if verdict:
             return verdict
+        if covered and held_checks_open(final, checks, now, a.check_grace, a.check_stall):
+            print(
+                "status=CHECKS_PENDING an attested local pass covers this head, and by the "
+                "timeout a check had not concluded, none had posted, or the merge was still "
+                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
+            )
+            return 30
         # The review loop closing is not the merge gate, and 0 alone was saying it was.
         # A wait ends the moment coverage lands, which leaves the checks mid-flight nearly always.
         # So a merely pending check is not this code, or the code would be the usual outcome.
         # Only a shape no waiting clears earns it, which is what the stuck field already prints.
         # It is read from the same payload the digest was, so the two can never disagree.
         # A rollup carries checks the ruleset does not require, four of six on a green run here.
-        # So `BLOCKED` is required of the code as well, borrowing GitHub's own reading.
-        # That is cheaper than reading the ruleset's contexts over another call.
-        # Without it, a stuck check nothing requires returns 44 on a mergeable pull request.
-        # `CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
-        # The digest reports the check either way, so the narrower code costs the reader nothing.
-        if stuck and final.get("mergeStateStatus") == "BLOCKED":
-            # Worded as a coincidence rather than a cause.
-            # Nothing here proves the stuck check is what blocks the merge.
+        # So only a stuck check whose rollup node reads `isRequired` counts toward the code.
+        # Without that, a stuck optional check on a merge a thread blocks returns 44.
+        # `BLOCKED` is required as well, since `CLEAN` proves no required gate is outstanding.
+        # The digest reports every stuck check either way, so the narrower code costs nothing.
+        gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
+        if final.get("mergeStateStatus") == "BLOCKED" and gates:
+            # The block above prints optional stuck checks too, so the required ones are named.
+            # They need not be all that blocks it.
             # `BLOCKED` is also worn by an open thread or a missing approval.
-            # The rollup also carries checks no ruleset requires.
-            # So naming the check as the blocker would assert a link this cannot read.
-            # Both facts are true, and both are printed.
             print(
                 "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
-                "BLOCKED, and a check is in a shape waiting does not clear: read the block "
-                "above, since a starved check wants a re-run, an unposted one its poster, a "
-                "long one a judgment, and a failed one a fix. Which of them gates the merge is "
-                "not read here, because BLOCKED is also worn by a thread or a missing approval"
+                "BLOCKED, and a required check is in a shape waiting does not clear, "
+                f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
+                "block above, since a starved check wants a re-run, an unposted one its poster, "
+                "a long one a judgment, and a failed one a fix. It need not be all that blocks "
+                "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
         return 0

@@ -49,6 +49,15 @@ def flowed_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def comment_flowed_text(text: str) -> str:
+    """Strip each line's leading `#` marker, then collapse as `flowed_text` does.
+
+    A `#` comment that rewraps gains a marker on its new line as well as a newline, so
+    collapsing whitespace alone leaves the marker between two words of a pinned phrase.
+    """
+    return flowed_text(" ".join(line.lstrip().removeprefix("#") for line in text.splitlines()))
+
+
 HEAD = "a" * 40
 OLD = "b" * 40
 
@@ -543,12 +552,22 @@ class TestLiveState(GqlCase):
         ):
             with self.subTest(case=label):
                 self.answer(payload(reviews))
-                self.assertEqual((HEAD, want, None), pr_review.live_state("o", "r", 1))
+                self.assertEqual((want, None, []), pr_review.live_state("o", "r", 1))
 
     def test_a_null_author_or_commit_does_not_raise(self) -> None:
         """GraphQL returns null for a deleted account, and a crash there stalls the whole wait."""
         self.answer(payload([{"author": None, "state": "COMMENTED", "commit": None}]))
-        self.assertEqual((HEAD, False, None), pr_review.live_state("o", "r", 1))
+        self.assertEqual((False, None, []), pr_review.live_state("o", "r", 1))
+
+    def test_a_poll_reads_the_same_three_readings_its_payload_gives(self) -> None:
+        for label, pr in (
+            ("on head", payload([review()])),
+            ("stale", payload([review(oid=OLD)])),
+            ("answered outside", payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)])),
+        ):
+            with self.subTest(case=label):
+                self.answer(pr)
+                self.assertEqual(pr_review.liveness(pr), pr_review.live_state("o", "r", 1))
 
 
 class TestAnsweredOutsideReview(unittest.TestCase):
@@ -736,21 +755,26 @@ class TestDigest(GqlCase):
         self.assertIn("coverage=full", out)
 
     def test_a_thread_from_a_deleted_account_does_not_crash_the_digest(self) -> None:
-        """GraphQL sends `author` present and null, which a defaulted lookup returns as None."""
+        """GraphQL sends `author` present and null, which a defaulted lookup returns as None.
+
+        The thread still blocks the merge, so it counts, attributed as `other`.
+        """
         orphan = thread("T1")
         orphan["comments"]["nodes"][0]["author"] = None
         self.answer(payload([review()], [orphan, thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(1, unresolved)
+        self.assertEqual(2, unresolved)
+        self.assertIn(f"unresolved=2 ({pr_review.REVIEWER}=1 other=1)", out)
+        self.assertIn("T1", out)
         self.assertIn("T2", out)
 
-    def test_only_the_reviewer_s_own_unresolved_threads_are_listed(self) -> None:
-        """A maintainer's own open thread is not a review finding to answer."""
+    def test_every_open_thread_is_listed_whoever_opened_it(self) -> None:
+        """An open thread blocks a ruleset-gated merge whatever its author."""
         self.answer(payload([review()], [thread("T1", login="ptr727"), thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(1, unresolved)
+        self.assertEqual(2, unresolved)
+        self.assertIn("T1", out)
         self.assertIn("T2", out)
-        self.assertNotIn("T1", out)
 
     def test_a_seen_set_marks_each_thread_new_exactly_once(self) -> None:
         """The seen set is what tells a second round's findings from the ones already answered."""
@@ -784,10 +808,11 @@ class TestOtherReviewers(GqlCase):
     in `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below, not here.
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
-    ruleset-gated merge, since only Copilot's own threads
-    counted. Coverage and refusal reading stay Copilot-only: `review_on_head` above names
-    Copilot's own coverage specifically, the reviewer this script requests and waits for, not
-    "no review of any kind covers this head".
+    ruleset-gated merge, first since only Copilot's own threads counted and then since only known
+    reviewer logins did, so every open thread now counts and a login only attributes it. Coverage
+    and refusal reading stay Copilot-only: `review_on_head` above names Copilot's own coverage
+    specifically, the reviewer this script requests and waits for, not "no review of any kind
+    covers this head".
     """
 
     def other_review(self, login: str, oid: str = HEAD, body: str = "") -> dict:
@@ -818,14 +843,34 @@ class TestOtherReviewers(GqlCase):
         self.assertIn("T2", out)
         self.assertNotIn("T3", out)
 
-    def test_a_human_thread_still_does_not_count(self) -> None:
-        """Generalizing past Copilot means the other tracked bots, not every account."""
-        self.answer(payload([review()], [thread("T1", login="ptr727")]))
-        out, unresolved = pr_review.digest("o", "r", 7)
-        self.assertEqual(0, unresolved)
-        self.assertNotIn("T1", out)
+    def test_a_thread_from_an_unknown_login_counts_and_is_named_other(self) -> None:
+        """A reviewer posting under a login missing from the known set once read `unresolved=0`.
 
-    def test_the_breakdown_appears_only_once_more_than_one_reviewer_contributes(self) -> None:
+        The known logins attribute a thread and never decide whether it counts, and `other` is
+        named even where it is the only contributor, since it is the count a reader cannot assume.
+        """
+        self.answer(payload([review()], [thread("T1", login="example-review-bot")]))
+        out, unresolved = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, unresolved)
+        self.assertIn("unresolved=1 (other=1)", out)
+        self.assertIn("T1", out)
+
+    def test_status_and_wait_print_an_unknown_login_s_thread_in_the_digest(self) -> None:
+        """`status` and `wait` print the digest a Merge Gate decision is read from."""
+        unknown = thread("T1", login="example-review-bot")
+        for command in (["status", "7"], ["wait", "7"]):
+            with self.subTest(command=command[0]):
+                self.answer(payload([review()], [unknown]))
+                out = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(out),
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    pr_review.main([*command, "--repo", "o/r"])
+                self.assertIn("unresolved=1 (other=1)", out.getvalue())
+                self.assertIn("T1", out.getvalue())
+
+    def test_one_known_reviewer_alone_prints_no_breakdown_and_two_print_one(self) -> None:
         self.answer(payload([review()], [thread("T1"), thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
         self.assertEqual(2, unresolved)
@@ -4258,9 +4303,19 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
+    def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
+        """Collapsing whitespace alone would leave the second line's marker inside the phrase."""
+        wrapped = (
+            "x = 1\n    # the output is regular: 10 headings, 10\n    # summaries and 4 labels.\n"
+        )
+        self.assertIn(
+            "the output is regular: 10 headings, 10 summaries and 4 labels.",
+            comment_flowed_text(wrapped),
+        )
+
     def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
         """The comment states the sizes, and adding an entry without it is how it goes stale."""
-        source = Path(pr_review.__file__).read_text(encoding="utf-8")
+        source = comment_flowed_text(Path(pr_review.__file__).read_text(encoding="utf-8"))
         stated = re.search(
             r"the output is regular: (\d+) headings, (\d+) summaries and (\d+) labels", source
         )
@@ -4678,6 +4733,8 @@ class TestOverviewSections(GqlCase):
         """The headline may name that thread, which the loop already waits on."""
         body = self.headline()
         self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [thread("T1")])))
+        unknown = thread("T1", login="example-review-bot")
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)], [unknown])))
         resolved = payload([review(body=body)], [thread("T1", resolved=True)])
         self.assertIsNotNone(pr_review.uncounted_verdict(resolved))
 
@@ -6035,6 +6092,18 @@ class TestCheckShapes(unittest.TestCase):
             "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
         )
 
+    def test_the_full_query_asks_which_checks_are_required_and_whether_the_pr_is_open(self) -> None:
+        """A dropped field reads as required or open, which holds a held wait to its timeout."""
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn("headRefOid baseRefName state mergeable", query)
+        self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", query)
+        self.assertIn("context state createdAt isRequired(pullRequestNumber:$n)", query)
+
+    def test_a_status_context_reads_its_own_required_flag(self) -> None:
+        optional = {**status_context("ci/external", state="PENDING"), "isRequired": False}
+        nodes = pr_review.check_nodes(payload([review()], checks=[optional, check()]))
+        self.assertEqual([False, True], [n["required"] for n in nodes])
+
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
         """A node missing its suite reads as suite zero under no workflow and no app."""
         bare = check(name="lint")
@@ -6367,13 +6436,12 @@ class TestCli(GqlCase):
         self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
         self.assertIn("CHECK NOT PICKED UP", out)
 
-    def test_a_stuck_check_nothing_requires_does_not_take_forty_four(self) -> None:
-        """A rollup carries checks the ruleset does not require, four of six on a green run here.
+    def test_a_stuck_check_on_a_clean_merge_does_not_take_forty_four(self) -> None:
+        """`CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
 
-        So the code borrows GitHub's own reading of which checks gate a merge, and `CLEAN` proves
-        no required gate is outstanding whatever else the rollup is doing. Without that, a stuck
-        check nothing requires returns 44 on a mergeable pull request. Raised in review on this
-        change. The digest still names the check, so the narrower code costs the reader nothing.
+        The node carries no `isRequired`, which reads as required, so this pins the `BLOCKED`
+        half of the condition. The digest still names the check, so the narrower code costs the
+        reader nothing.
         """
         self.answer(
             payload(
@@ -6391,6 +6459,42 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("stuck=NOT_PICKED_UP", out)
         self.assertNotIn("status=CHECKS_NOT_MERGEABLE", out)
+
+    def test_only_a_required_stuck_check_on_a_blocked_merge_takes_forty_four(self) -> None:
+        """`BLOCKED` is also worn by an open thread, so it cannot say a stuck check is required.
+
+        The rollup's `isRequired` can, so a failed check it marks optional exits 0 on a merge
+        blocked for another reason, and the same check marked required still exits 44.
+        """
+        for required, code in ((False, 0), (True, 44)):
+            with self.subTest(required=required):
+                self.out.seek(0)
+                self.out.truncate()
+                failed = {**check(name="scan", conclusion="FAILURE"), "isRequired": required}
+                self.answer(payload([review()], merge="BLOCKED", checks=[failed]))
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7"]))
+                out = self.out.getvalue()
+                self.assertIn("stuck=FAILED", out)
+                self.assertEqual(code == 44, "status=CHECKS_NOT_MERGEABLE" in out)
+
+    def test_the_forty_four_line_names_only_the_required_stuck_check(self) -> None:
+        """The block above prints every stuck check, so the 44 line says which one is required.
+
+        Otherwise a reader fixes the optional failure the block lists first and meets 44 again.
+        """
+        optional = {**check(name="scan", conclusion="FAILURE"), "isRequired": False}
+        gate = {**check(name="gate", conclusion="FAILURE", suite=2), "isRequired": True}
+        self.answer(payload([review()], merge="BLOCKED", checks=[optional, gate]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        status = next(
+            line
+            for line in self.out.getvalue().splitlines()
+            if line.startswith("status=CHECKS_NOT_MERGEABLE")
+        )
+        self.assertIn("required stuck 'gate':", status)
+        self.assertNotIn("'scan'", status)
 
     def test_wait_exits_zero_where_a_check_is_merely_still_running(self) -> None:
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.
@@ -7055,6 +7159,19 @@ class TestCli(GqlCase):
         """A liveness payload, whose reviews carry no body, as `Q_LIVE` asks for none."""
         return payload([{k: v for k, v in review(oid=oid).items() if k != "body"}])
 
+    def test_the_first_stop_reading_and_every_poll_share_one_helper(self) -> None:
+        """A stop reading added to one site and not the other splits the first decision off."""
+        self.answer(
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD)], pending=True),
+            payload([review(oid=OLD), review(rid="PRR_new")]),
+        )
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        spy = self.enterContext(mock.patch.object(pr_review, "liveness", wraps=pr_review.liveness))
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(slept.call_count + 1, spy.call_count)
+
     def test_a_pending_request_past_an_error_round_is_still_polled_for(self) -> None:
         """The stop withholds a request, and a review already on its way still lands."""
         self.answer(
@@ -7146,6 +7263,376 @@ class TestCli(GqlCase):
         self.assertIn("review_on_head=local", out)
         self.assertIn("coverage=local", out)
 
+    def test_an_attested_head_with_a_check_running_at_the_timeout_is_pending(self) -> None:
+        """Covered at once, the wait ended while CI ran and exit 0 read as a mergeable head."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(pr)
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("coverage=local", out)
+        self.assertIn("status=CHECKS_PENDING", out)
+
+    def test_an_attested_head_polls_its_checks_until_they_settle(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pending = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
+        )
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(pending, pending, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
+        """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
+        starved = check(status="QUEUED", conclusion="", started=real_ago(900))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[starved]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+
+    def test_a_failed_check_ends_the_poll_while_another_still_runs(self) -> None:
+        """A BLOCKED merge carrying a stuck check is the 44 the review path returns too."""
+        running = check(name="test", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        failed = check(name="lint", conclusion="FAILURE", started=real_ago(60))
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[failed, running]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_an_optional_failure_does_not_end_the_poll_on_a_required_check(self) -> None:
+        optional = {**check(name="lint", conclusion="FAILURE"), "isRequired": False}
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        blocked = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[optional, gate]), attest=True
+        )
+        passed = self.into(
+            payload([review(oid=OLD)], merge="UNSTABLE", checks=[optional, check(name="gate")]),
+            attest=True,
+        )
+        self.answer(blocked, blocked, passed)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+
+    def test_a_required_check_running_at_the_timeout_outranks_an_optional_failure(self) -> None:
+        """Waiting can still clear the merge, so the code is 30 rather than 44."""
+        optional = {**check(name="coverage", conclusion="FAILURE"), "isRequired": False}
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[optional, gate]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_an_empty_rollup_holds_any_merge_but_a_conflicted_one(self) -> None:
+        """A conflicted pull request runs no `pull_request` workflow, so none is coming."""
+        for merge, code in (
+            ("BLOCKED", 30),
+            ("BEHIND", 30),
+            ("DRAFT", 30),
+            ("UNKNOWN", 30),
+            ("DIRTY", 0),
+        ):
+            with self.subTest(merge=merge):
+                pr = self.into(payload([review(oid=OLD)], merge=merge, checks=[]), attest=True)
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
+        """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
+        optional = {
+            **check(name="coverage", status="IN_PROGRESS", conclusion="", started=real_ago(60)),
+            "isRequired": False,
+        }
+        pr = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[check(name="gate"), optional]),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_optional_checks_hold_until_a_required_one_posts(self) -> None:
+        """A required aggregator behind `needs:` is absent until the jobs it waits on finish."""
+        optional = {
+            **check(name="lint", status="IN_PROGRESS", conclusion="", started=real_ago(60)),
+            "isRequired": False,
+        }
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[optional]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_an_unattested_held_head_is_not_polled_for_its_checks(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        self.answer(self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running])))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_a_check_nothing_requires_does_not_hold_an_attested_head(self) -> None:
+        """A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+            with self.subTest(merge=merge):
+                pr = self.into(
+                    payload([review(oid=OLD)], merge=merge, checks=[running]), attest=True
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep") as slept:
+                    self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+                slept.assert_not_called()
+
+    def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
+        """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
+
+        A poll that never sleeps grades its first read, so the narrow query costs it no call.
+        """
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(empty, empty, green)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        queries = [c.args[0] for c in gql.call_args_list]
+        self.assertEqual(
+            [pr_review.Q_LIVE, pr_review.Q_FULL, pr_review.Q_HELD, pr_review.Q_FULL],
+            queries,
+        )
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(green)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_not_called()
+        self.assertEqual(
+            [pr_review.Q_LIVE, pr_review.Q_FULL], [c.args[0] for c in gql.call_args_list]
+        )
+
+    def test_a_held_poll_stops_only_on_a_full_read_that_agrees(self) -> None:
+        """A narrow read ending the poll is confirmed by the full read the verdict grades.
+
+        A merge reading UNKNOWN on that full read keeps the poll going, rather than returning 30
+        with time left on a payload the poll never judged.
+        """
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        unknown = self.into(
+            payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True
+        )
+        self.answer(empty, empty, green, unknown, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(2, slept.call_count)
+
+    def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
+        """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(held)
+        served = pr_review.gql
+
+        def narrow(query: str, owner: str, repo: str, num: int) -> dict:
+            pr = served(query, owner, repo, num)
+            if query is pr_review.Q_HELD:
+                return {k: v for k, v in pr.items() if k not in ("reviewThreads", "files")}
+            return pr
+
+        self.enterContext(mock.patch.object(pr_review, "gql", side_effect=narrow))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        clock = iter([0.0, 0.0])
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: next(clock, 1e9)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_called_once()
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
+        """A wait run right after the push reads an empty rollup, which is CI not started."""
+        empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
+        green = self.into(payload([review(oid=OLD)], checks=[check()]), attest=True)
+        self.answer(empty, empty, green)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(empty)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_a_review_requested_during_a_held_wait_ends_the_poll(self) -> None:
+        """A requested round is no longer held, so its checks are not what the wait is for."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        requested = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
+            attest=True,
+        )
+        self.answer(held, held, requested)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_called_once()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+        self.assertIn("status=PENDING", self.out.getvalue())
+
+    def test_a_quota_reading_outranks_pending_after_a_mid_poll_request(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        requested = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running], pending=True),
+            attest=True,
+        )
+        self.answer(held, held, requested)
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
+        self.assertNotIn("status=PENDING", self.out.getvalue())
+
+    def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
+        """The 43 outranks every check reading, so polling the checks cannot change it."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        odd = review(oid=OLD, body=OVERVIEW + "\n### Confidence assessment\n")
+        pr = self.into(payload([odd], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(43, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_a_required_check_running_long_holds_the_poll_rather_than_ending_it(self) -> None:
+        """Duration alone cannot tell a stalled job from a slow one, so waiting may clear it."""
+        slow = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(2000))
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[slow]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_an_unreadable_rollup_is_not_held_as_one_not_yet_registered(self) -> None:
+        """A rollup read off another commit is empty here, and waiting does not clear that."""
+        pr = payload([review(oid=OLD)], merge="BLOCKED", checks=[check()], rollup_oid="d" * 40)
+        self.answer(self.into(pr, attest=True))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_an_outside_answer_outranks_pending_after_a_mid_poll_request(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        rounds = payload(
+            [review(oid=OLD, at=EARLY)],
+            merge="BLOCKED",
+            checks=[running],
+            comments=[comment(at=LATE)],
+        )
+        held = self.into(rounds, attest=True)
+        held["comments"]["nodes"].append(comment(at=LATE))
+        requested = {**held, "reviewRequests": payload([], pending=True)["reviewRequests"]}
+        self.answer(held, held, requested)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(40, self.cli(["wait", "7", "--timeout", "1"]))
+        self.assertNotIn("status=PENDING", self.out.getvalue())
+
+    def test_a_merged_pull_request_is_not_held_on_its_unknown_merge(self) -> None:
+        """GitHub reads UNKNOWN on a merged pull request for good, so holding it never ends."""
+        pr = self.into(payload([review(oid=OLD)], merge="UNKNOWN", checks=[check()]), attest=True)
+        self.answer({**pr, "state": "MERGED"})
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_not_called()
+
+    def test_a_push_during_the_held_poll_ends_it_on_the_unattested_head(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        moved = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True
+        )
+        moved["headRefOid"] = "c" * 40
+        self.answer(held, held, moved)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
+        slept.assert_called_once()
+
+    def test_an_unknown_merge_holds_the_poll_over_a_failed_required_check(self) -> None:
+        """GitHub recomputes the word after a check concludes, and the code is chosen by it."""
+        failed = check(name="gate", conclusion="FAILURE", started=real_ago(60))
+        unknown = self.into(
+            payload([review(oid=OLD)], merge="UNKNOWN", checks=[failed]), attest=True
+        )
+        blocked = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[failed]), attest=True
+        )
+        self.answer(unknown, unknown, blocked)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+
+    def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
+        nodes = pr_review.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    check(name="running", status="IN_PROGRESS", conclusion=""),
+                    check(name="queued", status="QUEUED", conclusion=""),
+                    check(name="concluding", status="COMPLETED", conclusion=""),
+                    check(name="starved", status="QUEUED", conclusion="", started=ago(900)),
+                    check(name="long", status="IN_PROGRESS", conclusion="", started=ago(2000)),
+                    check(name="passed"),
+                    check(name="failed", conclusion="FAILURE"),
+                    status_context("ci/building", state="PENDING"),
+                    status_context("ci/expected", state="EXPECTED"),
+                    status_context("ci/done"),
+                    {"__typename": "UnknownContext"},
+                ],
+            )
+        )
+        settling = pr_review.checks_settling(nodes, NOW, 300, 1800)
+        self.assertEqual(
+            ["running", "queued", "concluding", "long", "ci/building", "ci/expected"],
+            [n["name"] for n in settling],
+        )
+
     def test_request_asks_for_a_round_on_a_fix_push(self) -> None:
         self.answer(self.into(payload([review(oid=OLD)])))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
@@ -7202,12 +7689,15 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def test_a_push_during_a_held_wait_grades_the_new_head(self) -> None:
-        """An attestation of the head read first does not cover the head the verdict reads."""
+    def test_a_hold_decided_on_a_pushed_unattested_head_grades_that_head(self) -> None:
+        """A push before the snapshot read moves the head the hold is decided for.
+
+        No local pass attests the moved head, so the verdict is 49 and nothing is requested.
+        """
         first = self.into(payload([review(oid=OLD)]), attest=True)
         moved = self.into(payload([review(oid=OLD)]), attest=True)
         moved["headRefOid"] = "c" * 40
-        self.answer(first, first, moved)
+        self.answer(first, moved)
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(49, self.cli(["wait", "7", "--timeout", "0"]))
@@ -8350,7 +8840,7 @@ class TestClaimsIsReadOnly(unittest.TestCase):
     def test_a_ref_is_matched_as_bytes_so_an_undecodable_file_is_still_searched(self) -> None:
         """Skipping a file this cannot decode is how a present ref reads as absent."""
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
-        self.assertIn("n in blob", source)
+        self.assertIn("n in blob", flowed_text(source))
 
     def test_an_absent_status_is_absence_and_a_rate_limit_is_not(self) -> None:
         """Reading a 403 as a missing commit reports a correct description as contradicting itself."""
@@ -8618,13 +9108,52 @@ class TestContract(unittest.TestCase):
 
     def test_the_backoff_is_bounded_and_non_decreasing(self) -> None:
         """A wait that sleeps zero seconds is a busy loop, and one that shrinks polls harder later."""
-        source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
-        delays = [
-            int(n) for n in source.split("delays = [")[1].split("]")[0].replace(" ", "").split(",")
-        ]
+        delays = list(pr_review.POLL_DELAYS)
         self.assertGreaterEqual(len(delays), 3)
         self.assertTrue(all(d > 0 for d in delays))
         self.assertEqual(delays, sorted(delays))
+
+    def test_the_backoff_sleeps_the_schedule_until_the_timeout(self) -> None:
+        """The last delay repeats, and the bound is read before each sleep rather than after.
+
+        Six sleeps reach 290 seconds and a seventh 410, so with a 400-second bound the eighth is
+        never taken.
+        """
+        clock = [0.0]
+        slept: list[int] = []
+
+        def sleep(seconds: int) -> None:
+            slept.append(seconds)
+            clock[0] += seconds
+
+        reads = iter(range(1, 100))
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(pr_review.time, "sleep", side_effect=sleep),
+        ):
+            last = pr_review.backoff(0, lambda: next(reads), lambda _: True, 0.0, 400)
+        self.assertEqual([15, 20, 30, 45, 60, 120, 120], slept)
+        self.assertEqual(7, last)
+
+    def test_the_backoff_returns_the_first_value_it_does_not_keep(self) -> None:
+        """A met condition ends the poll without a sleep, and a later one ends it on that read."""
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual("done", pr_review.backoff("done", str, lambda v: v != "done", 0.0, 9))
+        slept.assert_not_called()
+        reads = iter(["more", "done", "never"])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            last = pr_review.backoff("start", lambda: next(reads), lambda v: v != "done", 0.0, 1e9)
+        self.assertEqual("done", last)
+        self.assertEqual([mock.call(15), mock.call(20)], slept.call_args_list)
+
+    def test_the_held_poll_reads_neither_threads_nor_files(self) -> None:
+        """The poll re-reads every iteration, and only the final digest read needs the two."""
+        poll = " ".join(pr_review.Q_HELD.split())
+        self.assertNotIn("reviewThreads", poll)
+        self.assertNotIn("files(", poll)
+        self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
+        self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
+        self.assertIn("authorAssociation createdAt body", poll)
 
 
 class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):

@@ -17,16 +17,20 @@
 | nuget | | | | |
 | pypi | | | | |
 | python | | | | |
-| console | | | | |
+| dotnet-publish | | | | |
+| hugo | | | | |
 | docker | | | | |
 | branch-model | | | | |
+| carried-scope | | | | |
 | repo-setup | | | | |
+| runtime-secrets | | | | |
+| verbatim-tree | | | | |
 | linter-parity | | | | |
 | recurring-violations | | | | |
 | readme-structure | | | | |
 | workflow (WORKFLOW.md 5A/5B) | | | | |
 
-Verdict values: pass | drift | defect | N/A. Remove rows that are N/A for the repo's types, or mark them N/A.
+Verdict values: operational | not-operational | N/A. Letter and Intent values: pass | miss | N/A, where a letter miss with intent pass is a drift finding and both missing is a defect. Mark a row N/A, in all three columns, only when its checks govern a construct the repo does not contain, and never delete a row, so the report shows the dimension was judged.
 
 ## Defects (most severe first)
 
