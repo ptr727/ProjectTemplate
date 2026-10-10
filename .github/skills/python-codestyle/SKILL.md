@@ -33,7 +33,8 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
 - **build** (Project): third-party runtime dependencies, or the repo's deliverable. Either a uv
   project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
   `pyproject.toml` beside a `requirements*.txt` and no `uv.lock`, installed with pip. Uses pytest,
-  and pyright strict, mypy with its strict flags, or both as the CI type checker.
+  and pyright strict or mypy with its strict flags as the hub validator's type checker, with a
+  repo running both adding the second itself, per Toolchain below.
 - **lint-only** (Scripts): no `[project]`, no `[build-system]`, no lockfile, no `requirements*.txt`
   (the hub validator runs pytest wherever one sits). Uses `uvx` for third-party tools, unittest
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
@@ -76,10 +77,12 @@ than one checker is normal when each serves a purpose (the .NET side pairs CShar
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
 editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
-command joins the clean-compile. mypy may also be a build repo's only CI checker, run with its
-strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A
-pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
-engine.
+command joins the clean-compile. The hub validator runs one checker in each Python directory,
+mypy wherever the config declares both, so a repo enforcing pyright beside mypy runs it from its
+own `.github/actions/validate/action.yml` hook. mypy may also be a build repo's only CI checker,
+run with its strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs
+them. A pyright-only repo is the lightest and is inherently consistent, since the editor and CI run
+one engine.
 
 ## Local development loop
 
@@ -101,9 +104,11 @@ uv build                         # produce wheel + sdist in ./dist (published pa
 ```
 
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
-`uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy src` where mypy is
-the CI checker, or both where the repo runs both (see Type checking above). Run it, plus
-`uv run pytest`, before committing.
+`uv run ruff check` + the repo's type checker: `uv run pyright`, or `uv run mypy` where mypy is
+the CI checker, or both where the repo runs both (see Type checking above). CI passes the checker no
+path where the config sits in the project directory, so the config selects what is checked, and a
+mypy config there sets `files`, without which mypy exits with an error naming no target. Run it,
+plus `uv run pytest`, before committing.
 
 A **build**-profile directory in its pip form builds its environment the way CI does, through uv's
 pip interface, which writes no `uv.lock`. It installs every `requirements*.txt` in one command, since
@@ -226,7 +231,7 @@ Before pushing or opening a PR:
   (via the `charliermarsh.ruff` extension) and pyright (via the `ms-python.python` extension's
   bundled Pylance).
 - The **build**-profile CI gate, in its uv form, is `uv run ruff check`,
-  `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy src`), and
+  `uv run ruff format --check`, the repo's type checker (`uv run pyright` or `uv run mypy`), and
   `uv run pytest`, the same commands as the local loop above, run from the Python project directory
   (invoked as separate steps, not `&&`-chained, so the runner shell is irrelevant). The pip form's
   CI gate is its commands in the local loop above, and a **lint-only** profile's is its `uvx`
