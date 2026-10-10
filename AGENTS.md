@@ -59,7 +59,7 @@ An agent session is billed on the context it carries, not the work it does. Ever
 A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below alone. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
 
 - **`frontier`** is the strongest reasoning the fleet uses by default, for rule text, design, spec logic, and adversarial review.
-- **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's decline of a finding stands, since the pull request's reviewers and its merge gate check it.
+- **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
 - **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
 - **`highest`** is the most capable model available. Only the maintainer selects it, naming the tier or the model in the session or the invocation.
 
