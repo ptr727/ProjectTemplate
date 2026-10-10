@@ -5402,17 +5402,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
 
-        fulls = [gql(Q_FULL, owner, repo, a.number)]
+        last_full = [gql(Q_FULL, owner, repo, a.number)]
 
         def held_read() -> dict:
             polled = gql(Q_HELD, owner, repo, a.number)
             if still_held(polled):
                 return polled
-            fulls.append(gql(Q_FULL, owner, repo, a.number))
-            return fulls[-1]
+            last_full[0] = gql(Q_FULL, owner, repo, a.number)
+            return last_full[0]
 
-        polled = backoff(fulls[0], held_read, still_held, start, a.timeout)
-        final = polled if any(polled is f for f in fulls) else None
+        polled = backoff(last_full[0], held_read, still_held, start, a.timeout)
+        final = polled if polled is last_full[0] else None
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "

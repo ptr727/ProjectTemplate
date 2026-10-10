@@ -7438,6 +7438,30 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertEqual(2, slept.call_count)
 
+    def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
+        """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
+        self.answer(held)
+        served = pr_review.gql
+
+        def narrow(query: str, owner: str, repo: str, num: int) -> dict:
+            pr = served(query, owner, repo, num)
+            if query is pr_review.Q_HELD:
+                return {k: v for k, v in pr.items() if k not in ("reviewThreads", "files")}
+            return pr
+
+        self.enterContext(mock.patch.object(pr_review, "gql", side_effect=narrow))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        clock = iter([0.0, 0.0])
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: next(clock, 1e9)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_called_once()
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
     def test_an_attested_head_with_no_checks_registered_yet_is_polled(self) -> None:
         """A wait run right after the push reads an empty rollup, which is CI not started."""
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
