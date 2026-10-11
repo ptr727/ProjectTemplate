@@ -1595,6 +1595,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("app.ts", "// spell-checker: disable\n"),
             ("app.ts", "// Spell-Checker:ignore vendorid\n"),
             ("app.ts", "// spellchecker:words vendorid\n"),
+            ("app.ts", "// spell:ignore vendorid\n"),
+            ("app.ts", "// Spell: disable\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
@@ -1604,6 +1606,7 @@ class TestANamedToolIsStillProse(BaitCase):
         for name, text in (
             ("app.ts", "// cspell reads the word list from the root.\n"),
             ("app.ts", "// spellchecker settings live in the root.\n"),
+            ("app.ts", "// spell checking reads the word list from the root.\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual(

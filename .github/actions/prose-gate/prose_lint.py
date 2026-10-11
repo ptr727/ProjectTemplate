@@ -1569,7 +1569,7 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
     r"|(?:(?i:noqa)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
-    r"|SPDX|Copyright)\b|(?i:cspell|spell-?checker):)"
+    r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
 )
 
 TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa)|type:\s*ignore)\b|\bpylint:")
