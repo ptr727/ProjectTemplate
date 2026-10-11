@@ -6844,6 +6844,16 @@ class TestCli(GqlCase):
                 else:
                     self.assertEqual([], status)
 
+    def test_min_rounds_prints_the_bare_pending_line_where_no_round_covers_the_head(self) -> None:
+        """The line naming the baseline says a round covers the head, which holds only where one
+        does. A round on a superseded head covers nothing, so the timeout there is the ordinary
+        bare `status=PENDING` rather than a line claiming coverage.
+        """
+        self.answer(payload([review(oid=OLD)], pending=True))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
+
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
         reviewer's own reviews on this pull request, on any head. A count narrowed to the
