@@ -485,6 +485,47 @@ class TestDash(BaitCase):
             ["dash"], self.kinds("- **Bug** - wrong behavior - and worse besides\n", {"dash"})
         )
 
+    def test_every_marker_and_bold_spelling_exempts_the_label_separator(self) -> None:
+        """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
+
+        The exemption kept its own narrower marker set and read only `**`, so `+`, `1)`, `__`,
+        and `***` reported the separator the `-` and `**` spelling of the same bullet did not.
+        """
+        labels = (
+            "**Bug**",
+            "**Bug:**",
+            "**Bug**:",
+            "__Bug__",
+            "__Bug:__",
+            "***Bug***",
+            "___Bug___",
+            "**_Bug_**",
+            "__*Bug*__",
+            "_**Bug**_",
+            "*__Bug__*",
+        )
+        for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
+            for label in labels:
+                with self.subTest(marker=marker, label=label):
+                    self.assertEqual(
+                        [], self.kinds(f"{marker} {label} - wrong behavior\n", {"dash"})
+                    )
+                    self.assertEqual(
+                        ["dash"],
+                        self.kinds(f"{marker} {label} - wrong behavior - and worse\n", {"dash"}),
+                    )
+
+    def test_an_unmarked_or_mismatched_label_separator_still_counts(self) -> None:
+        """Without a list marker, or with mismatched emphasis, the dash is a clause break."""
+        for text in (
+            "**Bug** - wrong behavior\n",
+            "- **Bug__ - wrong behavior\n",
+            "- __Bug** - wrong behavior\n",
+            "- _**Bug** - wrong behavior\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
     def test_compound_words_and_ranges_are_left_alone(self) -> None:
         for text in (
             "A well-named must-pair input.\n",

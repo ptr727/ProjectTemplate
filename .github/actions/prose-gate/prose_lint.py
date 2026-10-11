@@ -1057,11 +1057,18 @@ LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]
 DASH = re.compile(r"(?<=[^\s\d])\s+-\s+(?=[^\s\d])")
 QUOTE_PREFIX = re.compile(r"^\s*(?:>\s*)+")
 
+LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
+
+STRONG_LABEL_TOKEN = (
+    r"(?P<outer>[*_]?)(?:(?P<star>\*\*)(?P<si>_?)|__(?P<ui>\*?))"
+    r"(?(star)[^*\n]|[^_\n])+?(?P<inner_colon>:\s*)?"
+    r"(?(star)(?P=si)\*\*|(?P=ui)__)(?P=outer)"
+)
+
 # `- **Label** - explanation` is a definition separator, structurally a colon.
 # Flagging it would restructure the document format rather than the prose.
 # The first dash on such a line is skipped, and any later one still counts.
-# An ordered marker introduces the same construct, so `1. **Label** - ...` is one too.
-LABEL_DASH = re.compile(r"^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*[.:]?\s+-\s+")
+LABEL_DASH = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}[.:]?\s+-\s+")
 
 # The negative lookbehind keeps a word-joining character from starting a repetition:
 # "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
@@ -1675,19 +1682,11 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"([^"\n]*)"', blank, s)
 
 
-LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
-
 # A bullet's `**Label**:` opens the text the same way `- **Label** -` does.
 # Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
 # The colon is written inside the emphasis as often as outside it, and both spell one construct.
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
-LABEL_COLON = re.compile(
-    rf"^\s*{LIST_MARKER_TOKEN}\s+(?P<outer>[*_]?)(?:"
-    r"(?P<star>\*\*)(?P<si>_?)[^*\n]+?"
-    r"(?:(?P=si)(?P=star)(?P=outer)\s*:|:\s*(?P=si)(?P=star)(?P=outer))"
-    r"|(?P<under>__)(?P<ui>\*?)[^_\n]+?"
-    r"(?:(?P=ui)(?P=under)(?P=outer)\s*:|:\s*(?P=ui)(?P=under)(?P=outer)))"
-)
+LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inner_colon)|\s*:)")
 
 # A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
 # The guards are the run-on rule's, so an initial or an abbreviation ends nothing.
