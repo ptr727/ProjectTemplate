@@ -293,9 +293,10 @@ Subcommands
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
-           on a held head covered by an attested local pass a 30 or a 44. A genuine round the
-           final read shows on the head also outranks it, read as 30 where --min-rounds does not
-           credit that round.
+           on a held head covered by an attested local pass a 30 or a 44. A genuine round on the
+           head rules 47 out. One already there when the wait begins leaves the request and the
+           poll to run as usual, and one landing during the wait that --min-rounds does not
+           credit reads as 30.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -5501,12 +5502,16 @@ def main(argv: list[str] | None = None) -> int:
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
     history = [] if done or answer or drift else copilot_history(owner, repo)
+    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
-    signal = None if a.ignore_quota_signal else quota_signal(history)
-    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
+    signal = (
+        None
+        if a.ignore_quota_signal or (snapshot is not None and reviewed_head(snapshot))
+        else quota_signal(history)
+    )
     stopped = (
         None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
     )

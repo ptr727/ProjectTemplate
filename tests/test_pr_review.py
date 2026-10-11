@@ -7912,25 +7912,49 @@ class TestCli(GqlCase):
 
     def test_a_round_on_the_head_outranks_the_repo_wide_quota_reading(self) -> None:
         """The 47 line says the head carries no Copilot review of its own, so it cannot fire
-        where the final read shows one. Three rounds sit on the head with a re-request pending,
-        the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine round lands
-        mid-wait at a position `--min-rounds 4` does not credit. Each clock read advances 100
-        seconds, so one poll lands it and the read after it is past the 150-second timeout.
+        where the final read shows one. Three rounds sit on the pull request with a re-request
+        pending, the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine
+        round lands on the head mid-wait at a position `--min-rounds 4` does not credit. The
+        three sit on the head in the issue's example, and on a superseded head in the case only
+        the final read can catch. Each clock read advances 100 seconds, so one poll lands it and
+        the read after it is past the 150-second timeout. The opening shape is answered twice,
+        since the wait's liveness read and its snapshot each take one.
         """
-        seen = [review(rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)]
-        fourth = review(rid="PRR_fourth", at=LATE)
-        self.answer(payload(seen, pending=True), payload([*seen, fourth]))
-        self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
-        clock = itertools.count(0, 100).__next__
-        with (
-            mock.patch.object(pr_review.time, "sleep"),
-            mock.patch.object(pr_review.time, "monotonic", clock),
-        ):
-            argv = ["wait", "7", "--min-rounds", "4", "--timeout", "150"]
-            self.assertEqual(30, self.cli(argv))
+        for label, oid in (("on head", HEAD), ("superseded", OLD)):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                seen = [
+                    review(oid=oid, rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)
+                ]
+                fourth = review(rid="PRR_fourth", at=LATE)
+                start = payload(seen, pending=True)
+                self.answer(start, start, payload([*seen, fourth]))
+                self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep"),
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", "4", "--timeout", "150"]
+                    self.assertEqual(30, self.cli(argv))
+                out = self.out.getvalue()
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+                self.assertIn("now has 4 rounds, up from 3", out)
+
+    def test_a_round_already_on_the_head_takes_no_repo_wide_quota_reading(self) -> None:
+        """The reading assumes a head with no Copilot activity of its own, so a genuine round
+        there when the wait begins must not skip the request and the poll on it either. Skipped,
+        the wait ended at once on a bare pending line that no later wait would ever change.
+        """
+        self.answer(payload([review(at="2026-08-02T10:00:00Z")]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
         out = self.out.getvalue()
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
-        self.assertIn("now has 4 rounds, up from 3", out)
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
+        self.assertIn("auto-request:", out)
 
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""
