@@ -1566,11 +1566,11 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 # A pragma, shebang, or divider is machinery rather than prose.
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
-# `noqa` and `pylint:` may also trail prose behind their own `#`, where flake8, ruff, and pylint read them.
+# `noqa`, `type: ignore`, and `pylint:` may also trail prose behind their own `#`, where a checker reads each.
 NOT_PROSE = re.compile(
-    r"^(?:!|\s*[-=#*/<>]+\s*$|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
+    r"^(?:!|\s*[-=#*/<>]+\s*$|noqa|type:\s*ignore|pylint|ruff:|mypy:|flake8:|shellcheck"
     r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright|v\d+(?:\.\d+)*$)"
-    r"|#\s*(?:noqa\b|pylint:)"
+    r"|#\s*(?:(?:noqa|type:\s*ignore)\b|pylint:)"
 )
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.

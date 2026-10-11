@@ -1551,11 +1551,7 @@ class TestANamedToolIsStillProse(BaitCase):
             ),
             ("# The noqa marker here is read per line.\n", ["comment-added"]),
             ("# Each type: ignore here names its code.\n", ["comment-added"]),
-            # A trailing `type: ignore` is prose, since mypy reads one only where it opens the comment.
-            (
-                "# two sentences here. Another one follows.  # type: ignore[arg-type]\n",
-                ["comment-wrap", "comment-case", "comment-added"],
-            ),
+            ("# Bump to v2.3\n", ["comment-added"]),
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
@@ -1571,6 +1567,9 @@ class TestANamedToolIsStillProse(BaitCase):
             ("run.sh", "# shellcheck disable=SC1091  # A host file, not present at lint time.\n"),
             ("app.ts", "// eslint-disable-next-line no-console -- Logging is intended here.\n"),
             ("tool.py", "# ruff: noqa: E501 - the URLs cannot wrap.\n"),
+            ("tool.py", "# flake8: noqa\n"),
+            ("tool.py", "# flake8: noqa: E501\n"),
+            ("tool.py", "# v2.3\n"),
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
             ("settings.jsonc", "// cSpell:ignore exampleword\n"),
@@ -1579,10 +1578,11 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
-        """`noqa` and `pylint:` sit after prose on the same line, where flake8, ruff, and pylint read them."""
+        """`noqa`, `type: ignore`, and `pylint:` sit after prose on the same line, where a checker reads each."""
         for text in (
             "# two sentences here. Another one follows.  # noqa: E501\n",
             "x = 1  # two sentences here. Another one follows.  # noqa\n",
+            "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
             "# two sentences here. Another one follows.  # pylint: disable=no-member\n",
         ):
             with self.subTest(text=text.strip()):
