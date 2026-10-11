@@ -7918,7 +7918,8 @@ class TestCli(GqlCase):
         three sit on the head in the issue's example, and on a superseded head in the case only
         the final read can catch. Each clock read advances 100 seconds, so one poll lands it and
         the read after it is past the 150-second timeout. The opening shape is answered twice,
-        since the wait's liveness read and its snapshot each take one.
+        since the wait's liveness read and its snapshot each take one. The fourth round is stamped
+        before the refusal, so that the head alone is what rules 47 out.
         """
         for label, oid in (("on head", HEAD), ("superseded", OLD)):
             with self.subTest(label):
@@ -7927,7 +7928,7 @@ class TestCli(GqlCase):
                 seen = [
                     review(oid=oid, rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)
                 ]
-                fourth = review(rid="PRR_fourth", at=LATE)
+                fourth = review(rid="PRR_fourth", at="2026-08-02T10:20:00Z")
                 start = payload(seen, pending=True)
                 self.answer(start, start, payload([*seen, fourth]))
                 self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
