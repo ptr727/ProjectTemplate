@@ -2729,8 +2729,8 @@ class TestCli(unittest.TestCase):
     def test_a_python_file_no_rule_could_tokenize_is_named_by_every_comment_rule(self) -> None:
         """A file whose comments went unread is not a clean pass, so the scope line says so.
 
-        Each comment rule reads a `.py` through `tokenize`, and on a file it refuses one falls back
-        to a line scan while the rest read no comment at all. The run exited 0 with the scope line
+        Each comment rule reads a `.py` through `tokenize`. On a file it refuses, `comment-wrap` and
+        `comment-case` fall back to a line scan, and `comment-added` and `issue-ref` read no comment. The run exited 0 with the scope line
         a clean tree prints. No interpreter tokenizes the fixture, so the case holds whichever one
         runs the suite. `comment-added` runs only under `--diff`, so its case is the diff-scoped one.
         """
@@ -2739,7 +2739,7 @@ class TestCli(unittest.TestCase):
             with self.subTest(rule=rule):
                 err = self.scope_line([bait], ["--check", rule])
                 self.assertIn("1 .py file(s) Python", err)
-                self.assertIn(f"cannot parse, so read only in part: {bait}", err)
+                self.assertIn(f"cannot parse, so read only in part: {str(bait)!r}", err)
 
     def test_a_python_file_that_tokenizes_but_does_not_parse_is_named_by_issue_ref_alone(
         self,
@@ -2765,7 +2765,7 @@ class TestCli(unittest.TestCase):
         self.assertNotIn("read only in part", self.scope_line([bait], ["--check", "dupword"]))
 
     def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
-        """No rule reads a file that does not decode, and a newer interpreter would not either."""
+        """No rule reads a file the gate cannot decode, so no parse was refused on it."""
         latin = self.tmp / "latin.py"
         latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
         self.assertNotIn("read only in part", self.scope_line([latin], []))
@@ -2774,7 +2774,7 @@ class TestCli(unittest.TestCase):
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
         err = self.scope_line(baits, ["--check", "comment-wrap"])
         self.assertIn("6 .py file(s) Python", err)
-        self.assertIn(f"{baits[4]} and more", err)
+        self.assertIn(f"{str(baits[4])!r} and more", err)
         self.assertNotIn(str(baits[5]), err)
 
     def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
@@ -2785,7 +2785,7 @@ class TestCli(unittest.TestCase):
         ):
             err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
         self.assertIn("1 changed line(s)", err)
-        self.assertIn("so read only in part: open.py", err)
+        self.assertIn("so read only in part: 'open.py'", err)
 
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
