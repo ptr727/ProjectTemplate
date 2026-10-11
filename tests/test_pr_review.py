@@ -7942,7 +7942,7 @@ class TestCli(GqlCase):
                 self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
                 self.assertIn("now has 4 rounds, up from 3", out)
 
-    def test_a_round_already_on_the_head_takes_no_repo_wide_quota_reading(self) -> None:
+    def test_a_round_already_on_the_head_still_requests_and_polls(self) -> None:
         """The reading assumes a head with no Copilot activity of its own, so a genuine round
         there when the wait begins must not skip the request and the poll on it either. Skipped,
         the wait ended at once on a bare pending line that no later wait would ever change.
@@ -7955,6 +7955,20 @@ class TestCli(GqlCase):
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertNotIn("note: the reviewer's own most recent activity", out)
         self.assertIn("auto-request:", out)
+
+    def test_a_push_off_the_reviewed_head_keeps_the_repo_wide_quota_reading(self) -> None:
+        """A round on the head when the wait begins lets the request and poll run, but the
+        reading itself stands, since a push during the wait can leave the final head with no
+        Copilot activity of its own, which is exactly what 47 reports. The opening shape is
+        answered twice, since the wait's liveness read and its snapshot each take one.
+        """
+        start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
+        moved = payload([review(oid=OLD, at="2026-08-02T10:00:00Z")], pending=True)
+        self.answer(start, start, moved)
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(47, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
 
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""

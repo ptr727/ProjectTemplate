@@ -227,13 +227,13 @@ Subcommands
            current head, then print the digest. The auto-request is skipped once a review past
            --min-rounds already covers the head, once Copilot has already answered outside a
            formal review, or once one is already in the pending request set, so calling `wait`
-           again on the same PR never double-requests. It is also skipped under 46's and 47's quota readings below, since a
-           request into a reached limit spends quota and returns the same refusal. It is skipped too
-           on a pull request into a branch other than the default once Copilot has reviewed it at
-           all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead only while they can still move
-           its merge, as 30 below lists, and one with no attestation exits 49 naming the `attest`
-           step.
+           again on the same PR never double-requests. It is also skipped under 46's and 47's quota
+           readings below, since a request into a reached limit spends quota and returns the same
+           refusal. It is skipped too on a pull request into a branch other than the default once
+           Copilot has reviewed it at all, since a fix push there is covered by an attested local
+           pass: an attested head is covered at once, so the wait polls its checks instead only
+           while they can still move its merge, as 30 below lists, and one with no attestation exits
+           49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -293,10 +293,10 @@ Subcommands
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
-           on a held head covered by an attested local pass a 30 or a 44. A genuine round on the
-           head rules 47 out. One already there when the wait begins leaves the request and the
-           poll to run as usual, and one landing during the wait that --min-rounds does not
-           credit reads as 30.
+           on a held head covered by an attested local pass a 30 or a 44. A genuine round the
+           final read shows on the head rules 47 out, read as 30 where --min-rounds does not
+           credit it. One already on the head when the wait begins leaves the request and the
+           poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -5507,11 +5507,8 @@ def main(argv: list[str] | None = None) -> int:
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
-    signal = (
-        None
-        if a.ignore_quota_signal or (snapshot is not None and reviewed_head(snapshot))
-        else quota_signal(history)
-    )
+    signal = None if a.ignore_quota_signal else quota_signal(history)
+    quota_stop = signal if snapshot is None or not reviewed_head(snapshot) else None
     stopped = (
         None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
     )
@@ -5524,14 +5521,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
-    # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    # Skipped once a review past --min-rounds already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     recorded: bool | None = None
     final: dict | None = None
     if (
         not done
         and not answer
         and not drift
-        and not signal
+        and not quota_stop
         and not stopped
         and not held
         and not reviewer_requested(pr)
@@ -5594,11 +5591,11 @@ def main(argv: list[str] | None = None) -> int:
             "nothing and stops here. Pass --ignore-quota-signal to request and poll anyway, "
             "once the limit is believed to have reset."
         )
-    elif signal and not reviewer_requested(pr):
+    elif quota_stop and not reviewer_requested(pr):
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
-        number, hist_refusal = signal
+        number, hist_refusal = quota_stop
         print(
             f"note: the reviewer's own most recent activity anywhere in this repository, on "
             f"pull request #{number} at {hist_refusal.get('_at') or 'an unknown time'}, is a "
