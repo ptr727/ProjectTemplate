@@ -128,10 +128,10 @@ restricted. Each structural rule a pattern can reach lands as a `prose_lint.py` 
 incrementally, and this section names each check as it ships.
 
 - **Short sentences: at most 25 words in one sentence**, ASD-STE100's descriptive cap, checked by
-  the `sentence-length` rule in `prose_lint.py`. The check is opt-in like `sentence-split`,
-  because the existing corpus predates the cap and a default gate would fail whole files nobody
-  is editing. Write new prose under the cap, and scope a run to a change with
-  `--check sentence-length --diff <base>`.
+  the `sentence-length` rule in `prose_lint.py`. The rule reads Markdown prose, code comments, and
+  docstrings. The check is opt-in like `sentence-split`, because the existing corpus predates the
+  cap and a default gate would fail whole files nobody is editing. Write new prose under the cap,
+  and scope a run to a change with `--check sentence-length --diff <base>`.
 - **One instruction per sentence.** A procedure step states one action, and a second action is a
   second step. No pattern reaches this, so it is authoring discipline with no check.
 - **Active voice, imperative mood for procedure steps.** Write "run the gate", never "the gate

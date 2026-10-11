@@ -2483,15 +2483,189 @@ class TestSentenceLength(BaitCase):
         tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
         self.assertEqual([(2, "sentence-length")], self.found("Intro line.\n" + tail))
 
-    def test_the_rule_is_markdown_only(self) -> None:
-        """A source file's long lines are code, which no sentence rule judges."""
-        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
-        self.assertEqual([], self.kinds(f"# {over}\n", {"sentence-length"}, name="bait.py"))
+    def test_a_source_line_that_is_not_a_comment_is_not_judged(self) -> None:
+        """A source file's long code lines are code, which no sentence rule judges."""
+        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
+        self.assertEqual([], self.kinds(f'x = "{over}."\n', {"sentence-length"}, name="bait.py"))
 
     def test_the_rule_is_opt_in(self) -> None:
         """Adoption is incremental, so the default set stays unchanged until a promotion."""
         self.assertNotIn("sentence-length", prose_lint.DEFAULT_RULES)
         self.assertIn("sentence-length", prose_lint.RULES)
+
+
+class TestCommentSentenceLength(BaitCase):
+    """The word cap reaches comments and docstrings, where the prose of a source file lives."""
+
+    def words(self, count: int) -> str:
+        return " ".join(["word"] * count)
+
+    def over(self) -> str:
+        return self.words(prose_lint.SENTENCE_WORD_CAP + 1) + "."
+
+    def at_cap(self) -> str:
+        return self.words(prose_lint.SENTENCE_WORD_CAP) + "."
+
+    def found(self, text: str, name: str, allowed: set[int] | None = None) -> list[tuple[int, str]]:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"}, allowed=allowed)
+        return [(n, kind) for n, kind, _ in found]
+
+    def test_an_over_cap_shell_comment_is_flagged(self) -> None:
+        self.assertEqual(
+            [(2, "sentence-length")], self.found(f"set -e\n# {self.over()}\nrun\n", "bait.sh")
+        )
+
+    def test_an_at_cap_shell_comment_passes(self) -> None:
+        self.assertEqual([], self.found(f"set -e\n# {self.at_cap()}\nrun\n", "bait.sh"))
+
+    def test_an_over_cap_yaml_comment_is_flagged(self) -> None:
+        self.assertEqual(
+            [(1, "sentence-length")], self.found(f"# {self.over()}\nname: value\n", "bait.yml")
+        )
+
+    def test_a_wrapped_sentence_is_counted_whole_and_reported_once(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"x=1\n# {half}\n# {half}.\ny=2\n"
+        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.sh"))
+
+    def test_a_gap_ends_the_block(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"# {half}\nx=1\n# {half}.\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_code_span_in_a_comment_is_one_word(self) -> None:
+        span = "`" + self.words(prose_lint.SENTENCE_WORD_CAP) + "`"
+        self.assertEqual([], self.found(f"# The value {span} is read.\n", "bait.sh"))
+
+    def test_the_diff_scope_drops_an_unchanged_sentence_and_keeps_a_changed_one(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"# {self.over()}\nx=1\n# {half}\n# {half}.\n"
+        self.assertEqual([], self.found(text, "bait.sh", allowed={2}))
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.sh", allowed={4}))
+
+    def test_an_over_cap_docstring_sentence_is_flagged(self) -> None:
+        text = f'def f() -> None:\n    """{self.over()}"""\n'
+        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_multiline_docstring_sentence_is_counted_whole(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f'def f() -> None:\n    """Summary.\n\n    {half}\n    {half}.\n    """\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_blank_line_ends_a_docstring_paragraph(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f'def f() -> None:\n    """Summary.\n\n    {half}\n\n    {half}.\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_doctest_line_is_not_counted(self) -> None:
+        text = (
+            'def f() -> None:\n    """Summary.\n\n'
+            f"    >>> print({self.words(prose_lint.SENTENCE_WORD_CAP + 1)})\n"
+            '    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_indented_code_block_is_not_counted(self) -> None:
+        text = f'def f() -> None:\n    """Summary.\n\n        {self.over()}\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_colon_line_opens_an_indented_command_block_that_is_not_counted(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        text = f'def f() -> None:\n    """Usage:\n        {run}\n        {run}\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_unpunctuated_docstring_bullets_are_separate_sentences(self) -> None:
+        item = self.words(9)
+        text = f'def f() -> None:\n    """Summary.\n\n    - {item}\n    - {item}\n    - {item}\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_unpunctuated_comment_bullets_are_separate_sentences(self) -> None:
+        item = self.words(9)
+        text = f"# Steps:\n#   - {item}\n#   - {item}\n#   - {item}\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_adjacent_docstrings_are_judged_apart(self) -> None:
+        half = self.words(13)
+        text = f'class C:\n    """{half}"""\n    def f(self): """{half}"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_tab_indented_docstring_code_block_is_not_counted(self) -> None:
+        text = f'def f() -> None:\n\t"""Summary.\n\n\t\t{self.over()}\n\t"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_ellipsis_opening_prose_is_not_a_doctest(self) -> None:
+        text = f'def f() -> None:\n    """Summary.\n\n    ... {self.over()}\n    """\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_doctest_output_and_continuation_lines_are_not_counted(self) -> None:
+        long = self.words(prose_lint.SENTENCE_WORD_CAP + 1)
+        text = (
+            'def f() -> None:\n    """Summary.\n\n    >>> x = (\n    ...     1)\n'
+            f'    {long}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_prose_resumes_after_a_docstring_code_block(self) -> None:
+        text = (
+            'def f() -> None:\n    """Summary.\n\n        code line\n\n'
+            f'    {self.over()}\n    """\n'
+        )
+        self.assertEqual([(6, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_the_diff_scope_reaches_a_docstring_continuation_line(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f'def f() -> None:\n    """Summary.\n\n    {half}\n    {half}.\n    """\n'
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py", allowed={5}))
+
+    def test_a_trailing_comment_ends_the_block(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        self.assertEqual([], self.found(f"x=1 # {half}\n# {half}.\n", "bait.sh"))
+
+    def test_a_non_prose_comment_ends_the_block(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"# {half}\n# https://example.com/a\n# {half}.\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_single_quoted_and_a_raw_docstring_are_read(self) -> None:
+        single = chr(39) * 3
+        for opener in ("r" + single, single, 'r"""'):
+            with self.subTest(opener=opener):
+                text = f"def f() -> None:\n    {opener}{self.over()}{opener[-3:]}\n"
+                self.assertEqual([(2, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_double_backtick_span_is_one_word(self) -> None:
+        span = "``" + self.words(prose_lint.SENTENCE_WORD_CAP) + "``"
+        self.assertEqual([], self.found(f"# The value {span} is read.\n", "bait.sh"))
+
+    def test_capitalized_unpunctuated_comment_lines_are_separate_sentences(self) -> None:
+        line = self.words(9)
+        text = "".join(f"# Step {line}\n" for _ in range(4))
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_sphinx_field_lines_are_separate_sentences(self) -> None:
+        field = self.words(8)
+        fields = "".join(f"    :param p{i}: {field}\n" for i in range(4))
+        text = f'def f() -> None:\n    """Summary.\n\n{fields}    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_implicit_concatenation_in_a_docstring_code_block_is_one_docstring(self) -> None:
+        code = "".join(f"        call_{i}(a, b, c, d, e, f, g, h)\n" for i in range(4))
+        text = (
+            'def f() -> None:\n    """Example::\n\n        msg = ("first "\n'
+            f'               "second")\n{code}    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_numbered_comment_marker_is_not_a_word(self) -> None:
+        text = f"# 1) {self.at_cap()}\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_python_comment_is_judged_too(self) -> None:
+        self.assertEqual(
+            [(1, "sentence-length")], self.found(f"# {self.over()}\nx = 1\n", "bait.py")
+        )
 
 
 class TestSpelling(BaitCase):
@@ -2946,7 +3120,7 @@ class TestCli(unittest.TestCase):
         """
         for name, text in (("open.py", self.UNTOKENIZED), ("newer.py", self.UNPARSED)):
             bait = self.bait(name, text)
-            for rule in ("comment-wrap", "comment-case", "issue-ref"):
+            for rule in ("comment-wrap", "comment-case", "issue-ref", "sentence-length"):
                 with self.subTest(file=name, rule=rule):
                     err = self.scope_line([bait], ["--check", rule])
                     self.assertIn("1 .py file(s) Python", err)
