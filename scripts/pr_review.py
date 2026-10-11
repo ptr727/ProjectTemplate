@@ -35,7 +35,8 @@ Subcommands
            carry below, or where nothing states or carries any, a round covering the head names
            exactly the changed files in its own file table, `coverage=table` in the digest, or
            where no round covering the head carries a table, the newest round that does names
-           them under the same change-set bound, `coverage=carried:table`.
+           them under the same change-set bound, `coverage=carried:table`, or an attested local
+           pass covers the head as described below, `coverage=local`.
            `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
@@ -46,7 +47,9 @@ Subcommands
            `review_on_head=local` reads a head no Copilot round covers on a pull request into a
            branch other than the default, after Copilot's first round, where an attestation vouches
            for it and no round on record states or appears to state partial coverage, with
-           `coverage=local` beside it.
+           `coverage=local` beside it. Under the same conditions the attestation also covers a
+           head whose Copilot round states no coverage, has none carried to it, and carries no file
+           table, which reads `review_on_head=yes coverage=local`.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -59,8 +62,8 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = no statement of changed-file coverage describes this head, and no file table
-           stands in for one. A round that
+           45 = no statement of changed-file coverage describes this head, and no file table or
+           attested local pass stands in for one. A round that
            states none carries the newest round that states some forward, bounded on the change
            set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
@@ -3153,6 +3156,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
         state, line, _from_head = carried
     if state == UNSTATED and not table_reading(owner, repo, pr)[1]:
         state = TABLE
+    if state == UNSTATED and local_beside_round(pr):
+        state = LOCAL
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -3942,7 +3947,7 @@ def digest(
     )
     if cover == UNSTATED and on_head and not table_short:
         cover = TABLE
-    local = not on_head and local_cover(pr)
+    local = local_cover(pr) if not on_head else cover == UNSTATED and local_beside_round(pr)
     if local:
         cover = LOCAL
     unknown = unrecognized_shapes(pr)
@@ -4248,10 +4253,17 @@ def digest(
         lines.append(f"  NO FILE TABLE STANDS IN: {table_short}")
     elif cover == LOCAL:
         lines.append(
-            "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
-            "follows the pull request's first round, and a comment from an owner, member, or "
-            "collaborator attests a recorded local strict-review pass over exactly this head's "
-            f"content, which recorded {attestation(pr)} finding(s)"
+            "  COVERAGE IS READ FROM THE LOCAL PASS: this head follows the pull request's first "
+            "round, "
+            + (
+                "the Copilot round covering it states no coverage, none carries to it, and no "
+                "round covering it carries a file table, "
+                if on_head
+                else "no Copilot round covers it, "
+            )
+            + "and a comment from an owner, member, or collaborator attests a recorded local "
+            "strict-review pass over exactly this head's content, which recorded "
+            f"{attestation(pr)} finding(s)"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
@@ -4859,6 +4871,16 @@ def local_cover(pr: dict) -> bool:
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
     )
+
+
+def local_beside_round(pr: dict) -> bool:
+    """Whether a recorded local pass covers a head whose own Copilot round leaves coverage unread.
+
+    The caller has found that no statement reaches the head and no table stands in. This holds
+    only where no round covering the head carries a table at all, so a table naming fewer files
+    than the diff changed, which is a round's own word that it skipped one, is never overruled.
+    """
+    return table_shortfall(pr) == NO_HEAD_TABLE and local_cover(pr)
 
 
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)
