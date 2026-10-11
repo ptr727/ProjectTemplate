@@ -12,7 +12,7 @@ these rules, so nothing enforced them before this script. Rules implemented:
   comment-added  No comment line opening its own line added or edited, unless the change says so.
   dupword        No duplicated consecutive word.
   sentence-split A sentence must not wrap across lines (one sentence per line).
-  sentence-length A Markdown prose sentence must not exceed the word cap.
+  sentence-length A Markdown, comment, or docstring sentence must not exceed the word cap.
   spelling       No British spelling, the repo-wide convention being US English.
   home-path      No absolute home path naming a real account, per the representative-data rule.
   dead-path      No mention of a path git once tracked and the tree no longer holds.
@@ -1801,12 +1801,53 @@ def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> st
             return '"' * (len(inner) + 1) + inner[-1]
         return '"' * len(m.group())
 
-    text = re.sub(r"`[^`]*`", code, text)
+    text = re.sub(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", code, text, flags=re.DOTALL)
     out = list(text)
     for start, length in zip(starts, lengths, strict=True):
         masked = re.sub(r'"([^"]*)"', quote, text[start : start + length])
         out[start : start + length] = masked
     return "".join(out)
+
+
+def over_cap_findings(
+    block: list[tuple[int, str]], allowed: set[int] | None = None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in one block of `(line number, text)` pairs, each judged whole.
+
+    The pairs are joined before the split, so a sentence wrapped across lines is counted once.
+    Both the Markdown reader and the comment reader hand their blocks here.
+    """
+    if not block:
+        return []
+    raw = ""
+    starts: list[int] = []
+    for _, span in block:
+        if raw:
+            raw += " "
+        starts.append(len(raw))
+        raw += span
+    numbers = [n for n, _ in block]
+    lengths = [len(span) for _, span in block]
+    text = mask_code_and_quotes(raw, starts, lengths)
+    out: list[tuple[int, str, str]] = []
+    pos = 0
+    for m in [*SENTENCE_BREAK.finditer(text), None]:
+        end = m.start() if m else len(text)
+        words = len(text[pos:end].split())
+        if words > SENTENCE_WORD_CAP:
+            first = bisect_right(starts, pos) - 1
+            last = bisect_right(starts, max(end - 1, pos)) - 1
+            rows = numbers[first : last + 1]
+            hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
+            if hit:
+                msg = (
+                    f"{words} words in one sentence -> "
+                    f"sentences of {SENTENCE_WORD_CAP} words or fewer"
+                )
+                out.append((hit, "sentence-length", msg))
+        if m:
+            pos = m.end()
+    return out
 
 
 def sentence_length_findings(
@@ -1828,37 +1869,8 @@ def sentence_length_findings(
     def flush() -> None:
         nonlocal block_is_item
         block_is_item = False
-        if not block:
-            return
-        raw = ""
-        starts: list[int] = []
-        for _, span in block:
-            if raw:
-                raw += " "
-            starts.append(len(raw))
-            raw += span
-        numbers = [n for n, _ in block]
-        lengths = [len(span) for _, span in block]
+        out.extend(over_cap_findings(block, allowed))
         block.clear()
-        text = mask_code_and_quotes(raw, starts, lengths)
-        pos = 0
-        for m in [*SENTENCE_BREAK.finditer(text), None]:
-            end = m.start() if m else len(text)
-            piece = text[pos:end]
-            words = len(piece.split())
-            if words > SENTENCE_WORD_CAP:
-                first = bisect_right(starts, pos) - 1
-                last = bisect_right(starts, max(end - 1, pos)) - 1
-                rows = numbers[first : last + 1]
-                hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
-                if hit:
-                    msg = (
-                        f"{words} words in one sentence -> "
-                        f"sentences of {SENTENCE_WORD_CAP} words or fewer"
-                    )
-                    out.append((hit, "sentence-length", msg))
-            if m:
-                pos = m.end()
 
     start = front_matter_end(lines)
     for i, line in enumerate(lines[:start], 1):
@@ -2256,6 +2268,34 @@ def config_run_lines(comments: list[Comment]) -> set[int]:
     return out
 
 
+def prose_comment_candidates(
+    path: Path, raw: str, lines: list[str]
+) -> tuple[list[Comment], list[Comment], set[int]]:
+    """The comments a prose rule reads, the originals beside them, and the config-run lines.
+
+    The bodies have a trailing checker directive cut off, and fenced lines are dropped.
+    """
+    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
+    if comments is None:
+        comments = extracted_comments(path, lines)
+    skip = fenced_lines(lines)
+    kept = [c for c in comments if c[0] not in skip]
+    trimmed = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
+    return trimmed, kept, config_run_lines(trimmed)
+
+
+def is_non_prose_comment(n: int, body: str, configured: set[int]) -> bool:
+    """Whether a comment body is not a sentence, so no prose rule judges it."""
+    return bool(
+        not body
+        or n in configured
+        or NOT_PROSE.search(body)
+        or BARE_URI.match(body.strip())
+        or KEY_ONLY.match(body)
+        or (SNIPPET.match(body) and not SNIPPET_END.search(body))
+    )
+
+
 def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
     """Comment lines whose sentence wraps into the next, or that carry two sentences.
 
@@ -2266,27 +2306,14 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
     goes on past.
     """
-    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
-    if comments is None:
-        comments = extracted_comments(path, lines)
-    skip = fenced_lines(lines)
-    kept = [c for c in comments if c[0] not in skip]
-    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
-    configured = config_run_lines(comments)
+    comments, kept, configured = prose_comment_candidates(path, raw, lines)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_whole = ""
     prev_no = 0
     for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
-        if (
-            not body
-            or n in configured
-            or NOT_PROSE.search(body)
-            or BARE_URI.match(body.strip())
-            or KEY_ONLY.match(body)
-            or (SNIPPET.match(body) and not SNIPPET_END.search(body))
-        ):
+        if is_non_prose_comment(n, body, configured):
             prev_body = ""
             continue
         # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
@@ -2632,7 +2659,127 @@ def issue_ref_findings(
     return out
 
 
-PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+PARSED_RULES = frozenset(
+    {"comment-wrap", "comment-case", "comment-added", "issue-ref", "sentence-length"}
+)
+
+
+DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
+DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
+DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
+DOCSTRING_CLOSED = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
+FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
+
+
+def comment_sentence_findings(
+    path: Path, raw: str, lines: list[str], allowed: set[int] | None = None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in the comments of a source file, each judged whole.
+
+    Comment lines on consecutive source lines are one block, so a wrapped sentence counts once.
+    A line that is not prose, a trailing comment, or a gap ends the block.
+    The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
+    """
+    comments, _kept, configured = prose_comment_candidates(path, raw, lines)
+    out: list[tuple[int, str, str]] = []
+    block: list[tuple[int, str]] = []
+    prev_no = 0
+
+    def flush() -> None:
+        out.extend(over_cap_findings(block, allowed))
+        block.clear()
+
+    for n, body, leading, _raw in comments:
+        if is_non_prose_comment(n, body, configured):
+            flush()
+            continue
+        if (
+            not leading
+            or n != prev_no + 1
+            or LIST_MARKER.match(body)
+            or FIELD_LINE.match(body)
+            or body[:1].isupper()
+        ):
+            flush()
+        block.append((n, ENUM_PREFIX.sub("", body).strip()))
+        prev_no = n
+        if not leading or body.rstrip().endswith(":"):
+            flush()
+    flush()
+    return out
+
+
+def docstring_sentence_findings(
+    raw: str, lines: list[str], allowed: set[int] | None = None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in Python docstrings, each judged whole.
+
+    A blank docstring line ends a paragraph, as a blank line does in Markdown.
+    A doctest and the output under it, and an indented code block, are code and are not counted.
+    """
+    spans = python_docstring_spans(raw, lines)
+    out: list[tuple[int, str, str]] = []
+    numbers = sorted(spans)
+    groups: list[list[int]] = []
+    for n in numbers:
+        prior = "".join(spans[groups[-1][-1]]) if groups else ""
+        joined = bool(groups) and n == groups[-1][-1] + 1
+        here = "".join(spans[n])
+        if (
+            joined
+            and DOCSTRING_CLOSED.search(prior)
+            and DOCSTRING_OPEN.match(here)
+            and here[:1].strip()
+        ):
+            joined = False
+        if joined:
+            groups[-1].append(n)
+        else:
+            groups.append([n])
+    for group in groups:
+        texts = ["".join(spans[n]).expandtabs(4) for n in group]
+        texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
+        texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
+        rest = [t for t in texts[1:] if t.strip()]
+        base = min((len(t) - len(t.lstrip()) for t in rest), default=0)
+        if len(texts) > 1 and texts[-1] and not texts[-1].strip():
+            base = min(base, len(texts[-1])) if rest else len(texts[-1])
+        block: list[tuple[int, str]] = []
+        in_doctest = in_code = False
+        prev_blank = True
+        prev_colon = False
+        for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
+            indent = len(text) - len(text.lstrip()) if idx else base
+            if not text.strip():
+                out.extend(over_cap_findings(block, allowed))
+                block.clear()
+                in_doctest = in_code = False
+                prev_blank = True
+                prev_colon = False
+                continue
+            if DOCTEST_PROMPT.match(text):
+                out.extend(over_cap_findings(block, allowed))
+                block.clear()
+                in_doctest = True
+            elif in_doctest or (in_code and indent >= base + 4):
+                pass
+            elif (prev_blank or prev_colon) and indent >= base + 4:
+                out.extend(over_cap_findings(block, allowed))
+                block.clear()
+                in_code = True
+            else:
+                in_code = False
+                if LIST_MARKER.match(text) or FIELD_LINE.match(text):
+                    out.extend(over_cap_findings(block, allowed))
+                    block.clear()
+                block.append((n, text.strip()))
+                if text.rstrip().endswith(":"):
+                    out.extend(over_cap_findings(block, allowed))
+                    block.clear()
+            prev_blank = False
+            prev_colon = text.rstrip().endswith(":")
+        out.extend(over_cap_findings(block, allowed))
+    return out
 
 
 def check_file(
@@ -2696,8 +2843,13 @@ def check_file(
     if {"spelling", "dupword"} & rules and path.suffix != ".md":
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
-    if "sentence-length" in rules and path.suffix == ".md":
-        out.extend(sentence_length_findings(lines, allowed))
+    if "sentence-length" in rules:
+        if path.suffix == ".md":
+            out.extend(sentence_length_findings(lines, allowed))
+        elif path.suffix.lower() != ".md":
+            out.extend(comment_sentence_findings(path, raw, lines, allowed))
+            if path.suffix.lower() == ".py":
+                out.extend(docstring_sentence_findings(raw, lines, allowed))
     in_fence = False
     prev_txt = ""
     prev_no = 0
