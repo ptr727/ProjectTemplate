@@ -5417,13 +5417,13 @@ class TestCoverageExitCodes(GqlCase):
         self.assertIn("splitting the pull request is the remedy", printed)
 
     def paged(
-        self, pages: list[tuple[list[str], str | None]], named: list[str], heads: list[str | None]
+        self, pages: list[tuple[list[str], str | None]], named: list[str], heads: list[str]
     ) -> list[dict]:
         """Answer each full read with `pages[0]` and each later page from `Q_FILES` in turn.
 
         Each page is its paths and the cursor to the next, None on the last. `heads` is the
         head each `Q_FILES` call reports, across every full read, so a push landing mid-list is
-        expressible, and None there is a page whose read fails. Every call is recorded, and a
+        expressible. Every call is recorded, and a
         document neither of these answers reports no Copilot history.
         """
         calls: list[dict] = []
@@ -5445,8 +5445,6 @@ class TestCoverageExitCodes(GqlCase):
                 state["page"] += 1
                 head = heads[state["reads"]]
                 state["reads"] += 1
-                if head is None:
-                    raise SystemExit("gh graphql failed rc=1")
                 more = {"headRefOid": head, "files": connection(state["page"])}
                 return {"repository": {"pullRequest": more}}
             return {"repository": {"pullRequests": {"nodes": []}}}
@@ -5464,15 +5462,13 @@ class TestCoverageExitCodes(GqlCase):
         self.assertIn({"o": "o", "r": "r", "n": 7, "after": "c1"}, calls)
 
     def test_a_list_not_read_whole_is_matched_against_nothing(self) -> None:
-        """A push between pages, a failed page, and the ceiling each leave the table unmatched."""
+        """A push between pages and the ceiling each leave the table unmatched."""
         first = [f"d/f{i:03}.md" for i in range(100)]
         rest = [f"d/f{i:03}.md" for i in range(100, 160)]
         moved = "the head moved while the changed-file list was paged"
-        failed = "a page of the changed-file list could not be read"
         ceiling = "the pull request changes 160 files or more, GitHub's own ceiling"
-        cases: list[tuple[list[tuple[list[str], str | None]], list[str | None], int, str]] = [
+        cases: list[tuple[list[tuple[list[str], str | None]], list[str], int, str]] = [
             ([(first, "c1"), (rest, None)], [OLD], 3000, moved),
-            ([(first, "c1"), (rest, None)], [None], 3000, failed),
             ([(first, "c1"), (rest, None)], [HEAD], 160, ceiling),
             ([(first, "c1"), (rest, "c2")], [HEAD], 160, ceiling),
         ]

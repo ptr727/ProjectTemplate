@@ -1064,8 +1064,9 @@ def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
     `FILES_WINDOW` is the connection's own ceiling on one page, so a longer list is paged.
     `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
     so a list reaching it stays marked as cut short. A page read at a head other than the first
-    page's, or one that could not be read at all, leaves the list unread instead, under
-    `FILES_UNREAD`, which `files_shortfall` reports and `full_read` reads again. Either way the
+    page's leaves the list unread instead, under `FILES_UNREAD`, which `files_shortfall`
+    reports and `full_read` reads again. A page that fails to read ends the run as any other
+    failed read does, since that failure is already loud. Either way the
     table is compared against nothing, where a list marked whole but missing a path reads
     exactly like a path the reviewer left out.
     """
@@ -1076,20 +1077,16 @@ def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
     if not isinstance(page, dict) or page.get("hasNextPage") is not True:
         return
     nodes = files["nodes"]
-    try:
-        for more in follow(Q_FILES, owner, repo, num, "files", page["endCursor"]):
-            if more["headRefOid"] != pr.get("headRefOid"):
-                files[FILES_UNREAD] = (
-                    "the head moved while the changed-file list was paged, so the list "
-                    "describes no one commit"
-                )
-                return
-            nodes.extend(more["files"]["nodes"])
-            if len(nodes) >= FILES_CAP:
-                return
-    except SystemExit:
-        files[FILES_UNREAD] = "a page of the changed-file list could not be read"
-        return
+    for more in follow(Q_FILES, owner, repo, num, "files", page["endCursor"]):
+        if more["headRefOid"] != pr.get("headRefOid"):
+            files[FILES_UNREAD] = (
+                "the head moved while the changed-file list was paged, so the list describes "
+                "no one commit"
+            )
+            return
+        nodes.extend(more["files"]["nodes"])
+        if len(nodes) >= FILES_CAP:
+            return
     files["pageInfo"] = {"hasNextPage": False}
 
 
@@ -1902,7 +1899,7 @@ def files_shortfall(pr: dict) -> str:
     One predicate for the table reading's reason and for `files_unread`'s re-read, so the two
     cannot disagree about which lists were read. A list the query cut short is not a shortfall
     here, since that list was read, and `table_shortfall` names it separately. A list
-    `page_files` left unread, a page failing or arriving at another head, is one, since reading
+    `page_files` left unread, a page arriving at another head, is one, since reading
     again can answer it.
     """
     files = pr.get("files")
@@ -3290,8 +3287,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that, and the same holds where it says the head moved or a page could "
-            "not be read while the changed-file list was paged. Where the digest names GitHub's "
+            "one cause of that, and the same holds where it says the head moved while the "
+            "changed-file list was paged. Where the digest names GitHub's "
             "own ceiling on the changed-file list, the table cannot be matched at all, and "
             "splitting the pull request is the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
