@@ -504,6 +504,8 @@ class GqlCase(unittest.TestCase):
         self.addCleanup(pr_review.tree_changed_at.cache_clear)
         pr_review.run_cause.cache_clear()
         self.addCleanup(pr_review.run_cause.cache_clear)
+        pr_review.required_contexts.cache_clear()
+        self.addCleanup(pr_review.required_contexts.cache_clear)
         self.enterContext(
             mock.patch.object(
                 pr_review,
@@ -7916,6 +7918,55 @@ class TestCli(GqlCase):
             self.assertEqual(49, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
 
+    def rules(self, *contexts: str) -> mock.MagicMock:
+        """Patch `gh_rest` to answer the base branch's rules read with these required contexts."""
+        out = json.dumps({"n": 2, "c": list(contexts)})
+        return self.enterContext(
+            mock.patch.object(
+                pr_review, "gh_rest", return_value=subprocess.CompletedProcess([], 0, out, "")
+            )
+        )
+
+    def test_a_required_check_not_yet_registered_holds_an_attested_head(self) -> None:
+        """Five of five passed and BLOCKED is a push whose other workflows have not registered."""
+        self.rules("Check pull request workflow status job", "Later workflow")
+        short = self.into(
+            payload([review(oid=OLD)], merge="BLOCKED", checks=[check()]), attest=True
+        )
+        full = self.into(
+            payload([review(oid=OLD)], checks=[check(), check(name="Later workflow")]), attest=True
+        )
+        self.answer(short, short, full)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.out.seek(0)
+        self.out.truncate()
+        self.answer(short)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+
+    def test_every_required_check_registered_does_not_hold_a_blocked_head(self) -> None:
+        self.rules("Check pull request workflow status job")
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[check()]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertNotEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+
+    def test_an_unread_rules_read_keeps_the_old_result_and_says_so(self) -> None:
+        """The suite's default `gh_rest` fails, which must never read as nothing being required."""
+        pr = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[check()]), attest=True)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertNotEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("rules for develop were unread", self.out.getvalue())
+
     def test_a_check_nothing_requires_does_not_hold_an_attested_head(self) -> None:
         """A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
@@ -10171,6 +10222,67 @@ class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
                 gh_graphql.assert_not_called()
 
 
+class TestRequiredContexts(unittest.TestCase):
+    """The rules read names what is required, and the hold arm compares it with the rollup."""
+
+    def setUp(self) -> None:
+        pr_review.required_contexts.cache_clear()
+        self.addCleanup(pr_review.required_contexts.cache_clear)
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def read(self, out: str, code: int = 0) -> frozenset[str] | None:
+        proc = subprocess.CompletedProcess([], code, out, "")
+        with mock.patch.object(pr_review, "gh_rest", return_value=proc):
+            return pr_review.required_contexts("o", "r", "develop")
+
+    def test_the_contexts_are_read_from_the_rules(self) -> None:
+        self.assertEqual(frozenset({"a", "b"}), self.read('{"n": 3, "c": ["a", "b"]}'))
+
+    def test_a_slash_in_the_base_is_one_path_segment(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, '{"n": 1, "c": []}', "")
+        with mock.patch.object(pr_review, "gh_rest", return_value=proc) as rest:
+            pr_review.required_contexts("o", "r", "release/1.0")
+        self.assertIn("/rules/branches/release%2F1.0?", rest.call_args.args[0])
+
+    def test_a_read_that_did_not_happen_is_none_not_empty(self) -> None:
+        for out, code in (("", 1), ("not json", 0), ('{"n": 1}', 0), ('{"n": 100, "c": []}', 0)):
+            with self.subTest(out=out, code=code):
+                pr_review.required_contexts.cache_clear()
+                self.assertIsNone(self.read(out, code))
+
+    def test_blocked_with_a_required_context_absent_holds(self) -> None:
+        pr = payload([], merge="BLOCKED", checks=[check()])
+        nodes = pr_review.check_nodes(pr)
+        now = datetime.now(UTC)
+        want = frozenset({"Check pull request workflow status job", "Later"})
+        self.assertTrue(pr_review.held_checks_open(pr, nodes, now, 600, 3600, want))
+        self.assertFalse(pr_review.held_checks_open(pr, nodes, now, 600, 3600, want - {"Later"}))
+        self.assertFalse(pr_review.held_checks_open(pr, nodes, now, 600, 3600))
+        clean = {**pr, "mergeStateStatus": "CLEAN"}
+        self.assertFalse(pr_review.held_checks_open(clean, nodes, now, 600, 3600, want))
+
+    def test_a_rollup_not_read_whole_never_holds_on_an_absent_context(self) -> None:
+        now = datetime.now(UTC)
+        want = frozenset({"Later"})
+        other = payload([], merge="BLOCKED", checks=[check()], rollup_oid="f" * 40)
+        self.assertFalse(
+            pr_review.held_checks_open(other, pr_review.check_nodes(other), now, 600, 3600, want)
+        )
+        cut = payload([], merge="BLOCKED", checks=[check()])
+        cut["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {
+            "hasNextPage": True
+        }
+        self.assertFalse(
+            pr_review.held_checks_open(cut, pr_review.check_nodes(cut), now, 600, 3600, want)
+        )
+
+    def test_the_rules_are_read_only_for_a_blocked_merge(self) -> None:
+        with mock.patch.object(pr_review, "gh_rest") as rest:
+            clean = payload([], merge="CLEAN", checks=[check()])
+            self.assertEqual(frozenset(), pr_review.required_for(clean, "o", "r"))
+        rest.assert_not_called()
+
+
 class TestAttest(unittest.TestCase):
     """A local pass is published only for the content the pull request's head carries."""
 
@@ -10213,7 +10325,8 @@ class TestAttest(unittest.TestCase):
             return 0
 
         self.enterContext(mock.patch.object(pr_review, "comment_on_pr", side_effect=post))
-        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.out = io.StringIO()
+        self.enterContext(contextlib.redirect_stdout(self.out))
 
     def run_attest(self, head: str, check_exit: int = 0, base: str | None = None) -> int:
         """Run `attest` with a stub `local_review.py` that records how it was called."""
@@ -10250,6 +10363,78 @@ class TestAttest(unittest.TestCase):
         self.assertEqual(["status --target develop"], [c[1] for c in calls])
         for cwd, _ in calls:
             self.assertEqual(os.path.realpath(self.dir), os.path.realpath(cwd))
+
+    def lagging(self, tip: str, heads: list[str]) -> int:
+        """Run `attest` while the pull request's head reads each of `heads` in turn."""
+        replies = iter(heads)
+        target = {"headRefOid": heads[0], "baseRefName": "develop"}
+
+        def gql(query: str, *_: object) -> dict:
+            if query == pr_review.Q_ATTEST_BRANCH:
+                return {
+                    "state": "OPEN",
+                    "headRefName": "feature",
+                    "headRepository": {"url": "https://x.test/o/r"},
+                }
+            return {**target, "headRefOid": next(replies, heads[-1])}
+
+        self.slept: list[float] = []
+        remote = subprocess.CompletedProcess([], 0, f"{tip}\trefs/heads/feature\n", "")
+        original = pr_review._git
+
+        def git(checkout: str, *args: str) -> subprocess.CompletedProcess:
+            return remote if args[0] == "ls-remote" else original(checkout, *args)
+
+        merge_base = subprocess.CompletedProcess([], 0, self.head + "\n", "")
+        stub = Path(self.dir).parent / "stub-lag.py"
+        stub.write_text(
+            "import json, sys\n"
+            "print(json.dumps({'covered': True, 'receiptProblems': [], 'findings': {'a': 0}}))\n"
+        )
+        self.addCleanup(stub.unlink)
+        with (
+            mock.patch.object(pr_review, "gql", side_effect=gql),
+            mock.patch.object(pr_review, "_git", side_effect=git),
+            mock.patch.object(pr_review, "gh_rest", return_value=merge_base),
+            mock.patch.object(pr_review, "LOCAL_REVIEW", stub),
+            mock.patch.object(pr_review.time, "sleep", side_effect=self.slept.append),
+        ):
+            return pr_review.attest("o", "r", 7, self.dir)
+
+    def test_a_head_that_catches_up_within_the_bound_is_attested(self) -> None:
+        old = "d" * 40
+        self.assertEqual(0, self.lagging(self.head, [old, old, self.head]))
+        self.assertEqual(2, len(self.slept))
+        self.assertEqual(1, len(self.posted))
+
+    def test_a_head_that_never_catches_up_is_refused_after_the_bound(self) -> None:
+        old = "d" * 40
+        self.assertEqual(67, self.lagging(self.head, [old]))
+        self.assertLessEqual(sum(self.slept), 60)
+        self.assertGreater(sum(self.slept), 0)
+        self.assertIn("had not registered it yet", self.out.getvalue())
+        self.assertEqual([], self.posted)
+
+    def test_a_closed_pull_request_is_refused_without_waiting(self) -> None:
+        old = "d" * 40
+        replies = {"state": "MERGED", "headRefName": "feature", "headRepository": {"url": "u"}}
+        with mock.patch.object(pr_review, "gql", return_value=replies):
+            head, registered = pr_review.await_registered_head(
+                "o", "r", 7, self.dir, self.head, old
+            )
+        self.assertEqual((old, True), (head, registered))
+
+    def test_a_head_that_moves_to_a_third_commit_is_not_called_unregistered(self) -> None:
+        old, other = "d" * 40, "c" * 40
+        self.assertEqual(67, self.lagging(self.head, [old, other]))
+        self.assertEqual(1, len(self.slept))
+        self.assertNotIn("had not registered", self.out.getvalue())
+
+    def test_a_remote_tip_that_is_not_the_checkout_is_refused_at_once(self) -> None:
+        old = "d" * 40
+        self.assertEqual(67, self.lagging("e" * 40, [old]))
+        self.assertEqual([], self.slept)
+        self.assertNotIn("had not registered", self.out.getvalue())
 
     def test_a_checkout_measuring_another_merge_base_is_refused(self) -> None:
         self.assertEqual(67, self.run_attest(self.head, base="e" * 40))
