@@ -2771,6 +2771,24 @@ class TestCli(unittest.TestCase):
         latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
         self.assertNotIn("read only in part", self.scope_line([latin], []))
 
+    def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
+        """An editor-added mark parses on every interpreter, so its docstrings are still read.
+
+        `ast` refuses the mark in a string, which named the file as one the interpreter could not
+        parse and skipped the reference its module docstring holds.
+        """
+        marked = self.bait("marked.py", '\ufeff"""See #12 for the reason."""\n')
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[marked]),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(1, prose_lint.main(["--check", "issue-ref"]))
+        self.assertIn(
+            "marked.py:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
+        )
+        self.assertNotIn("read only in part", err.getvalue())
+
     def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
         err = self.scope_line(baits, ["--check", "comment-wrap"])

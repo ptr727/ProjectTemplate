@@ -2465,7 +2465,15 @@ def python_docstring_spans(
     the line that carries it. A value has its escapes resolved, which no longer maps to a line.
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
+
+    A leading byte order mark is dropped before the parse and from the first line alike. `ast`
+    refuses one in a string on every interpreter, so leaving it would name the file as one this
+    interpreter cannot parse, and dropping it from the parse alone would shift the first line's
+    columns.
     """
+    if raw.startswith("\ufeff"):
+        raw = raw[1:]
+        lines = [lines[0].removeprefix("\ufeff"), *lines[1:]]
     tree = python_tree(raw)
     if tree is None:
         if unparsed is not None:
