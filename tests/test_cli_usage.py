@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """Hold every tracked command-line entry point to CODESTYLE.md's argument rule by running it.
 
-Each entry point runs once with `--help` and once with an unknown `--bogus-flag`, beside stubs that
-record any call to a network or host-changing command, with no credentials and an unreachable proxy.
-Help exits 0 printing its usage. The unknown flag exits non-zero with a refusal that names it or
-prints the usage, rather than a crash. Neither run reaches a stub or changes the working tree. The set is discovered from the tree rather than listed, so a new
-script is held to the rule the moment it is tracked. A hook its own host runs is not a command-line
-entry point and is listed in NOT_COMMAND_LINE. A Windows script builds paths from APPDATA and
-LOCALAPPDATA as it loads, so the sandbox sets both to keep a run off Windows from failing before
-the script's own argument handling. A parser missing a required argument refuses on that before it
-reaches the unknown one, so a refusal printing the usage passes as well as one naming the flag.
+Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
+the real commands on PATH record any call to gh or another network or host-changing command,
+no credential is passed, and the proxy is a local listener that records every connection made to
+it. Help exits 0 printing its usage. The unknown flag exits non-zero with a refusal that names it or
+prints the usage, rather than a crash. No run reaches a stub or the listener, or changes the working
+tree.
+
+The set is discovered from the tree rather than listed, so a new script is held to the rule the
+moment it is tracked. A hook its own host runs is not a command-line entry point and is listed in
+NOT_COMMAND_LINE. A Windows script builds paths from APPDATA and LOCALAPPDATA as it loads, so the
+sandbox sets both to keep a run off Windows from failing before the script's own argument handling.
+A parser missing a required argument refuses on that before it reaches the unknown one, so a
+refusal printing the usage passes as well as one naming the flag. The case is skipped on Windows,
+where a stub without an executable extension shadows nothing and the real commands would run.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from host_capability import bash_or_skip
@@ -39,7 +48,7 @@ RECORDED = ("gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", 
 
 
 def entry_points() -> list[str]:
-    """Every tracked shell, PowerShell, or Python script a command line runs, tests and hooks aside."""
+    """Every tracked shell, PowerShell, or Python script run by name, tests and hooks aside."""
     listed = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files", "-s", "-z", "--", "*.sh", "*.ps1", "*.py"],
         capture_output=True,
@@ -68,8 +77,37 @@ def tree_state() -> str:
     ).stdout
 
 
+@contextmanager
+def recording_proxy() -> Iterator[tuple[str, list[int]]]:
+    """A proxy URL whose listener counts each connection and answers none, so every fetch fails."""
+    connections: list[int] = []
+    stop = threading.Event()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        server.settimeout(0.1)
+
+        def accept() -> None:
+            while not stop.is_set():
+                try:
+                    peer, _ = server.accept()
+                except TimeoutError:
+                    continue
+                connections.append(1)
+                peer.close()
+
+        worker = threading.Thread(target=accept, daemon=True)
+        worker.start()
+        try:
+            yield f"http://127.0.0.1:{server.getsockname()[1]}", connections
+        finally:
+            stop.set()
+            worker.join()
+
+
+@unittest.skipIf(os.name == "nt", "a stub with no executable extension shadows nothing on Windows")
 class EntryPointCase(unittest.TestCase):
-    """`--help` answers with usage and exit 0, and `--bogus-flag` is refused, each touching nothing."""
+    """Help answers with usage and exit 0, and `--bogus-flag` is refused, each touching nothing."""
 
     def setUp(self) -> None:
         self.before = tree_state()
@@ -118,41 +156,43 @@ class EntryPointCase(unittest.TestCase):
                     "GITHUB_STEP_SUMMARY",
                 )
             }
-            unreachable = "http://127.0.0.1:9"
-            env.update(
-                PATH=f"{stubs}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
-                HOME=str(home),
-                **appdata,
-                PYTHONDONTWRITEBYTECODE="1",
-                HTTP_PROXY=unreachable,
-                HTTPS_PROXY=unreachable,
-                http_proxy=unreachable,
-                https_proxy=unreachable,
-                NO_PROXY="",
-                no_proxy="",
-            )
-            result = subprocess.run(
-                [*command, flag],
-                capture_output=True,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
-                check=False,
-                env=env,
-                cwd=ROOT,
-            )
+            with recording_proxy() as (proxy, connections):
+                env.update(
+                    PATH=f"{stubs}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                    HOME=str(home),
+                    **appdata,
+                    PYTHONDONTWRITEBYTECODE="1",
+                    HTTP_PROXY=proxy,
+                    HTTPS_PROXY=proxy,
+                    http_proxy=proxy,
+                    https_proxy=proxy,
+                    NO_PROXY="",
+                    no_proxy="",
+                )
+                result = subprocess.run(
+                    [*command, flag],
+                    capture_output=True,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=120,
+                    check=False,
+                    env=env,
+                    cwd=ROOT,
+                )
             recorded = calls.read_text(encoding="utf-8") if calls.exists() else ""
+            recorded += "proxy connection\n" * len(connections)
         return result, recorded
 
     def test_help_prints_usage_and_exits_zero(self) -> None:
         for path in entry_points():
-            with self.subTest(path=path):
-                result, calls = self.run_entry(path, "--help")
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("usage", result.stdout.lower(), result.stdout)
-                self.assertEqual(calls, "")
+            for flag in ("--help", "-h"):
+                with self.subTest(path=path, flag=flag):
+                    result, calls = self.run_entry(path, flag)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("usage", result.stdout.lower(), result.stdout)
+                    self.assertEqual(calls, "")
 
     def test_an_unknown_flag_is_refused(self) -> None:
         for path in entry_points():

@@ -4,15 +4,16 @@ description: >-
   Governs Python code style for ptr727/ProjectTemplate fleet repos: the build-versus-lint-only
   profile split, the uv/ruff/pyright/mypy/pytest toolchain, src layout, formatting and linting,
   comment and docstring conventions, type hints, naming, imports, patterns to avoid, test
-  conventions, and versioning. Use this whenever writing, reviewing, or editing a .py file, a
-  pyproject.toml, or a uv.lock, whenever running or choosing a Python formatting, lint, type-check,
-  or test command, whenever deciding whether a Python subtree is a shippable project or a lint-only
-  scripts tree, whenever choosing pyright versus mypy for a repo's CI gate, or whenever writing or
-  reviewing a Python test. Triggers even when the task looks like a small local fix ("just add a
-  helper function", "silence this lint warning", "add a dependency") or verification step ("run
-  the tests"), because choosing pytest before reading the profile turns an intentional unittest
-  suite into a false missing-dependency diagnosis. Applies only to a repo's Python side, a repo
-  with no Python has no use for this Skill.
+  conventions, versioning, and the --help and unknown-argument rule for a script. Use this
+  whenever writing, reviewing, or editing a .py file, a pyproject.toml, or a uv.lock, whenever
+  running or choosing a Python formatting, lint, type-check, or test command, whenever deciding
+  whether a Python subtree is a shippable project or a lint-only scripts tree, whenever choosing
+  pyright versus mypy for a repo's CI gate, or whenever writing or reviewing a Python test.
+  Triggers even when the task looks like a small local fix ("just add a helper function", "silence
+  this lint warning", "add a dependency") or verification step ("run the tests"), because choosing
+  pytest before reading the profile turns an intentional unittest suite into a false
+  missing-dependency diagnosis. Applies only to a repo's Python side, a repo with no Python has no
+  use for this Skill.
 ---
 
 # Python Codestyle
@@ -246,6 +247,17 @@ Before pushing or opening a PR:
   what CI relaxes for an undeclared root.
 - Markdown in this directory follows CODESTYLE.md's repo-wide Markdown and Spelling rules,
   packaged as the `comment-and-doc-style` Skill.
+
+## Command-Line Arguments
+
+<!-- include: CODESTYLE.md > Command-Line Arguments -->
+
+A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
+
+- **Every command-line script answers `--help` and `-h`** by printing its usage and exiting 0, changing nothing. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted.
+- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. An unrecognized first argument is never taken as a default mode or as a target.
+
+<!-- /include -->
 
 <!-- External -->
 
