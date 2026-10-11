@@ -1562,9 +1562,7 @@ def refusing_review(pr: dict) -> dict | None:
     its own right.
 
     A genuine round on the same head after the refusal spends it, so the newest review on the
-    head is the one read rather than the newest refusal. Every caller needs that reading, `wait`
-    included, which reaches this on a head a genuine round covers whenever that round is not past
-    `--min-rounds`.
+    head is the one read rather than the newest refusal.
     """
     head = pr["headRefOid"]
     newest = newest_of(

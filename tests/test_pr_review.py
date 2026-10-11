@@ -8370,6 +8370,15 @@ class TestCli(GqlCase):
         pr = self.into(payload(rounds), attest=True)
         self.assertFalse(pr_review.local_cover(pr))
 
+    def test_a_refusal_a_later_round_on_the_head_spends_yields_to_an_attestation(self) -> None:
+        rounds = [
+            review(oid=OLD, at=EARLY, rid="PRR_a"),
+            review(body=QUOTA_REFUSED, at="2026-08-02T10:30:00Z", rid="PRR_b"),
+            review(body=OVERVIEW, at=LATE, rid="PRR_c"),
+        ]
+        pr = self.into(payload(rounds), attest=True)
+        self.assertTrue(pr_review.local_cover(pr))
+
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
         for rounds, field in (
