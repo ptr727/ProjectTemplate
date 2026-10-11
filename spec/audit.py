@@ -2223,7 +2223,10 @@ CONCURRENCY_CALLERS = {
         "${{ github.workflow }}-${{ github.event.pull_request.number }}"
     ),
 }
-_RUN_ID_SUFFIX = re.compile(r"^\$\{\{(?:(?!\$\{\{).)*\}\}$")
+_RUN_ID_SUFFIX = re.compile(
+    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\(.*github\.actor.*\)\)"
+    r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
+)
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
 _EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 
@@ -2311,9 +2314,7 @@ def concurrency_caller_findings(path, text):
             suffix == ""
             or (
                 path.endswith("publish-release.yml")
-                and _RUN_ID_SUFFIX.match(suffix)
-                and "github.run_id" in suffix
-                and "github.event_name" in suffix
+                and _RUN_ID_SUFFIX.match(re.sub(r"\s+", "", suffix))
             )
         )
         if not suffix_ok:
@@ -6749,6 +6750,53 @@ def _selftest():
             "another workflow is not read",
         ),
     ]
+    refusal_cases = [
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
+            "cannot read",
+            "a folded scalar",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, pub_line + "\n      more"),
+            "cannot read",
+            "a continuation line",
+        ),
+        (pub_path, "concurrency: { group: x }\n", "cannot read", "a flow mapping"),
+        (
+            pub_path,
+            pub_text.replace("concurrency:\n", "concurrency: &c\n", 1),
+            "",
+            "an anchor on the key",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  "
+                + pub_group
+                + "${{ github.event_name == 'push' && format('-{0}', github.run_id) || '' }}",
+            ),
+            "group is",
+            "a suffix without the main clause",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  " + pub_group + "${{ format('-{0}{1}', github.run_id, github.event_name) }}",
+            ),
+            "group is",
+            "an unconditional suffix naming event_name",
+        ),
+    ]
+    for path_in, text_in, needle, label in refusal_cases:
+        got = concurrency_caller_findings(path_in, text_in)
+        if (needle == "" and got) or (needle and not any(needle in f[1] for f in got)):
+            ok = False
+            concurrency_ok = False
+            print(f"  FAIL concurrency_caller_findings [{label}] -> {got}")
     for path_in, text_in, expected, label in concurrency_cases:
         got = len(concurrency_caller_findings(path_in, text_in))
         if got != expected:
