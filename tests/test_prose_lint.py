@@ -1585,6 +1585,35 @@ class TestANamedToolIsStillProse(BaitCase):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
+    def test_a_directive_is_read_in_any_letter_case_its_tool_reads(self) -> None:
+        """flake8 reads `noqa` and CSpell reads its own spellings in any letter case."""
+        for name, text in (
+            ("tool.py", "# NOQA: E501\n"),
+            ("tool.py", "# NoQA\n"),
+            ("app.ts", "// cspell:ignore vendorid\n"),
+            ("app.ts", "// CSPELL: ignore vendorid\n"),
+            ("app.ts", "// spell-checker: disable\n"),
+            ("app.ts", "// Spell-Checker:ignore vendorid\n"),
+            ("app.ts", "// spellchecker:words vendorid\n"),
+            ("app.ts", "// spell:ignore vendorid\n"),
+            ("app.ts", "// Spell: disable\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_cspell_name_without_its_colon_is_prose(self) -> None:
+        """CSpell reads its directive only with the colon, so a sentence opening on its name is judged."""
+        for name, text in (
+            ("app.ts", "// cspell reads the word list from the root.\n"),
+            ("app.ts", "// spellchecker settings live in the root.\n"),
+            ("app.ts", "// spell checking reads the word list from the root.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual(
+                    ["comment-case", "comment-added"],
+                    self.kinds(text, self.COMMENT_RULES, name=name),
+                )
+
     def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
         """A Python checker reads the directive, and the prose in front of it is still prose."""
         both = ["comment-wrap", "comment-case", "comment-added"]
@@ -1627,6 +1656,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
             ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
             ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NOQA. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoQA: E501. Another one follows.\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
