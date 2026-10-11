@@ -2676,7 +2676,7 @@ def comment_sentence_findings(
 
     Comment lines on consecutive source lines are one block, so a wrapped sentence counts once.
     A line that is not prose, a trailing comment, or a gap ends the block.
-    The prose filters are `comment_wrap_findings`', so the two rules agree on what a comment is.
+    The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
     """
     comments, _kept, configured = prose_comment_candidates(path, raw, lines)
     out: list[tuple[int, str, str]] = []
