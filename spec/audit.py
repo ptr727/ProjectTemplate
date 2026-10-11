@@ -2281,7 +2281,8 @@ def concurrency_caller_findings(path, text):
         return unreadable
     if inline:
         group = _yaml_scalar(inline)
-        if group is None:
+        following = next((ln for ln in code[head.end() :].splitlines()[1:] if ln.strip()), "")
+        if group is None or following[:1] in (" ", "\t"):
             return unreadable
     else:
         child_indent = None
@@ -6771,6 +6772,12 @@ def _selftest():
         ),
     ]
     refusal_cases = [
+        (
+            pub_path,
+            "concurrency: ${{ github.workflow }}-${{ github.ref }}\n  -extra\njobs:\n  x: {}\n",
+            "cannot read",
+            "a continuation after an inline scalar",
+        ),
         (
             pub_path,
             pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
