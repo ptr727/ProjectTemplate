@@ -185,16 +185,19 @@ function run {
 # The run wrapper above, for a command that writes UTF-8 whatever the console's code page, as Docker's CLI does.
 # A console left at its OEM default decodes those bytes as that code page, so the check mark docker desktop prints on success reads as three unrelated characters.
 # The console is switched to UTF-8 for this one call and put back after, rather than for the whole run, so every other native tool here keeps the decoding it was written against.
-# A host with no console to switch (output redirected to a file or a pipe) refuses the switch, and that is not a failure: nothing renders the bytes there, so the command runs as it would have.
+# Output redirected to a file or a pipe is left alone: PowerShell keeps writing it in the encoding it started with, so decoding the command as UTF-8 there would turn the check mark into one lossy byte where it otherwise passes through intact.
+# A process with no console at all refuses the switch, and that is not a failure either, since nothing renders the bytes there.
 function Invoke-Utf8Run {
     param([Parameter(Mandatory)][string]$Command, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     $previous = [Console]::OutputEncoding
     $switched = $false
-    try {
-        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-        $switched = $true
-    } catch {
-        $switched = $false
+    if (-not [Console]::IsOutputRedirected) {
+        try {
+            [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $switched = $true
+        } catch {
+            $switched = $false
+        }
     }
     try {
         return (run -Command $Command -Arguments $Arguments)
@@ -437,9 +440,16 @@ function Get-InstallerFailureReason {
 # Anything outside these containers is left unread rather than guessed at: py.exe sits in the Windows directory on a machine wide Python install, and reading that as Python's tree would name half the host.
 function Get-InstallRoot {
     param([Parameter(Mandatory)][string]$Path)
-    $containers = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-    if ($env:LOCALAPPDATA) { $containers += @("$env:LOCALAPPDATA\Programs", "$env:LOCALAPPDATA\Microsoft\WinGet\Packages") }
-    foreach ($container in ($containers | Where-Object { $_ })) {
+    $containers = @(
+        $env:ProgramFiles
+        ${env:ProgramFiles(x86)}
+        "$env:ProgramFiles\WinGet\Packages"
+        "$env:LOCALAPPDATA\Programs"
+        "$env:LOCALAPPDATA\Programs\Python"
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    )
+    # Longest first, so a container nested inside another, WinGet's machine wide package directory inside Program Files or the per-user Python directory every line installs beside its siblings in, answers before the one holding it would claim every package in it as one tree.
+    foreach ($container in ($containers | Where-Object { $_ } | Sort-Object Length -Descending)) {
         $prefix = "$($container.TrimEnd('\'))\"
         if (-not $Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
         $rest = $Path.Substring($prefix.Length).Split('\')
@@ -466,6 +476,37 @@ function Get-ToolHolder {
         $holders += @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase) })
     }
     return , @($holders | Sort-Object Id -Unique)
+}
+
+# What a failed winget call owes its reader: winget's code, the reason the installer's own log gives, and the processes that may hold the tool's files.
+# The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
+# The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
+# Windows will not replace a file that is open, so the processes running from the tool's install are named as the cause where the log says files were in use, and as a possibility only where the log gave no reason at all.
+# A Git upgrade that failed on a download still finds every open Git Bash running from Git's own tree, and blaming those for an unrelated failure would send the reader after the wrong thing.
+function Write-InstallFailure {
+    param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe)
+    warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
+    $reason = Get-InstallerFailureReason -Id $Package -Since $Since
+    if ($reason.Entries.Count -gt 0) {
+        info 'The installer log says:'
+        foreach ($entry in $reason.Entries) {
+            $shown = if ($HOME) { $entry -ireplace [regex]::Escape($HOME), '%USERPROFILE%' } else { $entry }
+            info "  $shown"
+        }
+    }
+    if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
+    $inUse = @($reason.Entries | Where-Object { $_ -match '(?i)\bprocess|in use|being used|used by' }).Count -gt 0
+    if ($reason.Entries.Count -gt 0 -and -not $inUse) { return }
+    $running = Get-ToolHolder -Probe $Probe
+    if ($running.Count -eq 0) { return }
+    if ($inUse) {
+        info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
+    } else {
+        info "Running from $ToolName's install, and possibly holding a file the installer had to replace:"
+    }
+    foreach ($process in $running) { info "  $($process.ProcessName) (process $($process.Id))" }
+    info 'Close them, or stop them with the command below, then run this again:'
+    info "  Stop-Process -Id $($running.Id -join ', ')"
 }
 
 # --- Tools ---
@@ -1308,23 +1349,7 @@ function Invoke-ToolApply {
             Invoke-WingetInstall -Id $package
         }
         if ($code -ne 0) {
-            # The hex form is the one winget documents its own codes under, where the signed decimal matches nothing a search finds.
-            warn "$ToolName failed on $package, winget exited $code ($('0x{0:X8}' -f $code))"
-            # The winget output names the installer's log and stops, so the reason a person needs is read out of that log here rather than left behind a path.
-            $reason = Get-InstallerFailureReason -Id $package -Since $started
-            if ($reason.Entries.Count -gt 0) {
-                info 'The installer log says:'
-                foreach ($entry in $reason.Entries) { info "  $entry" }
-            }
-            if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
-            # Windows will not replace a file that is open, and an installer reports that as files in use or an access denial naming the file rather than whatever holds it.
-            # The holder is usually the tool itself left running by an editor or a language server, or a helper it started in the background, so each one is named here and the reader is spared guessing at a permission problem that is not one.
-            $running = Get-ToolHolder -Probe $record.Probe
-            if ($running.Count -gt 0) {
-                info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
-                foreach ($process in $running) { info "  $($process.ProcessName) (process $($process.Id))" }
-                info "Close them, or stop them with: Stop-Process -Id $($running.Id -join ', '); then run this again"
-            }
+            Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe
             $script:FAILED += $ToolName
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
             if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
