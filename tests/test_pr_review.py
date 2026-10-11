@@ -7681,6 +7681,35 @@ class TestCli(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=no", out)
 
+    def test_a_later_round_on_the_head_spends_a_quota_refusal_there(self) -> None:
+        """A quota refusal on the head, then a genuine round on that same head stating no
+        coverage. The genuine round is the newer word, so the refusal is spent and nothing reads
+        it as the account state. `--min-rounds 2` waits past the genuine round here, so the wait
+        names that baseline rather than the refusal. `--min-rounds 1` and `status` both reach
+        the coverage gap itself.
+        """
+        refused = review(body=QUOTA_REFUSED, at=EARLY, rid="PRR_refused")
+        both = payload([refused, review(body=OVERVIEW, at=LATE, rid="PRR_genuine")])
+        before = payload([refused], pending=True)
+        wait = ["wait", "7", "--ignore-quota-signal", "--timeout", "0", "--min-rounds"]
+        cases = (
+            ([*wait, "2"], (before, both), 30, "--min-rounds 2 waits for round 3"),
+            ([*wait, "1"], (before, both), 45, "status=COVERAGE_IS_UNSTATED"),
+            (["status", "7"], (both,), 45, "status=COVERAGE_IS_UNSTATED"),
+        )
+        for argv, reads, code, said in cases:
+            with self.subTest(argv=argv):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(*reads)
+                self.wire_history([])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(argv))
+                out = self.out.getvalue()
+                self.assertIn(said, out)
+                self.assertIn("refusal=no", out)
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED", out)
+
     def test_a_fix_push_after_the_first_round_is_not_requested(self) -> None:
         self.answer(self.into(payload([review(oid=OLD)])))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
