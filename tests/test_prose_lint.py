@@ -52,16 +52,7 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     The script is read out of the action rather than restated, so a case proves what the action
     does rather than what this module believes it does.
     """
-    action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-    _, block = action.split("      run: |\n", 1)
-    script_lines = []
-    for line in block.splitlines():
-        if line.startswith("        "):
-            script_lines.append(line.removeprefix("        "))
-        elif not line:
-            script_lines.append(line)
-        else:
-            break
+    script = step_script(PROSE_GATE_ACTION, "Check prose step")
     env = (
         os.environ
         | {
@@ -72,7 +63,7 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
         | extra
     )
     return subprocess.run(
-        [bash_or_skip(), "-c", "\n".join(script_lines)],
+        [bash_or_skip(), "-c", script],
         cwd=root,
         env=env,
         text=True,
@@ -82,14 +73,17 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     )
 
 
-def workflow_step_script(name: str) -> str:
-    """The `run` block of the validate-task workflow step called `name`, dedented as a runner reads it."""
-    step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), name)
-    _, block = step.split("        run: |\n", 1)
+def step_script(path: Path, name: str) -> str:
+    """The `run` block of the step called `name` in `path`, dedented as a runner reads it."""
+    step = yaml_step(path.read_text(encoding="utf-8"), name)
+    match = re.search(r"(?m)^( *)run: \|\n", step)
+    if match is None:
+        raise AssertionError(f"no run block in the step named {name!r}")
+    indent = match.group(1) + "  "
     script_lines = []
-    for line in block.splitlines():
-        if line.startswith("          "):
-            script_lines.append(line.removeprefix("          "))
+    for line in step[match.end() :].splitlines():
+        if line.startswith(indent):
+            script_lines.append(line.removeprefix(indent))
         elif not line:
             script_lines.append(line)
         else:
@@ -158,7 +152,7 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
 
     `live` is what the stub prints as the label names, and None makes the read fail.
     """
-    script = workflow_step_script("Read comments label step")
+    script = step_script(VALIDATE_TASK_WORKFLOW, "Read comments label step")
     with tempfile.TemporaryDirectory() as scratch:
         stub = Path(scratch) / "gh"
         if live is None:
@@ -4244,21 +4238,12 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         (stub_dir / "prose_lint.py").write_text(
             "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8"
         )
-        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-        _, block = action.split("      run: |\n", 1)
-        lines = []
-        for line in block.splitlines():
-            if line.startswith("        "):
-                lines.append(line.removeprefix("        "))
-            elif not line:
-                lines.append(line)
-            else:
-                break
+        script = step_script(PROSE_GATE_ACTION, "Check prose step")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ACTION_", "GITHUB_"))}
         env |= {"BASE": "HEAD", "PATHS": ".", "GITHUB_ACTION_PATH": str(stub_dir)}
         env |= extra
         r = subprocess.run(
-            [bash_or_skip(), "-c", "\n".join(lines)],
+            [bash_or_skip(), "-c", script],
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -5307,6 +5292,8 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         The live answer wins in both directions, so a payload that predates the label, or one
         that predates its removal, decides nothing while the read succeeds. It ignores case, as
         the payload's contains() does. The log line is the one the skills tell a driver to look for.
+        The harness sets the labels path and stubs gh, so the step's own path and token are read
+        off the step itself.
         """
         for live, payload, expected in (
             ("bug\ncomments\n", "false", "true"),
@@ -5322,6 +5309,14 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
                 self.assertIn("repos/example/widget/issues/7/labels", called)
                 self.assertIn("--paginate", called)
                 self.assertIn(".[].name", called)
+        step = yaml_step(
+            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
+        )
+        self.assertEqual("${{ github.token }}", yaml_value(step, "env", "GH_TOKEN"))
+        self.assertEqual(
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels",
+            yaml_value(step, "env", "LABELS_PATH"),
+        )
 
     def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
         """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
@@ -5390,7 +5385,7 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         output = self.root.parent / f"{self.root.name}.output"
         self.addCleanup(output.unlink, missing_ok=True)
         result = subprocess.run(
-            [bash_or_skip(), "-c", workflow_step_script("Resolve prose base step")],
+            [bash_or_skip(), "-c", step_script(VALIDATE_TASK_WORKFLOW, "Resolve prose base step")],
             cwd=self.root,
             env=os.environ | {"EVENT_BASE": self.event_base, "GITHUB_OUTPUT": str(output)},
             text=True,
