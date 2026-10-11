@@ -224,10 +224,10 @@ Subcommands
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
-           current head, then print the digest. The auto-request is skipped once a review already
-           covers the head, once Copilot has already answered outside a formal review, or once one
-           is already in the pending request set, so calling `wait` again on the same PR never
-           double-requests. It is also skipped under 46's and 47's quota readings below, since a
+           current head, then print the digest. The auto-request is skipped once a review past
+           --min-rounds already covers the head, once Copilot has already answered outside a
+           formal review, or once one is already in the pending request set, so calling `wait`
+           again on the same PR never double-requests. It is also skipped under 46's and 47's quota readings below, since a
            request into a reached limit spends quota and returns the same refusal. It is skipped too
            on a pull request into a branch other than the default once Copilot has reviewed it at
            all, since a fix push there is covered by an attested local pass: an attested head is
