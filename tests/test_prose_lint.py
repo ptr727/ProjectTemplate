@@ -2658,6 +2658,10 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([], self.found(text, "bait.py"))
 
+    def test_a_numbered_comment_marker_is_not_a_word(self) -> None:
+        text = f"# 1) {self.at_cap()}\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
     def test_a_python_comment_is_judged_too(self) -> None:
         self.assertEqual(
             [(1, "sentence-length")], self.found(f"# {self.over()}\nx = 1\n", "bait.py")
@@ -3116,7 +3120,7 @@ class TestCli(unittest.TestCase):
         """
         for name, text in (("open.py", self.UNTOKENIZED), ("newer.py", self.UNPARSED)):
             bait = self.bait(name, text)
-            for rule in ("comment-wrap", "comment-case", "issue-ref"):
+            for rule in ("comment-wrap", "comment-case", "issue-ref", "sentence-length"):
                 with self.subTest(file=name, rule=rule):
                     err = self.scope_line([bait], ["--check", rule])
                     self.assertIn("1 .py file(s) Python", err)

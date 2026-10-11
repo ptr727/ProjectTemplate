@@ -2659,7 +2659,9 @@ def issue_ref_findings(
     return out
 
 
-PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+PARSED_RULES = frozenset(
+    {"comment-wrap", "comment-case", "comment-added", "issue-ref", "sentence-length"}
+)
 
 
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
@@ -2699,7 +2701,7 @@ def comment_sentence_findings(
             or body[:1].isupper()
         ):
             flush()
-        block.append((n, body.strip()))
+        block.append((n, ENUM_PREFIX.sub("", body).strip()))
         prev_no = n
         if not leading or body.rstrip().endswith(":"):
             flush()
