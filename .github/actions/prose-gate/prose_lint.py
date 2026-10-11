@@ -2361,10 +2361,9 @@ def without_trailing_directive(path: Path, body: str) -> str:
 
     A Python checker reads `noqa` and `type: ignore` behind their own `#` after prose on the same
     line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to any
-    comment switch every comment rule off for that line. On a line holding only a comment the
-    directive can suppress nothing but findings about the comment itself, so the prose in front of
-    it is judged as prose. A body that is the directive and nothing else is left empty, and an empty
-    body is exempt.
+    comment switch every comment rule off for that line. The prose can be deleted and the directive
+    kept, so the directive is cut off and what is left is judged by the same exemptions as any other
+    body, an empty one included.
 
     No other language's checker reads these forms, so in any other file a mention of one is part of
     the sentence holding it.
