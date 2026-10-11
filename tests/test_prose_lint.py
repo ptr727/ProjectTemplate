@@ -1575,6 +1575,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("tool.py", "# ruff: noqa: E501 - the URLs cannot wrap.\n"),
             ("tool.py", "# flake8: noqa\n"),
             ("tool.py", "# flake8: noqa: E501\n"),
+            ("tool.py", "# flake8=noqa\n"),
+            ("tool.py", "# Flake8: noqa\n"),
             ("tool.py", "# v2.3\n"),
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
