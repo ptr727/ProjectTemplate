@@ -2266,14 +2266,17 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     if comments is None:
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
-    comments = [c for c in comments if c[0] not in skip]
+    comments = [
+        c._replace(body=without_trailing_directive(path, c.body))
+        for c in comments
+        if c[0] not in skip
+    ]
     configured = config_run_lines(comments)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, full_body, leading, _raw in comments:
-        body = without_trailing_directive(path, full_body)
+    for n, body, leading, _raw in comments:
         if (
             not body
             or n in configured

@@ -1602,6 +1602,14 @@ class TestANamedToolIsStillProse(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
 
+    def test_a_trailing_directive_does_not_make_prose_read_as_configuration(self) -> None:
+        """A directive's code ends the body where a full stop would, so the cut comes first."""
+        text = (
+            "# Note: two sentences here. Another one follows.  # noqa: E501\n"
+            "# Note: the value is read once.  # noqa: E501\n"
+        )
+        self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
+
     def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
         """Cutting the directive off leaves nothing to judge where the comment is only the directive."""
         for text in (
