@@ -2935,6 +2935,27 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([], prose_lint.check_file(path, {"issue-ref"}))
 
+    def test_a_numpy_list_of_bare_names_is_heads_not_one_sentence(self) -> None:
+        names = "".join(f"    method_{i}\n" for i in range(prose_lint.SENTENCE_WORD_CAP + 1))
+        text = f'class A:\n    """S.\n\n    Methods\n    -------\n{names}    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_numpy_name_does_not_chain_onto_the_description_above(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP)
+        text = (
+            'class A:\n    """S.\n\n    Attributes\n    ----------\n    shape : tuple\n'
+            f'        {desc}\n    dtype\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_numpy_type_before_a_blank_and_its_description_is_a_head(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP)
+        text = (
+            'def f():\n    """S.\n\n    Returns\n    -------\n    x : int\n'
+            f'        {desc}\n    ndarray\n\n        Other.\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.

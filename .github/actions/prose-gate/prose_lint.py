@@ -2746,7 +2746,7 @@ def comment_sentence_findings(
     Comment lines on consecutive source lines are one block, so a wrapped sentence counts once.
     A line that is not prose, a trailing comment, or a gap ends the block.
     The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
-    A comment run indented past its own text after a colon line or a gap is a command or table.
+    A comment run indented past its own text after a colon line, or after a gap that follows one, is a command or table.
     The indent is read from the comment as written, since extraction strips it from the body.
     """
     comments, _kept, configured = prose_comment_candidates(path, raw, lines)
@@ -2813,10 +2813,16 @@ def comment_sentence_findings(
 def is_numpy_head(text: str, below: int) -> bool:
     """Whether a line at a NumPy entry's indent heads an entry rather than being prose.
 
-    A head is a `name : type` line, or a line with an indented description under it, as numpydoc
-    lays out a bare type. `below` is the indent of the next non-blank line, or -1 where none follows.
+    A head is a `name : type` line, a line with an indented description right under it, or a single
+    token with no closing punctuation, which is a name or a type and never a sentence.
+    `below` is the indent of the next line, or -1 where it is blank or absent.
     """
-    return " : " in text or below > len(text) - len(text.lstrip())
+    words = text.split()
+    return (
+        " : " in text
+        or below > len(text) - len(text.lstrip())
+        or (len(words) == 1 and not words[0].endswith((".", "!", "?")))
+    )
 
 
 def bare_marker_gap(lines: list[str], before: int, after: int, markers: list[str]) -> bool:
