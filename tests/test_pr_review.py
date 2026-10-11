@@ -390,6 +390,7 @@ def check(
     suite: int = 1,
     workflow: int | None = None,
     slug: str = "github-actions",
+    app_id: int = 15368,
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
 
@@ -406,7 +407,7 @@ def check(
         "startedAt": ago(60) if started is None else started,
         "checkSuite": {
             "databaseId": suite,
-            "app": {"slug": slug},
+            "app": {"slug": slug, "databaseId": app_id},
             "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
         },
     }
@@ -6468,7 +6469,8 @@ class TestCheckShapes(unittest.TestCase):
         """Q_FULL selects the suite and workflow fields the dedup keys on."""
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } }", query
+            "checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } }",
+            query,
         )
 
     def test_the_full_query_asks_which_checks_are_required_and_whether_the_pr_is_open(self) -> None:
@@ -7920,7 +7922,7 @@ class TestCli(GqlCase):
 
     def rules(self, *contexts: str) -> mock.MagicMock:
         """Patch `gh_rest` to answer the base branch's rules read with these required contexts."""
-        out = json.dumps({"n": 2, "c": list(contexts)})
+        out = json.dumps({"n": 2, "c": [[c, None] for c in contexts]})
         return self.enterContext(
             mock.patch.object(
                 pr_review, "gh_rest", return_value=subprocess.CompletedProcess([], 0, out, "")
@@ -7948,6 +7950,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
+        self.assertIn("required, unmet: Later workflow", self.out.getvalue())
 
     def test_every_required_check_registered_does_not_hold_a_blocked_head(self) -> None:
         self.rules("Check pull request workflow status job")
@@ -10230,13 +10233,16 @@ class TestRequiredContexts(unittest.TestCase):
         self.addCleanup(pr_review.required_contexts.cache_clear)
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def read(self, out: str, code: int = 0) -> frozenset[str] | None:
+    def read(self, out: str, code: int = 0) -> frozenset[tuple[str, int | None]] | None:
         proc = subprocess.CompletedProcess([], code, out, "")
         with mock.patch.object(pr_review, "gh_rest", return_value=proc):
             return pr_review.required_contexts("o", "r", "develop")
 
     def test_the_contexts_are_read_from_the_rules(self) -> None:
-        self.assertEqual(frozenset({"a", "b"}), self.read('{"n": 3, "c": ["a", "b"]}'))
+        self.assertEqual(
+            frozenset({("a", None), ("b", 7)}),
+            self.read('{"n": 3, "c": [["a", null], ["b", 7]]}'),
+        )
 
     def test_a_slash_in_the_base_is_one_path_segment(self) -> None:
         proc = subprocess.CompletedProcess([], 0, '{"n": 1, "c": []}', "")
@@ -10245,7 +10251,15 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertIn("/rules/branches/release%2F1.0?", rest.call_args.args[0])
 
     def test_a_read_that_did_not_happen_is_none_not_empty(self) -> None:
-        for out, code in (("", 1), ("not json", 0), ('{"n": 1}', 0), ('{"n": 100, "c": []}', 0)):
+        for out, code in (
+            ("", 1),
+            ("not json", 0),
+            ('{"n": 1}', 0),
+            ('{"n": 100, "c": []}', 0),
+            ('{"n": 1, "c": [["a", "15368"]]}', 0),
+            ('{"n": 1, "c": [["a", 0]]}', 0),
+            ('{"n": 1, "c": [["a", true]]}', 0),
+        ):
             with self.subTest(out=out, code=code):
                 pr_review.required_contexts.cache_clear()
                 self.assertIsNone(self.read(out, code))
@@ -10254,16 +10268,18 @@ class TestRequiredContexts(unittest.TestCase):
         pr = payload([], merge="BLOCKED", checks=[check()])
         nodes = pr_review.check_nodes(pr)
         now = datetime.now(UTC)
-        want = frozenset({"Check pull request workflow status job", "Later"})
+        want = frozenset({("Check pull request workflow status job", None), ("Later", None)})
         self.assertTrue(pr_review.held_checks_open(pr, nodes, now, 600, 3600, want))
-        self.assertFalse(pr_review.held_checks_open(pr, nodes, now, 600, 3600, want - {"Later"}))
+        self.assertFalse(
+            pr_review.held_checks_open(pr, nodes, now, 600, 3600, want - {("Later", None)})
+        )
         self.assertFalse(pr_review.held_checks_open(pr, nodes, now, 600, 3600))
         clean = {**pr, "mergeStateStatus": "CLEAN"}
         self.assertFalse(pr_review.held_checks_open(clean, nodes, now, 600, 3600, want))
 
     def test_a_rollup_not_read_whole_never_holds_on_an_absent_context(self) -> None:
         now = datetime.now(UTC)
-        want = frozenset({"Later"})
+        want = frozenset({("Later", None)})
         other = payload([], merge="BLOCKED", checks=[check()], rollup_oid="f" * 40)
         self.assertFalse(
             pr_review.held_checks_open(other, pr_review.check_nodes(other), now, 600, 3600, want)
@@ -10275,6 +10291,30 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertFalse(
             pr_review.held_checks_open(cut, pr_review.check_nodes(cut), now, 600, 3600, want)
         )
+
+    def held(self, nodes: list[dict], entry: tuple[str, int | None]) -> bool:
+        pr = payload([], merge="BLOCKED", checks=nodes)
+        return pr_review.held_checks_open(
+            pr, pr_review.check_nodes(pr), datetime.now(UTC), 600, 3600, frozenset({entry})
+        )
+
+    def test_an_entry_bound_to_an_app_is_not_met_by_another_apps_check(self) -> None:
+        self.assertTrue(self.held([check(name="Gate", app_id=111)], ("Gate", 222)))
+
+    def test_an_entry_bound_to_an_app_is_met_by_that_apps_check(self) -> None:
+        self.assertFalse(self.held([check(name="Gate", app_id=222)], ("Gate", 222)))
+
+    def test_an_entry_bound_to_an_app_is_not_met_by_a_status_context(self) -> None:
+        self.assertTrue(self.held([status_context("Gate")], ("Gate", 222)))
+
+    def test_an_unbound_entry_is_met_by_a_same_name_node_of_either_type(self) -> None:
+        self.assertFalse(self.held([check(name="Gate", app_id=111)], ("Gate", None)))
+        self.assertFalse(self.held([status_context("Gate")], ("Gate", None)))
+
+    def test_the_unmet_context_is_named(self) -> None:
+        nodes = pr_review.check_nodes(payload([], merge="BLOCKED", checks=[check(name="Gate")]))
+        self.assertEqual("", pr_review._unmet_note(frozenset({("Gate", None)}), nodes))
+        self.assertIn("Gate", pr_review._unmet_note(frozenset({("Gate", 9)}), nodes))
 
     def test_the_rules_are_read_only_for_a_blocked_merge(self) -> None:
         with mock.patch.object(pr_review, "gh_rest") as rest:

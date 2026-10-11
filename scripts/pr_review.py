@@ -875,7 +875,7 @@ HELD_FIELDS = """
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
-          checkSuite{ databaseId app{ slug } workflowRun{ workflow{ databaseId } } } }
+          checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}}}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
@@ -3480,7 +3480,9 @@ def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
 
     A readable node also carries `required`, true unless the rollup marks it `isRequired: false`,
-    which `held_checks_open` and `wait`'s exit `44` decide on. A node of an unrecognized union
+    which `held_checks_open` and `wait`'s exit `44` decide on. A CheckRun also carries `app_id`, its
+    app's database id, which a rule's `integration_id` is matched against. A StatusContext has none.
+    A node of an unrecognized union
     member carries empty values for the four and an `unreadable` key naming its type instead.
 
     A rollup carries two node shapes and they spell every field differently: a CheckRun has a
@@ -3528,6 +3530,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "conclusion": n.get("conclusion") or "",
                     "since": n.get("startedAt") or "",
                     "required": n.get("isRequired") is not False,
+                    "app_id": (suite.get("app") or {}).get("databaseId"),
                 }
             )
         elif n.get("__typename") == "StatusContext":
@@ -3658,7 +3661,7 @@ def held_checks_open(
     now: datetime,
     grace: float,
     stall: float,
-    required: frozenset[str] = frozenset(),
+    required: frozenset[tuple[str, int | None]] = frozenset(),
 ) -> bool:
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
@@ -3675,7 +3678,8 @@ def held_checks_open(
     reads UNKNOWN on it for good.
 
     A BLOCKED merge also holds it, where the rollup was read whole, while a context the base
-    branch's rules require is absent from it by exact name, which `required` carries. The rollup
+    branch's rules require is unmet by it, which `required` carries as (context, integration id)
+    pairs and `required_unmet` reads. The rollup
     only knows the checks that have registered, so a push whose other workflows have not started
     reads five of five passed and BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
     holds nothing.
@@ -3701,27 +3705,49 @@ def held_checks_open(
         merge == "BLOCKED"
         and not checks_unreadable(pr)
         and not checks_truncated(pr)
-        and required - {n["name"] for n in nodes if not n.get("unreadable")}
+        and required_unmet(required, nodes)
     ):
         return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
-def required_for(pr: dict, owner: str, repo: str) -> frozenset[str]:
-    """The required contexts a BLOCKED merge can be short of, empty wherever none can matter."""
+def required_for(pr: dict, owner: str, repo: str) -> frozenset[tuple[str, int | None]]:
+    """The required entries a BLOCKED merge can be short of, empty wherever none can matter."""
     if pr.get("mergeStateStatus") != "BLOCKED":
         return frozenset()
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
 
-@functools.cache
-def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None:
-    """Every status check context the base branch's rules require, or None where it was unread.
+def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> list[str]:
+    """The contexts among `required` that no rollup node satisfies, sorted.
 
-    Read from the rules rather than the rollup, since the rollup lists only the checks that have
-    registered on the head, which is exactly the set a push in flight is short of. None rather than
-    an empty set wherever the read did not happen, so an unreadable rules endpoint never reads as
-    nothing being required. The read is one page of a hundred rules, and a full page is taken as
+    An entry without an integration id is satisfied by a node of either type carrying its name.
+    An entry with one is satisfied only by a CheckRun of that name whose app has that id. A
+    StatusContext carries no app, so it never satisfies one, which errs toward holding.
+    """
+    seen = [n for n in nodes if not n.get("unreadable")]
+    return sorted(
+        {
+            context
+            for context, integration in required
+            if not any(
+                n["name"] == context and (integration is None or n.get("app_id") == integration)
+                for n in seen
+            )
+        }
+    )
+
+
+@functools.cache
+def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, int | None]] | None:
+    """Every status check the base branch's rules require, or None where it was unread.
+
+    Each is a (context, integration id) pair, the id None where the rule binds no app. Read from
+    the rules rather than the rollup, since the rollup lists only the checks that have registered
+    on the head, which is exactly the set a push in flight is short of. None rather than an empty
+    set wherever the read did not happen, so an unreadable rules endpoint never reads as nothing
+    being required. An integration id that is present and not a positive integer is a malformed
+    entry and reads as None. The read is one page of a hundred rules, and a full page is taken as
     possibly cut short and returned as None. Memoized for the run, which also prints the note once.
     """
     safe = base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
@@ -3729,16 +3755,25 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None
         reread_json(
             f"repos/{owner}/{repo}/rules/branches/{urllib.parse.quote(base, safe='')}?per_page=100",
             '{n: length, c: [.[] | select(.type=="required_status_checks")'
-            " | .parameters.required_status_checks[].context]}",
+            " | .parameters.required_status_checks[] | [.context, .integration_id]]}",
         )
         if safe
         else None
     )
     answer = read if isinstance(read, dict) else {}
-    contexts = answer.get("c")
+    entries = answer.get("c")
     if (
-        not isinstance(contexts, list)
-        or not all(isinstance(c, str) and c for c in contexts)
+        not isinstance(entries, list)
+        or not all(
+            isinstance(e, list)
+            and len(e) == 2
+            and isinstance(e[0], str)
+            and e[0]
+            and (
+                e[1] is None or (isinstance(e[1], int) and not isinstance(e[1], bool) and e[1] > 0)
+            )
+            for e in entries
+        )
         or answer.get("n", 100) >= 100
     ):
         print(
@@ -3746,7 +3781,13 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None
             "this wait cannot hold for one that has not registered yet."
         )
         return None
-    return frozenset(contexts)
+    return frozenset((e[0], e[1]) for e in entries)
+
+
+def _unmet_note(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
+    """Names the required contexts still unmet, so a reader sees what the hold waits on."""
+    unmet = required_unmet(required, nodes)
+    return f" (required, unmet: {', '.join(unmet)})" if unmet else ""
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -5895,6 +5936,7 @@ def main(argv: list[str] | None = None) -> int:
                 "timeout a check had not concluded, none had posted, a check the base branch "
                 "requires had not registered, or the merge was still UNKNOWN, so the merge is "
                 "not ready yet: wait again, or read the checks above"
+                + _unmet_note(required_for(final, owner, repo), checks)
             )
             return 30
         # The review loop closing is not the merge gate, and 0 alone was saying it was.
