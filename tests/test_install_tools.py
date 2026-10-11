@@ -752,15 +752,18 @@ $results['roots'] = @($case.roots | ForEach-Object { [string](Get-InstallRoot -P
 $before = [Console]::OutputEncoding
 $switchable = $true
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $before } catch { $switchable = $false }
-$script:INSIDE = $null
 function run { param([string]$Command, [string[]]$Arguments) $script:INSIDE = [Console]::OutputEncoding.WebName; return 5 }
-$results['utf8'] = [ordered]@{
-    code = (Invoke-Utf8Run 'docker' @('desktop', 'stop'))
-    switchable = $switchable
-    redirected = [Console]::IsOutputRedirected
-    before = $before.WebName
-    inside = $script:INSIDE
-    restored = ([Console]::OutputEncoding.WebName -eq $before.WebName)
+foreach ($console in @($true, $false)) {
+    $script:CONSOLE = $console
+    function Test-OutputToConsole { return $script:CONSOLE }
+    $script:INSIDE = $null
+    $results["utf8 console=$console"] = [ordered]@{
+        code = (Invoke-Utf8Run 'docker' @('desktop', 'stop'))
+        switchable = $switchable
+        before = $before.WebName
+        inside = $script:INSIDE
+        restored = ([Console]::OutputEncoding.WebName -eq $before.WebName)
+    }
 }
 $results | ConvertTo-Json -Depth 4
 """
@@ -780,14 +783,18 @@ $script:LINES = @()
 function warn { param([string]$Message) $script:LINES += "WARN $Message" }
 function info { param([string]$Message) $script:LINES += "INFO $Message" }
 function Hide-Home { param([string]$Path) return 'LOG' }
-function Get-ToolHolder { param([string]$Probe) return , @([pscustomobject]@{ ProcessName = 'helper'; Id = 1234 }, [pscustomobject]@{ ProcessName = 'bash'; Id = 99 }) }
+function Get-ToolHolder {
+    param([string]$Probe, [string]$Executable)
+    $script:LINES += "HOLDERS $Probe $Executable".TrimEnd()
+    return , @([pscustomobject]@{ ProcessName = 'helper'; Id = 1234 }, [pscustomobject]@{ ProcessName = 'bash'; Id = 99 })
+}
 $results = [ordered]@{}
 foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
-    $script:REASON = @{ Log = 'C:\log.log'; Entries = @($case.Value | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') }) }
+    $script:REASON = @{ Log = 'C:\log.log'; Entries = @($case.Value.entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') }) }
     if ($script:REASON.Entries.Count -eq 0) { $script:REASON.Log = $null }
     function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return $script:REASON }
     $script:LINES = @()
-    Write-InstallFailure -ToolName 'tool' -Package 'Example.Tool' -Code -1978335226 -Since (Get-Date) -Probe 'tool'
+    Write-InstallFailure -ToolName 'tool' -Package 'Example.Tool' -Code $case.Value.code -Since (Get-Date) -Probe 'tool' -Executable $case.Value.executable
     $results[$case.Name] = @($script:LINES | ForEach-Object { $_.Replace($HOME, '<HOME>') })
 }
 $results | ConvertTo-Json -Depth 4
@@ -875,27 +882,48 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             ],
         )
 
-    def test_the_utf8_run_passes_the_exit_code_through_and_restores_the_console(self) -> None:
-        utf8 = self.run_cases()["utf8"]
-        self.assertEqual(utf8["code"], 5)
-        self.assertTrue(utf8["restored"])
-        if utf8["redirected"] or not utf8["switchable"]:
-            self.assertEqual(utf8["inside"], utf8["before"])
-        else:
-            self.assertEqual(utf8["inside"], "utf-8")
+    def test_the_utf8_run_switches_only_for_console_output_and_restores_it(self) -> None:
+        results = self.run_cases()
+        console = results["utf8 console=True"]
+        redirected = results["utf8 console=False"]
+        for utf8 in (console, redirected):
+            self.assertEqual(utf8["code"], 5)
+            self.assertTrue(utf8["restored"])
+        self.assertEqual(redirected["inside"], redirected["before"])
+        if console["switchable"]:
+            self.assertEqual(console["inside"], "utf-8")
+
+
+INSTALLER_FAILED = -1978335226
+SHARING_VIOLATION = -2147024864
 
 
 @unittest.skipUnless(
     shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
 )
 class TestWindowsInstallFailureReport(unittest.TestCase):
-    """`Write-InstallFailure` blames running processes only where the log points at them."""
+    """`Write-InstallFailure` blames running processes only where something says files were in use."""
 
     def run_cases(self) -> dict[str, list[str]]:
         cases = {
-            "in use": ["The following process(es) use Example Tool: helper.exe (PID 1234)"],
-            "unrelated": ["Download failed: <HOME>\\AppData\\Local\\Temp\\is-1.tmp"],
-            "no reason": [],
+            "in use": {
+                "entries": ["The following process(es) use Example Tool: helper.exe (PID 1234)"],
+                "code": INSTALLER_FAILED,
+                "executable": "",
+            },
+            "unrelated": {
+                "entries": [
+                    "Error 0x80070666: Process returned error at <HOME>\\AppData\\Local\\x.log"
+                ],
+                "code": INSTALLER_FAILED,
+                "executable": "",
+            },
+            "no reason": {"entries": [], "code": INSTALLER_FAILED, "executable": ""},
+            "sharing violation": {
+                "entries": [],
+                "code": SHARING_VIOLATION,
+                "executable": "C:\\Tool\\tool.exe",
+            },
         }
         result = run_pwsh_harness(WRITE_FAILURE_HARNESS, cases)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -910,6 +938,7 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
                 "INFO The installer log says:",
                 "INFO   The following process(es) use Example Tool: helper.exe (PID 1234)",
                 "INFO Full installer log: LOG",
+                "HOLDERS tool",
                 (
                     "INFO Running from tool's install, and Windows cannot replace a file a"
                     " running process holds:"
@@ -927,19 +956,25 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
             [
                 "WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)",
                 "INFO The installer log says:",
-                "INFO   Download failed: %USERPROFILE%\\AppData\\Local\\Temp\\is-1.tmp",
+                "INFO   Error 0x80070666: Process returned error at %USERPROFILE%\\AppData\\Local\\x.log",
                 "INFO Full installer log: LOG",
             ],
         )
 
-    def test_no_reason_names_the_holders_as_a_possibility(self) -> None:
-        lines = self.run_cases()["no reason"]
+    def test_no_reason_blames_no_process(self) -> None:
         self.assertEqual(
-            lines[0], "WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)"
+            self.run_cases()["no reason"],
+            ["WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)"],
         )
-        self.assertIn(
-            "INFO Running from tool's install, and possibly holding a file the installer had to replace:",
-            lines,
+
+    def test_a_sharing_violation_names_the_holders_from_the_executable_given(self) -> None:
+        lines = self.run_cases()["sharing violation"]
+        self.assertEqual(
+            lines[:2],
+            [
+                "WARN tool failed on Example.Tool, winget exited -2147024864 (0x80070020)",
+                "HOLDERS tool C:\\Tool\\tool.exe",
+            ],
         )
         self.assertEqual(lines[-1], "INFO   Stop-Process -Id 1234, 99")
 

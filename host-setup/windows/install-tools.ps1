@@ -182,6 +182,12 @@ function run {
     return $LASTEXITCODE
 }
 
+# Whether this process's own output reaches a console rather than a file or a pipe.
+# A function of its own so a test can drive the console branch of Invoke-Utf8Run from a harness whose output is always captured.
+function Test-OutputToConsole {
+    return (-not [Console]::IsOutputRedirected)
+}
+
 # The run wrapper above, for a command that writes UTF-8 whatever the console's code page, as Docker's CLI does.
 # A console left at its OEM default decodes those bytes as that code page, so the check mark docker desktop prints on success reads as three unrelated characters.
 # The console is switched to UTF-8 for this one call and put back after, rather than for the whole run, so every other native tool here keeps the decoding it was written against.
@@ -191,7 +197,7 @@ function Invoke-Utf8Run {
     param([Parameter(Mandatory)][string]$Command, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     $previous = [Console]::OutputEncoding
     $switched = $false
-    if (-not [Console]::IsOutputRedirected) {
+    if (Test-OutputToConsole) {
         try {
             [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
             $switched = $true
@@ -462,11 +468,12 @@ function Get-InstallRoot {
 
 # Every running process whose executable sits inside the tree one tool installed, which is what an installer refusing over files in use is refusing over.
 # Matching the tool's own process name misses the helpers a tool ships and leaves running in the background, such as the GnuPG key daemon Git for Windows carries, which outlives the git command that started it and blocks Git's own upgrade.
+# Executable names the file to read the tree from where the probe sits outside it, as py does for Python: the launcher installs in a directory of its own, while what blocks an upgrade is the interpreter the line installed.
 function Get-ToolHolder {
-    param([Parameter(Mandatory)][string]$Probe)
+    param([Parameter(Mandatory)][string]$Probe, [string]$Executable)
     $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
-    $command = Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    $item = if ($command) { Get-Item -LiteralPath $command.Source -ErrorAction SilentlyContinue }
+    $source = if ($Executable) { $Executable } else { (Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    $item = if ($source) { Get-Item -LiteralPath $source -ErrorAction SilentlyContinue }
     if ($item -and $item.LinkTarget) {
         $resolved = $item.ResolveLinkTarget($true)
         if ($resolved) { $item = $resolved }
@@ -481,10 +488,10 @@ function Get-ToolHolder {
 # What a failed winget call owes its reader: winget's code, the reason the installer's own log gives, and the processes that may hold the tool's files.
 # The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
 # The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
-# Windows will not replace a file that is open, so the processes running from the tool's install are named as the cause where the log says files were in use, and as a possibility only where the log gave no reason at all.
-# A Git upgrade that failed on a download still finds every open Git Bash running from Git's own tree, and blaming those for an unrelated failure would send the reader after the wrong thing.
+# Windows will not replace a file that is open, so the processes running from the tool's install are named only where something says files were in use: an installer log entry in Inno Setup's or Windows' own in-use wording, or winget's code being a sharing violation or an access denial, which is how a portable package that writes no installer log reports a locked file.
+# Anything else names nobody, since a Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree, and blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
-    param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe)
+    param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
     $reason = Get-InstallerFailureReason -Id $Package -Since $Since
     if ($reason.Entries.Count -gt 0) {
@@ -495,15 +502,13 @@ function Write-InstallFailure {
         }
     }
     if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
-    $inUse = @($reason.Entries | Where-Object { $_ -match '(?i)\bprocess|in use|being used|used by' }).Count -gt 0
-    if ($reason.Entries.Count -gt 0 -and -not $inUse) { return }
-    $running = Get-ToolHolder -Probe $Probe
+    $logInUse = @($reason.Entries | Where-Object { $_ -match '(?i)process\(es\) use|in use by|used by another process' }).Count -gt 0
+    # 0x80070020 and 0x80070005 are ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED carried as an HRESULT.
+    $codeInUse = ('0x{0:X8}' -f $Code) -in @('0x80070020', '0x80070005')
+    if (-not ($logInUse -or $codeInUse)) { return }
+    $running = Get-ToolHolder -Probe $Probe -Executable $Executable
     if ($running.Count -eq 0) { return }
-    if ($inUse) {
-        info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
-    } else {
-        info "Running from $ToolName's install, and possibly holding a file the installer had to replace:"
-    }
+    info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
     foreach ($process in $running) { info "  $($process.ProcessName) (process $($process.Id))" }
     info 'Close them, or stop them with the command below, then run this again:'
     info "  Stop-Process -Id $($running.Id -join ', ')"
@@ -1349,7 +1354,12 @@ function Invoke-ToolApply {
             Invoke-WingetInstall -Id $package
         }
         if ($code -ne 0) {
-            Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe
+            $executable = $null
+            if ($ToolName -eq 'python') {
+                $line = Get-PythonLine -Version $state.Installed
+                if ($line) { $executable = Get-PythonLineInterpreter -Line $line }
+            }
+            Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe -Executable $executable
             $script:FAILED += $ToolName
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
             if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }

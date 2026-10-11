@@ -673,8 +673,8 @@ function main {
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { die 'git is required' }
 
-    # Every task runs in a child process piped through this one, so its output crosses three decoders: the child reading a native tool, the child writing to this pipe, and this process reading it, plus the console rendering whatever a tool writes to stderr directly.
-    # Each one follows the console's code page, and on an OEM default a UTF-8 tool such as docker desktop prints its check mark as three unrelated characters, so the console is switched to UTF-8 for the menu's lifetime, which a child pwsh inherits at startup, and put back on the way out.
+    # Every task runs in a child process piped through this one, so its output is decoded by the child reading a native tool, encoded again by the child writing to this pipe, and decoded by this process reading it, while whatever a tool writes to stderr goes to the console and is rendered there.
+    # Each of those follows the console's code page, and on an OEM default a UTF-8 tool such as docker desktop prints its check mark as three unrelated characters, so the console is switched to UTF-8 for the menu's lifetime, which a child pwsh inherits at startup, and put back on the way out.
     $previousEncoding = [Console]::OutputEncoding
     $switchedEncoding = $false
     if (-not [Console]::IsOutputRedirected) {
