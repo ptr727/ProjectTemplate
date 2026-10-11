@@ -2261,22 +2261,24 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
 
     The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
     run-on is the other half of the same rule, so both are reported.
+
+    A body cut at a trailing directive continues into the next line only where the whole body does
+    not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
+    goes on past.
     """
     comments = python_comments(raw) if path.suffix.lower() == ".py" else None
     if comments is None:
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
-    comments = [
-        c._replace(body=without_trailing_directive(path, c.body))
-        for c in comments
-        if c[0] not in skip
-    ]
+    kept = [c for c in comments if c[0] not in skip]
+    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
     configured = config_run_lines(comments)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
+    prev_whole = ""
     prev_no = 0
-    for n, body, leading, _raw in comments:
+    for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
         if (
             not body
             or n in configured
@@ -2305,6 +2307,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             and leading
             and prev_body
             and not SENT_END.search(prev_body)
+            and not SENT_END.search(prev_whole)
             and body[:1].islower()
         )
         if continuation:
@@ -2331,6 +2334,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A trailing comment can start a sentence the next full-line comment continues.
         # The continuation has to be a full-line comment, since a trailing one annotates its own.
         prev_body = body
+        prev_whole = whole.body
         prev_no = n
     return out
 

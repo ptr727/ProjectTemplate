@@ -1624,6 +1624,7 @@ class TestANamedToolIsStillProse(BaitCase):
         for name, text in (
             ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
             ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
             ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
             ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
         ):
@@ -1665,8 +1666,30 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
-        text = "x = 1  # Read the row.  # noqable. Another one follows.\n"
-        self.assertEqual(["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+        for text in (
+            "x = 1  # Read the row.  # noqable. Another one follows.\n",
+            "x = 1  # Read the row mypylint: once. Another one follows.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(
+                    ["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py")
+                )
+
+    def test_a_directive_named_mid_sentence_leaves_no_wrap(self) -> None:
+        """The sentence goes on past a directive it names, so the next line does not continue it."""
+        for text, expected in (
+            ("# Suppress with `# noqa: E501` where needed.\n# max_len - the longest line.\n", []),
+            ("# Lines carry a `# noqa` marker.\n# flake8 reads it.\n", [(2, "comment-case")]),
+            (
+                "# A sentence that keeps  # noqa\n# going onto the next line.\n",
+                [(1, "comment-wrap")],
+            ),
+        ):
+            with self.subTest(text=text.strip()):
+                path = self.tmp / "tool.py"
+                path.write_text(text, encoding="utf-8")
+                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"})
+                self.assertEqual(expected, [(n, kind) for n, kind, _ in found])
 
     def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
         """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
