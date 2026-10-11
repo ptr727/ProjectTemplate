@@ -2357,13 +2357,13 @@ def is_tool_directive(body: str) -> bool:
 
 
 def without_trailing_directive(path: Path, body: str) -> str:
-    """The comment body with a directive a Python checker reads cut off its end.
+    """The comment body up to the first directive a Python checker reads.
 
     A Python checker reads `noqa` and `type: ignore` behind their own `#` after prose on the same
     line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to any
     comment switch every comment rule off for that line. The prose can be deleted and the directive
-    kept, so the directive is cut off and what is left is judged by the same exemptions as any other
-    body, an empty one included.
+    kept, so the directive and anything after it are cut off, and what is left is judged by the same
+    exemptions as any other body, an empty one included.
 
     No other language's checker reads these forms, so in any other file a mention of one is part of
     the sentence holding it.

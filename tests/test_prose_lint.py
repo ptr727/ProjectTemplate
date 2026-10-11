@@ -1611,7 +1611,7 @@ class TestANamedToolIsStillProse(BaitCase):
         self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
 
     def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
-        """Cutting the directive off leaves nothing to judge where the comment is only the directive."""
+        """What is left once the directive is cut is empty or a directive `NOT_PROSE` already exempts."""
         for text in (
             "x = 1  # noqa\n",
             "x = 1  # pylint: disable=no-member\n",
