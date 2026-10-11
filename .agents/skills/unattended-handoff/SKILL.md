@@ -119,10 +119,11 @@ describes it, so the orchestrator handles it itself.
 - **An error naming a temporary condition is retried, where no subagent started.** The
   orchestrator judges the condition from the error's own text, such as an overload, a rate limit,
   or a check reporting a transient failure. A retry needs the dispatch mechanism to show that no
-  subagent started. A second seat on the same brief would break one worker at a time. It
-  then waits on one bounded background timer of about ten minutes, such as a backgrounded
-  `sleep 600` whose exit wakes the session. It then dispatches the same brief again unchanged. It
-  spends at most three waits on one dispatch, and a dispatch that runs resets that count.
+  subagent started. A second seat on the same brief would duplicate the first one's work.
+  The orchestrator then waits on one bounded background timer of about ten minutes, such as a
+  backgrounded `sleep 600` whose exit wakes the session. It then dispatches the same brief again
+  unchanged. It spends at most three waits on one dispatch, and a dispatch that runs resets that
+  count.
 - **A dispatch that never ran was not dispatched.** A handoff number joins the dispatched ones only
   once its worker runs. A worker brief retried this way therefore does not meet the repeat stop in
   step 2.
