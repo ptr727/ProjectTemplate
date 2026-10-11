@@ -306,9 +306,9 @@ Subcommands
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
            read and clearing the set and requesting again changed nothing. It is decided one
            poll interval after the request, and the rest of the poll is skipped, since no
-           request exists to answer. It cannot meet 46, which sends no request, and ranks under
-           0/40/41/42/43/44/45/50 and above 47. `status` cannot report it, since a request that
-           recorded nothing leaves nothing for a later read to find.
+           request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
+           `status` cannot report it, since a request that recorded nothing leaves nothing for a
+           later read to find.
            49 = no Copilot round covers this head and none was requested, the pull request merging
            into a branch other than the default after Copilot's first round, and no attestation
            vouches for the head. Run the local strict review, record it, push, and run `attest`, or
@@ -1169,14 +1169,25 @@ def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, 
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
             if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
-                entries.append(
-                    (number, {**review, "_at": review.get("submittedAt") or "", "_kind": "review"})
-                )
+                entries.append(history_entry(number, review, "review"))
         for comment in (node.get("comments") or {}).get("nodes") or []:
             if (comment.get("author") or {}).get("login") == REVIEWER:
-                entries.append(
-                    (number, {**comment, "_at": comment.get("createdAt") or "", "_kind": "comment"})
-                )
+                entries.append(history_entry(number, comment, "comment"))
+    return newest_first(entries)
+
+
+def history_entry(number: int, node: dict, kind: str) -> tuple[int, dict]:
+    """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged.
+
+    Shared with `wait`'s final quota reading, which merges this pull request's own reviews into
+    the history it read, so the two can never spell the entry differently.
+    """
+    stamp = node.get("submittedAt" if kind == "review" else "createdAt") or ""
+    return number, {**node, "_at": stamp, "_kind": kind}
+
+
+def newest_first(entries: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """History entries ordered newest first, the order `quota_signal` reads its first entry in."""
     return sorted(entries, key=lambda pair: pair[1]["_at"], reverse=True)
 
 
@@ -5757,15 +5768,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    own = [
-        (a.number, {**n, "_at": n.get("submittedAt") or ""})
-        for n in reviewer_nodes(final, "reviews")
-    ]
-    if (
-        signal
-        and not reviewed_head(final)
-        and quota_signal(sorted([*history, *own], key=lambda pair: pair[1]["_at"], reverse=True))
-    ):
+    own = [history_entry(a.number, n, "review") for n in reviewer_nodes(final, "reviews")]
+    if signal and not reviewed_head(final) and quota_signal(newest_first([*history, *own])):
         number, hist_refusal = signal
         print(
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
