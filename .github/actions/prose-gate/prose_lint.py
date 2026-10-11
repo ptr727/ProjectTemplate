@@ -1683,9 +1683,9 @@ LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
 LABEL_COLON = re.compile(
     rf"^\s*{LIST_MARKER_TOKEN}\s+(?P<outer>[*_]?)(?:"
-    r"(?P<star>\*{2,3})(?P<si>_?)[^*\n]+?"
+    r"(?P<star>\*\*)(?P<si>_?)[^*\n]+?"
     r"(?:(?P=si)(?P=star)(?P=outer)\s*:|:\s*(?P=si)(?P=star)(?P=outer))"
-    r"|(?P<under>_{2,3})(?P<ui>\*?)[^_\n]+?"
+    r"|(?P<under>__)(?P<ui>\*?)[^_\n]+?"
     r"(?:(?P=ui)(?P=under)(?P=outer)\s*:|:\s*(?P=ui)(?P=under)(?P=outer)))"
 )
 
