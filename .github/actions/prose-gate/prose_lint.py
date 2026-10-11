@@ -1675,11 +1675,12 @@ def strip_quoted(s: str) -> str:
     return re.sub(r'"([^"\n]*)"', blank, s)
 
 
+LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
+
 # A bullet's `**Label**:` opens the text the same way `- **Label** -` does.
 # Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
 # The colon is written inside the emphasis as often as outside it, and both spell one construct.
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
-LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
 LABEL_COLON = re.compile(
     rf"^\s*{LIST_MARKER_TOKEN}\s+(?:"
     r"(?P<star>\*{2,3})[^*\n]+?(?:(?P=star)\s*:|:\s*(?P=star))"
