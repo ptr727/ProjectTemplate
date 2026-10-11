@@ -7910,6 +7910,28 @@ class TestCli(GqlCase):
             self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
         self.assertNotIn("status=PENDING", self.out.getvalue())
 
+    def test_a_round_on_the_head_outranks_the_repo_wide_quota_reading(self) -> None:
+        """The 47 line says the head carries no Copilot review of its own, so it cannot fire
+        where the final read shows one. Three rounds sit on the head with a re-request pending,
+        the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine round lands
+        mid-wait at a position `--min-rounds 4` does not credit. Each clock read advances 100
+        seconds, so one poll lands it and the read after it is past the 150-second timeout.
+        """
+        seen = [review(rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)]
+        fourth = review(rid="PRR_fourth", at=LATE)
+        self.answer(payload(seen, pending=True), payload([*seen, fourth]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+        clock = itertools.count(0, 100).__next__
+        with (
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review.time, "monotonic", clock),
+        ):
+            argv = ["wait", "7", "--min-rounds", "4", "--timeout", "150"]
+            self.assertEqual(30, self.cli(argv))
+        out = self.out.getvalue()
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertIn("now has 4 rounds, up from 3", out)
+
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
