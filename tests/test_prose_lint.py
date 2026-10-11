@@ -115,7 +115,9 @@ def yaml_step(text: str, name: str) -> str:
 
 
 def yaml_value(text: str, *keys: str) -> str | None:
-    """The plain scalar at the nested mapping path `keys`, or None where any key is absent.
+    """The text after the last key's colon at the nested mapping path `keys`, or None where absent.
+
+    The text is raw rather than a parsed value, so quotes and a trailing comment are kept.
 
     Each key is looked for only among its parent's direct children, the shallowest lines under it,
     and a comment line is no key at all, so a commented-out or relocated entry reads as absent.
