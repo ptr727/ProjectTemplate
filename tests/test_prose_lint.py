@@ -2832,6 +2832,82 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
 
+    def test_a_docstring_body_deeper_than_its_quotes_is_prose(self) -> None:
+        text = (
+            f'def f() -> None:\n    """\n        Summary.\n\n        {self.over()}\n        """\n'
+        )
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_block_deeper_than_a_deep_docstring_body_stays_code(self) -> None:
+        text = (
+            'def f() -> None:\n    """\n        Summary.\n\n'
+            f'            {self.over()}\n        """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_deep_docstring_colon_line_opens_a_code_block(self) -> None:
+        text = (
+            f'def f() -> None:\n    """\n        Usage:\n\n            {self.over()}\n        """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_non_prose_line_inside_a_comment_command_run_keeps_it_code(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        for middle in ("https://example.com/path", "key:"):
+            with self.subTest(middle=middle):
+                text = f"# Usage:\n#     first\n#     {middle}\n#     {run}\n#     {run}\n"
+                self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_block_comment_continuation_carries_its_indent(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        text = f"/* Usage:\n *     {run}\n *     {run}\n */\nint x;\n"
+        self.assertEqual([], self.found(text, "bait.c"))
+        bare = f"/* Usage:\n     {run}\n     {run}\n */\nint x;\n"
+        self.assertEqual([], self.found(bare, "bait.c"))
+
+    def test_a_block_comment_prose_continuation_is_still_counted(self) -> None:
+        half = self.words(13)
+        text = f"/* Intro\n *     {half}\n *     {half}.\n */\nint x;\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text, "bait.c"))
+
+    def test_google_free_text_sections_are_prose(self) -> None:
+        for header in ("Note", "Warning", "See Also", "Todo"):
+            with self.subTest(header=header):
+                text = f'def f() -> None:\n    """S.\n\n    {header}:\n        {self.over()}\n    """\n'
+                self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_google_free_text_body_keeps_no_entry_lead_stripped(self) -> None:
+        text = f'def f() -> None:\n    """S.\n\n    Note:\n        x: {self.at_cap()}\n    """\n'
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_code_deeper_than_a_free_text_body_stays_code(self) -> None:
+        text = (
+            'def f() -> None:\n    """S.\n\n    Note:\n        Call it like this:\n\n'
+            f'            {self.over()}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_numpy_prose_with_a_short_first_line_at_the_entry_indent_is_counted(self) -> None:
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    Short lead\n    {self.words(prose_lint.SENTENCE_WORD_CAP - 1)}.\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_bare_type_with_an_indented_description_stays_a_head(self) -> None:
+        part = self.words(prose_lint.SENTENCE_WORD_CAP - 2) + "."
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n'
+            f'        {part}\n    str\n        {part}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_comment_marker_gap_keeps_a_colon_block_open_outside_python(self) -> None:
+        run = " ".join(["tool list item"] * 9)
+        for name, mark in (("bait.sh", "#"), ("bait.js", "//"), ("bait.py", "#")):
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(f"{mark} Usage:\n{mark}\n{mark}     {run}\n", name))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.

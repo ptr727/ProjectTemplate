@@ -2138,7 +2138,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                out.append(Comment(n, body, True))
+                out.append(Comment(n, body, True, line if end < 0 else line[:end]))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -2702,7 +2702,6 @@ PARSED_RULES = frozenset(
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
 DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
 DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
-NUMPY_HEAD_WORDS = 6
 NUMPY_UNDERLINE = re.compile(r"^\s*-{3,}\s*$")
 NUMPY_STRUCTURED = frozenset(
     {
@@ -2721,6 +2720,9 @@ GOOGLE_HEADER = re.compile(
     r"^\s*(?:Args|Arguments|Keyword Args|Keyword Arguments|Parameters|Other Parameters|Attributes|Raise|Raises|Return|Returns|Warns|Yield|Yields|Methods):\s*$"
 )
 GOOGLE_ENTRY = re.compile(r"^\s*\*{0,2}\w[\w.]*(?:\s*\(.*?\))?:\s+(?=\S)")
+GOOGLE_PROSE_HEADER = re.compile(
+    r"^\s*(?:Attention|Caution|Danger|Error|Hint|Important|Notes?|References|See Also|Tip|Todo|Warnings?):\s*$"
+)
 FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
 
 
@@ -2745,6 +2747,8 @@ def comment_sentence_findings(
     The indent is read from the comment as written, since extraction strips it from the body.
     """
     comments, _kept, configured = prose_comment_candidates(path, raw, lines)
+    spec = syntax_for(path)
+    markers = list(spec["line"]) if spec else []
     out: list[tuple[int, str, str]] = []
     block: list[tuple[int, str]] = []
     prev_no = 0
@@ -2759,12 +2763,24 @@ def comment_sentence_findings(
     for comment in comments:
         n, body, leading = comment.line, comment.body, comment.leading
         indent = comment_indent(comment)
+        if leading and prev_no and bare_marker_gap(lines, prev_no, n, markers):
+            flush()
+            prev_no = n - 1
         if not body and leading:
             flush()
             prev_no = n
             continue
         if is_non_prose_comment(n, body, configured):
             flush()
+            if (
+                leading
+                and n == prev_no + 1
+                and (in_code or prev_colon)
+                and indented_past(indent, reference)
+            ):
+                in_code = True
+                prev_no = n
+                continue
             opens = leading and body.rstrip().endswith(":")
             in_code, prev_colon = False, opens
             if opens:
@@ -2791,11 +2807,26 @@ def comment_sentence_findings(
     return out
 
 
-def is_numpy_head(text: str) -> bool:
-    """Whether a line at a NumPy entry's indent is a `name : type` line or a short type name."""
-    if " : " in text:
-        return True
-    return len(text.split()) <= NUMPY_HEAD_WORDS and not text.rstrip().endswith((".", "!", "?"))
+def is_numpy_head(text: str, below: int) -> bool:
+    """Whether a line at a NumPy entry's indent heads an entry rather than being prose.
+
+    A head is a `name : type` line, or a line with an indented description under it, as numpydoc
+    lays out a bare type. `below` is the indent of the next non-blank line, or -1 where none follows.
+    """
+    return " : " in text or below > len(text) - len(text.lstrip())
+
+
+def bare_marker_gap(lines: list[str], before: int, after: int, markers: list[str]) -> bool:
+    """Whether every source line strictly between two comment lines is a bare comment marker."""
+    return after > before + 1 and all(lines[i].strip() in markers for i in range(before, after - 1))
+
+
+def next_indent(texts: list[str], idx: int) -> int:
+    """The indent of the first non-blank line after `idx`, or -1 when none follows."""
+    for text in texts[idx + 1 :]:
+        if text.strip():
+            return len(text) - len(text.lstrip())
+    return -1
 
 
 def leading_indent(line: str) -> int:
@@ -2828,12 +2859,22 @@ def one_docstring_findings(
     A NumPy section header and its underline, and a Google section header, are not prose.
     A NumPy `name : type` line is structural, and a Google `name:` lead is not a word.
     The description under either is prose, each entry its own unit.
+    A Google free-text section such as `Note:` is prose with no entry leads to strip.
+    Lines after the first are measured from the least indented of them, as `inspect.cleandoc` does.
+    A docstring whose every later line is an indented code block, closing quotes included, reads it as prose.
     """
     out: list[tuple[int, str, str]] = []
     group = sorted(spans)
     texts = [spans[n].expandtabs(4) for n in group]
     texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
+    closer = texts[-1]
     texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
+    quote = base
+    later = [len(t) - len(t.lstrip()) for t in texts[1:] if t.strip()]
+    if len(texts) > 1 and closer.strip() and not texts[-1].strip():
+        later.append(len(closer) - len(closer.lstrip()))  # closing quotes alone on their line
+    if later:
+        base = min(later)
     block: list[tuple[int, str]] = []
 
     def flush() -> None:
@@ -2847,11 +2888,12 @@ def one_docstring_findings(
     section_indent = base
     code_at = base
     skip = 0
+    colon_ref = base
     for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
         if skip:
             skip -= 1
             continue
-        indent = len(text) - len(text.lstrip()) if idx else base
+        indent = len(text) - len(text.lstrip()) if idx else quote
         if not text.strip():
             flush()
             in_doctest = in_code = False
@@ -2872,19 +2914,25 @@ def one_docstring_findings(
             section, section_indent = "google", 0
             prev_blank = prev_colon = False
             continue
-        if section == "google" and indent <= base:
+        if indent <= base and GOOGLE_PROSE_HEADER.match(text):
+            flush()
+            in_doctest = in_code = False
+            section, section_indent = "text", 0
+            prev_blank = prev_colon = False
+            continue
+        if section in ("google", "text") and indent <= base:
             section, code_at = "", base
-        if section == "numpy" and indent <= base and is_numpy_head(text):
+        if section == "numpy" and indent <= base and is_numpy_head(text, next_indent(texts, idx)):
             flush()
             in_doctest = in_code = False
             prev_blank = False
             prev_colon = text.rstrip().endswith(":")
             continue
-        if section == "google":
+        if section in ("google", "text"):
             if not section_indent:
                 section_indent = indent
-                code_at = indent + 2 * INDENT_BLOCK
-            if indent <= section_indent:
+                code_at = indent + (2 if section == "google" else 1) * INDENT_BLOCK
+            if section == "google" and indent <= section_indent:
                 lead = GOOGLE_ENTRY.match(text)
                 if lead:
                     flush()
@@ -2899,7 +2947,8 @@ def one_docstring_findings(
             pass
         elif (prev_blank and indent >= threshold) or (
             prev_colon
-            and indent >= (section_indent if section == "google" else base) + INDENT_BLOCK
+            and indent
+            >= (section_indent if section in ("google", "text") else colon_ref) + INDENT_BLOCK
         ):
             flush()
             in_code = True
@@ -2912,6 +2961,7 @@ def one_docstring_findings(
                 flush()
         prev_blank = False
         prev_colon = text.rstrip().endswith(":")
+        colon_ref = quote if idx == 0 else base
     flush()
     return out
 
