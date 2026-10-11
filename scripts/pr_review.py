@@ -268,7 +268,8 @@ Subcommands
            no wait clears: queued with nothing acting on it, expected and never posted, running far
            past what the job costs, or failed, though on a held head a required check running long
            is still polled, as 30 states. A check merely still running normally is not this and
-           exits 0, or on a held head is polled while it can still move the merge. Neither is a
+           exits 0, or on a held head is polled while it can still move the merge, which includes
+           a context the base branch's rules require and the head has not yet registered. Neither is a
            stuck check its rollup node reads as not required, since the rollup carries checks no
            ruleset requires, nor any stuck check on a merge that is not BLOCKED. The digest reports
            the check in every case, so a shape outside 44 is still named rather than lost.
@@ -780,6 +781,7 @@ FILES_UNREAD = "unread"
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
+ATTEST_HEAD_DELAYS = (3, 5, 10, 15, 15, 12)
 # What a git ref may not hold before it is interpolated into a REST path.
 # Refused rather than allow-listed, git permitting more than a branch name usually carries.
 # An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
@@ -957,6 +959,10 @@ query($o:String!,$r:String!,$n:Int!){
 Q_ATTEST_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid baseRefName } }}
+"""
+Q_ATTEST_BRANCH = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefName headRepository{ url } } }}
 """
 ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
@@ -3646,7 +3652,12 @@ def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float
 
 
 def held_checks_open(
-    pr: dict, nodes: list[dict], now: datetime, grace: float, stall: float
+    pr: dict,
+    nodes: list[dict],
+    now: datetime,
+    grace: float,
+    stall: float,
+    required: frozenset[str] = frozenset(),
 ) -> bool:
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
@@ -3661,6 +3672,12 @@ def held_checks_open(
     reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
     the exit code is chosen by. A pull request no longer open has no merge left to move, and GitHub
     reads UNKNOWN on it for good.
+
+    A BLOCKED merge also holds it while a context the base branch's rules require is absent from the
+    rollup by exact name, which `required` carries. The rollup only knows the checks that have
+    registered, so a push whose other workflows have not started reads five of five passed and
+    BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
+    holds nothing.
     """
     if pr.get("state", "OPEN") != "OPEN":
         return False
@@ -3679,7 +3696,47 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
+    if merge == "BLOCKED" and required - {n["name"] for n in nodes if not n.get("unreadable")}:
+        return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+
+
+@functools.cache
+def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None:
+    """Every status check context the base branch's rules require, or None where it was unread.
+
+    Read from the rules rather than the rollup, since the rollup lists only the checks that have
+    registered on the head, which is exactly the set a push in flight is short of. None rather than
+    an empty set wherever the read did not happen, so an unreadable rules endpoint never reads as
+    nothing being required. The read is one page of a hundred rules, and a full page is taken as
+    possibly cut short and returned as None. Memoized for the run, which also prints the note once.
+    """
+    proc = (
+        gh_rest(
+            f"repos/{owner}/{repo}/rules/branches/{base}?per_page=100",
+            '{n: length, c: [.[] | select(.type=="required_status_checks")'
+            " | .parameters.required_status_checks[].context]}",
+        )
+        if base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
+        else None
+    )
+    try:
+        read = json.loads(proc.stdout) if proc is not None and proc.returncode == 0 else None
+    except ValueError:
+        read = None
+    answer = read if isinstance(read, dict) else {}
+    contexts = answer.get("c")
+    if (
+        not isinstance(contexts, list)
+        or not all(isinstance(c, str) and c for c in contexts)
+        or answer.get("n", 100) >= 100
+    ):
+        print(
+            f"note: the rules for {base} were unread, so which checks they require is unknown and "
+            "this wait cannot hold for one that has not registered yet."
+        )
+        return None
+    return frozenset(contexts)
 
 
 def checks_truncated(pr: dict) -> bool:
@@ -4858,11 +4915,17 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
             f"status=CHECKOUT_NOT_READ nothing was written: {checkout} is not a readable checkout"
         )
         return 67
+    registered = True
+    if local.stdout.strip() != head:
+        head, registered = await_registered_head(
+            owner, repo, num, checkout, local.stdout.strip(), head
+        )
     if local.stdout.strip() != head:
         print(
             f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout is at "
             f"{local.stdout.strip()[:8]} and the pull request's head is {head[:8]}, so push or "
             "fetch until they agree"
+            + ("" if registered else ". The push landed and GitHub had not registered it yet")
         )
         return 67
     if dirty.stdout.strip():
@@ -4923,6 +4986,31 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
         f"<!-- fleet-local-review: head={head} base={base} findings={findings} -->"
     )
     return comment_on_pr(owner, repo, num, body)
+
+
+def await_registered_head(
+    owner: str, repo: str, num: int, checkout: str, local: str, head: str
+) -> tuple[str, bool]:
+    """The pull request's head after waiting for GitHub to register a push, and whether it did.
+
+    A push moves the remote branch at once and the pull request's head a moment later, so an
+    attest straight after a push read the old head and refused. The wait applies only where the
+    remote branch tip is the checkout's own commit, which is what makes the head merely late.
+    Any other tip, or one that cannot be read, returns at once with the head as read.
+    """
+    meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
+    ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
+    if not ref or not source or UNSAFE_REF.search(ref) or DOT_SEGMENT.search(ref):
+        return head, True
+    tip = _git(checkout, "ls-remote", source, f"refs/heads/{ref}")
+    if tip.returncode != 0 or tip.stdout.split()[:1] != [local]:
+        return head, True
+    for delay in ATTEST_HEAD_DELAYS:
+        time.sleep(delay)
+        head = (gql(Q_ATTEST_TARGET, owner, repo, num) or {}).get("headRefOid") or head
+        if head == local:
+            return head, True
+    return head, False
 
 
 def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
@@ -5686,6 +5774,7 @@ def main(argv: list[str] | None = None) -> int:
                     datetime.now(UTC),
                     a.check_grace,
                     a.check_stall,
+                    required_contexts(owner, repo, polled.get("baseRefName") or "") or frozenset(),
                 )
             )
 
@@ -5774,7 +5863,14 @@ def main(argv: list[str] | None = None) -> int:
         # Only once the review itself is sound does a stuck required check decide the code.
         if verdict:
             return verdict
-        if covered and held_checks_open(final, checks, now, a.check_grace, a.check_stall):
+        if covered and held_checks_open(
+            final,
+            checks,
+            now,
+            a.check_grace,
+            a.check_stall,
+            required_contexts(owner, repo, final.get("baseRefName") or "") or frozenset(),
+        ):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
                 "timeout a check had not concluded, none had posted, or the merge was still "
