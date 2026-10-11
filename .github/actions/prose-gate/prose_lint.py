@@ -1572,7 +1572,7 @@ NOT_PROSE = re.compile(
     r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
 )
 
-TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa)|type:\s*ignore)\b|\bpylint:")
+TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa|nopep8)|type:\s*ignore)\b|\bpylint:")
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
 # It cannot be capitalized or restructured without corrupting the address it exists to carry.
@@ -1671,7 +1671,7 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|nopep8\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|(?i:nopep8)\b"
     r"|codespell:|doctest:)"
 )
 
@@ -2363,11 +2363,11 @@ def is_tool_directive(body: str) -> bool:
 def without_trailing_directive(path: Path, body: str) -> str:
     """The comment body up to the first directive a Python checker reads.
 
-    A Python checker reads `noqa` and `type: ignore` behind their own `#` after prose on the same
-    line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to any
-    comment switch every comment rule off for that line. The prose can be deleted and the directive
-    kept, so the directive and anything after it are cut off, and what is left is judged by the same
-    exemptions as any other body, an empty one included.
+    A Python checker reads `noqa`, `nopep8`, and `type: ignore` behind their own `#` after prose on
+    the same line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to
+    any comment switch every comment rule off for that line. The prose can be deleted and the
+    directive kept, so the directive and anything after it are cut off, and what is left is judged by
+    the same exemptions as any other body, an empty one included.
 
     No other language's checker reads these forms, so in any other file a mention of one is part of
     the sentence holding it.
