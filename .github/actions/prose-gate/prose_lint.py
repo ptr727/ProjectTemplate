@@ -2666,7 +2666,7 @@ DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
 DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
 DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
 DOCSTRING_CLOSED = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
-FIELD_LINE = re.compile(r"^\s*\w+(?:\s*\([^)]*\))?:(?:\s|$)")
+FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
 
 
 def comment_sentence_findings(
@@ -2691,7 +2691,13 @@ def comment_sentence_findings(
         if is_non_prose_comment(n, body, configured):
             flush()
             continue
-        if not leading or n != prev_no + 1 or LIST_MARKER.match(body) or FIELD_LINE.match(body):
+        if (
+            not leading
+            or n != prev_no + 1
+            or LIST_MARKER.match(body)
+            or FIELD_LINE.match(body)
+            or body[:1].isupper()
+        ):
             flush()
         block.append((n, body.strip()))
         prev_no = n
@@ -2716,7 +2722,13 @@ def docstring_sentence_findings(
     for n in numbers:
         prior = "".join(spans[groups[-1][-1]]) if groups else ""
         joined = bool(groups) and n == groups[-1][-1] + 1
-        if joined and DOCSTRING_CLOSED.search(prior) and DOCSTRING_OPEN.match("".join(spans[n])):
+        here = "".join(spans[n])
+        if (
+            joined
+            and DOCSTRING_CLOSED.search(prior)
+            and DOCSTRING_OPEN.match(here)
+            and here[:1].strip()
+        ):
             joined = False
         if joined:
             groups[-1].append(n)

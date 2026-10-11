@@ -2639,6 +2639,25 @@ class TestCommentSentenceLength(BaitCase):
         span = "``" + self.words(prose_lint.SENTENCE_WORD_CAP) + "``"
         self.assertEqual([], self.found(f"# The value {span} is read.\n", "bait.sh"))
 
+    def test_capitalized_unpunctuated_comment_lines_are_separate_sentences(self) -> None:
+        line = self.words(9)
+        text = "".join(f"# Step {line}\n" for _ in range(4))
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_sphinx_field_lines_are_separate_sentences(self) -> None:
+        field = self.words(8)
+        fields = "".join(f"    :param p{i}: {field}\n" for i in range(4))
+        text = f'def f() -> None:\n    """Summary.\n\n{fields}    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_implicit_concatenation_in_a_docstring_code_block_is_one_docstring(self) -> None:
+        code = "".join(f"        call_{i}(a, b, c, d, e, f, g, h)\n" for i in range(4))
+        text = (
+            'def f() -> None:\n    """Example::\n\n        msg = ("first "\n'
+            f'               "second")\n{code}    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
     def test_a_python_comment_is_judged_too(self) -> None:
         self.assertEqual(
             [(1, "sentence-length")], self.found(f"# {self.over()}\nx = 1\n", "bait.py")
