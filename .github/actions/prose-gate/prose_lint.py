@@ -2025,12 +2025,11 @@ def python_comments(raw: str) -> list[Comment] | None:
     """Every comment in Python source, or None if it will not parse.
 
     `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
-    trailing comment is one a line-anchored pattern never sees. A leading byte order mark is
-    dropped first, since it is not whitespace and would read a first-line comment as trailing.
+    trailing comment is one a line-anchored pattern never sees.
     """
     out: list[Comment] = []
     try:
-        source = io.StringIO(raw.removeprefix("\ufeff"))
+        source = io.StringIO(raw)
         for tok in tokenize.generate_tokens(source.readline):
             if tok.type == tokenize.COMMENT:
                 col = tok.start[1]
@@ -2077,8 +2076,6 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
     carry = CLEAR
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip("\r")
-        if n == 1:  # a byte order mark is not whitespace, so kept it reads a comment as trailing
-            line = line.removeprefix("\ufeff")
         pos = 0
         # Every code span on the line, comments blanked, for a string this line opens.
         # Built up rather than captured once, since code after a closed block comment is code.
@@ -2441,11 +2438,10 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
 def python_tree(raw: str) -> ast.Module | None:
     """The parsed module, or None where this interpreter cannot parse the source.
 
-    A leading byte order mark is dropped first, since `ast` refuses one in a string on every
-    interpreter. Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
+    Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
     """
     try:
-        return ast.parse(raw.removeprefix("\ufeff"))
+        return ast.parse(raw)
     except (SyntaxError, ValueError):
         return None
 
@@ -2461,15 +2457,10 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     the line that carries it. A value has its escapes resolved, which no longer maps to a line.
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
-
-    `python_tree` drops a leading byte order mark, so it is dropped from the first line too, which
-    keeps that line's columns in step with the parse.
     """
     tree = python_tree(raw)
     if tree is None:
         return {}
-    if raw.startswith("\ufeff"):
-        lines = [lines[0].removeprefix("\ufeff"), *lines[1:]]
     out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -2620,12 +2611,19 @@ def check_file(
     The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
     grammar can read a newer f-string as an open string and swallow the comments after it without
     refusing anything.
+
+    A leading byte order mark is dropped once, here, since it is not whitespace and every reader
+    that judges line 1's structure would read it as content. The character-set rule is given the
+    mark on its own, where a fence opening line 1 cannot hide it.
     """
     out: list[tuple[int, str, str]] = []
     try:
-        raw = path.read_bytes().decode("utf-8")
+        decoded = path.read_bytes().decode("utf-8")
     except (UnicodeDecodeError, OSError):
         return out
+    raw = decoded.removeprefix("\ufeff")
+    if raw != decoded and {"charset", "charset-unknown"} & rules:
+        out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
     lines = raw.split("\n")
     # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
     # The file's own directory anchors a relative link, the repository root anchors the rest.
