@@ -1568,7 +1568,7 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
-    r"|(?:(?i:noqa)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
+    r"|(?:(?i:noqa|nopep8)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
     r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
 )
 
@@ -1671,7 +1671,7 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|(?i:nopep8)\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
     r"|codespell:|doctest:)"
 )
 

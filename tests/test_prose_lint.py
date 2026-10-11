@@ -1592,6 +1592,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("tool.py", "# NoQA\n"),
             ("tool.py", "# NOPEP8\n"),
             ("tool.py", "# NoPep8: E501\n"),
+            ("tool.py", "# NOPEP8: E501. Another sentence follows.\n"),
+            ("tool.py", "# nopep8\n"),
             ("app.ts", "// cspell:ignore vendorid\n"),
             ("app.ts", "// CSPELL: ignore vendorid\n"),
             ("app.ts", "// spell-checker: disable\n"),
