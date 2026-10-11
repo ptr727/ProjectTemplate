@@ -341,6 +341,7 @@ import sys
 import tarfile
 import time
 import unicodedata
+import urllib.parse
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -3726,7 +3727,7 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None
     safe = base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
     read = (
         reread_json(
-            f"repos/{owner}/{repo}/rules/branches/{base}?per_page=100",
+            f"repos/{owner}/{repo}/rules/branches/{urllib.parse.quote(base, safe='')}?per_page=100",
             '{n: length, c: [.[] | select(.type=="required_status_checks")'
             " | .parameters.required_status_checks[].context]}",
         )

@@ -10238,6 +10238,12 @@ class TestRequiredContexts(unittest.TestCase):
     def test_the_contexts_are_read_from_the_rules(self) -> None:
         self.assertEqual(frozenset({"a", "b"}), self.read('{"n": 3, "c": ["a", "b"]}'))
 
+    def test_a_slash_in_the_base_is_one_path_segment(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, '{"n": 1, "c": []}', "")
+        with mock.patch.object(pr_review, "gh_rest", return_value=proc) as rest:
+            pr_review.required_contexts("o", "r", "release/1.0")
+        self.assertIn("/rules/branches/release%2F1.0?", rest.call_args.args[0])
+
     def test_a_read_that_did_not_happen_is_none_not_empty(self) -> None:
         for out, code in (("", 1), ("not json", 0), ('{"n": 1}', 0), ('{"n": 100, "c": []}', 0)):
             with self.subTest(out=out, code=code):
