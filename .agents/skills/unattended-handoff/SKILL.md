@@ -215,13 +215,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session holds that comment in a closed link, further back where it parked more than
-   once, so walk it with `handoff.py chain --repo "<owner>/<repo>" --track "<track>"` and read every
-   link's comments, a refusal from `chain` returning `STOP`. Where a parking comment names a
-   decision issue the lane waits on, read the answer recorded there and follow it, since it is
-   what unblocked the lane. A lesson issue the
-   comment also names, per step 6, is its own work rather than this lane's, so the worker neither
-   follows it nor parks on it. Re-derive live state rather than trusting any of them, per
-   `session-handoff` "Resuming".
+   once, so walk it. List its links with `handoff.py chain --repo "<owner>/<repo>" --track
+   "<track>"`, raising `--limit` until no notice says the walk stopped, and read each link with `gh
+   issue view "<n>" --repo "<owner>/<repo>" --comments`, since `chain` prints one summary line per
+   link. A refusal from `chain` returns `STOP`. Where a parking comment names a decision issue the
+   lane waits on, read the answer recorded there and follow it, since it is what unblocked the lane.
+   A lesson issue the comment also names, per step 6, is its own work rather than this lane's, so
+   the worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
+   them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
@@ -239,29 +240,28 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    full-page check, with `gh issue list --repo "<owner>/<repo>" --label handoff --state open --limit
    100 --json number,body,comments`, and keep those on an `auto-*` track other than this worker's
    own. A lane parked and handed back more than once holds the answer in an older link, so walk each
-   kept track back with `handoff.py chain --repo "<owner>/<repo>" --track "<track>"` and read every
-   link's body and comments, a refusal from `chain` being a read that cannot run. Where any of them
-   names a decision issue that states it blocks the open promotion, whatever that issue's state,
-   the round narrows to develop as well. The worker then
-   merges, opens, and releases no promotion while either holds. It instead brings that promotion's
-   body up to a `Fixes` line for every issue develop fixes, `#<issue>` included, per
-   `backlog-burndown` "Assembling the Promotion Body", so each closes when the promotion merges. It
-   then closes the lane out, naming the decision issue in the close-out comment. Where neither
-   holds, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
-   develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
-   under `main` and merging and releasing under `release`. **A read this step names that cannot run
-   returns `STOP`** rather than continuing, since a read that did not run shows nothing about
-   whether the promotion is blocked. **Repeat both blocked-promotion reads immediately before each
-   head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
-   read with `--state all` and with `state,closedAt` added to `--json`, never with a `--search`
-   query, since search can lag a close. Where a `decision` issue blocking that promotion is open, or
-   the lane read finds the promotion held, the round narrows to develop. Otherwise, where a
-   `decision` issue blocking that promotion has a `closedAt` at or after the time noted before the
-   first read, park. That answer may not be to merge, so the `decision` issue the park files asks
-   whether it lets the promotion merge. Exit `45` on a promotion blocks no merge where the promotion
-   meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a promotion merges with no
-   `decision` issue, and the worker records that item's evidence on the handoff. Any other shortfall
-   parks.
+   kept track back as step 1 walks the worker's own, reading every link's body and comments, a
+   refusal from `chain` being a read that cannot run. Where any of them names a decision issue that
+   states it blocks the open promotion, whatever that issue's state, the round narrows to develop as
+   well. The worker then merges, opens, and releases no promotion while either holds. It instead
+   brings that promotion's body up to a `Fixes` line for every issue develop fixes, `#<issue>`
+   included, per `backlog-burndown` "Assembling the Promotion Body", so each closes when the
+   promotion merges. It then closes the lane out, naming the decision issue in the close-out
+   comment. Where neither holds, continue to the promotion pull request, its body carrying a `Fixes`
+   line for every issue develop fixes, assembled per that same section, and hand it to
+   `merge-and-release`, merging only under `main` and merging and releasing under `release`. **A
+   read this step names that cannot run returns `STOP`** rather than continuing, since a read that
+   did not run shows nothing about whether the promotion is blocked. **Repeat both blocked-promotion
+   reads immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
+   included. Run the `decision` read with `--state all` and with `state,closedAt` added to `--json`,
+   never with a `--search` query, since search can lag a close. Where a `decision` issue blocking
+   that promotion is open, or the lane read finds the promotion held, the round narrows to develop.
+   Otherwise, where a `decision` issue blocking that promotion has a `closedAt` at or after the time
+   noted before the first read, park. That answer may not be to merge, so the `decision` issue the
+   park files asks whether it lets the promotion merge. Exit `45` on a promotion blocks no merge
+   where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a
+   promotion merges with no `decision` issue, and the worker records that item's evidence on the
+   handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
    replies only after its reviewer has reported. It dispatches the reviewer in the background only
