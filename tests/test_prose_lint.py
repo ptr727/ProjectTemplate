@@ -1586,10 +1586,12 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_directive_is_read_in_any_letter_case_its_tool_reads(self) -> None:
-        """flake8 reads `noqa` and CSpell reads its own spellings in any letter case."""
+        """flake8, pycodestyle, and CSpell each read their own directive in any letter case."""
         for name, text in (
             ("tool.py", "# NOQA: E501\n"),
             ("tool.py", "# NoQA\n"),
+            ("tool.py", "# NOPEP8\n"),
+            ("tool.py", "# NoPep8: E501\n"),
             ("app.ts", "// cspell:ignore vendorid\n"),
             ("app.ts", "// CSPELL: ignore vendorid\n"),
             ("app.ts", "// spell-checker: disable\n"),
@@ -1658,6 +1660,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
             ("tool.py", "x = 1  # Read the row.  # NOQA. Another one follows.\n"),
             ("tool.py", "x = 1  # Read the row.  # NoQA: E501. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # nopep8. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoPep8: E501. Another one follows.\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
@@ -1670,6 +1674,7 @@ class TestANamedToolIsStillProse(BaitCase):
             "x = 1  # type: ignore  # noqa: E501\n",
             "# noqa: E501  # noqa\n",
             "#  # noqa\n",
+            "#  # NOPEP8\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
