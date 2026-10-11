@@ -675,6 +675,50 @@ class TestSemicolon2(BaitCase):
             ),
         )
 
+    def test_every_marker_and_bold_spelling_opens_the_bullet_the_same_way(self) -> None:
+        """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
+
+        The stripper kept its own narrower marker set and read only `**`, so `+`, `1)`, `__`,
+        and `***` left the label announcing a list and exempted the splice after it.
+        """
+        labels = (
+            "**Inputs**:",
+            "**Inputs:**",
+            "__Inputs__:",
+            "__Inputs:__",
+            "***Inputs***:",
+            "***Inputs:***",
+            "___Inputs___:",
+            "___Inputs:___",
+            "**_Inputs_**:",
+            "**_Inputs:_**",
+            "__*Inputs*__:",
+            "__*Inputs:*__",
+            "_**Inputs**_:",
+            "_**Inputs:**_",
+            "*__Inputs__*:",
+        )
+        for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
+            for label in labels:
+                with self.subTest(marker=marker, label=label):
+                    self.assertEqual(
+                        ["semicolon"],
+                        self.kinds(
+                            f"{marker} {label} a, b; **Outputs**: c and d.\n", {"semicolon"}
+                        ),
+                    )
+
+    def test_an_unmarked_or_mismatched_label_is_not_stripped(self) -> None:
+        """Without a list marker, or with mismatched emphasis, the label still announces a list."""
+        for text in (
+            "**Inputs**: a, b; **Outputs**: c and d.\n",
+            "- **Inputs__: a, b; **Outputs**: c and d.\n",
+            "- __Inputs**: a, b; **Outputs**: c and d.\n",
+            "- _**Inputs**: a, b; **Outputs**: c and d.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
     def test_a_blockquoted_bullet_label_colon_does_not_announce_a_list(self) -> None:
         """A callout's `>` is structure, so its bullet is judged as the same bullet unquoted."""
         for text in (
