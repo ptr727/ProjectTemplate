@@ -690,6 +690,10 @@ class TestSemicolon2(BaitCase):
             "***Inputs:***",
             "___Inputs___:",
             "___Inputs:___",
+            "**_Inputs_**:",
+            "_**Inputs**_:",
+            "_**Inputs:**_",
+            "*__Inputs__*:",
         )
         for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
             for label in labels:
@@ -707,6 +711,7 @@ class TestSemicolon2(BaitCase):
             "**Inputs**: a, b; **Outputs**: c and d.\n",
             "- **Inputs__: a, b; **Outputs**: c and d.\n",
             "- __Inputs**: a, b; **Outputs**: c and d.\n",
+            "- _**Inputs**: a, b; **Outputs**: c and d.\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
