@@ -755,7 +755,8 @@ $results['absent holders'] = @(
 )
 if ($IsWindows) {
     # This harness runs as pwsh from a directory none of the containers above name, so the name fallback finds it, and a tree read from a file elsewhere does not.
-    $env:LOCALAPPDATA = Join-Path $case.directory 'LAD'
+    # Read back through Get-Item, which expands an 8.3 short path such as a hosted runner's temp directory, so the container and the file it holds are compared in the same form.
+    $env:LOCALAPPDATA = Join-Path (Get-Item -LiteralPath $case.directory).FullName 'LAD'
     $elsewhere = Join-Path $env:LOCALAPPDATA 'Programs\Tool\tool.exe'
     $byName = Get-ToolHolder -Probe 'pwsh'
     $byTree = Get-ToolHolder -Probe 'pwsh' -Executable $elsewhere
