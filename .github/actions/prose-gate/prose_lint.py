@@ -1748,6 +1748,22 @@ def sentences(span: str) -> list[str]:
 
 
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+INDENT_BLOCK = 4
+
+
+def strip_list_marker(text: str) -> str:
+    """The text without a leading bullet or number marker, which is no word of the sentence.
+
+    Every reader hands its item text through here, so an item of exactly the cap stays at the cap.
+    """
+    return LIST_MARKER.sub("", text, count=1).strip()
+
+
+def indented_past(indent: int, reference: int) -> bool:
+    """Whether a line sits far enough past its reference indent to be an indented block."""
+    return indent >= reference + INDENT_BLOCK
+
+
 SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
 THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
 TABLE_DELIMITER = re.compile(
@@ -1880,7 +1896,7 @@ def sentence_length_findings(
             flush()
     in_fence = in_comment = in_table = in_code = in_list = False
     item_offset = 0
-    code_indent = 4
+    code_indent = INDENT_BLOCK
     prev_blank = True
     for i, line in enumerate(lines[start:], start + 1):
         line = line.rstrip("\r")
@@ -1915,7 +1931,7 @@ def sentence_length_findings(
             marker and (number is None or in_list or not block or number.lstrip("0") == "1")
         )
         if not block and was_blank:
-            code_indent = 4 + (item_offset if in_list else 0)
+            code_indent = INDENT_BLOCK + (item_offset if in_list else 0)
             if indent >= code_indent and not is_item:
                 in_code = True
                 continue
@@ -1960,6 +1976,7 @@ def sentence_length_findings(
             in_list = True
             item_offset = marker.end() if marker else 0
             block_is_item = True
+            span = strip_list_marker(span)
         block.append((i, span))
     flush()
     return out
@@ -2510,12 +2527,12 @@ def python_tree(raw: str) -> ast.Module | None:
         return None
 
 
-def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
-    """Each source line a docstring occupies, mapped to the docstring text on that line.
+def python_docstrings(raw: str, lines: list[str]) -> list[dict[int, str]]:
+    """Each docstring as its own map of source line to the docstring text on that line.
 
     `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
     where it opens a body, and a docstring's own text may hold one. Empty where the source will
-    not parse.
+    not parse. One map per string node, so two docstrings on adjacent lines stay two.
 
     The source text is returned rather than the docstring's value, so a reference is reported on
     the line that carries it. A value has its escapes resolved, which no longer maps to a line.
@@ -2524,8 +2541,8 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """
     tree = python_tree(raw)
     if tree is None:
-        return {}
-    out: dict[int, list[str]] = {}
+        return []
+    out: list[dict[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -2535,6 +2552,7 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
         if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
             continue
         last = first.end_lineno or first.lineno
+        spans: dict[int, str] = {}
         for n in range(first.lineno, last + 1):
             if n > len(lines):
                 continue
@@ -2544,7 +2562,17 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
             data = lines[n - 1].encode("utf-8")
             end = first.end_col_offset if n == last and first.end_col_offset is not None else None
             start = first.col_offset if n == first.lineno else 0
-            out.setdefault(n, []).append(data[start:end].decode("utf-8", "replace"))
+            spans[n] = data[start:end].decode("utf-8", "replace")
+        out.append(spans)
+    return out
+
+
+def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
+    """Each source line a docstring occupies, mapped to the docstring text on that line."""
+    out: dict[int, list[str]] = {}
+    for spans in python_docstrings(raw, lines):
+        for n, text in spans.items():
+            out.setdefault(n, []).append(text)
     return out
 
 
@@ -2667,8 +2695,34 @@ PARSED_RULES = frozenset(
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
 DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
 DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
-DOCSTRING_CLOSED = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
+NUMPY_UNDERLINE = re.compile(r"^\s*-{3,}\s*$")
+NUMPY_STRUCTURED = frozenset(
+    {
+        "parameters",
+        "other parameters",
+        "returns",
+        "yields",
+        "receives",
+        "raises",
+        "warns",
+        "attributes",
+        "methods",
+    }
+)
+GOOGLE_HEADER = re.compile(
+    r"^\s*(?:Args|Arguments|Keyword Args|Keyword Arguments|Attributes|Raises|Returns|Yields):\s*$"
+)
+GOOGLE_ENTRY = re.compile(r"^\s*\w[\w.*]*(?:\s*\([^)]*\))?:\s+(?=\S)")
 FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
+
+
+def comment_indent(comment: Comment) -> int:
+    """The columns a comment's text sits past its marker, or 0 where the parser kept no raw form."""
+    at = comment.raw.find(comment.body) if comment.body else -1
+    if at <= 0:
+        return 0
+    lead = comment.raw[:at].expandtabs(4)
+    return len(lead) - len(lead.rstrip(" "))
 
 
 def comment_sentence_findings(
@@ -2679,34 +2733,56 @@ def comment_sentence_findings(
     Comment lines on consecutive source lines are one block, so a wrapped sentence counts once.
     A line that is not prose, a trailing comment, or a gap ends the block.
     The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
+    A comment run indented past its own text after a colon line or a gap is a command or table.
+    The indent is read from the comment as written, since extraction strips it from the body.
     """
     comments, _kept, configured = prose_comment_candidates(path, raw, lines)
     out: list[tuple[int, str, str]] = []
     block: list[tuple[int, str]] = []
     prev_no = 0
+    reference = 0
+    in_code = False
+    prev_colon = False
 
     def flush() -> None:
         out.extend(over_cap_findings(block, allowed))
         block.clear()
 
-    for n, body, leading, _raw in comments:
+    for comment in comments:
+        n, body, leading = comment.line, comment.body, comment.leading
+        indent = comment_indent(comment)
         if is_non_prose_comment(n, body, configured):
             flush()
+            opens = leading and body.rstrip().endswith(":")
+            in_code, prev_colon = False, opens
+            if opens:
+                prev_no, reference = n, indent
             continue
-        if (
-            not leading
-            or n != prev_no + 1
-            or LIST_MARKER.match(body)
-            or FIELD_LINE.match(body)
-            or body[:1].isupper()
-        ):
+        fresh = not leading or n != prev_no + 1
+        if fresh:
+            in_code = prev_colon = False
+        if not fresh and (in_code or prev_colon) and indented_past(indent, reference):
             flush()
-        block.append((n, ENUM_PREFIX.sub("", body).strip()))
+            in_code = True
+            prev_no = n
+            continue
+        in_code = False
+        if fresh or LIST_MARKER.match(body) or FIELD_LINE.match(body) or body[:1].isupper():
+            flush()
+        block.append((n, strip_list_marker(body)))
         prev_no = n
-        if not leading or body.rstrip().endswith(":"):
+        reference = indent
+        prev_colon = body.rstrip().endswith(":")
+        if not leading or prev_colon:
             flush()
     flush()
     return out
+
+
+def docstring_indent(line: str) -> int:
+    """The columns of leading space on a source line, tabs read as four."""
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 def docstring_sentence_findings(
@@ -2714,71 +2790,108 @@ def docstring_sentence_findings(
 ) -> list[tuple[int, str, str]]:
     """Over-cap sentences in Python docstrings, each judged whole.
 
+    Each docstring is one string node, so adjacent ones are judged apart.
+    """
+    out: list[tuple[int, str, str]] = []
+    for spans in python_docstrings(raw, lines):
+        out.extend(one_docstring_findings(spans, lines, allowed))
+    return out
+
+
+def one_docstring_findings(
+    spans: dict[int, str], lines: list[str], allowed: set[int] | None
+) -> list[tuple[int, str, str]]:
+    """Over-cap sentences in one docstring, given its source lines.
+
     A blank docstring line ends a paragraph, as a blank line does in Markdown.
     A doctest and the output under it, and an indented code block, are code and are not counted.
+    Its text is measured from the column its quotes open at, so a trailing code line sets nothing.
+    A NumPy section header and its underline, and a Google section header, are not prose.
+    A NumPy `name : type` line is structural, and a Google `name:` lead is not a word.
+    The description under either is prose, each entry its own unit.
     """
-    spans = python_docstring_spans(raw, lines)
     out: list[tuple[int, str, str]] = []
-    numbers = sorted(spans)
-    groups: list[list[int]] = []
-    for n in numbers:
-        prior = "".join(spans[groups[-1][-1]]) if groups else ""
-        joined = bool(groups) and n == groups[-1][-1] + 1
-        here = "".join(spans[n])
-        if (
-            joined
-            and DOCSTRING_CLOSED.search(prior)
-            and DOCSTRING_OPEN.match(here)
-            and here[:1].strip()
-        ):
-            joined = False
-        if joined:
-            groups[-1].append(n)
-        else:
-            groups.append([n])
-    for group in groups:
-        texts = ["".join(spans[n]).expandtabs(4) for n in group]
-        texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
-        texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
-        rest = [t for t in texts[1:] if t.strip()]
-        base = min((len(t) - len(t.lstrip()) for t in rest), default=0)
-        if len(texts) > 1 and texts[-1] and not texts[-1].strip():
-            base = min(base, len(texts[-1])) if rest else len(texts[-1])
-        block: list[tuple[int, str]] = []
-        in_doctest = in_code = False
-        prev_blank = True
-        prev_colon = False
-        for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
-            indent = len(text) - len(text.lstrip()) if idx else base
-            if not text.strip():
-                out.extend(over_cap_findings(block, allowed))
-                block.clear()
-                in_doctest = in_code = False
-                prev_blank = True
-                prev_colon = False
-                continue
-            if DOCTEST_PROMPT.match(text):
-                out.extend(over_cap_findings(block, allowed))
-                block.clear()
-                in_doctest = True
-            elif in_doctest or (in_code and indent >= base + 4):
-                pass
-            elif (prev_blank or prev_colon) and indent >= base + 4:
-                out.extend(over_cap_findings(block, allowed))
-                block.clear()
-                in_code = True
-            else:
-                in_code = False
-                if LIST_MARKER.match(text) or FIELD_LINE.match(text):
-                    out.extend(over_cap_findings(block, allowed))
-                    block.clear()
-                block.append((n, text.strip()))
-                if text.rstrip().endswith(":"):
-                    out.extend(over_cap_findings(block, allowed))
-                    block.clear()
-            prev_blank = False
-            prev_colon = text.rstrip().endswith(":")
+    group = sorted(spans)
+    texts = [spans[n].expandtabs(4) for n in group]
+    texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
+    texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
+    base = docstring_indent(lines[group[0] - 1])
+    block: list[tuple[int, str]] = []
+
+    def flush() -> None:
         out.extend(over_cap_findings(block, allowed))
+        block.clear()
+
+    in_doctest = in_code = False
+    prev_blank = True
+    prev_colon = False
+    section = ""  # "numpy" or "google" while inside a structured section
+    section_indent = base
+    code_at = base
+    skip = 0
+    for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
+        if skip:
+            skip -= 1
+            continue
+        indent = len(text) - len(text.lstrip()) if idx else base
+        if not text.strip():
+            flush()
+            in_doctest = in_code = False
+            prev_blank = True
+            prev_colon = False
+            continue
+        following = texts[idx + 1] if idx + 1 < len(texts) else ""
+        if indent <= base and NUMPY_UNDERLINE.match(following) and not NUMPY_UNDERLINE.match(text):
+            flush()
+            in_doctest = in_code = False
+            skip = 1
+            section = "numpy" if text.strip().lower() in NUMPY_STRUCTURED else ""
+            code_at = base + 2 * INDENT_BLOCK
+            prev_blank = prev_colon = False
+            continue
+        if indent <= base and GOOGLE_HEADER.match(text):
+            flush()
+            in_doctest = in_code = False
+            section, section_indent = "google", 0
+            prev_blank = prev_colon = False
+            continue
+        if section == "google" and indent <= base:
+            section, code_at = "", base
+        if section == "numpy" and indent <= base:
+            flush()
+            in_doctest = in_code = False
+            prev_blank = prev_colon = False
+            continue
+        if section == "google":
+            if not section_indent:
+                section_indent = indent
+                code_at = indent + 2 * INDENT_BLOCK
+            if indent <= section_indent:
+                lead = GOOGLE_ENTRY.match(text)
+                if lead:
+                    flush()
+                    text = text[lead.end() :]
+                    indent = section_indent
+                    in_code = False
+        threshold = code_at if section else base + INDENT_BLOCK
+        if DOCTEST_PROMPT.match(text):
+            flush()
+            in_doctest = True
+        elif in_doctest or (in_code and indent >= threshold):
+            pass
+        elif (prev_blank or prev_colon) and indent >= threshold:
+            flush()
+            in_code = True
+        else:
+            in_code = False
+            if LIST_MARKER.match(text) or FIELD_LINE.match(text):
+                flush()
+            block.append((n, strip_list_marker(text.strip())))
+            if text.rstrip().endswith(":"):
+                flush()
+        prev_blank = False
+        prev_colon = text.rstrip().endswith(":")
+    flush()
     return out
 
 

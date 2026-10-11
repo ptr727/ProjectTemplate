@@ -2292,6 +2292,12 @@ class TestSentenceLength(BaitCase):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
+    def test_a_list_marker_is_not_a_word(self) -> None:
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        for marker in ("-", "*", "+", "1.", "1)"):
+            with self.subTest(marker=marker):
+                self.assertEqual([], self.found(f"{marker} {at_cap}\n"))
+
     def found(self, text: str) -> list[tuple[int, str]]:
         path = self.tmp / "bait.md"
         path.write_text(text, encoding="utf-8")
@@ -2665,6 +2671,82 @@ class TestCommentSentenceLength(BaitCase):
     def test_a_python_comment_is_judged_too(self) -> None:
         self.assertEqual(
             [(1, "sentence-length")], self.found(f"# {self.over()}\nx = 1\n", "bait.py")
+        )
+
+    def test_a_list_marker_is_not_a_word_in_a_comment_or_docstring(self) -> None:
+        for marker in ("-", "*", "+", "1.", "1)"):
+            with self.subTest(marker=marker):
+                comment = f"# Steps:\n#   {marker} {self.at_cap()}\n"
+                self.assertEqual([], self.found(comment, "bait.sh"))
+                doc = (
+                    f'def f() -> None:\n    """Summary.\n\n    {marker} {self.at_cap()}\n    """\n'
+                )
+                self.assertEqual([], self.found(doc, "bait.py"))
+
+    def test_a_column_zero_quote_line_does_not_split_a_module_docstring(self) -> None:
+        half = self.words(13)
+        text = f'"""{half} said "go"\n"stop" {half}.\n"""\n'
+        self.assertEqual([(1, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_closing_quotes_on_the_last_code_line_set_no_indent_base(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        text = f'def f() -> None:\n    """Usage:\n        {run}\n        {run}"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_numpy_sections_are_structure_and_each_description_is_judged_alone(self) -> None:
+        part = self.words(22) + "."
+        text = (
+            'def f(x: int, y: int) -> int:\n    """Summary.\n\n    Parameters\n'
+            f"    ----------\n    x : int\n        {part}\n    y : int\n        {part}\n"
+            '    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_numpy_description_over_the_cap_is_flagged_on_its_line(self) -> None:
+        text = (
+            'def f(x: int) -> int:\n    """Summary.\n\n    Parameters\n'
+            f'    ----------\n    x : int\n        {self.over()}\n    """\n'
+        )
+        self.assertEqual([(7, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_second_paragraph_is_prose_not_code(self) -> None:
+        text = (
+            'def f(x: int) -> int:\n    """Summary.\n\n    Parameters\n'
+            f'    ----------\n    x : int\n        Short.\n\n        {self.over()}\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_google_args_body_is_prose_and_the_name_lead_is_no_word(self) -> None:
+        over = f'def f(x: int) -> int:\n    """Summary.\n\n    Args:\n        x: {self.over()}\n    """\n'
+        self.assertEqual([(5, "sentence-length")], self.found(over, "bait.py"))
+        lead_only = self.words(prose_lint.SENTENCE_WORD_CAP) + "."
+        at_cap = f'def f(x: int) -> int:\n    """Summary.\n\n    Args:\n        x: {lead_only}\n    """\n'
+        self.assertEqual([], self.found(at_cap, "bait.py"))
+
+    def test_google_entries_are_judged_apart(self) -> None:
+        part = self.words(20) + "."
+        text = (
+            'def f(x: int, y: int) -> int:\n    """Summary.\n\n    Args:\n'
+            f'        x: {part}\n        y (int): {part}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_google_examples_body_stays_code(self) -> None:
+        text = (
+            f'def f() -> None:\n    """Summary.\n\n    Examples:\n        {self.over()}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_indented_run_under_a_colon_comment_is_not_prose(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        for name in ("bait.sh", "bait.py"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(f"# Usage:\n#     {run}\n#     {run}\n", name))
+
+    def test_an_indented_comment_run_without_a_colon_line_is_still_prose(self) -> None:
+        half = self.words(13)
+        self.assertEqual(
+            [(1, "sentence-length")], self.found(f"# Intro {half}\n#     {half}.\n", "bait.sh")
         )
 
 
