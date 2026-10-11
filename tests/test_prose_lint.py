@@ -2710,6 +2710,41 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, "discover", return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
+    UNPARSED = 'def f():\n    """A docstring the gate reads."""\n    return = 1\n'
+
+    def scope_line(self, path: Path, argv: list[str]) -> str:
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[path]),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(0, prose_lint.main(argv))
+        return err.getvalue()
+
+    def test_a_python_file_the_interpreter_cannot_parse_is_named_in_the_scope_line(self) -> None:
+        """A file whose docstrings and comments went unread is not a clean pass, so it says so.
+
+        The docstring read returns nothing and the comment read falls back or stops on a file
+        `ast` refuses, and the run exited 0 with the same scope line a clean tree prints. No
+        interpreter parses the fixture, so the case holds whichever one runs the suite. It stands in
+        for newer syntax read by an older interpreter, a 3.12 `type` statement read by 3.11.
+        """
+        bait = self.tmp / "newer.py"
+        bait.write_text(self.UNPARSED, encoding="utf-8")
+        err = self.scope_line(bait, ["--check", "issue-ref"])
+        self.assertIn("parser-based checks skipped on 1 .py file(s)", err)
+        self.assertIn(str(bait), err)
+
+    def test_a_python_file_that_parses_is_not_named(self) -> None:
+        clean = self.tmp / "clean.py"
+        clean.write_text('def f():\n    """A docstring the gate reads."""\n', encoding="utf-8")
+        self.assertNotIn("parser-based checks skipped", self.scope_line(clean, []))
+
+    def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
+        """A run reading the file only line by line lost nothing to the parse, so names nothing."""
+        bait = self.tmp / "newer.py"
+        bait.write_text(self.UNPARSED, encoding="utf-8")
+        self.assertNotIn("parser-based", self.scope_line(bait, ["--check", "dupword"]))
+
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
 

@@ -533,7 +533,12 @@ def checkout_provenance(script: Path) -> str:
 
 
 def scope_note(
-    read: int, discovered: int, lines: int | None, base: str | None, provenance: str
+    read: int,
+    discovered: int,
+    lines: int | None,
+    base: str | None,
+    provenance: str,
+    unparsed: list[str] | None = None,
 ) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
@@ -549,13 +554,26 @@ def scope_note(
     The copy that read that scope is named beside it for the same reason. A scope answers what
     was read and a provenance answers what read it, and a verdict reproducing nowhere is a
     question about the second rather than about the first.
+
+    A `.py` file the running interpreter cannot parse is named beside them too. Its docstrings and
+    tokenized comments go unread, so a pass under an interpreter older than the code it reads is
+    otherwise the same line as a clean one.
     """
     if base is None:
-        return f"scope: {read} file(s) read, whole tree, gate {provenance}"
-    return (
-        f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-        f"diff against {base!r}, gate {provenance}"
-    )
+        note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
+    else:
+        note = (
+            f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
+            f"diff against {base!r}, gate {provenance}"
+        )
+    if unparsed:
+        shown = ", ".join(unparsed[:5]) + (" and more" if len(unparsed) > 5 else "")
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        note += (
+            f", parser-based checks skipped on {len(unparsed)} .py file(s) "
+            f"Python {version} cannot parse: {shown}"
+        )
+    return note
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -2411,6 +2429,29 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
+PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+
+
+def python_unparsed(path: Path) -> bool:
+    """Whether `path` is a `.py` file this interpreter cannot parse.
+
+    Each parser-based rule reads such a file as having no docstring, and either no comment or only
+    the ones a line scan finds, so the run reads less of it than of a file that parses. A file that
+    does not decode is not one, since it is skipped whole and reported as not UTF-8. `PARSED_RULES`
+    are the rules that read a `.py` through `ast` or `tokenize`, so only a run of one of them names
+    the file.
+    """
+    if path.suffix.lower() != ".py":
+        return False
+    try:
+        ast.parse(path.read_bytes().decode("utf-8"))
+    except (SyntaxError, ValueError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """Each source line a docstring occupies, mapped to the docstring text on that line.
 
@@ -2905,8 +2946,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{keys[f]}:{ln}: {kind}: {msg}")
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
+    unparsed = [keys[f] for f in files if python_unparsed(f)] if PARSED_RULES & rules else []
     print(
-        scope_note(len(files), discovered, inscope, a.diff, gate_provenance(a.provenance)),
+        scope_note(
+            len(files), discovered, inscope, a.diff, gate_provenance(a.provenance), unparsed
+        ),
         file=sys.stderr,
     )
     if a.summary or total:
