@@ -343,6 +343,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # The directory this script sits in, and the anchor every scope answer is read from.
 # One value serves the owner probe and the refusal naming it, so the two cannot disagree.
@@ -778,8 +779,6 @@ FILES_CAP = 3000
 FILES_UNREAD = "unread"
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
-AT_CEILING = "ceiling"
-COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 READ_RETRY_DELAYS = (2, 5)
 # What a git ref may not hold before it is interpolated into a REST path.
 # Refused rather than allow-listed, git permitting more than a branch name usually carries.
@@ -1997,8 +1996,18 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
+class Capped(NamedTuple):
+    """A compare whose file list reached `COMPARE_FILE_CAP`, with the merge base it named.
+
+    The merge base is what `tree_changed_at` reads past the cap from, carried here so that
+    reading costs no second compare.
+    """
+
+    merge_base: str
+
+
 @functools.cache
-def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | str | None:
+def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | Capped | None:
     """The paths a pull request off `base` changes at `commit`, or why that could not be had.
 
     Read as a three-dot compare, which is the same merge-base reading the pull request's own file
@@ -2010,10 +2019,11 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     None rather than an empty set wherever the read did not happen, since a pull request that
     changes nothing and a compare that could not be fetched take opposite decisions, and the
     caller fails closed on the second. The API caps its file list at 300, and the response carries
-    no flag saying it did, so a set at the cap is returned as `AT_CEILING` rather than as a set
-    that is probably short, and `tree_changed_at` reads past it. A name the response leaves null would coerce to the literal path `None`
-    and compare equal to another round's null, so an entry that is not a non-empty string makes
-    the whole reading unreadable rather than a set with a fabricated member in it.
+    no flag saying it did, so a set at the cap is returned as `Capped` rather than as a set that
+    is probably short, and `tree_changed_at` reads past it. A name the response leaves null
+    would coerce to the literal path `None` and compare equal to another round's null, so an
+    entry that is not a non-empty string makes the whole reading unreadable rather than a set
+    with a fabricated member in it.
 
     A read that did not happen is taken again on the `READ_RETRY_DELAYS` schedule before it is
     returned as None. One run read `unstated` on a head where the runs either side of it carried a
@@ -2041,21 +2051,26 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
         return None
 
-    names = reread_json(
+    compared = reread_json(
         f"repos/{owner}/{repo}/compare/{base}...{commit}",
-        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
+        r'if (.files | type) == "array" then ({files: [.files[].filename], '
+        r'merge_base: (.merge_base_commit.sha // "")} | @json) else empty end',
     )
+    if not isinstance(compared, dict):
+        return None
+    names = compared.get("files")
     if not isinstance(names, list):
         return None
     if not all(isinstance(n, str) and n for n in names):
         return None
     if len(names) >= COMPARE_FILE_CAP:
-        return AT_CEILING
+        merge_base = compared.get("merge_base")
+        return Capped(merge_base) if isinstance(merge_base, str) and merge_base else None
     return frozenset(names)
 
 
 def reread_json(path: str, jq: str) -> object:
-    """One REST read whose filter emits JSON, parsed, re-read on the schedule `changed_at` uses.
+    """One REST read whose filter emits JSON, parsed, re-read on the `READ_RETRY_DELAYS` schedule.
 
     None wherever nothing parseable came back, an absence GitHub answered included, so the caller
     has one value to refuse on.
@@ -2079,12 +2094,12 @@ def reread_json(path: str, jq: str) -> object:
     return parsed(proc)
 
 
-def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | str | None:
-    """Every path in `commit`'s tree with its mode and object id, or why that could not be had.
+def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
+    """Every path in `commit`'s tree with its mode and object id, or None where that was unread.
 
-    `AT_CEILING` where GitHub truncated the recursive read, which is its own ceiling and one a
-    re-run meets again. None where the read did not happen or came back malformed. A directory
-    entry is left out, a submodule kept, since the compare lists a submodule moving as a change.
+    A tree GitHub truncated is unread too. Its ceiling on a recursive read is about 100,000
+    entries, which no fleet repository approaches. A directory entry is left out, a submodule
+    kept, since the compare lists a submodule moving as a change.
     """
     tree = reread_json(
         f"repos/{owner}/{repo}/git/trees/{commit}?recursive=1",
@@ -2092,12 +2107,10 @@ def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | 
         r'then ({truncated, entries: [.tree[] | select(.type != "tree") | [.path, .mode, .sha]]} '
         r"| @json) else empty end",
     )
-    if not isinstance(tree, dict):
+    if not isinstance(tree, dict) or tree.get("truncated") is not False:
         return None
-    if tree.get("truncated") is True:
-        return AT_CEILING
     entries = tree.get("entries")
-    if tree.get("truncated") is not False or not isinstance(entries, list):
+    if not isinstance(entries, list):
         return None
     paths: dict[str, tuple[str, str]] = {}
     for entry in entries:
@@ -2112,35 +2125,22 @@ def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | 
 
 
 @functools.cache
-def tree_changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | str | None:
-    """The paths a pull request off `base` changes at `commit`, read past the compare's ceiling.
+def tree_changed_at(owner: str, repo: str, merge_base: str, commit: str) -> frozenset[str] | None:
+    """The paths `commit` changes against `merge_base`, read past the compare's file cap.
 
     The compare caps its file list at 300 on every page. Measured on a 308-file comparison, the
     first page carried 300 files and the second none at all, so no paging of it reaches further.
-    The trees either side do: the commit's own and its merge base's, each read whole and diffed
+    The trees either side do: the commit's own and the merge base's, each read whole and diffed
     here. On that comparison this named exactly the paths `git diff --no-renames --name-only`
     does, 326 of them. That is not the compare's own reading, which names a rename once by its
     new path, so `carry_holds` reads both commits this way or neither, never one of each.
 
-    `AT_CEILING` where either tree came back truncated, None where any read did not happen. The
-    refs are checked as `changed_at` checks them, and the merge base the compare names must be a
-    full commit id before it enters a path. Memoized for the run, for the reason `changed_at` is.
+    None where either tree was unread. Memoized for the run, for the reason `changed_at` is.
     """
-    if any(not r or UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in (base, commit)):
-        return None
-    merge_base = reread_json(
-        f"repos/{owner}/{repo}/compare/{base}...{commit}?per_page=1",
-        r'if (.merge_base_commit.sha | type) == "string" then (.merge_base_commit.sha | @json) '
-        r"else empty end",
-    )
-    if not isinstance(merge_base, str) or not COMMIT_ID.fullmatch(merge_base):
-        return None
     before = tree_at(owner, repo, merge_base)
     after = tree_at(owner, repo, commit)
     if before is None or after is None:
         return None
-    if isinstance(before, str) or isinstance(after, str):
-        return AT_CEILING
     return frozenset(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
 
 
@@ -2170,10 +2170,9 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
     rather than as a pass. A bound that fell open when it could not be measured would be the
     unbounded carry again, reached by a different route.
 
-    A compare at its ceiling on one side only is a definite no, since the other side's list is
-    whole and shorter than the ceiling, so the two sets differ in size. At the ceiling on both,
-    the change set is read again from the trees, for both commits, and `carry_ceiling` says
-    whether GitHub's ceiling is what still stopped that reading.
+    A compare at its cap on one side only is a definite no, since the other side's list is whole
+    and shorter than the cap, so the two sets differ in size. At the cap on both, the change set
+    is read again from the trees, for both commits.
     """
     head = pr.get("headRefOid") or ""
     base = pr.get("baseRefName") or ""
@@ -2185,45 +2184,11 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
         return earlier == current
     if isinstance(earlier, frozenset) or isinstance(current, frozenset):
         return False
-    earlier = tree_changed_at(owner, repo, base, carried_from)
-    current = tree_changed_at(owner, repo, base, head)
-    if not isinstance(earlier, frozenset) or not isinstance(current, frozenset):
+    before = tree_changed_at(owner, repo, earlier.merge_base, carried_from)
+    after = tree_changed_at(owner, repo, current.merge_base, head)
+    if before is None or after is None:
         return None
-    return earlier == current
-
-
-def carry_ceiling(owner: str, repo: str, pr: dict, carried_from: str) -> bool:
-    """Whether GitHub's own ceiling, rather than a read that failed, left `carry_holds` at None.
-
-    True where both compares reached their 300-file ceiling and a tree past it came back
-    truncated, a ceiling a re-run meets again. Every read here is the memoized one `carry_holds`
-    already took, so asking costs nothing and cannot disagree with it.
-    """
-    head = pr.get("headRefOid") or ""
-    base = pr.get("baseRefName") or ""
-    if changed_at(owner, repo, base, carried_from) != AT_CEILING:
-        return False
-    if changed_at(owner, repo, base, head) != AT_CEILING:
-        return False
-    return AT_CEILING in (
-        tree_changed_at(owner, repo, base, carried_from),
-        tree_changed_at(owner, repo, base, head),
-    )
-
-
-def carry_unmeasured(owner: str, repo: str, pr: dict, carried_from: str) -> str:
-    """Why `carry_holds` could not measure the bound, worded for the digest to name its remedy.
-
-    A failed read and GitHub's ceiling read the same to the bound and take different remedies,
-    a re-run clearing the first and meeting the second again, so the digest says which it was.
-    """
-    if carry_ceiling(owner, repo, pr, carried_from):
-        return (
-            f"the change set passes GitHub's own ceiling on what it compares, {COMPARE_FILE_CAP} "
-            f"files on the compare and a truncated tree past it, so a re-run reads the same "
-            f"ceiling"
-        )
-    return "the change set could not be read at both commits"
+    return before == after
 
 
 def second_format(body: str) -> bool:
@@ -3195,7 +3160,7 @@ def table_reading(owner: str, repo: str, pr: dict) -> tuple[str, str]:
     kept = carry_holds(owner, repo, pr, carried_from)
     if kept is None:
         return carried_from, (
-            f"{whose}, and {carry_unmeasured(owner, repo, pr, carried_from)}, so its table is "
+            f"{whose}, and the change set could not be read at both commits, so its table is "
             f"not carried"
         )
     if not kept:
@@ -3445,9 +3410,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "the comparison could not be read, run status again, since a failed API read is "
             "one cause of that, and the same holds where it says the head moved while the "
             "changed-file list was paged. Where the digest names GitHub's "
-            "own ceiling on the changed-file list or on what it compares, the table cannot be "
-            "matched or carried at all, and splitting the pull request is the remedy where it "
-            "applies. "
+            "own ceiling on the changed-file list, the table cannot be matched at all, and "
+            "splitting the pull request is the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage or carrying a table only by chance. Past those, a develop -> "
             "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
@@ -4453,8 +4417,8 @@ def digest(
             why = "that round names no commit, so there is no change set of its own to compare"
         elif carry_kept is None:
             why = (
-                f"{carry_unmeasured(owner, repo, pr, carried_from)}, so the bound could not be "
-                f"measured and the statement is not carried"
+                "the change set could not be read at both commits, so the bound could not be "
+                "measured and the statement is not carried"
             )
         else:
             why = (
