@@ -5387,7 +5387,7 @@ class TestCoverageExitCodes(GqlCase):
             (["a.md"], ["a.md", "b.md"], False, "the table leaves out b.md"),
             (["a.md", "x.md"], ["a.md"], False, "the table names x.md, which the diff does not"),
             (["x.md"], ["a.md"], False, "the table leaves out a.md, and names x.md, which"),
-            (["a.md"], ["a.md"], True, "the changed-file list could not be read whole"),
+            (["a.md"], ["a.md"], True, "changes 3000 files or more, GitHub's own ceiling"),
             (["a.md"], [], False, "the pull request changes no files"),
         ):
             with self.subTest(reason=reason):
@@ -5408,19 +5408,21 @@ class TestCoverageExitCodes(GqlCase):
         )
         self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
         printed = self.out.getvalue()
-        self.assertIn("NO FILE TABLE STANDS IN: the changed-file list could not be read", printed)
+        self.assertIn("NO FILE TABLE STANDS IN: the pull request changes 3000 files", printed)
         self.assertIn("splitting the pull request is the remedy", printed)
 
     def paged(
-        self, pages: list[tuple[list[str], str | None]], named: list[str], heads: list[str]
+        self, pages: list[tuple[list[str], str | None]], named: list[str], heads: list[str | None]
     ) -> list[dict]:
-        """Answer the full read with `pages[0]` and each later page from `Q_FILES` in turn.
+        """Answer each full read with `pages[0]` and each later page from `Q_FILES` in turn.
 
         Each page is its paths and the cursor to the next, None on the last. `heads` is the
-        head each later page reports, so a push landing mid-list is expressible. Every call is
-        recorded, and a document neither of these answers reports no Copilot history.
+        head each `Q_FILES` call reports, across every full read, so a push landing mid-list is
+        expressible, and None there is a page whose read fails. Every call is recorded, and a
+        document neither of these answers reports no Copilot history.
         """
         calls: list[dict] = []
+        state = {"page": 0, "reads": 0}
 
         def connection(index: int) -> dict:
             paths, cursor = pages[index]
@@ -5430,12 +5432,17 @@ class TestCoverageExitCodes(GqlCase):
         def fake(query: str, **variables: object) -> dict:
             calls.append(variables)
             if query == pr_review.Q_FULL:
+                state["page"] = 0
                 pr = payload([review(body=self.balanced(named))])
                 pr["files"] = connection(0)
                 return {"repository": {"pullRequest": pr}}
             if query == pr_review.Q_FILES:
-                index = len([c for c in calls if "after" in c])
-                more = {"headRefOid": heads[index - 1], "files": connection(index)}
+                state["page"] += 1
+                head = heads[state["reads"]]
+                state["reads"] += 1
+                if head is None:
+                    raise SystemExit("gh graphql failed rc=1")
+                more = {"headRefOid": head, "files": connection(state["page"])}
                 return {"repository": {"pullRequest": more}}
             return {"repository": {"pullRequests": {"nodes": []}}}
 
@@ -5452,26 +5459,35 @@ class TestCoverageExitCodes(GqlCase):
         self.assertIn({"o": "o", "r": "r", "n": 7, "after": "c1"}, calls)
 
     def test_a_list_not_read_whole_is_matched_against_nothing(self) -> None:
-        """A push between pages, a page with no cursor, and the ceiling each leave it cut short."""
+        """A push between pages, a failed page, and the ceiling each leave the table unmatched."""
         first = [f"d/f{i:03}.md" for i in range(100)]
         rest = [f"d/f{i:03}.md" for i in range(100, 160)]
-        cases: list[tuple[str, list[tuple[list[str], str | None]], list[str], int]] = [
-            ("a push between pages", [(first, "c1"), (rest, None)], [OLD], 3000),
-            ("a page with no cursor", [(first, ""), (rest, None)], [HEAD], 3000),
-            ("the ceiling", [(first, "c1"), (rest, None)], [HEAD], 160),
-            ("past the ceiling", [(first, "c1"), (rest, "c2")], [HEAD], 160),
+        moved = "the head moved while the changed-file list was paged"
+        failed = "a page of the changed-file list could not be read"
+        ceiling = "the pull request changes 160 files or more, GitHub's own ceiling"
+        cases: list[tuple[list[tuple[list[str], str | None]], list[str | None], int, str]] = [
+            ([(first, "c1"), (rest, None)], [OLD], 3000, moved),
+            ([(first, "c1"), (rest, None)], [None], 3000, failed),
+            ([(first, "c1"), (rest, None)], [HEAD], 160, ceiling),
+            ([(first, "c1"), (rest, "c2")], [HEAD], 160, ceiling),
         ]
-        for label, pages, heads, cap in cases:
-            with self.subTest(case=label):
+        for pages, heads, cap, reason in cases:
+            with self.subTest(reason=reason, pages=len(pages), last=pages[-1][1]):
                 self.out.seek(0)
                 self.out.truncate()
                 self.enterContext(mock.patch.object(pr_review, "FILES_CAP", cap))
                 self.paged(pages, first + rest, heads)
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
-                self.assertIn(
-                    "NO FILE TABLE STANDS IN: the changed-file list could not be read whole",
-                    self.out.getvalue(),
-                )
+                self.assertIn(f"NO FILE TABLE STANDS IN: {reason}", self.out.getvalue())
+
+    def test_a_list_left_unread_by_a_push_is_read_again(self) -> None:
+        """A push between pages is transient, so the full read is taken again and matches."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        rest = [f"d/f{i:03}.md" for i in range(100, 160)]
+        self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)))
+        self.paged([(first, "c1"), (rest, None)], first + rest, [OLD, HEAD])
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 160 changed files in", self.out.getvalue())
 
     def test_a_partial_the_coverage_reader_misses_still_keeps_the_table_out(self) -> None:
         """Wrapped, mid-line, unprefixed, or fenced, a partial count is still on record."""
@@ -5889,13 +5905,12 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("names no unread file", out)
 
     def test_a_changed_file_list_the_window_cut_short_is_not_compared(self) -> None:
-        """A path outside the window reads exactly like a path the reviewer left out.
+        """A path past GitHub's ceiling on the list reads exactly like a path the reviewer left out.
 
-        The record holds a pull request of 301 changed files, so this is reachable rather than
-        theoretical, and reading it would name every file past the window as unreviewed.
+        Reading a list cut short there would name every file past the ceiling as unreviewed.
         """
         out = self.reading(summarized(["a.py"], covers=self.PART), ["a.py"], more=True)
-        self.assertIn("longer than the window this reads", out)
+        self.assertIn(f"reaching the {pr_review.FILES_CAP} files GitHub lists", out)
         self.assertNotIn("corroborates nothing", out)
 
     def test_a_head_carrying_no_table_at_all_says_so_rather_than_staying_silent(self) -> None:
