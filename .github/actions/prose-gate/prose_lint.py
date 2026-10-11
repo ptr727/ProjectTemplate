@@ -555,9 +555,9 @@ def scope_note(
     was read and a provenance answers what read it, and a verdict reproducing nowhere is a
     question about the second rather than about the first.
 
-    A `.py` file the running interpreter cannot parse is named beside them too. Its docstrings and
-    tokenized comments go unread, so a pass under an interpreter older than the code it reads is
-    otherwise the same line as a clean one.
+    A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
+    needs the parse ran. That rule reads such a file only in part, so a pass under an interpreter
+    older than the code it reads is otherwise the same line as a clean one.
     """
     if base is None:
         note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
@@ -567,13 +567,17 @@ def scope_note(
             f"diff against {base!r}, gate {provenance}"
         )
     if unparsed:
-        shown = ", ".join(unparsed[:5]) + (" and more" if len(unparsed) > 5 else "")
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         note += (
-            f", parser-based checks skipped on {len(unparsed)} .py file(s) "
-            f"Python {version} cannot parse: {shown}"
+            f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
+            f"so read only in part: {shortlist(unparsed)}"
         )
     return note
+
+
+def shortlist(names: list[str]) -> str:
+    """The first five names, joined, with a marker where the list ran longer."""
+    return ", ".join(names[:5]) + (" and more" if len(names) > 5 else "")
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -2429,27 +2433,39 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
-PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+TOKENIZED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+AST_RULES = frozenset({"issue-ref"})
 
 
-def python_unparsed(path: Path) -> bool:
-    """Whether `path` is a `.py` file this interpreter cannot parse.
+def python_unparsed(path: Path, rules: set[str]) -> bool:
+    """Whether a rule in `rules` read the `.py` file at `path` only in part, for want of a parse.
 
-    Each parser-based rule reads such a file as having no docstring, and either no comment or only
-    the ones a line scan finds, so the run reads less of it than of a file that parses. A file that
-    does not decode is not one, since it is skipped whole and reported as not UTF-8. `PARSED_RULES`
-    are the rules that read a `.py` through `ast` or `tokenize`, so only a run of one of them names
-    the file.
+    The comment rules read a `.py` through `python_comments`, and where that cannot tokenize it
+    one falls back to a line scan while the others read no comment at all. `issue-ref` also reads
+    its docstrings through `python_tree`, and where that cannot parse it reads none. Newer grammar
+    than the interpreter knows, such as a 3.12 `type` statement read by 3.11, tokenizes but does
+    not parse, so the two are asked separately and each only for the rules that use it.
+
+    A file whose bytes are not UTF-8 is not named, since `check_file` reads none of it and no
+    interpreter would parse it any better.
     """
-    if path.suffix.lower() != ".py":
+    if path.suffix.lower() != ".py" or not (TOKENIZED_RULES | AST_RULES) & rules:
         return False
     try:
-        ast.parse(path.read_bytes().decode("utf-8"))
-    except (SyntaxError, ValueError):
-        return True
-    except OSError:
+        raw = path.read_bytes().decode("utf-8")
+    except (UnicodeDecodeError, OSError):
         return False
-    return False
+    if TOKENIZED_RULES & rules and python_comments(raw) is None:
+        return True
+    return bool(AST_RULES & rules) and python_tree(raw) is None
+
+
+def python_tree(raw: str) -> ast.Module | None:
+    """The parsed module, or None where this interpreter cannot parse the source."""
+    try:
+        return ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return None
 
 
 def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
@@ -2464,9 +2480,8 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
     """
-    try:
-        tree = ast.parse(raw)
-    except (SyntaxError, ValueError):
+    tree = python_tree(raw)
+    if tree is None:
         return {}
     out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
@@ -2918,7 +2933,7 @@ def main(argv: list[str] | None = None) -> int:
         if scope and not matched:
             unread = unread_diff_files(scope, a.paths or ["."], tuple(a.exclude), scan_root)
             if unread:
-                shown = ", ".join(unread[:5]) + (" and more" if len(unread) > 5 else "")
+                shown = shortlist(unread)
                 print(
                     f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
                     f"this run was asked about, and the scan matched none of them: {shown}. "
@@ -2946,7 +2961,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{keys[f]}:{ln}: {kind}: {msg}")
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
-    unparsed = [keys[f] for f in files if python_unparsed(f)] if PARSED_RULES & rules else []
+    unparsed = [keys[f] for f in files if python_unparsed(f, rules)]
     print(
         scope_note(
             len(files), discovered, inscope, a.diff, gate_provenance(a.provenance), unparsed

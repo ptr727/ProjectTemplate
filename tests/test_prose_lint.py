@@ -2710,40 +2710,82 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, "discover", return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
+    UNTOKENIZED = 'def f():\n    """A docstring the gate reads."""\n    return (1,\n'
     UNPARSED = 'def f():\n    """A docstring the gate reads."""\n    return = 1\n'
 
-    def scope_line(self, path: Path, argv: list[str]) -> str:
+    def scope_line(self, paths: list[Path], argv: list[str]) -> str:
         with (
-            mock.patch.object(prose_lint, "discover", return_value=[path]),
+            mock.patch.object(prose_lint, "discover", return_value=paths),
             contextlib.redirect_stderr(io.StringIO()) as err,
         ):
             self.assertEqual(0, prose_lint.main(argv))
         return err.getvalue()
 
-    def test_a_python_file_the_interpreter_cannot_parse_is_named_in_the_scope_line(self) -> None:
-        """A file whose docstrings and comments went unread is not a clean pass, so it says so.
+    def bait(self, name: str, text: str) -> Path:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
 
-        The docstring read returns nothing and the comment read falls back or stops on a file
-        `ast` refuses, and the run exited 0 with the same scope line a clean tree prints. No
-        interpreter parses the fixture, so the case holds whichever one runs the suite. It stands in
-        for newer syntax read by an older interpreter, a 3.12 `type` statement read by 3.11.
+    def test_a_python_file_no_rule_could_tokenize_is_named_by_every_comment_rule(self) -> None:
+        """A file whose comments went unread is not a clean pass, so the scope line says so.
+
+        Each comment rule reads a `.py` through `tokenize`, and on a file it refuses one falls back
+        to a line scan while the rest read no comment at all. The run exited 0 with the scope line
+        a clean tree prints. No interpreter tokenizes the fixture, so the case holds whichever one
+        runs the suite. `comment-added` runs only under `--diff`, so its case is the diff-scoped one.
         """
-        bait = self.tmp / "newer.py"
-        bait.write_text(self.UNPARSED, encoding="utf-8")
-        err = self.scope_line(bait, ["--check", "issue-ref"])
-        self.assertIn("parser-based checks skipped on 1 .py file(s)", err)
-        self.assertIn(str(bait), err)
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        for rule in ("comment-wrap", "comment-case", "issue-ref"):
+            with self.subTest(rule=rule):
+                err = self.scope_line([bait], ["--check", rule])
+                self.assertIn("1 .py file(s) Python", err)
+                self.assertIn(f"cannot parse, so read only in part: {bait}", err)
+
+    def test_a_python_file_that_tokenizes_but_does_not_parse_is_named_by_issue_ref_alone(
+        self,
+    ) -> None:
+        """Only `issue-ref` reads through `ast`, for the docstrings, so only it read less.
+
+        This is the shape of newer grammar under an older interpreter, a 3.12 `type` statement read
+        by 3.11, which tokenizes and does not parse. The fixture parses under no interpreter, so the
+        case holds whichever one runs the suite. A comment rule read every comment the file holds,
+        so naming the file on its run would claim a skip that did not happen.
+        """
+        bait = self.bait("newer.py", self.UNPARSED)
+        self.assertIn("so read only in part", self.scope_line([bait], ["--check", "issue-ref"]))
+        self.assertNotIn("read only in part", self.scope_line([bait], ["--check", "comment-wrap"]))
 
     def test_a_python_file_that_parses_is_not_named(self) -> None:
-        clean = self.tmp / "clean.py"
-        clean.write_text('def f():\n    """A docstring the gate reads."""\n', encoding="utf-8")
-        self.assertNotIn("parser-based checks skipped", self.scope_line(clean, []))
+        clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
+        self.assertNotIn("read only in part", self.scope_line([clean], []))
 
     def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
         """A run reading the file only line by line lost nothing to the parse, so names nothing."""
-        bait = self.tmp / "newer.py"
-        bait.write_text(self.UNPARSED, encoding="utf-8")
-        self.assertNotIn("parser-based", self.scope_line(bait, ["--check", "dupword"]))
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        self.assertNotIn("read only in part", self.scope_line([bait], ["--check", "dupword"]))
+
+    def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
+        """No rule reads a file that does not decode, and a newer interpreter would not either."""
+        latin = self.tmp / "latin.py"
+        latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
+        self.assertNotIn("read only in part", self.scope_line([latin], []))
+
+    def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
+        baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
+        err = self.scope_line(baits, ["--check", "comment-wrap"])
+        self.assertIn("6 .py file(s) Python", err)
+        self.assertIn(f"{baits[4]} and more", err)
+        self.assertNotIn(str(baits[5]), err)
+
+    def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        with (
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"open.py": {1}}),
+        ):
+            err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("so read only in part: open.py", err)
 
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
