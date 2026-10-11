@@ -35,7 +35,8 @@ Subcommands
            carry below, or where nothing states or carries any, a round covering the head names
            exactly the changed files in its own file table, `coverage=table` in the digest, or
            where no round covering the head carries a table, the newest round that does names
-           them under the same change-set bound, `coverage=carried:table`.
+           them under the same change-set bound, `coverage=carried:table`, or an attested local
+           pass covers the head as described below, `coverage=local`.
            `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
@@ -61,8 +62,8 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = no statement of changed-file coverage describes this head, and no file table
-           stands in for one. A round that
+           45 = no statement of changed-file coverage describes this head, and no file table or
+           attested local pass stands in for one. A round that
            states none carries the newest round that states some forward, bounded on the change
            set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
