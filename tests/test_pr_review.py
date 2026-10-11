@@ -7970,6 +7970,20 @@ class TestCli(GqlCase):
             self.assertEqual(47, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
         self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
 
+    def test_a_round_newer_than_the_refusal_answers_the_repo_wide_quota_reading(self) -> None:
+        """A genuine round on this pull request newer than the refusal elsewhere answers it, the
+        way `quota_signal` reads one anywhere, even where a push left that round off the head.
+        """
+        start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
+        moved = payload(
+            [review(oid=OLD, at="2026-08-02T10:00:00Z"), review(oid=OLD, rid="PRR_new", at=LATE)]
+        )
+        self.answer(start, start, moved)
+        self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))

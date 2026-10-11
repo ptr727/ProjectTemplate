@@ -294,9 +294,9 @@ Subcommands
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
            on a held head covered by an attested local pass a 30 or a 44. A genuine round the
-           final read shows on the head rules 47 out, read as 30 where --min-rounds does not
-           credit it. One already on the head when the wait begins leaves the request and the
-           poll to run as usual.
+           final read shows on the head rules 47 out, and so does one on any head of this pull
+           request newer than the refusal, since it answers that refusal. One already on the head
+           when the wait begins leaves the request and the poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -305,8 +305,8 @@ Subcommands
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
            read and clearing the set and requesting again changed nothing. It is decided one
            poll interval after the request, and the rest of the poll is skipped, since no
-           request exists to answer. It cannot meet 46 or 47, since neither sends a request,
-           and ranks under 0/40/41/42/43/44/45/50. `status` cannot report it, since a request that
+           request exists to answer. It cannot meet 46, which sends no request, and ranks under
+           0/40/41/42/43/44/45/50 and above 47. `status` cannot report it, since a request that
            recorded nothing leaves nothing for a later read to find.
            49 = no Copilot round covers this head and none was requested, the pull request merging
            into a branch other than the default after Copilot's first round, and no attestation
@@ -5756,7 +5756,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    if signal and not reviewed_head(final):
+    if (
+        signal
+        and not reviewed_head(final)
+        and not any(
+            (n.get("submittedAt") or "") > (signal[1].get("_at") or "")
+            for n in reviewer_nodes(final, "reviews")
+            if not refusal_of(n)
+        )
+    ):
         number, hist_refusal = signal
         print(
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
