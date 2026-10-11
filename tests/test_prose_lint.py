@@ -2776,9 +2776,54 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
 
-    def test_an_indented_bullet_under_a_colon_comment_is_a_list_not_code(self) -> None:
-        text = f"# The script does the following:\n#     - {self.over()}\n"
-        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.sh"))
+    def test_a_yaml_snippet_under_a_colon_comment_is_code(self) -> None:
+        text = f"# Add this step to the workflow file:\n#     - name: build\n#       run: {self.over()}\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_blank_comment_line_keeps_the_colon_block_open(self) -> None:
+        run = " ".join(["tool list item"] * 9)
+        self.assertEqual([], self.found(f"# Usage:\n#\n#     {run}\n", "bait.py"))
+
+    def test_a_def_line_docstring_keeps_google_entries_and_code_blocks(self) -> None:
+        entry = (
+            f'class A:\n    def f(self, x): """Summary.\n\n        Args:\n            x: {self.at_cap()}\n'
+            '        """\n'
+        )
+        self.assertEqual([], self.found(entry, "bait.py"))
+        code = (
+            'class A:\n    def f(self): """Summary.\n\n        Example:\n\n'
+            f'            result = compute({self.words(26)})\n        """\n'
+        )
+        self.assertEqual([], self.found(code, "bait.py"))
+
+    def test_a_def_line_docstring_numpy_description_is_checked(self) -> None:
+        text = (
+            'class A:\n    def f(self, x): """Summary.\n\n        Parameters\n        ----------\n'
+            f'        x : int\n            {self.over()}\n        """\n'
+        )
+        self.assertEqual([(7, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_type_line_ending_in_a_period_still_ends_the_previous_entry(self) -> None:
+        text = (
+            'def f(x: int) -> int:\n    """S.\n\n    Parameters\n    ----------\n    x : int\n'
+            f'        {self.words(20)}\n    alpha : float, optional.\n        Short.\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_wrapped_numpy_paragraph_at_the_entry_indent_is_prose(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {half}\n    {half}.\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_colon_lead_in_ends_a_numpy_section_for_the_code_under_it(self) -> None:
+        text = (
+            'def f(x: int) -> int:\n    """S.\n\n    Parameters\n    ----------\n    x : int\n'
+            f'        The value.\n\n    Call it like this::\n\n        result = compute({self.words(26)})\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
 
 
 class TestSpelling(BaitCase):

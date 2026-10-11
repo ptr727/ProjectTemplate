@@ -2564,7 +2564,13 @@ def python_docstrings(raw: str, lines: list[str]) -> list[tuple[int, dict[int, s
             spans[n] = data[start:end].decode("utf-8", "replace")
         if spans:
             prefix = lines[first.lineno - 1].encode("utf-8")[: first.col_offset]
-            out.append((len(prefix.decode("utf-8", "replace").expandtabs(4)), spans))
+            text_before = prefix.decode("utf-8", "replace").expandtabs(4)
+            column = (
+                len(text_before)
+                if not text_before.strip()
+                else leading_indent(text_before) + INDENT_BLOCK
+            )
+            out.append((column, spans))
     return out
 
 
@@ -2696,6 +2702,7 @@ PARSED_RULES = frozenset(
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
 DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
 DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
+NUMPY_HEAD_WORDS = 6
 NUMPY_UNDERLINE = re.compile(r"^\s*-{3,}\s*$")
 NUMPY_STRUCTURED = frozenset(
     {
@@ -2752,6 +2759,10 @@ def comment_sentence_findings(
     for comment in comments:
         n, body, leading = comment.line, comment.body, comment.leading
         indent = comment_indent(comment)
+        if not body and leading:
+            flush()
+            prev_no = n
+            continue
         if is_non_prose_comment(n, body, configured):
             flush()
             opens = leading and body.rstrip().endswith(":")
@@ -2762,8 +2773,7 @@ def comment_sentence_findings(
         fresh = not leading or n != prev_no + 1
         if fresh:
             in_code = prev_colon = False
-        opens = prev_colon and not LIST_MARKER.match(body)
-        if not fresh and (in_code or opens) and indented_past(indent, reference):
+        if not fresh and (in_code or prev_colon) and indented_past(indent, reference):
             flush()
             in_code = True
             prev_no = n
@@ -2779,6 +2789,11 @@ def comment_sentence_findings(
             flush()
     flush()
     return out
+
+
+def is_numpy_head(text: str) -> bool:
+    """Whether a line at a NumPy entry's indent is a `name : type` line or a short type name."""
+    return " : " in text or len(text.split()) <= NUMPY_HEAD_WORDS
 
 
 def leading_indent(line: str) -> int:
@@ -2839,7 +2854,6 @@ def one_docstring_findings(
             flush()
             in_doctest = in_code = False
             prev_blank = True
-            prev_colon = False
             continue
         following = texts[idx + 1] if idx + 1 < len(texts) else ""
         if indent <= base and NUMPY_UNDERLINE.match(following) and not NUMPY_UNDERLINE.match(text):
@@ -2858,10 +2872,11 @@ def one_docstring_findings(
             continue
         if section == "google" and indent <= base:
             section, code_at = "", base
-        if section == "numpy" and indent <= base and not text.rstrip().endswith((".", "!", "?")):
+        if section == "numpy" and indent <= base and is_numpy_head(text):
             flush()
             in_doctest = in_code = False
-            prev_blank = prev_colon = False
+            prev_blank = False
+            prev_colon = text.rstrip().endswith(":")
             continue
         if section == "google":
             if not section_indent:
@@ -2880,7 +2895,10 @@ def one_docstring_findings(
             in_doctest = True
         elif in_doctest or (in_code and indent >= threshold):
             pass
-        elif (prev_blank or prev_colon) and indent >= threshold:
+        elif (prev_blank and indent >= threshold) or (
+            prev_colon
+            and indent >= (section_indent if section == "google" else base) + INDENT_BLOCK
+        ):
             flush()
             in_code = True
         else:
