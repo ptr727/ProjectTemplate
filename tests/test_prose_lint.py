@@ -2756,13 +2756,13 @@ class TestCli(unittest.TestCase):
         bait = self.bait("open.py", self.UNTOKENIZED)
         self.assertNotIn("may be misread", self.scope_line([bait], ["--check", "dupword"]))
 
+    LATIN = b"# caf\xe9 is fine.\nx = 1\n"
+
     def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
         """No rule reads a file the gate cannot decode, so no parse was refused on it."""
         latin = self.tmp / "latin.py"
-        latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
+        latin.write_bytes(self.LATIN)
         self.assertNotIn("may be misread", self.scope_line([latin], []))
-
-    LATIN = b"# caf\xe9 is fine.\nx = 1\n"
 
     def test_a_file_the_gate_cannot_decode_is_named_whatever_rule_ran(self) -> None:
         """No rule reads a file that is not UTF-8, so a run that skipped it is not a clean one.

@@ -561,8 +561,8 @@ def scope_note(
     through a tokenizer older than its grammar, so a pass under an interpreter older than the code
     it reads is otherwise the same line as a clean one.
 
-    A file the gate cannot read as UTF-8 is named the same way. No rule reads it, so it is counted
-    among the files read while nothing in it was judged.
+    A file the gate cannot read as UTF-8 is named the same way. No rule reads it, yet it is counted
+    among the files read, so the line names it.
     """
     if base is None:
         note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
