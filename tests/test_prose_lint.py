@@ -2923,6 +2923,18 @@ class TestCommentSentenceLength(BaitCase):
         text = f'def f() -> None:\n    """Summary.\n\n    {self.over()}\n"""\n'
         self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
 
+    def test_an_over_cap_summary_is_counted_when_the_body_is_left_of_the_quotes(self) -> None:
+        text = f'class A:\n    def f(self) -> None:\n        """{self.over()}\n\n    Body line.\n        """\n'
+        self.assertEqual([(3, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_block_continuation_left_of_the_opener_keeps_its_url_whole(self) -> None:
+        path = self.tmp / "bait.c"
+        path.write_text(
+            "void f(void) {\n    foo(); /* See the spec at\n    https://example.com/spec#123 */\n}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual([], prose_lint.check_file(path, {"issue-ref"}))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.

@@ -2139,7 +2139,9 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                out.append(Comment(n, body, True, (line if end < 0 else line[:end])[block_col:]))
+                written = line if end < 0 else line[:end]
+                cut = min(block_col, len(line) - len(line.lstrip()))
+                out.append(Comment(n, body, True, written[cut:]))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -2898,7 +2900,7 @@ def one_docstring_findings(
         if skip:
             skip -= 1
             continue
-        indent = len(text) - len(text.lstrip()) if idx else quote
+        indent = len(text) - len(text.lstrip()) if idx else min(quote, base)
         if not text.strip():
             flush()
             in_doctest = in_code = False
