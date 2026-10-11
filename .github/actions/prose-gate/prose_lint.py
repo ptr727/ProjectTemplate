@@ -1683,8 +1683,10 @@ LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
 LABEL_COLON = re.compile(
     rf"^\s*{LIST_MARKER_TOKEN}\s+(?P<outer>[*_]?)(?:"
-    r"(?P<star>\*{2,3})[^*\n]+?(?:(?P=star)(?P=outer)\s*:|:\s*(?P=star)(?P=outer))"
-    r"|(?P<under>_{2,3})[^_\n]+?(?:(?P=under)(?P=outer)\s*:|:\s*(?P=under)(?P=outer)))"
+    r"(?P<star>\*{2,3})(?P<si>_?)[^*\n]+?"
+    r"(?:(?P=si)(?P=star)(?P=outer)\s*:|:\s*(?P=si)(?P=star)(?P=outer))"
+    r"|(?P<under>_{2,3})(?P<ui>\*?)[^_\n]+?"
+    r"(?:(?P=ui)(?P=under)(?P=outer)\s*:|:\s*(?P=ui)(?P=under)(?P=outer)))"
 )
 
 # A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
