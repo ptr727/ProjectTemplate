@@ -533,7 +533,13 @@ def checkout_provenance(script: Path) -> str:
 
 
 def scope_note(
-    read: int, discovered: int, lines: int | None, base: str | None, provenance: str
+    read: int,
+    discovered: int,
+    lines: int | None,
+    base: str | None,
+    provenance: str,
+    unparsed: list[str] | None = None,
+    undecoded: list[str] | None = None,
 ) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
@@ -549,13 +555,34 @@ def scope_note(
     The copy that read that scope is named beside it for the same reason. A scope answers what
     was read and a provenance answers what read it, and a verdict reproducing nowhere is a
     question about the second rather than about the first.
+
+    A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
+    reads Python through a parser ran. Such a rule reads that file by a line scan, not at all, or
+    through a tokenizer older than its grammar, so a pass under an interpreter older than the code
+    it reads is otherwise the same line as a clean one.
+
+    A file the gate cannot read as UTF-8 is named the same way. No rule reads it, yet it is counted
+    among the files read, so the line names it.
     """
     if base is None:
-        return f"scope: {read} file(s) read, whole tree, gate {provenance}"
-    return (
-        f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-        f"diff against {base!r}, gate {provenance}"
-    )
+        note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
+    else:
+        note = (
+            f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
+            f"diff against {base!r}, gate {provenance}"
+        )
+    if unparsed:
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        note += (
+            f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
+            f"so their comments and docstrings may be misread: {quoted(unparsed, 5)}"
+        )
+    if undecoded:
+        note += (
+            f", {len(undecoded)} file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+            f"{quoted(undecoded, 5)}"
+        )
+    return note
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -854,13 +881,17 @@ def comment_syntax_including_docs(path: Path) -> Syntax | None:
     return widened
 
 
-def quoted(paths) -> str:
+def quoted(paths, cap: int | None = None) -> str:
     """Paths as a sorted, quoted, comma-joined list for an error message.
 
     Quoted because a path holding a space or a comma is indistinguishable from two paths once
-    joined, which makes the message unreadable exactly when it names something unexpected.
+    joined, which makes the message unreadable exactly when it names something unexpected. With a
+    `cap`, only the first that many are listed, followed by a marker where the list ran longer.
     """
-    return ", ".join(repr(str(p)) for p in sorted(paths))
+    ordered = sorted(paths)
+    shown = ordered if cap is None else ordered[:cap]
+    more = " and more" if len(shown) < len(ordered) else ""
+    return ", ".join(repr(str(p)) for p in shown) + more
 
 
 def repo_root(path: Path) -> str:
@@ -1057,11 +1088,18 @@ LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]
 DASH = re.compile(r"(?<=[^\s\d])\s+-\s+(?=[^\s\d])")
 QUOTE_PREFIX = re.compile(r"^\s*(?:>\s*)+")
 
+LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
+
+STRONG_LABEL_TOKEN = (
+    r"(?P<outer>[*_]?)(?:(?P<star>\*\*)(?P<si>_?)|__(?P<ui>\*?))"
+    r"(?(star)[^*\n]|[^_\n])+?(?P<inner_colon>:\s*)?"
+    r"(?(star)(?P=si)\*\*|(?P=ui)__)(?P=outer)"
+)
+
 # `- **Label** - explanation` is a definition separator, structurally a colon.
 # Flagging it would restructure the document format rather than the prose.
 # The first dash on such a line is skipped, and any later one still counts.
-# An ordered marker introduces the same construct, so `1. **Label** - ...` is one too.
-LABEL_DASH = re.compile(r"^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+\*\*[.:]?\s+-\s+")
+LABEL_DASH = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}[.:]?\s+-\s+")
 
 # The negative lookbehind keeps a word-joining character from starting a repetition:
 # "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
@@ -1527,11 +1565,14 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 
 # A pragma, shebang, or divider is machinery rather than prose.
+# A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
 NOT_PROSE = re.compile(
-    r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
-    r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
-    r"|^v\d+(\.\d+)*$"
+    r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
+    r"|(?:(?i:noqa|nopep8)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
+    r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
 )
+
+TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa|nopep8)|type:\s*ignore)\b|\bpylint:")
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
 # It cannot be capitalized or restructured without corrupting the address it exists to carry.
@@ -1627,11 +1668,10 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # A directive a tool reads, exempt because deleting one changes what the file does.
 # Anchored at the body's start, since a comment that merely names one of these is prose.
 # Read by `comment-added` alone rather than added to `NOT_PROSE`, which two gating rules share.
-# Widening that pattern stopped those two reporting any comment naming a word in it.
-# That is a gate narrowing where the intent was an exemption in a third rule.
+# So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|nopep8\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
     r"|codespell:|doctest:)"
 )
 
@@ -1679,7 +1719,7 @@ def strip_quoted(s: str) -> str:
 # Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
 # The colon is written inside the emphasis as often as outside it, and both spell one construct.
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
-LABEL_COLON = re.compile(r"^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+?(?:\*\*\s*:|:\s*\*\*)")
+LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inner_colon)|\s*:)")
 
 # A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
 # The guards are the run-on rule's, so an initial or an abbreviation ends nothing.
@@ -1707,7 +1747,7 @@ def sentences(span: str) -> list[str]:
     return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
-LIST_MARKER = re.compile(r"^\s*(?:[-*+]|([0-9]+)[.)])\s")
+LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
 SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
 THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
 TABLE_DELIMITER = re.compile(
@@ -2000,7 +2040,8 @@ def python_comments(raw: str) -> list[Comment] | None:
     """
     out: list[Comment] = []
     try:
-        for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
+        source = io.StringIO(raw)
+        for tok in tokenize.generate_tokens(source.readline):
             if tok.type == tokenize.COMMENT:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()
@@ -2220,18 +2261,24 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
 
     The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
     run-on is the other half of the same rule, so both are reported.
+
+    A body cut at a trailing directive continues into the next line only where the whole body does
+    not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
+    goes on past.
     """
-    comments = python_comments(raw) if path.suffix == ".py" else None
+    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
     if comments is None:
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
-    comments = [c for c in comments if c[0] not in skip]
+    kept = [c for c in comments if c[0] not in skip]
+    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
     configured = config_run_lines(comments)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
+    prev_whole = ""
     prev_no = 0
-    for n, body, leading, _raw in comments:
+    for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
         if (
             not body
             or n in configured
@@ -2260,6 +2307,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             and leading
             and prev_body
             and not SENT_END.search(prev_body)
+            and not SENT_END.search(prev_whole)
             and body[:1].islower()
         )
         if continuation:
@@ -2286,6 +2334,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A trailing comment can start a sentence the next full-line comment continues.
         # The continuation has to be a full-line comment, since a trailing one annotates its own.
         prev_body = body
+        prev_whole = whole.body
         prev_no = n
     return out
 
@@ -2309,6 +2358,24 @@ def is_tool_directive(body: str) -> bool:
     spelling, and its test-name form.
     """
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
+
+
+def without_trailing_directive(path: Path, body: str) -> str:
+    """The comment body up to the first directive a Python checker reads.
+
+    A Python checker reads `noqa`, `nopep8`, and `type: ignore` behind their own `#` after prose on
+    the same line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to
+    any comment switch every comment rule off for that line. The prose can be deleted and the
+    directive kept, so the directive and anything after it are cut off, and what is left is judged by
+    the same exemptions as any other body, an empty one included.
+
+    No other language's checker reads these forms, so in any other file a mention of one is part of
+    the sentence holding it.
+    """
+    if path.suffix.lower() != ".py":
+        return body
+    match = TRAILING_DIRECTIVE.search(body)
+    return body[: match.start()].rstrip() if match else body
 
 
 def is_comment_prose(body: str) -> bool:
@@ -2387,7 +2454,7 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     for comment in bodies:
         n = comment.line
-        if n in seen or not is_comment_prose(comment.body):
+        if n in seen or not is_comment_prose(without_trailing_directive(path, comment.body)):
             continue
         seen.add(n)
         out.append(
@@ -2404,6 +2471,18 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def python_tree(raw: str) -> ast.Module | None:
+    """The parsed module, or None where this interpreter cannot parse the source.
+
+    Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
+    """
+    try:
+        return ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return None
+
+
 def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """Each source line a docstring occupies, mapped to the docstring text on that line.
 
@@ -2416,9 +2495,8 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
     """
-    try:
-        tree = ast.parse(raw)
-    except (SyntaxError, ValueError):
+    tree = python_tree(raw)
+    if tree is None:
         return {}
     out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
@@ -2554,17 +2632,41 @@ def issue_ref_findings(
     return out
 
 
+PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+
+
 def check_file(
     path: Path,
     rules: set[str],
     root: Path | None = None,
     allowed: set[int] | None = None,
+    unparsed: list[Path] | None = None,
+    undecoded: list[Path] | None = None,
 ) -> list[tuple[int, str, str]]:
+    """Every finding the rules in `rules` make on `path`.
+
+    `unparsed` collects a `.py` this interpreter cannot parse where a rule in `PARSED_RULES` ran.
+    The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
+    grammar can read a newer f-string as an open string and swallow the comments after it without
+    refusing anything.
+
+    `undecoded` collects a file this function cannot read as UTF-8, whatever rules ran, since no
+    rule reads it and the file is otherwise counted as read with nothing found.
+
+    A leading byte order mark is dropped once, here, since it is not whitespace and every reader
+    that judges line 1's structure would read it as content. The character-set rule is given the
+    mark on its own, where a fence opening line 1 cannot hide it.
+    """
     out: list[tuple[int, str, str]] = []
     try:
-        raw = path.read_bytes().decode("utf-8")
+        decoded = path.read_bytes().decode("utf-8")
     except (UnicodeDecodeError, OSError):
+        if undecoded is not None:
+            undecoded.append(path)
         return out
+    raw = decoded.removeprefix("\ufeff")
+    if raw != decoded and {"charset", "charset-unknown"} & rules:
+        out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
     lines = raw.split("\n")
     # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
     # The file's own directory anchors a relative link, the repository root anchors the rest.
@@ -2580,6 +2682,13 @@ def check_file(
         out.extend(comment_added_findings(path, raw))
     if "issue-ref" in rules:
         out.extend(issue_ref_findings(path, raw, lines, root))
+    if (
+        unparsed is not None
+        and PARSED_RULES & rules
+        and path.suffix.lower() == ".py"
+        and python_tree(raw) is None
+    ):
+        unparsed.append(path)
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -2870,7 +2979,7 @@ def main(argv: list[str] | None = None) -> int:
         if scope and not matched:
             unread = unread_diff_files(scope, a.paths or ["."], tuple(a.exclude), scan_root)
             if unread:
-                shown = ", ".join(unread[:5]) + (" and more" if len(unread) > 5 else "")
+                shown = quoted(unread, 5)
                 print(
                     f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
                     f"this run was asked about, and the scan matched none of them: {shown}. "
@@ -2886,9 +2995,11 @@ def main(argv: list[str] | None = None) -> int:
     total = 0
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
+    refused: list[Path] = []
+    undecoded: list[Path] = []
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root, allowed):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused, undecoded):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
@@ -2899,7 +3010,15 @@ def main(argv: list[str] | None = None) -> int:
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
     print(
-        scope_note(len(files), discovered, inscope, a.diff, gate_provenance(a.provenance)),
+        scope_note(
+            len(files),
+            discovered,
+            inscope,
+            a.diff,
+            gate_provenance(a.provenance),
+            [keys[f] for f in refused],
+            [keys[f] for f in undecoded],
+        ),
         file=sys.stderr,
     )
     if a.summary or total:

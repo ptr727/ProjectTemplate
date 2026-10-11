@@ -39,7 +39,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    thread, and a missing approval alike, and the response differs by cause.
 2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
    default, a head after Copilot's first round can carry an attested local pass instead,
-   `review_on_head=local` in the digest, where the whole review history is in view and no round on
+   `coverage=local` in the digest, where the whole review history is in view and no round on
    record states or appears to state partial coverage, and a pull request into the default branch, a
    promotion among them, always carries a Copilot round on its head. A review is matched by commit
    SHA rather than assumed from a green merge-state. A push makes checks go green *before* the

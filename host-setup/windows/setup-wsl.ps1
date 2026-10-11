@@ -338,7 +338,10 @@ function Resolve-Mode {
 
 function main {
     if ($script:WANT_HELP) { usage; exit 0 }
+    $unknown = @($script:WANT_NAMES | Where-Object { $_ -like '-*' })
+    if ($unknown.Count -gt 0) { die "Unknown option `"$($unknown[0])`", -Help lists the options" }
     $script:MODE = Resolve-Mode
+    if ($script:MODE -ne 'install' -and $script:WANT_NAMES.Count -gt 0) { die "Only -Install takes a distribution, and `"$($script:WANT_NAMES[0])`" was given" }
 
     switch ($script:MODE) {
         'list' { Show-List }

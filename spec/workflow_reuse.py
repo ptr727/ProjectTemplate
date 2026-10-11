@@ -24,6 +24,7 @@ per-workflow table, a per-repo table, and the repo-invented workflows no canonic
 Usage: python3 spec/workflow_reuse.py [--report] [--selftest]
 """
 
+import argparse
 import base64
 import difflib
 import re
@@ -398,9 +399,16 @@ def _selftest():
     return 0
 
 
-def main():
-    argv = sys.argv[1:]
-    if "--selftest" in argv:
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument(
+        "--report", action="store_true", help=f"write {REPORT_PATH} rather than print"
+    )
+    parser.add_argument(
+        "--selftest", action="store_true", help="run the offline self-test and exit"
+    )
+    args = parser.parse_args(list(argv))
+    if args.selftest:
         return _selftest()
     registry = audit.load("registry/repos.json")
     hub_entry = next(
@@ -409,7 +417,7 @@ def main():
     )
     hub_slug = audit.repo_slug(hub_entry)
     rows, unreadable, empty = measure(registry, canonical_texts(), hub_slug)
-    if "--report" in argv:
+    if args.report:
         content = render_report(rows, unreadable, empty, hub_sha())
         # LF matches the fleet default, since reports/*.md is LF.
         # Bytes are written so the local platform does not re-translate them.
@@ -435,4 +443,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

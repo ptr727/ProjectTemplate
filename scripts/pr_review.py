@@ -35,7 +35,8 @@ Subcommands
            carry below, or where nothing states or carries any, a round covering the head names
            exactly the changed files in its own file table, `coverage=table` in the digest, or
            where no round covering the head carries a table, the newest round that does names
-           them under the same change-set bound, `coverage=carried:table`.
+           them under the same change-set bound, `coverage=carried:table`, or an attested local
+           pass covers the head as described below, `coverage=local`.
            `review_on_head` and `rounds=`
            in the digest name Copilot's own coverage specifically, the reviewer this script
            requests and waits for, never "no review of any kind covers this head": a
@@ -46,7 +47,9 @@ Subcommands
            `review_on_head=local` reads a head no Copilot round covers on a pull request into a
            branch other than the default, after Copilot's first round, where an attestation vouches
            for it and no round on record states or appears to state partial coverage, with
-           `coverage=local` beside it.
+           `coverage=local` beside it. Under the same conditions the attestation also covers a
+           head whose Copilot round states no coverage, has none carried to it, and carries no file
+           table, which reads `review_on_head=yes coverage=local`.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -59,8 +62,8 @@ Subcommands
            be believed. The remedy is an issue on the repository hosting this script, and the
            review loop does not close until the reader is fixed. Merging regardless is the
            maintainer's decision rather than the agent's.
-           45 = no statement of changed-file coverage describes this head, and no file table
-           stands in for one. A round that
+           45 = no statement of changed-file coverage describes this head, and no file table or
+           attested local pass stands in for one. A round that
            states none carries the newest round that states some forward, bounded on the change
            set, so this covers three states: nothing ever stated coverage, the round that did
            describes a different set of changed files, or that comparison could not be read.
@@ -221,16 +224,16 @@ Subcommands
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
-           current head, then print the digest. The auto-request is skipped once a review already
-           covers the head, once Copilot has already answered outside a formal review, or once one
-           is already in the pending request set, so calling `wait` again on the same PR never
-           double-requests. It is also skipped under 46's and 47's quota readings below, since a
-           request into a reached limit spends quota and returns the same refusal. It is skipped too
-           on a pull request into a branch other than the default once Copilot has reviewed it at
-           all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead only while they can still move
-           its merge, as 30 below lists, and one with no attestation exits 49 naming the `attest`
-           step.
+           current head, then print the digest. The auto-request is skipped once a review past
+           --min-rounds already covers the head, once Copilot has already answered outside a
+           formal review, or once one is already in the pending request set, so calling `wait`
+           again on the same PR never double-requests. It is also skipped under 46's and 47's quota
+           readings below, since a request into a reached limit spends quota and returns the same
+           refusal. It is skipped too on a pull request into a branch other than the default once
+           Copilot has reviewed it at all, since a fix push there is covered by an attested local
+           pass: an attested head is covered at once, so the wait polls its checks instead only
+           while they can still move its merge, as 30 below lists, and one with no attestation exits
+           49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -290,7 +293,11 @@ Subcommands
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
-           on a held head covered by an attested local pass a 30 or a 44.
+           on a held head covered by an attested local pass a 30 or a 44. A genuine round the final
+           read shows on the head rules 47 out, and so does any review of this pull request, on any
+           head, submitted after the refusal and not itself a quota refusal, since it answers that
+           refusal as one anywhere in the repository would. A genuine round already on the head when
+           the wait begins leaves the request and the poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -299,9 +306,9 @@ Subcommands
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
            read and clearing the set and requesting again changed nothing. It is decided one
            poll interval after the request, and the rest of the poll is skipped, since no
-           request exists to answer. It cannot meet 46 or 47, since neither sends a request,
-           and ranks under 0/40/41/42/43/44/45/50. `status` cannot report it, since a request that
-           recorded nothing leaves nothing for a later read to find.
+           request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
+           `status` cannot report it, since a request that recorded nothing leaves nothing for a
+           later read to find.
            49 = no Copilot round covers this head and none was requested, the pull request merging
            into a branch other than the default after Copilot's first round, and no attestation
            vouches for the head. Run the local strict review, record it, push, and run `attest`, or
@@ -333,9 +340,10 @@ import sys
 import tarfile
 import time
 import unicodedata
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # The directory this script sits in, and the anchor every scope answer is read from.
 # One value serves the owner probe and the refusal naming it, so the two cannot disagree.
@@ -766,12 +774,9 @@ HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 WINDOW = 100
 
-# How many of the pull request's own changed files the full query asks for.
-# 100 is the connection's own ceiling, so a longer diff is truncated rather than paged.
-# A truncated list is reported as one and compared against nothing.
-# A path missing from a short window reads exactly like a path the reviewer left out.
-# The record holds a pull request of 301 changed files, so the truncation is reachable here.
 FILES_WINDOW = 100
+FILES_CAP = 3000
+FILES_UNREAD = "unread"
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
@@ -880,9 +885,15 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path } }
   }}}
 """.replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
+Q_FILES = """
+query($o:String!,$r:String!,$n:Int!,$after:String){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
+    files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path } }
+  }}}
+""".replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -1035,6 +1046,55 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     return pr
 
 
+def follow(
+    query: str, owner: str, repo: str, num: int, connection: str, after: str | None = None
+) -> Iterator[dict]:
+    """Each page of the pull request's `connection`, from the one past `after` to the last.
+
+    One cursor walk for every paged read, so a fix to how a page is followed lands once.
+    """
+    while True:
+        extra: dict[str, str] = {"after": after} if after else {}
+        pr = gh_graphql(query, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"]
+        yield pr
+        page = pr[connection].get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            return
+        after = page["endCursor"]
+
+
+def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
+    """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
+
+    `FILES_WINDOW` is the connection's own ceiling on one page, so a longer list is paged.
+    `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
+    so a list reaching it stays marked as cut short. A page read at a head other than the first
+    page's leaves the list unread instead, under `FILES_UNREAD`, which `files_shortfall`
+    reports and `full_read` reads again. A list cut short or unread is compared against
+    nothing, where a list marked whole but missing a path reads exactly like a path the
+    reviewer left out. A page that fails to read ends the run as any other failed read does,
+    since that failure is already loud.
+    """
+    files = pr.get("files")
+    if not isinstance(files, dict):
+        return
+    page = files.get("pageInfo")
+    if not isinstance(page, dict) or page.get("hasNextPage") is not True:
+        return
+    nodes = files["nodes"]
+    for more in follow(Q_FILES, owner, repo, num, "files", page["endCursor"]):
+        if more["headRefOid"] != pr.get("headRefOid"):
+            files[FILES_UNREAD] = (
+                "the head moved while the changed-file list was paged, so the list describes "
+                "no one commit"
+            )
+            return
+        nodes.extend(more["files"]["nodes"])
+        if len(nodes) >= FILES_CAP:
+            return
+    files["pageInfo"] = {"hasNextPage": False}
+
+
 def reviewer_requested(pr: dict) -> bool:
     """True where the reviewer sits in the pending request set.
 
@@ -1110,14 +1170,25 @@ def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, 
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
             if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
-                entries.append(
-                    (number, {**review, "_at": review.get("submittedAt") or "", "_kind": "review"})
-                )
+                entries.append(history_entry(number, review, "review"))
         for comment in (node.get("comments") or {}).get("nodes") or []:
             if (comment.get("author") or {}).get("login") == REVIEWER:
-                entries.append(
-                    (number, {**comment, "_at": comment.get("createdAt") or "", "_kind": "comment"})
-                )
+                entries.append(history_entry(number, comment, "comment"))
+    return newest_first(entries)
+
+
+def history_entry(number: int, node: dict, kind: str) -> tuple[int, dict]:
+    """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged.
+
+    Shared with `standing_quota`, which merges this pull request's own reviews into the history
+    `wait` read, so the two can never spell the entry differently.
+    """
+    stamp = node.get("submittedAt" if kind == "review" else "createdAt") or ""
+    return number, {**node, "_at": stamp, "_kind": kind}
+
+
+def newest_first(entries: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """History entries ordered newest first, the order `quota_signal` reads its first entry in."""
     return sorted(entries, key=lambda pair: pair[1]["_at"], reverse=True)
 
 
@@ -1156,6 +1227,24 @@ def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
     """
     newest = history[0] if history else None
     return newest if newest and quota_refusal(newest[1]) else None
+
+
+def standing_quota(
+    history: list[tuple[int, dict]], pr: dict, number: int
+) -> tuple[int, dict] | None:
+    """`quota_signal` over `history` as this pull request's own read leaves it, or None.
+
+    None where a genuine round covers the head, since the reading is about a head carrying no
+    Copilot activity of its own. This pull request's reviews are merged in rather than trusted to
+    sit in `history`, which reads only the most recently updated pull requests, so a review of it,
+    on any head, submitted after the refusal answers that refusal as one anywhere else would. `wait`
+    reads this on its opening snapshot and on its final read, so both apply one rule, though a
+    push between them can change what the rule finds.
+    """
+    if reviewed_head(pr):
+        return None
+    own = [history_entry(number, n, "review") for n in reviewer_nodes(pr, "reviews")]
+    return quota_signal(newest_first([*history, *own]))
 
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
@@ -1466,24 +1555,20 @@ def stopping_refusal(pr: dict) -> dict | None:
 
 
 def refusing_review(pr: dict) -> dict | None:
-    """The reviewer's newest refusal carrying the current head, where one is there.
+    """The reviewer's newest review carrying the current head, where that review is a refusal.
 
     Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
     a push retires it, and the round the push raises either reviews that head or refuses it in
     its own right.
 
-    A refusal alongside a genuine review of the same head is spent too, and that is the caller's
-    reading rather than this one's, since what spends it is coverage this cannot see from a
-    refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
-    here, and the digest reports the field only where nothing covers the head.
+    A genuine round on the same head after the refusal spends it, so the newest review on the
+    head is the one read rather than the newest refusal.
     """
     head = pr["headRefOid"]
-    refusals = [
-        n
-        for n in reviewer_nodes(pr, "reviews")
-        if (n.get("commit") or {}).get("oid") == head and refusal_of(n)
-    ]
-    return newest_of(refusals)
+    newest = newest_of(
+        [n for n in reviewer_nodes(pr, "reviews") if (n.get("commit") or {}).get("oid") == head]
+    )
+    return newest if newest is not None and refusal_of(newest) else None
 
 
 def newest_of(nodes: list[dict]) -> dict | None:
@@ -1843,11 +1928,15 @@ def files_shortfall(pr: dict) -> str:
 
     One predicate for the table reading's reason and for `files_unread`'s re-read, so the two
     cannot disagree about which lists were read. A list the query cut short is not a shortfall
-    here, since that list was read, and `table_shortfall` names it separately.
+    here, since that list was read, and `table_shortfall` names it separately. A list
+    `page_files` left unread, a page arriving at another head, is one, since reading
+    again can answer it.
     """
     files = pr.get("files")
     if not isinstance(files, dict):
         return "the changed-file list is absent from the query, so the table has nothing to match"
+    if unread := files.get(FILES_UNREAD):
+        return f"{unread}, so the table cannot be matched against it"
     nodes = files.get("nodes")
     page = files.get("pageInfo")
     if (
@@ -1886,15 +1975,36 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     """The full payload, `pr` where one was read already, read again while `files_unread` holds.
 
     The whole payload is read again rather than the one connection. The digest and the exit code
-    then still come from one read of the pull request.
+    then still come from one read of the pull request. The changed-file list is paged here, on
+    `pr` and on each read again, rather than on every `Q_FULL` read, since this is the payload
+    the digest and the exit code read the list from, and a read deciding only a wait's next step
+    never looks at it. `pr` is a read `page_files` has not yet seen, which every caller passes.
     """
-    read = functools.partial(gql, Q_FULL, owner, repo, num)
-    return backoff(read() if pr is None else pr, read, files_unread, delays=READ_RETRY_DELAYS)
+
+    def read() -> dict:
+        fresh = gql(Q_FULL, owner, repo, num)
+        page_files(owner, repo, num, fresh)
+        return fresh
+
+    if pr is None:
+        return backoff(read(), read, files_unread, delays=READ_RETRY_DELAYS)
+    page_files(owner, repo, num, pr)
+    return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
+
+
+class Capped(NamedTuple):
+    """A compare whose file list reached `COMPARE_FILE_CAP`, with the merge base it named.
+
+    The merge base is what `tree_changed_at` reads past the cap from, carried here so that
+    reading costs no second compare.
+    """
+
+    merge_base: str
 
 
 @functools.cache
-def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
-    """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
+def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | Capped | None:
+    """The paths a pull request off `base` changes at `commit`, or why that could not be had.
 
     Read as a three-dot compare, which is the same merge-base reading the pull request's own file
     list is, so the set at an earlier commit and the set at the head are two readings of one
@@ -1905,10 +2015,11 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     None rather than an empty set wherever the read did not happen, since a pull request that
     changes nothing and a compare that could not be fetched take opposite decisions, and the
     caller fails closed on the second. The API caps its file list at 300, and the response carries
-    no flag saying it did, so a set at the cap is returned as unreadable rather than as a set that
-    is probably short. A name the response leaves null would coerce to the literal path `None`
-    and compare equal to another round's null, so an entry that is not a non-empty string makes
-    the whole reading unreadable rather than a set with a fabricated member in it.
+    no flag saying it did, so a set at the cap is returned as `Capped` rather than as a set that
+    is probably short, and `tree_changed_at` reads past it. A name the response leaves null
+    would coerce to the literal path `None` and compare equal to another round's null, so an
+    entry that is not a non-empty string makes the whole reading unreadable rather than a set
+    with a fabricated member in it.
 
     A read that did not happen is taken again on the `READ_RETRY_DELAYS` schedule before it is
     returned as None. One run read `unstated` on a head where the runs either side of it carried a
@@ -1936,7 +2047,32 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
         return None
 
-    def listed(proc: subprocess.CompletedProcess) -> object:
+    compared = reread_json(
+        f"repos/{owner}/{repo}/compare/{base}...{commit}",
+        r'if (.files | type) == "array" then ({files: [.files[].filename], '
+        r'merge_base: (.merge_base_commit.sha // "")} | @json) else empty end',
+    )
+    if not isinstance(compared, dict):
+        return None
+    names = compared.get("files")
+    if not isinstance(names, list):
+        return None
+    if not all(isinstance(n, str) and n for n in names):
+        return None
+    if len(names) >= COMPARE_FILE_CAP:
+        merge_base = compared.get("merge_base")
+        return Capped(merge_base) if isinstance(merge_base, str) and merge_base else None
+    return frozenset(names)
+
+
+def reread_json(path: str, jq: str) -> object:
+    """One REST read whose filter emits JSON, parsed, re-read on the `READ_RETRY_DELAYS` schedule.
+
+    None wherever nothing parseable came back, an absence GitHub answered included, so the caller
+    has one value to refuse on.
+    """
+
+    def parsed(proc: subprocess.CompletedProcess) -> object:
         if proc.returncode != 0:
             return None
         try:
@@ -1944,25 +2080,64 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
         except json.JSONDecodeError:
             return None
 
-    compare = functools.partial(
-        gh_rest,
-        f"repos/{owner}/{repo}/compare/{base}...{commit}",
-        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
-    )
+    read = functools.partial(gh_rest, path, jq)
     proc = backoff(
-        compare(),
-        compare,
-        lambda p: not answered_absent(p) and listed(p) is None,
+        read(),
+        read,
+        lambda p: not answered_absent(p) and parsed(p) is None,
         delays=READ_RETRY_DELAYS,
     )
-    names = listed(proc)
-    if names is None:
+    return parsed(proc)
+
+
+def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
+    """Every path in `commit`'s tree with its mode and object id, or None where that was unread.
+
+    A tree GitHub truncated is unread too. Its ceiling on a recursive read is about 100,000
+    entries, which no fleet repository approaches. A directory entry is left out, a submodule
+    kept, since the compare lists a submodule moving as a change.
+    """
+    tree = reread_json(
+        f"repos/{owner}/{repo}/git/trees/{commit}?recursive=1",
+        r'if (.tree | type) == "array" and (.truncated | type) == "boolean" '
+        r'then ({truncated, entries: [.tree[] | select(.type != "tree") | [.path, .mode, .sha]]} '
+        r"| @json) else empty end",
+    )
+    if not isinstance(tree, dict) or tree.get("truncated") is not False:
         return None
-    if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
+    entries = tree.get("entries")
+    if not isinstance(entries, list):
         return None
-    if not all(isinstance(n, str) and n for n in names):
+    paths: dict[str, tuple[str, str]] = {}
+    for entry in entries:
+        if not (
+            isinstance(entry, list)
+            and len(entry) == 3
+            and all(isinstance(e, str) and e for e in entry)
+        ):
+            return None
+        paths[entry[0]] = (entry[1], entry[2])
+    return paths
+
+
+@functools.cache
+def tree_changed_at(owner: str, repo: str, merge_base: str, commit: str) -> frozenset[str] | None:
+    """The paths `commit` changes against `merge_base`, read past the compare's file cap.
+
+    The compare caps its file list at 300 on every page. Measured on a 308-file comparison, the
+    first page carried 300 files and the second none at all, so no paging of it reaches further.
+    The trees either side do: the commit's own and the merge base's, each read whole and diffed
+    here. On that comparison this named exactly the paths `git diff --no-renames --name-only`
+    does, 326 of them. That is not the compare's own reading, which names a rename once by its
+    new path, so `carry_holds` reads both commits this way or neither, never one of each.
+
+    None where either tree was unread. Memoized for the run, for the reason `changed_at` is.
+    """
+    before = tree_at(owner, repo, merge_base)
+    after = tree_at(owner, repo, commit)
+    if before is None or after is None:
         return None
-    return frozenset(names)
+    return frozenset(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
 
 
 def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
@@ -1990,6 +2165,10 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
     None where the comparison could not be made at all, which the caller reads as a refusal
     rather than as a pass. A bound that fell open when it could not be measured would be the
     unbounded carry again, reached by a different route.
+
+    A compare at its cap on one side only is a definite no, since the other side's list is whole
+    and shorter than the cap, so the two sets differ in size. At the cap on both, the change set
+    is read again from the trees, for both commits.
     """
     head = pr.get("headRefOid") or ""
     base = pr.get("baseRefName") or ""
@@ -1997,7 +2176,15 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
     current = changed_at(owner, repo, base, head)
     if earlier is None or current is None:
         return None
-    return earlier == current
+    if isinstance(earlier, frozenset) and isinstance(current, frozenset):
+        return earlier == current
+    if isinstance(earlier, frozenset) or isinstance(current, frozenset):
+        return False
+    before = tree_changed_at(owner, repo, earlier.merge_base, carried_from)
+    after = tree_changed_at(owner, repo, current.merge_base, head)
+    if before is None or after is None:
+        return None
+    return before == after
 
 
 def second_format(body: str) -> bool:
@@ -2659,10 +2846,12 @@ def span_list(text: str) -> list[str]:
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
-    """The paths this pull request changes, and whether the query's window cut the list short.
+    """The paths this pull request changes, and whether that list is incomplete.
 
-    Truncation is carried rather than hidden, since a path outside a short window reads exactly
-    like a path the reviewer left out of its table, and the two take opposite readings.
+    Incomplete is a list cut short at GitHub's ceiling, and also one `page_files` left unread,
+    whose first page's `hasNextPage` still stands, `FILES_UNREAD` naming which of the two it is.
+    It is carried rather than hidden, since a path missing from the list reads exactly like a
+    path the reviewer left out of its table, and the two take opposite readings.
     """
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
@@ -2719,11 +2908,16 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     if not named:
         return "no round covering this head carries a file table, so none of them locates the file"
     changed, truncated = changed_paths(pr)
-    if truncated or not changed:
+    unread = (pr.get("files") or {}).get(FILES_UNREAD)
+    if truncated or not changed or unread:
+        why = unread or (
+            f"the changed-file list reaching the {FILES_CAP} files GitHub lists"
+            if truncated
+            else "the changed-file list being absent from the query"
+        )
         return (
             f"the reviewer names {len(named)} entries in its own table and the diff could not "
-            f"be read back to compare them, the changed-file list being "
-            f"{'longer than the window this reads' if truncated else 'absent from the query'}"
+            f"be read back to compare them, {why}"
         )
     left, invented, ambiguous, noted = table_match(named, {bare_path(c) for c in changed})
     omitted = [p for p in changed if bare_path(p) in left]
@@ -2840,8 +3034,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     Empty where the table stands in, which is the coverage reading `table_reading` gives.
     Otherwise the reason, which the digest prints under an unstated head, since the remedies
     differ: a missing or mismatched table may be answered by another round, a changed-file list
-    longer than the window this reads by a push bringing it back within it, and a partial on
-    record by nothing but the maintainer's reading.
+    at GitHub's own ceiling by a split, and a partial on record by nothing but the maintainer's
+    reading.
 
     `named` is an earlier round's table where `table_reading` matches a carried one, and the
     head's own table otherwise. Every other check reads the pull request either way, since a
@@ -2867,9 +3061,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated:
         return (
-            f"the pull request changes more than the {FILES_WINDOW} files this reads, so the "
-            f"table cannot be compared against all of them until a push brings the pull request "
-            f"back within that window"
+            f"the pull request changes {FILES_CAP} files or more, GitHub's own ceiling on the "
+            f"changed-file list, so the table cannot be compared against all of them"
         )
     diff = {bare_path(p) for p in changed}
     if len(diff) != len(set(changed)):
@@ -3153,6 +3346,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
         state, line, _from_head = carried
     if state == UNSTATED and not table_reading(owner, repo, pr)[1]:
         state = TABLE
+    if state == UNSTATED and local_beside_round(pr):
+        state = LOCAL
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -3209,9 +3404,10 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that. Where the digest says the pull request changes more files than "
-            "this reads, the table cannot be matched at all, and splitting the pull request is "
-            "the remedy where it applies. "
+            "one cause of that, and the same holds where it says the head moved while the "
+            "changed-file list was paged. Where the digest names GitHub's "
+            "own ceiling on the changed-file list, the table cannot be matched at all, and "
+            "splitting the pull request is the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage or carrying a table only by chance. Past those, a develop -> "
             "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
@@ -3904,7 +4100,7 @@ def digest(
     `stalled` remains as an ignored compatibility parameter for callers that supplied the old
     pickup reading. GitHub's effort-labeled lifecycle makes that reading inconclusive.
     """
-    pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
+    pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -3942,7 +4138,7 @@ def digest(
     )
     if cover == UNSTATED and on_head and not table_short:
         cover = TABLE
-    local = not on_head and local_cover(pr)
+    local = local_cover(pr) if not on_head else cover == UNSTATED and local_beside_round(pr)
     if local:
         cover = LOCAL
     unknown = unrecognized_shapes(pr)
@@ -4248,10 +4444,17 @@ def digest(
         lines.append(f"  NO FILE TABLE STANDS IN: {table_short}")
     elif cover == LOCAL:
         lines.append(
-            "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
-            "follows the pull request's first round, and a comment from an owner, member, or "
-            "collaborator attests a recorded local strict-review pass over exactly this head's "
-            f"content, which recorded {attestation(pr)} finding(s)"
+            "  COVERAGE IS READ FROM THE LOCAL PASS: this head follows the pull request's first "
+            "round, "
+            + (
+                "the Copilot round covering it states no coverage, none carries to it, and no "
+                "round covering it carries a file table, "
+                if on_head
+                else "no Copilot round covers it, "
+            )
+            + "and a comment from an owner, member, or collaborator attests a recorded local "
+            "strict-review pass over exactly this head's content, which recorded "
+            f"{attestation(pr)} finding(s)"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
@@ -4526,17 +4729,9 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     no-match is indistinguishable from a thread that was already answered.
     """
     out: list[dict] = []
-    after = None
-    while True:
-        extra: dict[str, str] = {"after": after} if after else {}
-        conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"][
-            "reviewThreads"
-        ]
-        out += open_threads(conn["nodes"])
-        page = conn.get("pageInfo") or {}
-        if not page.get("hasNextPage"):
-            return out
-        after = page["endCursor"]
+    for pr in follow(Q_THREADS, owner, repo, num, "reviewThreads"):
+        out += open_threads(pr["reviewThreads"]["nodes"])
+    return out
 
 
 def describe(thread: dict) -> str:
@@ -4849,7 +5044,8 @@ def local_cover(pr: dict) -> bool:
     a head its writer attests, and only where nothing on record says any round read part of a
     diff and the whole review history is in view, the bound a file table stands in under. A fix
     push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
+    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
+    overrules, and only a later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
@@ -4859,6 +5055,16 @@ def local_cover(pr: dict) -> bool:
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
     )
+
+
+def local_beside_round(pr: dict) -> bool:
+    """Whether a recorded local pass covers a head whose own Copilot round leaves coverage unread.
+
+    The caller has found that no statement reaches the head and no table stands in. This holds
+    only where no round covering the head carries a table at all, so a table naming fewer files
+    than the diff changed, which is a round's own word that it skipped one, is never overruled.
+    """
+    return table_shortfall(pr) == NO_HEAD_TABLE and local_cover(pr)
 
 
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)
@@ -5277,8 +5483,10 @@ def main(argv: list[str] | None = None) -> int:
         "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
         "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
         "already carries one: `reviewed_head` alone would report that earlier round as done "
-        "at once, never waiting for the fresh one the re-request was for (default 0, so any "
-        "round counts, unchanged from before this flag existed)",
+        "at once, never waiting for the fresh one the re-request was for. N is the count "
+        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
+        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
+        "unchanged from before this flag existed)",
     )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
@@ -5398,6 +5606,7 @@ def main(argv: list[str] | None = None) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
+    rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
         full = gql(Q_FULL, owner, repo, a.number)
@@ -5408,12 +5617,15 @@ def main(argv: list[str] | None = None) -> int:
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
     history = [] if done or answer or drift else copilot_history(owner, repo)
+    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
-    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
+    quota_stop = (
+        None if not signal or snapshot is None else standing_quota(history, snapshot, a.number)
+    )
     stopped = (
         None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
     )
@@ -5426,14 +5638,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
-    # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    # Skipped once a review past --min-rounds already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     recorded: bool | None = None
     final: dict | None = None
     if (
         not done
         and not answer
         and not drift
-        and not signal
+        and not quota_stop
         and not stopped
         and not held
         and not reviewer_requested(pr)
@@ -5496,11 +5708,11 @@ def main(argv: list[str] | None = None) -> int:
             "nothing and stops here. Pass --ignore-quota-signal to request and poll anyway, "
             "once the limit is believed to have reset."
         )
-    elif signal and not reviewer_requested(pr):
+    elif quota_stop and not reviewer_requested(pr):
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
-        number, hist_refusal = signal
+        number, hist_refusal = quota_stop
         print(
             f"note: the reviewer's own most recent activity anywhere in this repository, on "
             f"pull request #{number} at {hist_refusal.get('_at') or 'an unknown time'}, is a "
@@ -5661,8 +5873,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    if signal:
-        number, hist_refusal = signal
+    if signal and (standing := standing_quota(history, final, a.number)):
+        number, hist_refusal = standing
         print(
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
             f"Copilot review or comment of its own, and the reviewer's own most recent activity "
@@ -5673,6 +5885,17 @@ def main(argv: list[str] | None = None) -> int:
             "to poll this pull request's own head for the full --timeout"
         )
         return 47
+    if head_review_done(final, rounds_before):
+        rounds = len(reviewer_nodes(final, "reviews"))
+        print(
+            f"status=PENDING this pull request now has {rounds} rounds, up from "
+            f"{rounds_before} when this wait began, and one that landed covers this head, but "
+            f"--min-rounds {a.min_rounds} waits for round {a.min_rounds + 1} or later and none "
+            "past that position covers the head. N is the `rounds=` a `status` read before "
+            "the re-request, so one above it waits for the round after the one the re-request "
+            "was for"
+        )
+        return 30
     print("status=PENDING")
     return 30
 

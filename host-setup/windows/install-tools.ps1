@@ -182,6 +182,36 @@ function run {
     return $LASTEXITCODE
 }
 
+# Whether this process's own output reaches a console rather than a file or a pipe.
+# A function of its own so a test can drive the console branch of Invoke-Utf8Run from a harness whose output is always captured.
+function Test-OutputToConsole {
+    return (-not [Console]::IsOutputRedirected)
+}
+
+# The run wrapper above, for a command that writes UTF-8 whatever the console's code page, as Docker's CLI does.
+# A console left at its OEM default decodes those bytes as that code page, so the check mark docker desktop prints on success reads as three unrelated characters.
+# The console is switched to UTF-8 for this one call and put back after, rather than for the whole run, so every other native tool here keeps the decoding it was written against.
+# Output redirected to a file or a pipe is left alone: PowerShell keeps writing it in the encoding it started with, so decoding the command as UTF-8 there would turn the check mark into one lossy byte where it otherwise passes through intact.
+# A process with no console at all refuses the switch, and that is not a failure either, since nothing renders the bytes there.
+function Invoke-Utf8Run {
+    param([Parameter(Mandatory)][string]$Command, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    $previous = [Console]::OutputEncoding
+    $switched = $false
+    if (Test-OutputToConsole) {
+        try {
+            [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $switched = $true
+        } catch {
+            $switched = $false
+        }
+    }
+    try {
+        return (run -Command $Command -Arguments $Arguments)
+    } finally {
+        if ($switched) { [Console]::OutputEncoding = $previous }
+    }
+}
+
 function confirm {
     param([Parameter(Mandatory)][string]$Question)
     if ($script:ASSUME_YES -or $script:DRY_RUN) { return $true }
@@ -382,6 +412,122 @@ function Invoke-WingetRemove {
     $arguments = @('uninstall', '--id', $Id, '--exact', '--disable-interactivity', '--silent')
     if ($InScope) { $arguments += @('--scope', $InScope) }
     return (run -Command 'winget' -Arguments $arguments)
+}
+
+# Where App Installer keeps every installer log winget asks a package for, named <package id>.<version>-<timestamp>.log.
+$WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir'
+
+# The entries of the installer log one failed winget call wrote that say why it failed, or none where no such log or entry exists.
+# All winget reports is that the installer exited non-zero, with a code the installer chose, so the reason lives in that log and nowhere a person reads by default.
+# A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text, which is the whole reason, so an entry keeps its indented continuation lines rather than being read one line at a time.
+# Capped at the last few matches so a verbose MSI log cannot flood the console, with the log's own path printed beside them for the rest.
+# Whether files were in use is read from every entry before that cap, and an in-use entry is always among those shown, the first one put back where none survived the cap, so a run of later error and abort lines cannot push the actual reason out of the report.
+function Get-InstallerFailureReason {
+    param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
+    $result = @{ Log = $null; Entries = @(); InUse = $false }
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $result }
+    $log = Get-ChildItem -LiteralPath $Directory -Filter "$Id.*.log" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | Select-Object -Last 1
+    if (-not $log) { return $result }
+    $result.Log = $log.FullName
+    $entries = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in (Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)) {
+        if (($line -eq '' -or $line -match '^\s') -and $entries.Count -gt 0) {
+            $entries[$entries.Count - 1] = "$($entries[$entries.Count - 1]) $($line.Trim())".TrimEnd()
+        } else {
+            $entries.Add(($line -replace '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+\s+', '').Trim())
+        }
+    }
+    $inUsePattern = '(?i)process\(es\) use|in use by|used by another process'
+    $matched = @($entries | Where-Object { $_ -match '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3' -or $_ -match $inUsePattern })
+    $inUse = @($matched | Where-Object { $_ -match $inUsePattern })
+    $result.InUse = $inUse.Count -gt 0
+    $shown = @($matched | Select-Object -Last 4)
+    if ($result.InUse -and -not ($shown | Where-Object { $_ -match $inUsePattern })) {
+        $shown = @($inUse[0]) + @($matched | Select-Object -Last 3)
+    }
+    $result.Entries = $shown
+    return $result
+}
+
+# The directory one installed file's package owns, read as the child of the container it was installed into, or nothing where the file sits in no such container.
+# A tool's executable can sit several levels down its own tree and in more than one place, Git for Windows carrying git.exe in both cmd and mingw64\bin, so walking up from the executable a fixed number of levels lands on a different directory depending on which copy PATH resolved.
+# Anything outside these containers is left unread rather than guessed at: py.exe sits in the Windows directory on a machine wide Python install, and reading that as Python's tree would name half the host.
+function Get-InstallRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    $containers = @(
+        $env:ProgramFiles
+        ${env:ProgramFiles(x86)}
+        "$env:ProgramFiles\WinGet\Packages"
+        "$env:LOCALAPPDATA\Programs"
+        "$env:LOCALAPPDATA\Programs\Python"
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    )
+    # Longest first, so a container nested inside another, WinGet's machine wide package directory inside Program Files or the per-user Python directory every line installs beside its siblings in, answers before the one holding it would claim every package in it as one tree.
+    foreach ($container in ($containers | Where-Object { $_ } | Sort-Object Length -Descending)) {
+        $prefix = "$($container.TrimEnd('\'))\"
+        if (-not $Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $rest = $Path.Substring($prefix.Length).Split('\')
+        # A file sitting directly in the container belongs to no directory of its own, so there is no tree to read.
+        if ($rest.Count -lt 2) { return $null }
+        return "$prefix$($rest[0])"
+    }
+    return $null
+}
+
+# Every running process whose executable sits inside the tree one tool installed, which is what an installer refusing over files in use is refusing over.
+# Matching the tool's own process name misses the helpers a tool ships and leaves running in the background, such as the GnuPG key daemon Git for Windows carries, which outlives the git command that started it and blocks Git's own upgrade.
+# Executable names the file to read the tree from where the probe sits outside it, as py does for Python: the launcher installs in a directory of its own, while what blocks an upgrade is the interpreter the line installed.
+# A process is matched by the probe's name only where no tree could be read, since once one is, a same-named process running from somewhere else, py.exe beside an upgraded Python line, holds nothing the installer replaces.
+function Get-ToolHolder {
+    param([Parameter(Mandatory)][string]$Probe, [string]$Executable)
+    $source = $Executable
+    if (-not $source) {
+        $command = Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) { $source = $command.Source }
+    }
+    $item = if ($source) { Get-Item -LiteralPath $source -ErrorAction SilentlyContinue }
+    if ($item -and $item.LinkTarget) {
+        $resolved = $item.ResolveLinkTarget($true)
+        if ($resolved) { $item = $resolved }
+    }
+    $root = if ($item) { Get-InstallRoot -Path $item.FullName }
+    if ($root) {
+        $holders = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase) })
+    } else {
+        $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
+    }
+    return , @($holders | Sort-Object Id -Unique)
+}
+
+# What a failed winget call owes its reader: winget's code, the reason the installer's own log gives, and the processes that may hold the tool's files.
+# The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
+# The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
+# Windows will not replace a file that is open, so the processes running from the tool's install are named only where something says files were in use: an installer log entry in Inno Setup's or Windows' own in-use wording, or winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial.
+# Anything else names nobody, since a Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree, and blaming those would send the reader after the wrong thing.
+function Write-InstallFailure {
+    param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
+    warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
+    $reason = Get-InstallerFailureReason -Id $Package -Since $Since
+    if ($reason.Entries.Count -gt 0) {
+        info 'The installer log says:'
+        foreach ($entry in $reason.Entries) {
+            $shown = if ($HOME) { $entry -ireplace [regex]::Escape($HOME), '%USERPROFILE%' } else { $entry }
+            info "  $shown"
+        }
+    }
+    if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
+    $logInUse = [bool]$reason.InUse
+    # 0x8A150101 and 0x8A150103 are winget's own INSTALL_PACKAGE_IN_USE and INSTALL_FILE_IN_USE, which it returns where a manifest maps the installer's exit code to either.
+    # 0x80070020 and 0x80070005 are ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED carried as an HRESULT.
+    $codeInUse = ('0x{0:X8}' -f $Code) -in @('0x8A150101', '0x8A150103', '0x80070020', '0x80070005')
+    if (-not ($logInUse -or $codeInUse)) { return }
+    $running = Get-ToolHolder -Probe $Probe -Executable $Executable
+    if ($running.Count -eq 0) { return }
+    info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
+    foreach ($process in $running) { info "  $($process.ProcessName) (process $($process.Id))" }
+    info 'Close them, or stop them with the command below, then run this again:'
+    info "  Stop-Process -Id $($running.Id -join ', ')"
 }
 
 # --- Tools ---
@@ -965,7 +1111,7 @@ function Stop-DockerDesktop {
         return 1
     }
     info 'Stopping Docker Desktop'
-    $code = run 'docker' @('desktop', 'stop', '--timeout', '90')
+    $code = Invoke-Utf8Run 'docker' @('desktop', 'stop', '--timeout', '90')
     if ($code -ne 0) { warn "docker desktop stop exited $code" }
     return $code
 }
@@ -976,7 +1122,7 @@ function Start-DockerDesktop {
         return 1
     }
     info 'Starting Docker Desktop'
-    $code = run 'docker' @('desktop', 'start', '--timeout', '180')
+    $code = Invoke-Utf8Run 'docker' @('desktop', 'start', '--timeout', '180')
     if ($code -ne 0) { warn 'docker desktop start did not exit cleanly, start Docker Desktop by hand and check WSL integration per distro' }
     return $code
 }
@@ -1217,20 +1363,19 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
+        $started = Get-Date
         $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
         }
         if ($code -ne 0) {
-            warn "$ToolName failed on $package, winget exited $code"
-            # Windows will not replace a file that is open, and winget reports that as an access denial naming the file rather than whatever holds it.
-            # The holder is usually the tool itself, left running by an editor or a language server, so the process is named here and the reader is spared guessing at a permission problem that is not one.
-            $running = @(Get-Process -Name $record.Probe -ErrorAction SilentlyContinue)
-            if ($running.Count -gt 0) {
-                info "$($record.Probe) is running as process $($running.Id -join ', '), and Windows cannot replace a running executable"
-                info 'Close whatever is running it, then run this again'
+            $executable = $null
+            if ($ToolName -eq 'python') {
+                $line = Get-PythonLine -Version $state.Installed
+                if ($line) { $executable = Get-PythonLineInterpreter -Line $line }
             }
+            Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe -Executable $executable
             $script:FAILED += $ToolName
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
             if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
@@ -1317,6 +1462,8 @@ function Resolve-Selection {
 
 function main {
     if ($script:WANT_HELP) { usage; exit 0 }
+    $unknown = @($script:WANT_TOOLS | Where-Object { $_ -like '-*' })
+    if ($unknown.Count -gt 0) { die "Unknown option `"$($unknown[0])`", -Help lists the options" }
     $script:MODE = Resolve-Mode
     Test-HostSupported
     Add-RepositoryToolCatalog

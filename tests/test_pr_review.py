@@ -15,6 +15,7 @@ import argparse
 import contextlib
 import inspect
 import io
+import itertools
 import json
 import os
 import re
@@ -499,6 +500,8 @@ class GqlCase(unittest.TestCase):
         # Without this a case inherits another's compares and the suite becomes order-dependent.
         pr_review.changed_at.cache_clear()
         self.addCleanup(pr_review.changed_at.cache_clear)
+        pr_review.tree_changed_at.cache_clear()
+        self.addCleanup(pr_review.tree_changed_at.cache_clear)
         pr_review.run_cause.cache_clear()
         self.addCleanup(pr_review.run_cause.cache_clear)
         self.enterContext(
@@ -526,8 +529,13 @@ class GqlCase(unittest.TestCase):
 
         `gh_rest` is patched in `setUp` rather than here, so a case that never calls this still
         makes no REST read.
+
+        `page_files` is patched to leave each response as it stands, since a response here is
+        the whole read, a list marked cut short included. A case about paging patches
+        `gh_graphql` itself rather than calling this.
         """
         queue = list(responses)
+        self.enterContext(mock.patch.object(pr_review, "page_files"))
 
         def fake(_query, _owner, _repo, _num):
             return queue.pop(0) if len(queue) > 1 else queue[0]
@@ -2738,7 +2746,8 @@ class CarryCase(GqlCase):
                 names = at.get(path.rsplit("...", 1)[-1])
                 if names is None:
                     return subprocess.CompletedProcess([], 1, "", "no read for this commit")
-                return subprocess.CompletedProcess([], 0, json.dumps(names), "")
+                shape = {"files": names, "merge_base": "c" * 40}
+                return subprocess.CompletedProcess([], 0, json.dumps(shape), "")
             return subprocess.CompletedProcess([], 0, "1 1", "")
 
         self.calls: list[str] = []
@@ -3053,11 +3062,13 @@ class TestCoverageCarriesForward(CarryCase):
         self.assertIn("one of three things", text)
         self.assertNotIn("no round on this pull request states changed-file coverage", text)
 
-    def test_a_change_set_at_the_compare_cap_reads_as_unreadable(self) -> None:
-        """The API caps its file list and flags nothing, so a set at the cap proves nothing."""
+    def test_a_change_set_at_the_compare_cap_reads_as_capped(self) -> None:
+        """The API caps its file list and flags nothing, so a set at the cap is not a set."""
         capped = [f"f{n}.py" for n in range(pr_review.COMPARE_FILE_CAP)]
         with self.compare(**{OLD: capped}):
-            self.assertIsNone(pr_review.changed_at("o", "r", "develop", OLD))
+            self.assertEqual(
+                pr_review.Capped("c" * 40), pr_review.changed_at("o", "r", "develop", OLD)
+            )
 
     def test_a_pull_request_that_changes_nothing_is_not_an_unreadable_compare(self) -> None:
         """An empty set and a compare that never happened take opposite decisions."""
@@ -3290,7 +3301,7 @@ class TestFileTableCarriesForward(CarryCase):
         replies = iter(
             [
                 subprocess.CompletedProcess([], 1, "", "gh: Bad Gateway (HTTP 502)"),
-                subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), ""),
+                subprocess.CompletedProcess([], 0, json.dumps({"files": ["a.py"]}), ""),
             ]
         )
         with (
@@ -3398,6 +3409,131 @@ class TestFileTableCarriesForward(CarryCase):
         code, out = self.verdict(pr)
         self.assertEqual(45, code)
         self.assertIn("no earlier round carries one either", out)
+
+
+class TestCarryPastTheCompareCeiling(CarryCase):
+    """A change set at the compare's 300-file cap is read from the trees either side instead.
+
+    The constructed case is a promotion changing 400 files, its first round carrying a full table
+    and a later round on a new head re-reviewing a one-line delta with no table. Both compares
+    return 300 files, so the change set is read past them from the trees.
+    """
+
+    BASE = "c" * 40
+    MANY = tuple(f"src/f{n:03}.py" for n in range(400))
+
+    def trees(
+        self,
+        head: dict[str, str] | None = None,
+        compared: dict[str, list[str]] | None = None,
+        merge_base: str | None = None,
+    ) -> mock._patch:
+        """Answer every compare at the cap, naming its merge base, and the trees either side.
+
+        The merge base keeps every path at one blob and `OLD` moves all of `MANY`. The head
+        moves one of them again by default, the one-line delta past `OLD`, so the change set is
+        the same at both. `head` replaces the head's tree, an empty one standing for a read that
+        failed. `compared` gives a commit a list under the cap instead, and `merge_base`
+        replaces the merge base the compares name.
+        """
+        base_tree = {p: "1" * 40 for p in [*self.MANY, "README.md"]}
+        old_tree = {**base_tree, **{p: "2" * 40 for p in self.MANY}}
+        head_tree = {**old_tree, self.MANY[0]: "3" * 40} if head is None else head
+        served = {self.BASE: base_tree, OLD: old_tree, HEAD: head_tree}
+        named = self.BASE if merge_base is None else merge_base
+
+        def rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+            self.calls.append(path)
+            if "/git/trees/" in path:
+                tree = served.get(path.split("/git/trees/", 1)[1].split("?", 1)[0])
+                if not tree:
+                    return subprocess.CompletedProcess([], 1, "", "no tree for this commit")
+                rows = [[p, "100644", blob] for p, blob in tree.items()]
+                shape = {"truncated": False, "entries": rows}
+                return subprocess.CompletedProcess([], 0, json.dumps(shape), "")
+            if "/compare/" not in path:
+                return subprocess.CompletedProcess([], 1, "", "not a compare")
+            if jq and "@json" in jq:
+                commit = path.rsplit("...", 1)[-1]
+                names = (compared or {}).get(commit, list(self.MANY[: pr_review.COMPARE_FILE_CAP]))
+                answer = {"files": names, "merge_base": named}
+                return subprocess.CompletedProcess([], 0, json.dumps(answer), "")
+            return subprocess.CompletedProcess([], 0, "1 1", "")
+
+        self.calls: list[str] = []
+        return mock.patch.object(pr_review, "gh_rest", side_effect=rest)
+
+    def promotion(self, first: str | None = None) -> dict:
+        body = summarized(list(self.MANY), covers="") if first is None else first
+        return payload(
+            [
+                review(oid=OLD, body=body, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE, rid="B"),
+            ],
+            files=list(self.MANY),
+        )
+
+    def verdict(self, pr: dict) -> tuple[int, str]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = pr_review.report_verdict(pr, "o", "r")
+        out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        return code, out
+
+    def test_a_400_file_promotion_carries_its_table_onto_an_unchanged_change_set(self) -> None:
+        with self.trees():
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out)
+        self.assertEqual(4, sum("/git/trees/" in c for c in self.calls))
+
+    def test_a_400_file_promotion_carries_a_statement_onto_an_unchanged_change_set(self) -> None:
+        with self.trees():
+            code, out = self.verdict(self.promotion(first=self.FULL))
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:full", out)
+
+    def test_a_change_set_past_the_cap_that_moved_is_not_carried(self) -> None:
+        moved = {
+            **{p: "1" * 40 for p in [*self.MANY, "README.md"]},
+            **{p: "2" * 40 for p in self.MANY},
+            "README.md": "3" * 40,
+        }
+        with self.trees(head=moved):
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(45, code)
+        self.assertIn("changes a different set of files at the two commits", out)
+
+    def test_the_cap_on_one_side_only_is_a_different_set_without_a_tree_read(self) -> None:
+        for whole in (OLD, HEAD):
+            with self.subTest(whole=whole), self.trees(compared={whole: ["a.py"]}):
+                pr_review.changed_at.cache_clear()
+                self.assertIs(False, pr_review.carry_holds("o", "r", self.promotion(), OLD))
+                self.assertFalse(any("/git/trees/" in c for c in self.calls))
+
+    def test_a_tree_read_that_failed_reads_as_unreadable(self) -> None:
+        with self.trees(head={}):
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(45, code)
+        self.assertIn("the change set could not be read at both commits", out)
+
+    def test_a_compare_at_the_cap_naming_no_merge_base_reads_no_tree(self) -> None:
+        with self.trees(merge_base=""):
+            self.assertIsNone(pr_review.carry_holds("o", "r", self.promotion(), OLD))
+        self.assertFalse(any("/git/trees/" in c for c in self.calls))
+
+    def test_the_tree_reading_names_both_paths_of_a_rename(self) -> None:
+        """A rename is a removal and an addition here, where the compare names its new path."""
+        renamed = {p: "1" * 40 for p in [*self.MANY[1:], "README.md", "moved.py"]}
+        with self.trees(head=renamed):
+            changed = pr_review.tree_changed_at("o", "r", self.BASE, HEAD)
+        self.assertEqual(frozenset({self.MANY[0], "moved.py"}), changed)
+
+    def test_a_truncated_tree_reads_as_unread(self) -> None:
+        cut = json.dumps({"truncated": True, "entries": []})
+        with mock.patch.object(
+            pr_review, "gh_rest", return_value=subprocess.CompletedProcess([], 0, cut, "")
+        ):
+            self.assertIsNone(pr_review.tree_at("o", "r", HEAD))
 
 
 class TestTheDeltaSinceTheCarriedRound(unittest.TestCase):
@@ -5387,7 +5523,7 @@ class TestCoverageExitCodes(GqlCase):
             (["a.md"], ["a.md", "b.md"], False, "the table leaves out b.md"),
             (["a.md", "x.md"], ["a.md"], False, "the table names x.md, which the diff does not"),
             (["x.md"], ["a.md"], False, "the table leaves out a.md, and names x.md, which"),
-            (["a.md"], ["a.md"], True, "changes more than the 100 files this reads"),
+            (["a.md"], ["a.md"], True, "changes 3000 files or more, GitHub's own ceiling"),
             (["a.md"], [], False, "the pull request changes no files"),
         ):
             with self.subTest(reason=reason):
@@ -5402,14 +5538,105 @@ class TestCoverageExitCodes(GqlCase):
                 pr = payload([review(body=body)], files=files, more_files=more)
                 self.assertIn(reason, pr_review.table_shortfall(pr))
 
-    def test_the_unstated_message_names_splitting_for_a_list_past_the_window(self) -> None:
+    def test_the_unstated_message_names_splitting_for_a_list_past_the_ceiling(self) -> None:
         self.answer(
             payload([review(body=self.balanced(["a.md"]))], files=["a.md"], more_files=True)
         )
         self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
         printed = self.out.getvalue()
-        self.assertIn("NO FILE TABLE STANDS IN: the pull request changes more than", printed)
+        self.assertIn("NO FILE TABLE STANDS IN: the pull request changes 3000 files", printed)
         self.assertIn("splitting the pull request is the remedy", printed)
+
+    def paged(
+        self, pages: list[tuple[list[str], str | None]], named: list[str], heads: list[str]
+    ) -> list[dict]:
+        """Answer each full read with `pages[0]` and each later page from `Q_FILES` in turn.
+
+        Each page is its paths and the cursor to the next, None on the last. `heads` is the
+        head each `Q_FILES` call reports, across every full read, so a push landing mid-list is
+        expressible. Every call is recorded, and a
+        document neither of these answers reports no Copilot history.
+        """
+        calls: list[dict] = []
+        state = {"page": 0, "reads": 0}
+
+        def connection(index: int) -> dict:
+            paths, cursor = pages[index]
+            info = {"hasNextPage": cursor is not None, "endCursor": cursor}
+            return {"nodes": [{"path": x} for x in paths], "pageInfo": info}
+
+        def fake(query: str, **variables: object) -> dict:
+            calls.append(variables)
+            if query == pr_review.Q_FULL:
+                state["page"] = 0
+                pr = payload([review(body=self.balanced(named))])
+                pr["files"] = connection(0)
+                return {"repository": {"pullRequest": pr}}
+            if query == pr_review.Q_FILES:
+                state["page"] += 1
+                head = heads[state["reads"]]
+                state["reads"] += 1
+                more = {"headRefOid": head, "files": connection(state["page"])}
+                return {"repository": {"pullRequest": more}}
+            return {"repository": {"pullRequests": {"nodes": []}}}
+
+        self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
+        return calls
+
+    def test_a_changed_file_list_past_one_page_is_read_whole_and_matched(self) -> None:
+        """A promotion of 160 changed files reaches a coverage verdict rather than exit 45."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        rest = [f"d/f{i:03}.md" for i in range(100, 160)]
+        calls = self.paged([(first, "c1"), (rest, None)], first + rest, [HEAD])
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 160 changed files in", self.out.getvalue())
+        self.assertIn({"o": "o", "r": "r", "n": 7, "after": "c1"}, calls)
+
+    def test_a_list_not_read_whole_is_matched_against_nothing(self) -> None:
+        """A push between pages and the ceiling each leave the table unmatched."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        rest = [f"d/f{i:03}.md" for i in range(100, 160)]
+        moved = "the head moved while the changed-file list was paged"
+        ceiling = "the pull request changes 160 files or more, GitHub's own ceiling"
+        cases: list[tuple[list[tuple[list[str], str | None]], list[str], int, str]] = [
+            ([(first, "c1"), (rest, None)], [OLD], 3000, moved),
+            ([(first, "c1"), (rest, None)], [HEAD], 160, ceiling),
+            ([(first, "c1"), (rest, "c2")], [HEAD], 160, ceiling),
+        ]
+        for pages, heads, cap, reason in cases:
+            with self.subTest(reason=reason, pages=len(pages), last=pages[-1][1]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.enterContext(mock.patch.object(pr_review, "FILES_CAP", cap))
+                self.paged(pages, first + rest, heads)
+                self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
+                self.assertIn(f"NO FILE TABLE STANDS IN: {reason}", self.out.getvalue())
+
+    def test_a_read_outside_the_digest_does_not_page_the_list(self) -> None:
+        """A wait's own reads never look at the list, so they spend no page on it."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        calls = self.paged([(first, "c1"), (["d/x.md"], None)], first, [HEAD])
+        pr = pr_review.gql(pr_review.Q_FULL, "o", "r", 7)
+        self.assertTrue(pr["files"]["pageInfo"]["hasNextPage"])
+        self.assertEqual([], [c for c in calls if "after" in c])
+
+    def test_a_read_already_taken_is_paged_by_the_full_read(self) -> None:
+        """`wait` hands its own last read to the full read, which pages it rather than reading anew."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        calls = self.paged([(first, "c1"), (["d/x.md"], None)], first, [HEAD])
+        pr = pr_review.full_read("o", "r", 7, pr_review.gql(pr_review.Q_FULL, "o", "r", 7))
+        self.assertEqual(101, len(pr["files"]["nodes"]))
+        self.assertFalse(pr["files"]["pageInfo"]["hasNextPage"])
+        self.assertEqual(1, len([c for c in calls if "after" not in c and "n" in c]))
+
+    def test_a_list_left_unread_by_a_push_is_read_again(self) -> None:
+        """A push between pages is transient, so the full read is taken again and matches."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        rest = [f"d/f{i:03}.md" for i in range(100, 160)]
+        self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)))
+        self.paged([(first, "c1"), (rest, None)], first + rest, [OLD, HEAD])
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("names exactly the 160 changed files in", self.out.getvalue())
 
     def test_a_partial_the_coverage_reader_misses_still_keeps_the_table_out(self) -> None:
         """Wrapped, mid-line, unprefixed, or fenced, a partial count is still on record."""
@@ -5826,14 +6053,13 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("names 1 of the 3 changed files", out)
         self.assertIn("names no unread file", out)
 
-    def test_a_changed_file_list_the_window_cut_short_is_not_compared(self) -> None:
-        """A path outside the window reads exactly like a path the reviewer left out.
+    def test_a_changed_file_list_the_ceiling_cut_short_is_not_compared(self) -> None:
+        """A path past GitHub's ceiling on the list reads exactly like a path the reviewer left out.
 
-        The record holds a pull request of 301 changed files, so this is reachable rather than
-        theoretical, and reading it would name every file past the window as unreviewed.
+        Reading a list cut short there would name every file past the ceiling as unreviewed.
         """
         out = self.reading(summarized(["a.py"], covers=self.PART), ["a.py"], more=True)
-        self.assertIn("longer than the window this reads", out)
+        self.assertIn(f"reaching the {pr_review.FILES_CAP} files GitHub lists", out)
         self.assertNotIn("corroborates nothing", out)
 
     def test_a_head_carrying_no_table_at_all_says_so_rather_than_staying_silent(self) -> None:
@@ -6712,7 +6938,67 @@ class TestCli(GqlCase):
         self.answer(payload([review()], pending=True))
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
-        self.assertIn("status=PENDING", self.out.getvalue())
+        self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
+
+    def test_min_rounds_names_the_baseline_when_a_round_lands_mid_wait_below_it(self) -> None:
+        """Three rounds already sit on the head, a `status` read of `rounds=3`, and a fourth
+        lands while the wait polls. N is the count already seen, so `--min-rounds 3` returns on
+        that fourth round. One above it, `--min-rounds 4`, waits for a fifth and reaches its
+        timeout, which a bare `status=PENDING` reported exactly like a round that never landed.
+        The line names the position it waits for instead, so a caller can tell the two apart.
+        Each clock read advances 100 seconds, so one poll lands the fourth round and the read
+        after it is past the 150-second timeout.
+        """
+        seen = [review(rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)]
+        fourth = review(rid="PRR_fourth", at=LATE)
+        for baseline, code in ((3, 0), (4, 30)):
+            with self.subTest(min_rounds=baseline):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(payload(seen, pending=True), payload([*seen, fourth]))
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", str(baseline), "--timeout", "150"]
+                    self.assertEqual(code, self.cli(argv))
+                slept.assert_called_once()
+                status = [
+                    line for line in self.out.getvalue().splitlines() if line.startswith("status=")
+                ]
+                if code:
+                    self.assertEqual(1, len(status))
+                    self.assertIn("now has 4 rounds, up from 3", status[0])
+                    self.assertIn("--min-rounds 4 waits for round 5 or later", status[0])
+                else:
+                    self.assertEqual([], status)
+
+    def test_min_rounds_keeps_the_bare_pending_line_unless_a_new_round_covers_head(self) -> None:
+        """The line naming the baseline says a round landing during the wait covers the head,
+        which holds only where one does. Here a round lands mid-wait, raising the count, but on a
+        superseded head, so it covers nothing. N sits above the count the wait began with, the
+        only case the line can fire in, so the coverage clause alone keeps it bare. That holds
+        whether or not an earlier round covers the head. Each clock read advances 100 seconds,
+        so one poll lands the round and the read after it is past the 150-second timeout.
+        """
+        for label, before in (("uncovered", [review(oid=OLD)]), ("covered", [review()])):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(
+                    payload(before, pending=True),
+                    payload([*before, review(oid=OLD, rid="PRR_two", at=LATE)]),
+                )
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", "2", "--timeout", "150"]
+                    self.assertEqual(30, self.cli(argv))
+                slept.assert_called_once()
+                self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
 
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
@@ -7395,6 +7681,35 @@ class TestCli(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=no", out)
 
+    def test_a_later_round_on_the_head_spends_a_quota_refusal_there(self) -> None:
+        """A quota refusal on the head, then a genuine round on that same head stating no
+        coverage. The genuine round is the newer word, so the refusal is spent and nothing reads
+        it as the account state. `--min-rounds 2` waits past the genuine round here, so the wait
+        names that baseline rather than the refusal. `--min-rounds 1` and `status` both reach
+        the coverage gap itself.
+        """
+        refused = review(body=QUOTA_REFUSED, at=EARLY, rid="PRR_refused")
+        both = payload([refused, review(body=OVERVIEW, at=LATE, rid="PRR_genuine")])
+        before = payload([refused], pending=True)
+        wait = ["wait", "7", "--ignore-quota-signal", "--timeout", "0", "--min-rounds"]
+        cases = (
+            ([*wait, "2"], (before, both), 30, "--min-rounds 2 waits for round 3"),
+            ([*wait, "1"], (before, both), 45, "status=COVERAGE_IS_UNSTATED"),
+            (["status", "7"], (both,), 45, "status=COVERAGE_IS_UNSTATED"),
+        )
+        for argv, reads, code, said in cases:
+            with self.subTest(argv=argv):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(*reads)
+                self.wire_history([])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(argv))
+                out = self.out.getvalue()
+                self.assertIn(said, out)
+                self.assertIn("refusal=no", out)
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED", out)
+
     def test_a_fix_push_after_the_first_round_is_not_requested(self) -> None:
         self.answer(self.into(payload([review(oid=OLD)])))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
@@ -7413,6 +7728,62 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("review_on_head=local", out)
         self.assertIn("coverage=local", out)
+
+    def table_less(self, first: str = OVERVIEW, attest: bool = True) -> dict:
+        """A first round on an earlier head, then a round on this head stating nothing."""
+        rounds = [review(oid=OLD, body=first, rid="PRR_a"), review(body=OVERVIEW, rid="PRR_b")]
+        return self.into(payload(rounds, files=["a.md"]), attest=attest)
+
+    def test_an_attested_head_beside_a_table_less_round_is_covered(self) -> None:
+        """The round on the head states nothing and carries no table, so the attestation covers it."""
+        for cmd in (["status", "7"], ["wait", "7", "--timeout", "0"]):
+            with self.subTest(cmd=cmd[0]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.table_less())
+                calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(cmd))
+                self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+                out = self.out.getvalue()
+                self.assertIn("review_on_head=yes", out)
+                self.assertIn("coverage=local", out)
+                self.assertIn("COVERAGE IS READ FROM THE LOCAL PASS", out)
+                self.assertNotIn("COVERAGE_IS_UNSTATED", out)
+
+    def test_an_unattested_head_beside_a_table_less_round_stays_unstated(self) -> None:
+        self.answer(self.table_less(attest=False))
+        self.assertEqual(45, self.cli(["status", "7"]))
+        self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
+
+    def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_not_covered(self) -> None:
+        """A table naming fewer files than the diff is the round's own word that it skipped one."""
+        table = overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+            verdict="### Approval recommended",
+        ).replace("| a.py | Narrows the reader. |", "| `a.md` | Prose about the change. |")
+        rounds = [review(oid=OLD, body=OVERVIEW, rid="PRR_a"), review(body=table, rid="PRR_b")]
+        self.answer(self.into(payload(rounds, files=["a.md", "b.md"]), attest=True))
+        self.assertEqual(45, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("status=COVERAGE_IS_UNSTATED", out)
+        self.assertNotIn("coverage=local", out)
+
+    def test_a_partial_on_record_beside_a_table_less_round_is_not_covered(self) -> None:
+        """A round that read part of a diff sends the pull request to the maintainer."""
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        for cmd in (["status", "7"], ["wait", "7", "--timeout", "0"]):
+            with self.subTest(cmd=cmd[0]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.table_less(first=part))
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertNotEqual(0, self.cli(cmd))
+                self.assertNotIn("coverage=local", self.out.getvalue())
 
     def test_an_attested_head_with_a_check_running_at_the_timeout_is_pending(self) -> None:
         """Covered at once, the wait ended while CI ran and exit 0 read as a mergeable head."""
@@ -7618,7 +7989,7 @@ class TestCli(GqlCase):
         landed = self.into(payload(rounds, checks=[check()], files=[]))
         served = self.answer(held, held, landed, landed, self.into(payload(rounds, files=["a.py"])))
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
-        compare = subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), "")
+        compare = subprocess.CompletedProcess([], 0, json.dumps({"files": ["a.py"]}), "")
         with (
             mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
             mock.patch.object(pr_review, "gh_rest", return_value=compare),
@@ -7697,6 +8068,101 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(47, self.cli(["wait", "7", "--timeout", "1"]))
         self.assertNotIn("status=PENDING", self.out.getvalue())
+
+    def test_a_round_on_the_head_outranks_the_repo_wide_quota_reading(self) -> None:
+        """The 47 line says the head carries no Copilot review of its own, so it cannot fire
+        where the final read shows one. Three rounds sit on the pull request with a re-request
+        pending, the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine
+        round lands on the head mid-wait at a position `--min-rounds 4` does not credit. The
+        three sit on the head in the issue's example, and on a superseded head in the case only
+        the final read can catch. Each clock read advances 100 seconds, so one poll lands it and
+        the read after it is past the 150-second timeout. The opening shape is answered twice,
+        since the wait's liveness read and its snapshot each take one. The fourth round is stamped
+        before the refusal, so that the head alone is what rules 47 out.
+        """
+        for label, oid in (("on head", HEAD), ("superseded", OLD)):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                seen = [
+                    review(oid=oid, rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)
+                ]
+                fourth = review(rid="PRR_fourth", at="2026-08-02T10:20:00Z")
+                start = payload(seen, pending=True)
+                self.answer(start, start, payload([*seen, fourth]))
+                self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep"),
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", "4", "--timeout", "150"]
+                    self.assertEqual(30, self.cli(argv))
+                out = self.out.getvalue()
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+                self.assertIn("now has 4 rounds, up from 3", out)
+
+    def test_a_round_already_on_the_head_still_requests_and_polls(self) -> None:
+        """The reading assumes a head with no Copilot activity of its own, so a genuine round
+        there when the wait begins must not skip the request and the poll on it either. Skipped,
+        the wait ended at once on a bare pending line that no later wait would ever change.
+        """
+        self.answer(payload([review(at="2026-08-02T10:00:00Z")]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
+        self.assertIn("auto-request:", out)
+
+    def test_a_push_off_the_reviewed_head_keeps_the_repo_wide_quota_reading(self) -> None:
+        """A round on the head when the wait begins lets the request and poll run, but the
+        reading itself stands, since a push during the wait can leave the final head with no
+        Copilot activity of its own, which is exactly what 47 reports. The opening shape is
+        answered twice, since the wait's liveness read and its snapshot each take one.
+        """
+        start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
+        moved = payload([review(oid=OLD, at="2026-08-02T10:00:00Z")], pending=True)
+        self.answer(start, start, moved)
+        self.wire_history([hist_review(962, QUOTA_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(47, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        self.assertIn("status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+
+    def test_a_round_newer_than_the_refusal_answers_the_repo_wide_quota_reading(self) -> None:
+        """A review on this pull request newer than the refusal elsewhere answers it, the way
+        `quota_signal` reads one anywhere, even where a push left that review off the head. That
+        holds for a refusal other than the quota's too, since the reviewer ran to post it.
+        """
+        for label, body in (("genuine", None), ("file-count refusal", REFUSED)):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
+                newer = review(oid=OLD, rid="PRR_new", at=LATE)
+                if body is not None:
+                    newer = review(oid=OLD, rid="PRR_new", at=LATE, body=body)
+                moved = payload([review(oid=OLD, at="2026-08-02T10:00:00Z"), newer])
+                self.answer(start, start, moved)
+                self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+                argv = ["wait", "7", "--min-rounds", "1", "--timeout", "0"]
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(30, self.cli(argv))
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
+
+    def test_an_off_head_round_newer_than_the_refusal_opens_no_quota_stop(self) -> None:
+        """The opening read answers the refusal the way the final one does, from this pull
+        request's own reviews, since the history window can leave them out. Read only from the
+        history, the wait skipped the request and the poll, then ended at once on a bare 30.
+        """
+        self.answer(payload([review(oid=OLD, at=LATE)]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
+        self.assertIn("auto-request:", out)
 
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""
@@ -7903,6 +8369,15 @@ class TestCli(GqlCase):
         ]
         pr = self.into(payload(rounds), attest=True)
         self.assertFalse(pr_review.local_cover(pr))
+
+    def test_a_later_round_on_the_head_lets_an_attestation_past_a_spent_refusal(self) -> None:
+        rounds = [
+            review(oid=OLD, at=EARLY, rid="PRR_a"),
+            review(body=QUOTA_REFUSED, at="2026-08-02T10:30:00Z", rid="PRR_b"),
+            review(body=OVERVIEW, at=LATE, rid="PRR_c"),
+        ]
+        pr = self.into(payload(rounds), attest=True)
+        self.assertTrue(pr_review.local_cover(pr))
 
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"

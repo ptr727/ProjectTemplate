@@ -16,6 +16,7 @@ from subprocess import run
 from typing import NamedTuple
 
 from host_capability import bash_or_skip
+from workflow_steps import step_script_text
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -271,16 +272,7 @@ class ReleaseGuardCase(unittest.TestCase):
 
         marker = "    - name: Compute PyPI version step\n"
         self.assertIn(marker, action)
-        body = action.split(marker, 1)[1]
-        opener = re.search(r"(?m)^      run: \|-?\n", body)
-        self.assertIsNotNone(opener, "the version step's script must be a literal block scalar")
-        assert opener is not None
-        lines: list[str] = []
-        for line in body[opener.end() :].splitlines():
-            if line and not line.startswith(" " * 8):
-                break
-            lines.append(line[8:])
-        script = "\n".join(lines)
+        script = step_script_text(action, "Compute PyPI version step")
 
         with tempfile.TemporaryDirectory() as scratch:
             output = Path(scratch) / "output"
@@ -376,15 +368,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertLess(
             workflow.index(marker), workflow.index("      - name: Create GitHub release step\n")
         )
-        body = workflow.split(marker, 1)[1]
-        opener = re.search(r"(?m)^        run: \|-?\n", body)
-        assert opener is not None
-        lines: list[str] = []
-        for line in body[opener.end() :].splitlines():
-            if line and not line.startswith(" " * 10):
-                break
-            lines.append(line[10:])
-        script = "\n".join(lines)
+        script = step_script_text(workflow, "Supersede a release the token cannot tag step")
 
         plan = (REPO / ".github/workflows/publish-plan-task.yml").read_text(encoding="utf-8")
         allowed = set(re.findall(r'"\$ACTOR" == "([^"]+)"', plan))
@@ -561,16 +545,7 @@ class ReleaseGuardCase(unittest.TestCase):
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         marker = "      - name: Validate branch and version consistency step\n"
         self.assertIn(marker, workflow)
-        body = workflow.split(marker, 1)[1]
-        opener = re.search(r"(?m)^        run: \|-?\n", body)
-        self.assertIsNotNone(opener, "the gate's script must be a literal block scalar")
-        assert opener is not None
-        lines: list[str] = []
-        for line in body[opener.end() :].splitlines():
-            if line and not line.startswith(" " * 10):
-                break
-            lines.append(line[10:])
-        script = "\n".join(lines)
+        script = step_script_text(workflow, "Validate branch and version consistency step")
 
         def gate(branch: str, semver2: str, smoke: str = "false") -> tuple[int, str]:
             env = {**os.environ, "BRANCH": branch, "SEMVER2": semver2, "SMOKE": smoke}
@@ -1113,9 +1088,7 @@ gh() {
         The third value is what the step wrote to GITHUB_OUTPUT followed by every stub invocation.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
-        step = workflow.split(f"      - name: {step_name}\n", 1)[1]
-        body = step.split("        run: |\n", 1)[1].split("\n\n", 1)[0]
-        script = "\n".join(line[10:] for line in body.splitlines())
+        script = step_script_text(workflow, step_name)
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         work, stubs = root / "work", root / "bin"
         contents = tree if isinstance(tree, dict) else dict.fromkeys(tree, "")
@@ -1645,16 +1618,7 @@ gh() {
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
         marker = "      - name: Run unit tests step\n"
         self.assertIn(marker, job)
-        body = job.split(marker, 1)[1]
-        opener = re.search(r"(?m)^        run: \|-?\n", body)
-        self.assertIsNotNone(opener, "the step's script must be a literal block scalar")
-        assert opener is not None
-        lines: list[str] = []
-        for line in body[opener.end() :].splitlines():
-            if line and not line.startswith(" " * 10):
-                break
-            lines.append(line[10:])
-        script = "\n".join(lines)
+        script = step_script_text(job, "Run unit tests step")
 
         writers = {
             "report": 'mkdir -p ./coverage && echo "<coverage/>" > "./coverage/0f1e2d3c.cobertura.xml"',
@@ -1721,17 +1685,7 @@ gh() {
 
         marker = "      - name: Validate python-versions input step\n"
         self.assertIn(marker, job)
-        body = job.split(marker, 1)[1]
-        opener = re.search(r"(?m)^        run: \|-?\n", body)
-        self.assertIsNotNone(opener, "the guard's script must be a literal block scalar")
-        assert opener is not None
-        script = body[opener.end() :]
-        lines: list[str] = []
-        for line in script.splitlines():
-            if line and not line.startswith(" " * 10):
-                break
-            lines.append(line[10:])
-        script = "\n".join(lines)
+        script = step_script_text(job, "Validate python-versions input step")
         self.assertIn("jq -e", script)
         self.assertIn("::error::The python-versions input must be", script)
         guard_script = Path(self.enterContext(tempfile.TemporaryDirectory())) / "guard.sh"

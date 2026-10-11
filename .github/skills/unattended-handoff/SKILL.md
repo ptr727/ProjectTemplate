@@ -34,10 +34,11 @@ no reminder.
 ## The Three Seats
 
 - **The orchestrator** is the session this skill is invoked in. It resolves the repository once,
-  then only dispatches, reads one line back, and dispatches again. It reads no file, issue, diff,
-  or review, writes no handoff, and saves no memory. Everything it would learn by looking belongs
-  to a subagent that starts empty and is discarded after one round. Its cost stays flat because of
-  what it holds, whatever tier it runs on.
+  then only dispatches, reads one line back, and dispatches again, waiting out a dispatch that
+  fails per "The Loop". It reads no file, issue, diff, or review, writes no handoff, and saves no
+  memory. Everything it would learn by looking belongs to a subagent that starts empty and is
+  discarded after one round. Its cost stays flat because of what it holds, whatever tier it runs
+  on.
 - **The picker** is a subagent dispatched once per round. It chooses one handoff whose work needs
   no maintainer decision, creating one where none is waiting, and returns its number and track.
 - **The worker** is a subagent dispatched once per round on the handoff the picker returned. It
@@ -83,9 +84,10 @@ maintainer starts a second run on a repository only once the first has ended.
 ## The Loop
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
-invocation, which is the one command it runs. From then on it holds exactly four things. They are
-the scope and any `highest` the invocation named, the round count, the dispatched handoff numbers,
-and each round's one-line outcome.
+invocation. Apart from the timer "A Dispatch That Fails" names, that is the one command it runs.
+From then on it holds only the scope and any `highest` the invocation named, the round count, and
+the dispatched handoff numbers. It also holds each round's one-line outcome and the waits spent on
+a dispatch being retried.
 Each round runs:
 
 1. **Dispatch the picker** at `frontier` with the brief below, or at `highest` where the
@@ -102,10 +104,36 @@ Each round runs:
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
 
-The run ends at `NONE`, `STOP`, an unlisted reply, the round cap, or the repeat stop above. Its
-final message lists every round's outcome line, then the count of parked handoffs, and names the
+The run ends at `NONE`, `STOP`, an unlisted reply, the round cap, the repeat stop, or a dispatch
+failure per "A Dispatch That Fails". Its final message lists every round's outcome line, then the
+dispatch failure where one ended the run. It then gives the count of parked handoffs, and names the
 attended session (`session-handoff`, "resume the handoff") as where they get answered. It writes
 nothing else and asks nothing.
+
+### A Dispatch That Fails
+
+A dispatch can fail before its subagent starts, when the harness or a check in front of it returns
+an error instead. That is a state of the session rather than of any issue. No picker or worker line
+describes it, so the orchestrator handles it itself.
+
+- **An error naming a temporary condition is retried, where no subagent started.** The
+  orchestrator judges the condition from the error's own text, such as an overload, a rate limit,
+  or a check reporting a transient failure. A retry needs the dispatch mechanism to show that no
+  subagent started. A second seat on the same brief would duplicate the first one's work.
+  The orchestrator then waits on one bounded background timer of about ten minutes, such as a
+  backgrounded `sleep 600` whose exit wakes the session. It then dispatches the same brief again
+  unchanged. It spends at most three waits on one dispatch, and a dispatch that runs resets that
+  count.
+- **A dispatch that never ran was not dispatched.** A handoff number joins the dispatched ones only
+  once its worker runs. A worker brief retried this way therefore does not meet the repeat stop in
+  step 2.
+- **Anything else ends the run at a dispatch failure.** That covers an error naming no temporary
+  condition, an error leaving unclear whether a subagent started, and a dispatch still failing after
+  its third wait. It also covers a timer that cannot itself start, since an outage refusing every
+  call refuses the timer too. It is an end state of its own, apart from `STOP`, which only a
+  subagent returns. The final message names it in a line of its own, with the seat whose dispatch
+  failed and the error its last attempt returned. Where the timer could not start, that line also
+  carries the timer's own error.
 
 ### The Briefs
 
@@ -214,40 +242,55 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
-   an attended session has a closed predecessor holding that comment, so read the predecessor's
-   comments too. Where the parking comment names the decision issue the lane waits on, read the
-   answer recorded there and follow it, since it is what unblocked the lane. A lesson issue the
-   comment also names, per step 6, is its own work rather than this lane's, so the worker neither
-   follows it nor parks on it. Re-derive live state rather than trusting any of them, per
-   `session-handoff` "Resuming".
+   an attended session holds that comment in a closed link, further back where it parked more than
+   once, so walk it. List its links with `handoff.py chain --repo "<owner>/<repo>" --track
+   "<track>"`, raising `--limit` while its only notice names the `--limit` cap, and read each link
+   with `gh issue view "<n>" --repo "<owner>/<repo>" --json body,comments`, since `chain` prints one
+   summary line per link. Any other notice says the walk missed part of the lane, so it returns
+   `STOP`, as a nonzero exit from `chain` does. Where a parking comment names a decision issue the
+   lane waits on, read the answer recorded there and follow it, since it is what unblocked the lane.
+   A lesson issue the comment also names, per step 6, is its own work rather than this lane's, so
+   the worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
+   them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
    `drive-pr` to develop, its body carrying `Closes on promotion: #<issue>`. Every Merge Gate item
-   other than the permission still has to hold, on this pull request and on any promotion.
-   **Under `main` or `release`, check for a blocked promotion before opening or driving one.** Note
-   the time first, in UTC as `closedAt` reports it, so a decision closed while the read runs counts
-   as closed after it. Read the open `decision` issues under picker step 1's full-page check, with
-   `gh issue list --repo "<owner>/<repo>" --label decision --state open --limit 100 --json
+   other than the permission still has to hold, on this pull request and on any promotion. **Under
+   `main` or `release`, check for a blocked promotion before opening or driving one.** Note the time
+   first, in UTC as `closedAt` reports it, so a decision closed while the read runs counts as closed
+   after it. Read the open `decision` issues under picker step 1's full-page check, with `gh issue
+   list --repo "<owner>/<repo>" --label decision --state open --limit 100 --json
    number,body,comments`. Where one of them states, in its body or in a comment, that it blocks the
    open develop -> main pull request, as "Parking" step 2 has it state, the round narrows to
-   develop. The worker then merges, opens, and releases no promotion while that decision issue is
-   open. It instead brings that promotion's body up to a `Fixes` line for every issue develop
-   fixes, `#<issue>` included, per `backlog-burndown` "Assembling the Promotion Body", so each
-   closes when the promotion merges.
-   It then closes the lane out, naming the decision issue in the close-out comment. Where none
-   does, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
-   develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
-   under `main` and merging and releasing under `release`. **Repeat the blocked-promotion read
-   immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
-   included. Run it with `--state all` and with `state,closedAt` added to `--json`, never with a
-   `--search` query, since search can lag a close. Where one blocking that promotion is open, the
-   round narrows to develop as above. Where one blocking that promotion has a `closedAt` at or
-   after the time noted before the first read, park. That answer may not be to merge, so the
-   `decision` issue the park files asks whether it lets the promotion merge. Exit `45` on a
-   promotion blocks no merge where the promotion meets the one case `pr-review-conduct` Merge Gate
-   item 2 states. Such a promotion merges with no `decision` issue,
-   and the worker records that item's evidence on the handoff. Any other shortfall parks.
+   develop. **A lane parked on that promotion holds it until the lane closes, answered or not.** An
+   answer closes the decision issue and takes its label off, so the read above stops seeing it
+   before the lane holding the answer has applied it. Read the open handoffs under the same
+   full-page check, with `gh issue list --repo "<owner>/<repo>" --label handoff --state open --limit
+   100 --json number,body,comments`, and keep those on an `auto-*` track other than this worker's
+   own. A lane parked and handed back more than once holds the answer in an older link, so walk each
+   kept track back as step 1 walks the worker's own, reading every link's body and comments. A walk
+   step 1 would return `STOP` on is a read that cannot run. Where any of them names a decision issue
+   that states it blocks the open promotion, whatever that issue's state, the round narrows to
+   develop as well. The worker then merges, opens, and releases no promotion while either holds. It
+   instead brings that promotion's body up to a `Fixes` line for every issue develop fixes,
+   `#<issue>` included, per `backlog-burndown` "Assembling the Promotion Body", so each closes when
+   the promotion merges. It then closes the lane out, naming the decision issue in the close-out
+   comment. Where neither holds, continue to the promotion pull request, its body carrying a `Fixes`
+   line for every issue develop fixes, assembled per that same section, and hand it to
+   `merge-and-release`, merging only under `main` and merging and releasing under `release`. **A
+   read this step names that cannot run returns `STOP`** rather than continuing, since a read that
+   did not run shows nothing about whether the promotion is blocked. **Repeat both blocked-promotion
+   reads immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
+   included. Run the `decision` read with `--state all` and with `state,closedAt` added to `--json`,
+   never with a `--search` query, since search can lag a close. Where a `decision` issue blocking
+   that promotion is open, or the lane read finds the promotion held, the round narrows to develop.
+   Otherwise, where a `decision` issue blocking that promotion has a `closedAt` at or after the time
+   noted before the first read, park. That answer may not be to merge, so the `decision` issue the
+   park files asks whether it lets the promotion merge. Exit `45` on a promotion blocks no merge
+   where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a
+   promotion merges with no `decision` issue, and the worker records that item's evidence on the
+   handoff. Any other shortfall parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
    replies only after its reviewer has reported. It dispatches the reviewer in the background only
@@ -258,10 +301,15 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
-   retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks
-   only on a choice the maintainer alone can make. Anything with a determined outcome is applied,
-   or handed to the pull request's review as `local-strict-review` "Disposing of Findings" hands
-   it a spent edit budget's remaining findings.
+   retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks only
+   on a choice the maintainer alone can make, or on an action only the maintainer can take that
+   `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
+   requested, which its "Expected review loop" sends there. Two others it sends there return `STOP`
+   instead, since a later round on another issue would meet the same reviewer. One is a stall still
+   pending after the wait that follows clearing the request. The other is a wait ending
+   `REQUEST_NOT_RECORDED`, which that section reads as an exhausted reviewer allowance. Anything
+   with a determined outcome is applied, or handed to the pull request's review as
+   `local-strict-review` "Disposing of Findings" hands it a spent edit budget's remaining findings.
 6. **File any lesson for the maintainer.** A lesson a future agent must honor is rule text, which is
    the maintainer's to judge and no one is present to judge it, so file it as an issue carrying
    `decision`, stating the proposed rule and where it would go, with the choices as its options in
