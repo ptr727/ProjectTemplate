@@ -5402,7 +5402,7 @@ class TestCoverageExitCodes(GqlCase):
                 pr = payload([review(body=body)], files=files, more_files=more)
                 self.assertIn(reason, pr_review.table_shortfall(pr))
 
-    def test_the_unstated_message_names_splitting_for_a_list_past_the_window(self) -> None:
+    def test_the_unstated_message_names_splitting_for_a_list_past_the_ceiling(self) -> None:
         self.answer(
             payload([review(body=self.balanced(["a.md"]))], files=["a.md"], more_files=True)
         )
@@ -5904,7 +5904,7 @@ class TestTheRoundsOwnFileTable(GqlCase):
         self.assertIn("names 1 of the 3 changed files", out)
         self.assertIn("names no unread file", out)
 
-    def test_a_changed_file_list_the_window_cut_short_is_not_compared(self) -> None:
+    def test_a_changed_file_list_the_ceiling_cut_short_is_not_compared(self) -> None:
         """A path past GitHub's ceiling on the list reads exactly like a path the reviewer left out.
 
         Reading a list cut short there would name every file past the ceiling as unreviewed.

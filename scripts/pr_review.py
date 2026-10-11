@@ -2723,10 +2723,11 @@ def span_list(text: str) -> list[str]:
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
-    """The paths this pull request changes, and whether the query's window cut the list short.
+    """The paths this pull request changes, and whether GitHub's ceiling on the list cut it short.
 
-    Truncation is carried rather than hidden, since a path outside a short window reads exactly
-    like a path the reviewer left out of its table, and the two take opposite readings.
+    Truncation is carried rather than hidden, since a path past the ceiling reads exactly like a
+    path the reviewer left out of its table, and the two take opposite readings. A list
+    `page_files` left unread is carried under `FILES_UNREAD` instead.
     """
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
