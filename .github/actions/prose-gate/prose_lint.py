@@ -556,8 +556,8 @@ def scope_note(
     question about the second rather than about the first.
 
     A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
-    needs the parse ran. That rule reads such a file only in part, so a pass under an interpreter
-    older than the code it reads is otherwise the same line as a clean one.
+    needs the parse ran. That rule then reads the file by a line scan or not at all, so a pass
+    under an interpreter older than the code it reads is otherwise the same line as a clean one.
     """
     if base is None:
         note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
@@ -570,7 +570,7 @@ def scope_note(
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         note += (
             f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
-            f"so read only in part: {quoted(unparsed, 5)}"
+            f"so read without the parse a rule needed: {quoted(unparsed, 5)}"
         )
     return note
 
@@ -2024,11 +2024,13 @@ def python_comments(raw: str) -> list[Comment] | None:
     """Every comment in Python source, or None if it will not parse.
 
     `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
-    trailing comment is one a line-anchored pattern never sees.
+    trailing comment is one a line-anchored pattern never sees. A leading byte order mark is
+    dropped first, since it is not whitespace and would read a first-line comment as trailing.
     """
     out: list[Comment] = []
     try:
-        for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
+        source = io.StringIO(raw.removeprefix("\ufeff"))
+        for tok in tokenize.generate_tokens(source.readline):
             if tok.type == tokenize.COMMENT:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()

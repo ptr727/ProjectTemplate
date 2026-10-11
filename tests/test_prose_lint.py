@@ -2740,7 +2740,9 @@ class TestCli(unittest.TestCase):
             with self.subTest(rule=rule):
                 err = self.scope_line([bait], ["--check", rule])
                 self.assertIn("1 .py file(s) Python", err)
-                self.assertIn(f"cannot parse, so read only in part: {str(bait)!r}", err)
+                self.assertIn(
+                    f"cannot parse, so read without the parse a rule needed: {str(bait)!r}", err
+                )
 
     def test_a_python_file_that_tokenizes_but_does_not_parse_is_named_by_issue_ref_alone(
         self,
@@ -2753,23 +2755,28 @@ class TestCli(unittest.TestCase):
         so naming the file on its run would claim a skip that did not happen.
         """
         bait = self.bait("newer.py", self.UNPARSED)
-        self.assertIn("so read only in part", self.scope_line([bait], ["--check", "issue-ref"]))
-        self.assertNotIn("read only in part", self.scope_line([bait], ["--check", "comment-wrap"]))
+        self.assertIn(
+            "so read without the parse a rule needed",
+            self.scope_line([bait], ["--check", "issue-ref"]),
+        )
+        self.assertNotIn(
+            "read without the parse", self.scope_line([bait], ["--check", "comment-wrap"])
+        )
 
     def test_a_python_file_that_parses_is_not_named(self) -> None:
         clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
-        self.assertNotIn("read only in part", self.scope_line([clean], []))
+        self.assertNotIn("read without the parse", self.scope_line([clean], []))
 
     def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
         """A run reading the file only line by line lost nothing to the parse, so names nothing."""
         bait = self.bait("open.py", self.UNTOKENIZED)
-        self.assertNotIn("read only in part", self.scope_line([bait], ["--check", "dupword"]))
+        self.assertNotIn("read without the parse", self.scope_line([bait], ["--check", "dupword"]))
 
     def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
         """No rule reads a file the gate cannot decode, so no parse was refused on it."""
         latin = self.tmp / "latin.py"
         latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
-        self.assertNotIn("read only in part", self.scope_line([latin], []))
+        self.assertNotIn("read without the parse", self.scope_line([latin], []))
 
     def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
         """An editor-added mark parses on every interpreter, so its docstrings are still read.
@@ -2787,7 +2794,12 @@ class TestCli(unittest.TestCase):
         self.assertIn(
             "marked.py:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
         )
-        self.assertNotIn("read only in part", err.getvalue())
+        self.assertNotIn("read without the parse", err.getvalue())
+
+    def test_a_byte_order_mark_leaves_a_first_line_comment_leading(self) -> None:
+        """The mark is not whitespace, so read as code it made a first-line comment trailing."""
+        comments = prose_lint.python_comments("\ufeff# See the reason.\nx = 1\n")
+        self.assertEqual([(1, "See the reason.", True, "# See the reason.")], comments)
 
     def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
@@ -2804,7 +2816,7 @@ class TestCli(unittest.TestCase):
         ):
             err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
         self.assertIn("1 changed line(s)", err)
-        self.assertIn("so read only in part: 'open.py'", err)
+        self.assertIn("so read without the parse a rule needed: 'open.py'", err)
 
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
