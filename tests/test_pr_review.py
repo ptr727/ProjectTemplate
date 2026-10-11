@@ -7441,6 +7441,22 @@ class TestCli(GqlCase):
         self.assertEqual(45, self.cli(["status", "7"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
+    def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_not_covered(self) -> None:
+        """A table naming fewer files than the diff is the round's own word that it skipped one."""
+        table = overview_v2(
+            findings="**Findings:** None",
+            covers="",
+            effort="**Review effort:** Balanced",
+            entries=0,
+            verdict="### Approval recommended",
+        ).replace("| a.py | Narrows the reader. |", "| `a.md` | Prose about the change. |")
+        rounds = [review(oid=OLD, body=OVERVIEW, rid="PRR_a"), review(body=table, rid="PRR_b")]
+        self.answer(self.into(payload(rounds, files=["a.md", "b.md"]), attest=True))
+        self.assertEqual(45, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("status=COVERAGE_IS_UNSTATED", out)
+        self.assertNotIn("coverage=local", out)
+
     def test_a_partial_on_record_beside_a_table_less_round_is_not_covered(self) -> None:
         """A round that read part of a diff sends the pull request to the maintainer."""
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
