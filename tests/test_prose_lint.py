@@ -4053,13 +4053,15 @@ class TestDiffScopeFloor(unittest.TestCase):
         (self.tmp / "scripts").mkdir()
         changed = self.tmp / "scripts" / "tool.py"
         changed.write_text("# A clean comment.\n", encoding="utf-8")
+        narrowed = self.tmp / "catalog"
+        narrowed.mkdir()
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
             mock.patch.object(prose_lint, "discover", return_value=[]),
             mock.patch.object(prose_lint, "changed_lines", return_value={"scripts/tool.py": {1}}),
         ):
             self.assertEqual(
-                0, prose_lint.main(["--check", "dupword", "--diff", "HEAD", "catalog"])
+                0, prose_lint.main(["--check", "dupword", "--diff", "HEAD", str(narrowed)])
             )
 
     def test_an_excluded_file_is_not_counted_as_one_the_run_should_have_read(self) -> None:
