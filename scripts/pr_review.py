@@ -336,7 +336,7 @@ import sys
 import tarfile
 import time
 import unicodedata
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -769,12 +769,9 @@ HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
 # A test holds this equal to the number the queries carry, since a drift between them reads clean.
 WINDOW = 100
 
-# How many of the pull request's own changed files the full query asks for.
-# 100 is the connection's own ceiling, so a longer diff is truncated rather than paged.
-# A truncated list is reported as one and compared against nothing.
-# A path missing from a short window reads exactly like a path the reviewer left out.
-# The record holds a pull request of 301 changed files, so the truncation is reachable here.
 FILES_WINDOW = 100
+FILES_CAP = 3000
+FILES_UNREAD = "unread"
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
@@ -883,9 +880,15 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path } }
   }}}
 """.replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
+Q_FILES = """
+query($o:String!,$r:String!,$n:Int!,$after:String){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
+    files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path } }
+  }}}
+""".replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -1036,6 +1039,55 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
     return pr
+
+
+def follow(
+    query: str, owner: str, repo: str, num: int, connection: str, after: str | None = None
+) -> Iterator[dict]:
+    """Each page of the pull request's `connection`, from the one past `after` to the last.
+
+    One cursor walk for every paged read, so a fix to how a page is followed lands once.
+    """
+    while True:
+        extra: dict[str, str] = {"after": after} if after else {}
+        pr = gh_graphql(query, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"]
+        yield pr
+        page = pr[connection].get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            return
+        after = page["endCursor"]
+
+
+def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
+    """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
+
+    `FILES_WINDOW` is the connection's own ceiling on one page, so a longer list is paged.
+    `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
+    so a list reaching it stays marked as cut short. A page read at a head other than the first
+    page's leaves the list unread instead, under `FILES_UNREAD`, which `files_shortfall`
+    reports and `full_read` reads again. A list cut short or unread is compared against
+    nothing, where a list marked whole but missing a path reads exactly like a path the
+    reviewer left out. A page that fails to read ends the run as any other failed read does,
+    since that failure is already loud.
+    """
+    files = pr.get("files")
+    if not isinstance(files, dict):
+        return
+    page = files.get("pageInfo")
+    if not isinstance(page, dict) or page.get("hasNextPage") is not True:
+        return
+    nodes = files["nodes"]
+    for more in follow(Q_FILES, owner, repo, num, "files", page["endCursor"]):
+        if more["headRefOid"] != pr.get("headRefOid"):
+            files[FILES_UNREAD] = (
+                "the head moved while the changed-file list was paged, so the list describes "
+                "no one commit"
+            )
+            return
+        nodes.extend(more["files"]["nodes"])
+        if len(nodes) >= FILES_CAP:
+            return
+    files["pageInfo"] = {"hasNextPage": False}
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -1846,11 +1898,15 @@ def files_shortfall(pr: dict) -> str:
 
     One predicate for the table reading's reason and for `files_unread`'s re-read, so the two
     cannot disagree about which lists were read. A list the query cut short is not a shortfall
-    here, since that list was read, and `table_shortfall` names it separately.
+    here, since that list was read, and `table_shortfall` names it separately. A list
+    `page_files` left unread, a page arriving at another head, is one, since reading
+    again can answer it.
     """
     files = pr.get("files")
     if not isinstance(files, dict):
         return "the changed-file list is absent from the query, so the table has nothing to match"
+    if unread := files.get(FILES_UNREAD):
+        return f"{unread}, so the table cannot be matched against it"
     nodes = files.get("nodes")
     page = files.get("pageInfo")
     if (
@@ -1889,10 +1945,21 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     """The full payload, `pr` where one was read already, read again while `files_unread` holds.
 
     The whole payload is read again rather than the one connection. The digest and the exit code
-    then still come from one read of the pull request.
+    then still come from one read of the pull request. The changed-file list is paged here, on
+    `pr` and on each read again, rather than on every `Q_FULL` read, since this is the payload
+    the digest and the exit code read the list from, and a read deciding only a wait's next step
+    never looks at it. `pr` is a read `page_files` has not yet seen, which every caller passes.
     """
-    read = functools.partial(gql, Q_FULL, owner, repo, num)
-    return backoff(read() if pr is None else pr, read, files_unread, delays=READ_RETRY_DELAYS)
+
+    def read() -> dict:
+        fresh = gql(Q_FULL, owner, repo, num)
+        page_files(owner, repo, num, fresh)
+        return fresh
+
+    if pr is None:
+        return backoff(read(), read, files_unread, delays=READ_RETRY_DELAYS)
+    page_files(owner, repo, num, pr)
+    return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
 @functools.cache
@@ -2662,10 +2729,12 @@ def span_list(text: str) -> list[str]:
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
-    """The paths this pull request changes, and whether the query's window cut the list short.
+    """The paths this pull request changes, and whether that list is incomplete.
 
-    Truncation is carried rather than hidden, since a path outside a short window reads exactly
-    like a path the reviewer left out of its table, and the two take opposite readings.
+    Incomplete is a list cut short at GitHub's ceiling, and also one `page_files` left unread,
+    whose first page's `hasNextPage` still stands, `FILES_UNREAD` naming which of the two it is.
+    It is carried rather than hidden, since a path missing from the list reads exactly like a
+    path the reviewer left out of its table, and the two take opposite readings.
     """
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
@@ -2722,11 +2791,16 @@ def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
     if not named:
         return "no round covering this head carries a file table, so none of them locates the file"
     changed, truncated = changed_paths(pr)
-    if truncated or not changed:
+    unread = (pr.get("files") or {}).get(FILES_UNREAD)
+    if truncated or not changed or unread:
+        why = unread or (
+            f"the changed-file list reaching the {FILES_CAP} files GitHub lists"
+            if truncated
+            else "the changed-file list being absent from the query"
+        )
         return (
             f"the reviewer names {len(named)} entries in its own table and the diff could not "
-            f"be read back to compare them, the changed-file list being "
-            f"{'longer than the window this reads' if truncated else 'absent from the query'}"
+            f"be read back to compare them, {why}"
         )
     left, invented, ambiguous, noted = table_match(named, {bare_path(c) for c in changed})
     omitted = [p for p in changed if bare_path(p) in left]
@@ -2843,8 +2917,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     Empty where the table stands in, which is the coverage reading `table_reading` gives.
     Otherwise the reason, which the digest prints under an unstated head, since the remedies
     differ: a missing or mismatched table may be answered by another round, a changed-file list
-    longer than the window this reads by a push bringing it back within it, and a partial on
-    record by nothing but the maintainer's reading.
+    at GitHub's own ceiling by a split, and a partial on record by nothing but the maintainer's
+    reading.
 
     `named` is an earlier round's table where `table_reading` matches a carried one, and the
     head's own table otherwise. Every other check reads the pull request either way, since a
@@ -2870,9 +2944,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated:
         return (
-            f"the pull request changes more than the {FILES_WINDOW} files this reads, so the "
-            f"table cannot be compared against all of them until a push brings the pull request "
-            f"back within that window"
+            f"the pull request changes {FILES_CAP} files or more, GitHub's own ceiling on the "
+            f"changed-file list, so the table cannot be compared against all of them"
         )
     diff = {bare_path(p) for p in changed}
     if len(diff) != len(set(changed)):
@@ -3214,9 +3287,10 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that. Where the digest says the pull request changes more files than "
-            "this reads, the table cannot be matched at all, and splitting the pull request is "
-            "the remedy where it applies. "
+            "one cause of that, and the same holds where it says the head moved while the "
+            "changed-file list was paged. Where the digest names GitHub's "
+            "own ceiling on the changed-file list, the table cannot be matched at all, and "
+            "splitting the pull request is the remedy where it applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage or carrying a table only by chance. Past those, a develop -> "
             "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
@@ -3909,7 +3983,7 @@ def digest(
     `stalled` remains as an ignored compatibility parameter for callers that supplied the old
     pickup reading. GitHub's effort-labeled lifecycle makes that reading inconclusive.
     """
-    pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
+    pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -4538,17 +4612,9 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     no-match is indistinguishable from a thread that was already answered.
     """
     out: list[dict] = []
-    after = None
-    while True:
-        extra: dict[str, str] = {"after": after} if after else {}
-        conn = gh_graphql(Q_THREADS, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"][
-            "reviewThreads"
-        ]
-        out += open_threads(conn["nodes"])
-        page = conn.get("pageInfo") or {}
-        if not page.get("hasNextPage"):
-            return out
-        after = page["endCursor"]
+    for pr in follow(Q_THREADS, owner, repo, num, "reviewThreads"):
+        out += open_threads(pr["reviewThreads"]["nodes"])
+    return out
 
 
 def describe(thread: dict) -> str:
