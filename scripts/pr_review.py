@@ -3482,8 +3482,8 @@ def check_nodes(pr: dict) -> list[dict]:
     A readable node also carries `required`, true unless the rollup marks it `isRequired: false`,
     which `held_checks_open` and `wait`'s exit `44` decide on. A CheckRun also carries `app_id`, its
     app's database id, which a rule's `integration_id` is matched against. A StatusContext has none.
-    A node of an unrecognized union
-    member carries empty values for the four and an `unreadable` key naming its type instead.
+    A node of an unrecognized union member carries empty values for `name`, `state`, `conclusion`,
+    and `since`, and an `unreadable` key naming its type instead.
 
     A rollup carries two node shapes and they spell every field differently: a CheckRun has a
     `name`, a `status` and a `conclusion`, while a StatusContext has a `context` and a single
@@ -3679,10 +3679,9 @@ def held_checks_open(
 
     A BLOCKED merge also holds it, where the rollup was read whole, while a context the base
     branch's rules require is unmet by it, which `required` carries as (context, integration id)
-    pairs and `required_unmet` reads. The rollup
-    only knows the checks that have registered, so a push whose other workflows have not started
-    reads five of five passed and BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
-    holds nothing.
+    pairs and `required_unmet` reads. The rollup only knows the checks that have registered, so a
+    push whose other workflows have not started reads five of five passed and BLOCKED. An empty
+    `required` is a rules read that found nothing or did not happen, and it holds nothing.
     """
     if pr.get("state", "OPEN") != "OPEN":
         return False
@@ -5934,7 +5933,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
                 "timeout a check had not concluded, none had posted, a check the base branch "
-                "requires had not registered, or the merge was still UNKNOWN, so the merge is "
+                "requires had not registered or came from another app, or the merge was still UNKNOWN, so the merge is "
                 "not ready yet: wait again, or read the checks above"
                 + _unmet_note(required_for(final, owner, repo), checks)
             )

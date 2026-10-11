@@ -10292,6 +10292,19 @@ class TestRequiredContexts(unittest.TestCase):
             pr_review.held_checks_open(cut, pr_review.check_nodes(cut), now, 600, 3600, want)
         )
 
+    def test_the_rules_filter_projects_the_context_and_integration_id(self) -> None:
+        proc = subprocess.CompletedProcess([], 0, '{"n": 0, "c": []}', "")
+        with mock.patch.object(pr_review, "gh_rest", return_value=proc) as rest:
+            pr_review.required_contexts("o", "r", "develop")
+        jq = rest.call_args.args[1]
+        self.assertIn(".context", jq)
+        self.assertIn(".integration_id", jq)
+
+    def test_a_check_run_with_no_app_does_not_meet_an_app_bound_entry(self) -> None:
+        node = check(name="Gate")
+        node["checkSuite"]["app"] = None
+        self.assertTrue(self.held([node], ("Gate", 222)))
+
     def held(self, nodes: list[dict], entry: tuple[str, int | None]) -> bool:
         pr = payload([], merge="BLOCKED", checks=nodes)
         return pr_review.held_checks_open(
