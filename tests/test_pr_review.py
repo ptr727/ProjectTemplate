@@ -6844,27 +6844,32 @@ class TestCli(GqlCase):
                 else:
                     self.assertEqual([], status)
 
-    def test_min_rounds_prints_the_bare_pending_line_where_no_round_covers_the_head(self) -> None:
-        """The line naming the baseline says a round covers the head, which holds only where one
-        does. Here a round lands mid-wait, raising the count, but on a superseded head, so it
-        covers nothing. The timeout is then the ordinary bare `status=PENDING` rather than a
-        line claiming coverage. Each clock read advances 100 seconds, so one poll lands the
-        round and the read after it is past the 150-second timeout.
+    def test_min_rounds_keeps_the_bare_pending_line_unless_a_new_round_covers_head(self) -> None:
+        """The line naming the baseline says a round landing during the wait covers the head,
+        which holds only where one does. Here a round lands mid-wait, raising the count, but on a
+        superseded head, so it covers nothing. That holds whether no earlier round covers the
+        head or one does, the second being a caller who passed the right N and must not be told
+        to lower it. The timeout is then the ordinary bare `status=PENDING`. Each clock read
+        advances 100 seconds, so one poll lands the round and the read after it is past the
+        150-second timeout.
         """
-        stale = [review(oid=OLD)]
-        self.answer(
-            payload(stale, pending=True),
-            payload([*stale, review(oid=OLD, rid="PRR_two", at=LATE)]),
-        )
-        clock = itertools.count(0, 100).__next__
-        with (
-            mock.patch.object(pr_review.time, "sleep") as slept,
-            mock.patch.object(pr_review.time, "monotonic", clock),
-        ):
-            argv = ["wait", "7", "--min-rounds", "1", "--timeout", "150"]
-            self.assertEqual(30, self.cli(argv))
-        slept.assert_called_once()
-        self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
+        for label, before in (("uncovered", [review(oid=OLD)]), ("covered", [review()])):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(
+                    payload(before, pending=True),
+                    payload([*before, review(oid=OLD, rid="PRR_two", at=LATE)]),
+                )
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", "1", "--timeout", "150"]
+                    self.assertEqual(30, self.cli(argv))
+                slept.assert_called_once()
+                self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
 
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the

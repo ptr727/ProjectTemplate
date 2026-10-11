@@ -5764,11 +5764,11 @@ def main(argv: list[str] | None = None) -> int:
             "to poll this pull request's own head for the full --timeout"
         )
         return 47
-    rounds = len(reviewer_nodes(final, "reviews"))
-    if reviewed_head(final) and rounds > rounds_before:
+    if head_review_done(final, rounds_before):
+        rounds = len(reviewer_nodes(final, "reviews"))
         print(
             f"status=PENDING this pull request now has {rounds} rounds, up from "
-            f"{rounds_before} when this wait began, and a round covers this head, but "
+            f"{rounds_before} when this wait began, and one that landed covers this head, but "
             f"--min-rounds {a.min_rounds} waits for round {a.min_rounds + 1} or later and none "
             "past that position covers the head. N is the `rounds=` a `status` read before "
             "the re-request, so one above it waits for the round after the one the re-request "
