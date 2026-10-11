@@ -1566,13 +1566,13 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 # A pragma, shebang, or divider is machinery rather than prose.
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
-# `noqa` and `type: ignore` may also trail prose behind their own `#`, and `pylint:` anywhere.
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
     r"|(?:noqa|type:\s*ignore|pylint|shellcheck|cSpell|markdownlint|omit from toc|prettier|eslint"
     r"|SPDX|Copyright)\b)"
-    r"|#\s*(?:noqa|type:\s*ignore)\b|\bpylint:"
 )
+
+TRAILING_DIRECTIVE = re.compile(r"#\s*(?:noqa|type:\s*ignore)\b|\bpylint:")
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
 # It cannot be capitalized or restructured without corrupting the address it exists to carry.
@@ -2272,7 +2272,8 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_no = 0
-    for n, body, leading, _raw in comments:
+    for n, full_body, leading, _raw in comments:
+        body = without_trailing_directive(path, full_body)
         if (
             not body
             or n in configured
@@ -2352,6 +2353,25 @@ def is_tool_directive(body: str) -> bool:
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
 
 
+def without_trailing_directive(path: Path, body: str) -> str:
+    """The comment body with a directive a Python checker reads cut off its end.
+
+    A Python checker reads `noqa` and `type: ignore` behind their own `#` after prose on the same
+    line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to any
+    comment switch every comment rule off for that line. On a line holding only a comment the
+    directive can suppress nothing but findings about the comment itself, so the prose in front of
+    it is judged as prose. A body that is the directive and nothing else is left empty, and an empty
+    body is exempt.
+
+    No other language's checker reads these forms, so in any other file a mention of one is part of
+    the sentence holding it.
+    """
+    if path.suffix.lower() != ".py":
+        return body
+    match = TRAILING_DIRECTIVE.search(body)
+    return body[: match.start()].rstrip() if match else body
+
+
 def is_comment_prose(body: str) -> bool:
     """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
     return bool(
@@ -2428,7 +2448,7 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     for comment in bodies:
         n = comment.line
-        if n in seen or not is_comment_prose(comment.body):
+        if n in seen or not is_comment_prose(without_trailing_directive(path, comment.body)):
             continue
         seen.add(n)
         out.append(

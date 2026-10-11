@@ -1585,17 +1585,45 @@ class TestANamedToolIsStillProse(BaitCase):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
-    def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
-        """A checker reads these after prose on the same line, `noqa` and `type: ignore` behind a `#`."""
+    def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
+        """A Python checker reads the directive, and the prose in front of it is still prose."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for text, expected in (
+            ("# A new prose comment the reviewer never sees.  # noqa\n", ["comment-added"]),
+            ("# two sentences here. Another one follows.  # noqa: E501\n", both),
+            ("x = 1  # two sentences here. Another one follows.  # noqa\n", ["comment-wrap"]),
+            (
+                "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
+                ["comment-wrap"],
+            ),
+            ("# two sentences here. Another one follows.  # pylint: disable=no-member\n", both),
+            ("# two sentences here. Another one follows, pylint: disable=no-member\n", both),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
+        """Cutting the directive off leaves nothing to judge where the comment is only the directive."""
         for text in (
-            "# two sentences here. Another one follows.  # noqa: E501\n",
-            "x = 1  # two sentences here. Another one follows.  # noqa\n",
-            "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
-            "# two sentences here. Another one follows.  # pylint: disable=no-member\n",
-            "# two sentences here. Another one follows, pylint: disable=no-member\n",
+            "x = 1  # noqa\n",
+            "x = 1  # pylint: disable=no-member\n",
+            "x = 1  # type: ignore  # noqa: E501\n",
+            "# noqa: E501  # noqa\n",
+            "#  # noqa\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_is_prose_outside_python(self) -> None:
+        """No other language's checker reads these forms, so a mention of one is part of the sentence."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for name, text in (
+            ("a.toml", "# two sentences here. Each line carries a `# noqa` marker.\n"),
+            ("a.yml", "# two sentences here. Another one follows.  # noqa\n"),
+            ("run.sh", "# two sentences here. Another one follows, pylint: disable=no-member\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
         text = "# two sentences here. Another one follows.  # noqable\n"
