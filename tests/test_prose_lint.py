@@ -84,9 +84,8 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
 
 def workflow_step_script(name: str) -> str:
     """The `run` block of the validate-task workflow step called `name`, dedented as a runner reads it."""
-    workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-    _, body = workflow.split(f"      - name: {name}\n", 1)
-    _, block = body.split("        run: |\n", 1)
+    step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), name)
+    _, block = step.split("        run: |\n", 1)
     script_lines = []
     for line in block.splitlines():
         if line.startswith("          "):
@@ -5426,11 +5425,13 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     def test_the_gate_reads_the_resolved_base(self) -> None:
         """The resolution decides nothing unless the gate step consumes its output."""
         workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-        _, gate = workflow.split("      - name: Check prose step\n", 1)
-        self.assertIn(
-            "base: ${{ steps.prose-base.outputs.base }}", gate.split("      - name:", 1)[0]
+        self.assertEqual(
+            "${{ steps.prose-base.outputs.base }}",
+            yaml_value(yaml_step(workflow, "Check prose step"), "with", "base"),
         )
-        self.assertIn("        id: prose-base\n", workflow)
+        self.assertEqual(
+            "prose-base", yaml_value(yaml_step(workflow, "Resolve prose base step"), "id")
+        )
 
 
 class TestTheIssueRefRule(unittest.TestCase):
