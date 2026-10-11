@@ -2776,21 +2776,27 @@ class TestCli(unittest.TestCase):
                 with self.subTest(file=name, argv=argv):
                     err = self.scope_line([latin], argv)
                     self.assertIn(
-                        f"1 file(s) not readable as UTF-8, so no rule read them: "
+                        f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
                         f"{latin.as_posix()!r}",
                         err,
                     )
 
     def test_a_file_that_decodes_is_not_named_as_undecoded(self) -> None:
         clean = self.bait("clean.md", "Caf\u00e9 is fine.\n")
-        self.assertNotIn("not readable as UTF-8", self.scope_line([clean], []))
+        self.assertNotIn("could not open or decode", self.scope_line([clean], []))
 
-    def test_a_file_that_cannot_be_opened_is_collected_as_undecoded(self) -> None:
-        """A read failing after discovery skips the file the same way a failed decode does."""
-        undecoded: list[Path] = []
+    def test_a_file_that_cannot_be_opened_is_named_too(self) -> None:
+        """A read failing after discovery skips the file the same way a failed decode does.
+
+        The clause names both causes, so an open failure is not reported as an encoding one.
+        """
         absent = self.tmp / "absent.md"
-        self.assertEqual([], prose_lint.check_file(absent, {"dupword"}, undecoded=undecoded))
-        self.assertEqual([absent], undecoded)
+        err = self.scope_line([absent], ["--check", "dupword"])
+        self.assertIn(
+            f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+            f"{absent.as_posix()!r}",
+            err,
+        )
 
     def test_the_diff_scoped_line_names_an_undecoded_file_too(self) -> None:
         latin = self.tmp / "latin.md"
@@ -2801,7 +2807,7 @@ class TestCli(unittest.TestCase):
         ):
             err = self.scope_line([latin], ["--check", "dupword", "--diff", "HEAD"])
         self.assertIn("1 changed line(s)", err)
-        self.assertIn("not readable as UTF-8, so no rule read them: 'latin.md'", err)
+        self.assertIn("could not open or decode as UTF-8, so no rule read them: 'latin.md'", err)
 
     def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
         """An editor-added mark parses on every interpreter, so its docstrings are still read.

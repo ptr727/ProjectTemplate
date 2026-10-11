@@ -579,7 +579,7 @@ def scope_note(
         )
     if undecoded:
         note += (
-            f", {len(undecoded)} file(s) not readable as UTF-8, so no rule read them: "
+            f", {len(undecoded)} file(s) the gate could not open or decode as UTF-8, so no rule read them: "
             f"{quoted(undecoded, 5)}"
         )
     return note
