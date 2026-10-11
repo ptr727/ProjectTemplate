@@ -10365,7 +10365,11 @@ class TestAttest(unittest.TestCase):
 
         def gql(query: str, *_: object) -> dict:
             if query == pr_review.Q_ATTEST_BRANCH:
-                return {"headRefName": "feature", "headRepository": {"url": "https://x.test/o/r"}}
+                return {
+                    "state": "OPEN",
+                    "headRefName": "feature",
+                    "headRepository": {"url": "https://x.test/o/r"},
+                }
             return {**target, "headRefOid": next(replies, heads[-1])}
 
         self.slept: list[float] = []
@@ -10404,6 +10408,15 @@ class TestAttest(unittest.TestCase):
         self.assertGreater(sum(self.slept), 0)
         self.assertIn("had not registered it yet", self.out.getvalue())
         self.assertEqual([], self.posted)
+
+    def test_a_closed_pull_request_is_refused_without_waiting(self) -> None:
+        old = "d" * 40
+        replies = {"state": "MERGED", "headRefName": "feature", "headRepository": {"url": "u"}}
+        with mock.patch.object(pr_review, "gql", return_value=replies):
+            head, registered = pr_review.await_registered_head(
+                "o", "r", 7, self.dir, self.head, old
+            )
+        self.assertEqual((old, True), (head, registered))
 
     def test_a_head_that_moves_to_a_third_commit_is_not_called_unregistered(self) -> None:
         old, other = "d" * 40, "c" * 40

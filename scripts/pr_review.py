@@ -962,7 +962,7 @@ query($o:String!,$r:String!,$n:Int!){
 """
 Q_ATTEST_BRANCH = """
 query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefName headRepository{ url } } }}
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ state headRefName headRepository{ url } } }}
 """
 ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
@@ -3674,9 +3674,9 @@ def held_checks_open(
     reads UNKNOWN on it for good.
 
     A BLOCKED merge also holds it, where the rollup was read whole, while a context the base
-    branch's rules require is absent from it by exact name, which `required` carries. The rollup only knows the checks that have
-    registered, so a push whose other workflows have not started reads five of five passed and
-    BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
+    branch's rules require is absent from it by exact name, which `required` carries. The rollup
+    only knows the checks that have registered, so a push whose other workflows have not started
+    reads five of five passed and BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
     holds nothing.
     """
     if pr.get("state", "OPEN") != "OPEN":
@@ -5009,7 +5009,13 @@ def await_registered_head(
     """
     meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
-    if not ref or not source or UNSAFE_REF.search(ref) or DOT_SEGMENT.search(ref):
+    if (
+        meta.get("state") != "OPEN"
+        or not ref
+        or not source
+        or UNSAFE_REF.search(ref)
+        or DOT_SEGMENT.search(ref)
+    ):
         return head, True
     tip = _git(checkout, "ls-remote", source, f"refs/heads/{ref}")
     if tip.returncode != 0 or tip.stdout.split()[:1] != [local]:
