@@ -6846,12 +6846,24 @@ class TestCli(GqlCase):
 
     def test_min_rounds_prints_the_bare_pending_line_where_no_round_covers_the_head(self) -> None:
         """The line naming the baseline says a round covers the head, which holds only where one
-        does. A round on a superseded head covers nothing, so the timeout there is the ordinary
-        bare `status=PENDING` rather than a line claiming coverage.
+        does. Here a round lands mid-wait, raising the count, but on a superseded head, so it
+        covers nothing. The timeout is then the ordinary bare `status=PENDING` rather than a
+        line claiming coverage. Each clock read advances 100 seconds, so one poll lands the
+        round and the read after it is past the 150-second timeout.
         """
-        self.answer(payload([review(oid=OLD)], pending=True))
-        with mock.patch.object(pr_review.time, "sleep"):
-            self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
+        stale = [review(oid=OLD)]
+        self.answer(
+            payload(stale, pending=True),
+            payload([*stale, review(oid=OLD, rid="PRR_two", at=LATE)]),
+        )
+        clock = itertools.count(0, 100).__next__
+        with (
+            mock.patch.object(pr_review.time, "sleep") as slept,
+            mock.patch.object(pr_review.time, "monotonic", clock),
+        ):
+            argv = ["wait", "7", "--min-rounds", "1", "--timeout", "150"]
+            self.assertEqual(30, self.cli(argv))
+        slept.assert_called_once()
         self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
 
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:

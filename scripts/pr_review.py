@@ -5765,7 +5765,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 47
     rounds = len(reviewer_nodes(final, "reviews"))
-    if a.min_rounds and reviewed_head(final) and rounds > rounds_before:
+    if reviewed_head(final) and rounds > rounds_before:
         print(
             f"status=PENDING this pull request now has {rounds} rounds, up from "
             f"{rounds_before} when this wait began, and a round covers this head, but "
