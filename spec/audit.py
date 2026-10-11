@@ -2224,7 +2224,7 @@ CONCURRENCY_CALLERS = {
     ),
 }
 _RUN_ID_SUFFIX = re.compile(
-    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\(.*github\.actor.*\)\)"
+    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\(github\.actor!='[^']+'(?:&&github\.actor!='[^']+')*\)\)"
     r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
 )
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
@@ -6670,6 +6670,14 @@ def _selftest():
             re.sub(r"(?s)\nconcurrency:.*?cancel-in-progress: \w+\n", "\n", pub_text),
             1,
             "no concurrency block",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                "github.actor != 'dependabot[bot]'", "github.actor == 'dependabot[bot]'"
+            ),
+            1,
+            "an actor predicate that is not an exclusion list",
         ),
         (
             pub_path,
