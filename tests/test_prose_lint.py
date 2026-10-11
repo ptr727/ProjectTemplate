@@ -1552,6 +1552,12 @@ class TestANamedToolIsStillProse(BaitCase):
             ("# The noqa marker here is read per line.\n", ["comment-added"]),
             ("# Each type: ignore here names its code.\n", ["comment-added"]),
             ("# Bump to v2.3\n", ["comment-added"]),
+            # A name has to end where the directive's word does, so a longer word opening prose is prose.
+            (
+                "# noqable starts here. Another sentence.\n",
+                ["comment-wrap", "comment-case", "comment-added"],
+            ),
+            ("# eslintrc is read from the root.\n", ["comment-case", "comment-added"]),
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
@@ -1578,12 +1584,13 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
-        """`noqa`, `type: ignore`, and `pylint:` sit after prose on the same line, where a checker reads each."""
+        """A checker reads these after prose on the same line, `noqa` and `type: ignore` behind a `#`."""
         for text in (
             "# two sentences here. Another one follows.  # noqa: E501\n",
             "x = 1  # two sentences here. Another one follows.  # noqa\n",
             "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
             "# two sentences here. Another one follows.  # pylint: disable=no-member\n",
+            "# two sentences here. Another one follows, pylint: disable=no-member\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
@@ -5141,11 +5148,7 @@ class TestTheCommentAddedRule(BaitCase):
         )
 
     def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
-        """A case-insensitive filesystem hands the same file back under either spelling.
-
-        This rule alone. `comment_wrap_findings` still matches the suffix case-sensitively, which
-        is filed rather than fixed here, so the two rules read such a file differently.
-        """
+        """A case-insensitive filesystem hands the same file back under either spelling."""
         for name in ("mixed.py", "mixed.PY"):
             with self.subTest(name=name):
                 self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))

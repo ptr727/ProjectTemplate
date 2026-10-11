@@ -1566,11 +1566,12 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 # A pragma, shebang, or divider is machinery rather than prose.
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
-# `noqa`, `type: ignore`, and `pylint:` may also trail prose behind their own `#`, where a checker reads each.
+# `noqa` and `type: ignore` may also trail prose behind their own `#`, and `pylint:` anywhere, as checkers read them.
 NOT_PROSE = re.compile(
-    r"^(?:!|\s*[-=#*/<>]+\s*$|noqa|type:\s*ignore|pylint|ruff:|mypy:|flake8:|shellcheck"
-    r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright|v\d+(?:\.\d+)*$)"
-    r"|#\s*(?:(?:noqa|type:\s*ignore)\b|pylint:)"
+    r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|flake8:|v\d+(?:\.\d+)*$"
+    r"|(?:noqa|type:\s*ignore|pylint|shellcheck|cSpell|markdownlint|omit from toc|prettier|eslint"
+    r"|SPDX|Copyright)\b)"
+    r"|#\s*(?:noqa|type:\s*ignore)\b|\bpylint:"
 )
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
@@ -1667,6 +1668,7 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # A directive a tool reads, exempt because deleting one changes what the file does.
 # Anchored at the body's start, since a comment that merely names one of these is prose.
 # Read by `comment-added` alone rather than added to `NOT_PROSE`, which two gating rules share.
+# So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
     r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|nopep8\b"
