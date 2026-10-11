@@ -5488,6 +5488,7 @@ def main(argv: list[str] | None = None) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
+    rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
         full = gql(Q_FULL, owner, repo, a.number)
@@ -5763,14 +5764,15 @@ def main(argv: list[str] | None = None) -> int:
             "to poll this pull request's own head for the full --timeout"
         )
         return 47
-    if a.min_rounds and reviewed_head(final):
-        rounds = len(reviewer_nodes(final, "reviews"))
+    rounds = len(reviewer_nodes(final, "reviews"))
+    if a.min_rounds and reviewed_head(final) and rounds > rounds_before:
         print(
-            f"status=PENDING a round covers this head, but --min-rounds {a.min_rounds} waits "
-            f"for round {a.min_rounds + 1} or later and none of the {rounds} rounds on this "
-            "pull request past that position covers the head. N is the `rounds=` a `status` "
-            "read before the re-request, so one above it waits for the round after the one "
-            "the re-request was for"
+            f"status=PENDING this pull request now has {rounds} rounds, up from "
+            f"{rounds_before} when this wait began, and a round covers this head, but "
+            f"--min-rounds {a.min_rounds} waits for round {a.min_rounds + 1} or later and none "
+            "past that position covers the head. N is the `rounds=` a `status` read before "
+            "the re-request, so one above it waits for the round after the one the re-request "
+            "was for"
         )
         return 30
     print("status=PENDING")

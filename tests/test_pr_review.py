@@ -6808,7 +6808,7 @@ class TestCli(GqlCase):
         self.answer(payload([review()], pending=True))
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
-        self.assertIn("status=PENDING", self.out.getvalue())
+        self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
 
     def test_min_rounds_names_the_baseline_when_a_round_lands_mid_wait_below_it(self) -> None:
         """Three rounds already sit on the head, a `status` read of `rounds=3`, and a fourth
@@ -6839,8 +6839,8 @@ class TestCli(GqlCase):
                 ]
                 if code:
                     self.assertEqual(1, len(status))
+                    self.assertIn("now has 4 rounds, up from 3", status[0])
                     self.assertIn("--min-rounds 4 waits for round 5 or later", status[0])
-                    self.assertIn("none of the 4 rounds", status[0])
                 else:
                     self.assertEqual([], status)
 
