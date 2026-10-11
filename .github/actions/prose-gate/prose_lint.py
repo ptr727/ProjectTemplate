@@ -539,6 +539,7 @@ def scope_note(
     base: str | None,
     provenance: str,
     unparsed: list[str] | None = None,
+    undecoded: list[str] | None = None,
 ) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
@@ -559,6 +560,9 @@ def scope_note(
     reads Python through a parser ran. Such a rule reads that file by a line scan, not at all, or
     through a tokenizer older than its grammar, so a pass under an interpreter older than the code
     it reads is otherwise the same line as a clean one.
+
+    A file the gate cannot read as UTF-8 is named the same way. No rule reads it, so it is counted
+    among the files read while nothing in it was judged.
     """
     if base is None:
         note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
@@ -572,6 +576,11 @@ def scope_note(
         note += (
             f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
             f"so their comments and docstrings may be misread: {quoted(unparsed, 5)}"
+        )
+    if undecoded:
+        note += (
+            f", {len(undecoded)} file(s) not readable as UTF-8, so no rule read them: "
+            f"{quoted(undecoded, 5)}"
         )
     return note
 
@@ -2604,6 +2613,7 @@ def check_file(
     root: Path | None = None,
     allowed: set[int] | None = None,
     unparsed: list[Path] | None = None,
+    undecoded: list[Path] | None = None,
 ) -> list[tuple[int, str, str]]:
     """Every finding the rules in `rules` make on `path`.
 
@@ -2611,6 +2621,9 @@ def check_file(
     The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
     grammar can read a newer f-string as an open string and swallow the comments after it without
     refusing anything.
+
+    `undecoded` collects a file this function cannot read as UTF-8, whatever rules ran, since no
+    rule reads it and the file is otherwise counted as read with nothing found.
 
     A leading byte order mark is dropped once, here, since it is not whitespace and every reader
     that judges line 1's structure would read it as content. The character-set rule is given the
@@ -2620,6 +2633,8 @@ def check_file(
     try:
         decoded = path.read_bytes().decode("utf-8")
     except (UnicodeDecodeError, OSError):
+        if undecoded is not None:
+            undecoded.append(path)
         return out
     raw = decoded.removeprefix("\ufeff")
     if raw != decoded and {"charset", "charset-unknown"} & rules:
@@ -2953,9 +2968,10 @@ def main(argv: list[str] | None = None) -> int:
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
     refused: list[Path] = []
+    undecoded: list[Path] = []
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused, undecoded):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
@@ -2973,6 +2989,7 @@ def main(argv: list[str] | None = None) -> int:
             a.diff,
             gate_provenance(a.provenance),
             [keys[f] for f in refused],
+            [keys[f] for f in undecoded],
         ),
         file=sys.stderr,
     )
