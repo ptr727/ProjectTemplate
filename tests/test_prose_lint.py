@@ -2794,8 +2794,10 @@ class TestCli(unittest.TestCase):
         self.assertNotIn(baits[5].as_posix(), err)
 
     def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
+        """The environment override is cleared, since it stands `comment-added` down."""
         bait = self.bait("open.py", self.UNTOKENIZED)
         with (
+            mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}),
             mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
             mock.patch.object(prose_lint, "changed_lines", return_value={"open.py": {1}}),
         ):
