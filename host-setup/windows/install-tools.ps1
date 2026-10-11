@@ -421,9 +421,10 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # All winget reports is that the installer exited non-zero, with a code the installer chose, so the reason lives in that log and nowhere a person reads by default.
 # A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text, which is the whole reason, so an entry keeps its indented continuation lines rather than being read one line at a time.
 # Capped at the last few matches so a verbose MSI log cannot flood the console, with the log's own path printed beside them for the rest.
+# Whether files were in use is read from every entry before that cap, and the first such entry is kept in what is shown, so a run of later error and abort lines cannot push the actual reason out of the report.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
-    $result = @{ Log = $null; Entries = @() }
+    $result = @{ Log = $null; Entries = @(); InUse = $false }
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $result }
     $log = Get-ChildItem -LiteralPath $Directory -Filter "$Id.*.log" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | Select-Object -Last 1
@@ -437,7 +438,15 @@ function Get-InstallerFailureReason {
             $entries.Add(($line -replace '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+\s+', '').Trim())
         }
     }
-    $result.Entries = @($entries | Where-Object { $_ -match '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3' } | Select-Object -Last 4)
+    $inUsePattern = '(?i)process\(es\) use|in use by|used by another process'
+    $matched = @($entries | Where-Object { $_ -match '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3' -or $_ -match $inUsePattern })
+    $inUse = @($matched | Where-Object { $_ -match $inUsePattern })
+    $result.InUse = $inUse.Count -gt 0
+    $shown = @($matched | Select-Object -Last 4)
+    if ($result.InUse -and -not ($shown | Where-Object { $_ -match $inUsePattern })) {
+        $shown = @($inUse[0]) + @($matched | Select-Object -Last 3)
+    }
+    $result.Entries = $shown
     return $result
 }
 
@@ -469,9 +478,9 @@ function Get-InstallRoot {
 # Every running process whose executable sits inside the tree one tool installed, which is what an installer refusing over files in use is refusing over.
 # Matching the tool's own process name misses the helpers a tool ships and leaves running in the background, such as the GnuPG key daemon Git for Windows carries, which outlives the git command that started it and blocks Git's own upgrade.
 # Executable names the file to read the tree from where the probe sits outside it, as py does for Python: the launcher installs in a directory of its own, while what blocks an upgrade is the interpreter the line installed.
+# A process is matched by the probe's name only where no tree could be read, since once one is, a same-named process running from somewhere else, py.exe beside an upgraded Python line, holds nothing the installer replaces.
 function Get-ToolHolder {
     param([Parameter(Mandatory)][string]$Probe, [string]$Executable)
-    $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
     $source = $Executable
     if (-not $source) {
         $command = Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -484,7 +493,9 @@ function Get-ToolHolder {
     }
     $root = if ($item) { Get-InstallRoot -Path $item.FullName }
     if ($root) {
-        $holders += @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase) })
+        $holders = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase) })
+    } else {
+        $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
     }
     return , @($holders | Sort-Object Id -Unique)
 }
@@ -506,7 +517,7 @@ function Write-InstallFailure {
         }
     }
     if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
-    $logInUse = @($reason.Entries | Where-Object { $_ -match '(?i)process\(es\) use|in use by|used by another process' }).Count -gt 0
+    $logInUse = [bool]$reason.InUse
     # 0x8A150101 and 0x8A150103 are winget's own INSTALL_PACKAGE_IN_USE and INSTALL_FILE_IN_USE, which it returns where a manifest maps the installer's exit code to either.
     # 0x80070020 and 0x80070005 are ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED carried as an HRESULT.
     $codeInUse = ('0x{0:X8}' -f $Code) -in @('0x8A150101', '0x8A150103', '0x80070020', '0x80070005')

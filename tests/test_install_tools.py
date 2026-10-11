@@ -743,7 +743,7 @@ $case = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
 $results = [ordered]@{}
 foreach ($probe in $case.reasons) {
     $reason = Get-InstallerFailureReason -Id $probe.id -Since ([datetime]$probe.since) -Directory $case.directory
-    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{ log = [bool]$reason.Log; entries = @($reason.Entries) }
+    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{ log = [bool]$reason.Log; entries = @($reason.Entries); in_use = $reason.InUse }
 }
 $env:ProgramFiles = 'C:\PF'
 ${env:ProgramFiles(x86)} = 'C:\PF86'
@@ -753,6 +753,18 @@ $results['absent holders'] = @(
     (Get-ToolHolder -Probe 'no-such-tool-on-path').Count
     (Get-ToolHolder -Probe 'no-such-tool-on-path' -Executable '').Count
 )
+if ($IsWindows) {
+    # This harness runs as pwsh from a directory none of the containers above name, so the name fallback finds it, and a tree read from a file elsewhere does not.
+    $env:LOCALAPPDATA = Join-Path $case.directory 'LAD'
+    $elsewhere = Join-Path $env:LOCALAPPDATA 'Programs\Tool\tool.exe'
+    $byName = Get-ToolHolder -Probe 'pwsh'
+    $byTree = Get-ToolHolder -Probe 'pwsh' -Executable $elsewhere
+    $results['scoped holders'] = @(
+        [bool]($byName | Where-Object { $_.Id -eq $PID })
+        [bool]($byTree | Where-Object { $_.Id -eq $PID })
+        $byTree.Count
+    )
+}
 $before = [Console]::OutputEncoding
 $switchable = $true
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $before } catch { $switchable = $false }
@@ -794,7 +806,11 @@ function Get-ToolHolder {
 }
 $results = [ordered]@{}
 foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
-    $script:REASON = @{ Log = 'C:\log.log'; Entries = @($case.Value.entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') }) }
+    $script:REASON = @{
+        Log = 'C:\log.log'
+        Entries = @($case.Value.entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') })
+        InUse = [bool]($case.Value.PSObject.Properties['in_use'] -and $case.Value.in_use)
+    }
     if ($script:REASON.Entries.Count -eq 0) { $script:REASON.Log = $null }
     function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return $script:REASON }
     $script:LINES = @()
@@ -816,6 +832,14 @@ INNO_LOG = [
     "2026-01-02 03:04:06.002   Deinitializing Setup.",
 ]
 
+BUSY_LOG = [
+    "2026-01-02 03:04:05.100   The file is being used by another process.",
+    *(
+        f"2026-01-02 03:04:06.00{index}   Error {index}: rollback step failed."
+        for index in range(5)
+    ),
+]
+
 
 @unittest.skipUnless(
     shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
@@ -827,12 +851,18 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory, "Example.Tool.1.2.3-26-01-02-03-04-05.log")
             log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
+            busy = Path(directory, "Busy.Tool.1.0-26-01-02-03-04-05.log")
+            busy.write_text("\r\n".join([*BUSY_LOG, ""]), encoding="utf-8", newline="")
+            elsewhere = Path(directory, "LAD", "Programs", "Tool", "tool.exe")
+            elsewhere.parent.mkdir(parents=True)
+            elsewhere.write_bytes(b"")
             cases = {
                 "directory": directory,
                 "reasons": [
                     {"id": "Example.Tool", "since": "2000-01-01"},
                     {"id": "Example.Tool", "since": "2100-01-01"},
                     {"id": "Other.Tool", "since": "2000-01-01"},
+                    {"id": "Busy.Tool", "since": "2000-01-01"},
                 ],
                 "roots": [
                     "C:\\PF\\Git\\cmd\\git.exe",
@@ -863,13 +893,34 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     ),
                     "Failed to proceed to next wizard page; aborting.",
                 ],
+                "in_use": True,
+            },
+        )
+
+    def test_an_in_use_entry_survives_the_cap_on_later_errors(self) -> None:
+        self.assertEqual(
+            self.run_cases()["reason Busy.Tool 2000-01-01"],
+            {
+                "log": True,
+                "entries": [
+                    "The file is being used by another process.",
+                    "Error 2: rollback step failed.",
+                    "Error 3: rollback step failed.",
+                    "Error 4: rollback step failed.",
+                ],
+                "in_use": True,
             },
         )
 
     def test_a_log_older_than_the_attempt_or_for_another_id_is_not_read(self) -> None:
         results = self.run_cases()
-        self.assertEqual(results["reason Example.Tool 2100-01-01"], {"log": False, "entries": []})
-        self.assertEqual(results["reason Other.Tool 2000-01-01"], {"log": False, "entries": []})
+        unread = {"log": False, "entries": [], "in_use": False}
+        self.assertEqual(results["reason Example.Tool 2100-01-01"], unread)
+        self.assertEqual(results["reason Other.Tool 2000-01-01"], unread)
+
+    @unittest.skipUnless(sys.platform == "win32", "reads this host's own process list")
+    def test_a_same_named_process_outside_the_tree_is_not_a_holder(self) -> None:
+        self.assertEqual(self.run_cases()["scoped holders"], [True, False, 0])
 
     def test_the_install_root_is_the_containers_child_whichever_copy_resolved(self) -> None:
         self.assertEqual(
@@ -916,6 +967,7 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
         cases = {
             "in use": {
                 "entries": ["The following process(es) use Example Tool: helper.exe (PID 1234)"],
+                "in_use": True,
                 "code": INSTALLER_FAILED,
                 "executable": "",
             },
