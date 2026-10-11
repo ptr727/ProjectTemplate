@@ -1610,6 +1610,26 @@ class TestANamedToolIsStillProse(BaitCase):
         )
         self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
 
+    def test_what_is_left_before_a_directive_keeps_its_exemptions(self) -> None:
+        """The space in front of the directive is cut with it, so an address or a key is still exempt."""
+        for text in (
+            "# https://example.com/a/very/long/reference/path  # noqa: E501\n",
+            "# Note:  # noqa: E501\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_each_trailing_form_ends_what_is_judged(self) -> None:
+        """A sentence after the directive is cut with it, whichever form it is and however the suffix is cased."""
+        for name, text in (
+            ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
+            ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
     def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
         """What is left once the directive is cut is empty or a directive `NOT_PROSE` already exempts."""
         for text in (
@@ -1645,8 +1665,8 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
-        text = "# two sentences here. Another one follows.  # noqable\n"
-        self.assertIn("comment-wrap", self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+        text = "x = 1  # Read the row.  # noqable. Another one follows.\n"
+        self.assertEqual(["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
 
     def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
         """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
