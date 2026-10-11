@@ -5044,8 +5044,8 @@ def local_cover(pr: dict) -> bool:
     a head its writer attests, and only where nothing on record says any round read part of a
     diff and the whole review history is in view, the bound a file table stands in under. A fix
     push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal no later round on this head spends is Copilot's own word on it and
-    is never overruled.
+    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
+    overrules, and only a later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
