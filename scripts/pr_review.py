@@ -296,8 +296,8 @@ Subcommands
            on a held head covered by an attested local pass a 30 or a 44. A genuine round the
            final read shows on the head rules 47 out, and so does any review of this pull request
            on any head newer than the refusal other than a quota refusal, since it answers that
-           refusal as one anywhere in the repository would. One already on the head when the wait
-           begins leaves the request and the poll to run as usual.
+           refusal as one anywhere in the repository would. A genuine round already on the head
+           when the wait begins leaves the request and the poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -1237,7 +1237,8 @@ def standing_quota(
     Copilot activity of its own. This pull request's reviews are merged in rather than trusted to
     sit in `history`, which reads only the most recently updated pull requests, so a review of it
     on any head newer than the refusal answers that refusal as one anywhere else would. `wait`
-    reads this on its opening snapshot and on its final read, so the two cannot disagree.
+    reads this on its opening snapshot and on its final read, so both apply one rule, though a
+    push between them can change what the rule finds.
     """
     if reviewed_head(pr):
         return None
