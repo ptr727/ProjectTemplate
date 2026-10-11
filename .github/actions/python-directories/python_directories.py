@@ -23,6 +23,7 @@ GITHUB_OUTPUT. Exits 1 on a declaration naming a path that is not a tracked Pyth
 
 from __future__ import annotations
 
+import argparse
 import io
 import os
 import posixpath
@@ -30,7 +31,7 @@ import subprocess
 import sys
 import tomllib
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 UNCOVERED_SHOWN = 10
@@ -127,7 +128,10 @@ def uncovered(directories: list[str], tracked: list[str]) -> list[str]:
     ]
 
 
-def main() -> int:
+def main(argv: Sequence[str] = ()) -> int:
+    argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None).parse_args(
+        list(argv)
+    )
     # A tracked path need not be valid UTF-8, and a warning naming one must not crash the step it only warns in.
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(errors="backslashreplace")
@@ -187,4 +191,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

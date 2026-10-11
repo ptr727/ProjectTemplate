@@ -7,6 +7,7 @@ spec/secrets.json. Exits non-zero on any failure. This is the classification
 dry-run the CI lint job runs; it needs no third-party packages.
 """
 
+import argparse
 import collections
 import fnmatch
 import json
@@ -594,7 +595,10 @@ def utf8_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
-def main():
+def main(argv=()):
+    argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None).parse_args(
+        list(argv)
+    )
     utf8_console()
     errors = []
     repos = load("registry/repos.json")
@@ -1537,4 +1541,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

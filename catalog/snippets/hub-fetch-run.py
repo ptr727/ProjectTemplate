@@ -102,12 +102,16 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
     return out
 
 
+USAGE = "usage: hub-fetch-run.py <hub-relative-path> [script-args...]"
+
+
 def main(argv: list[str]) -> int:
-    if not argv:
-        print(
-            "hub-fetch-run: usage: hub-fetch-run.py <hub-relative-path> [script-args...]",
-            file=sys.stderr,
-        )
+    if argv[:1] in (["-h"], ["--help"]):
+        print(USAGE)
+        return 0
+    if not argv or argv[0].startswith("-"):
+        problem = f"unknown option {argv[0]!r}, " if argv else ""
+        print(f"hub-fetch-run: {problem}{USAGE}", file=sys.stderr)
         return 2
     hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
     is_prose_gate = hub_path == PROSE_GATE_PATH
