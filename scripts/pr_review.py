@@ -3986,7 +3986,7 @@ def digest(
     `stalled` remains as an ignored compatibility parameter for callers that supplied the old
     pickup reading. GitHub's effort-labeled lifecycle makes that reading inconclusive.
     """
-    pr = gql(Q_FULL, owner, repo, num) if pr is None else pr
+    pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")

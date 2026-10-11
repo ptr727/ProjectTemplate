@@ -5493,6 +5493,15 @@ class TestCoverageExitCodes(GqlCase):
         self.assertTrue(pr["files"]["pageInfo"]["hasNextPage"])
         self.assertEqual([], [c for c in calls if "after" in c])
 
+    def test_a_read_already_taken_is_paged_by_the_full_read(self) -> None:
+        """`wait` hands its own last read to the full read, which pages it rather than reading anew."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        calls = self.paged([(first, "c1"), (["d/x.md"], None)], first, [HEAD])
+        pr = pr_review.full_read("o", "r", 7, pr_review.gql(pr_review.Q_FULL, "o", "r", 7))
+        self.assertEqual(101, len(pr["files"]["nodes"]))
+        self.assertFalse(pr["files"]["pageInfo"]["hasNextPage"])
+        self.assertEqual(1, len([c for c in calls if "after" not in c and "n" in c]))
+
     def test_a_list_left_unread_by_a_push_is_read_again(self) -> None:
         """A push between pages is transient, so the full read is taken again and matches."""
         first = [f"d/f{i:03}.md" for i in range(100)]
