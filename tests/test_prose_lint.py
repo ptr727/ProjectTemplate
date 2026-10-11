@@ -2729,10 +2729,11 @@ class TestCli(unittest.TestCase):
     def test_a_python_file_no_rule_could_tokenize_is_named_by_every_comment_rule(self) -> None:
         """A file whose comments went unread is not a clean pass, so the scope line says so.
 
-        Each comment rule reads a `.py` through `tokenize`. On a file it refuses, `comment-wrap` and
-        `comment-case` fall back to a line scan, and `comment-added` and `issue-ref` read no comment. The run exited 0 with the scope line
-        a clean tree prints. No interpreter tokenizes the fixture, so the case holds whichever one
-        runs the suite. `comment-added` runs only under `--diff`, so its case is the diff-scoped one.
+        Each comment rule reads a `.py` through `tokenize`. On a file it refuses, `comment-wrap`
+        and `comment-case` fall back to a line scan, and `comment-added` and `issue-ref` read no
+        comment. The run exited 0 with the scope line a clean tree prints. No interpreter tokenizes
+        the fixture, so the case holds whichever one runs the suite. `comment-added` runs only
+        under `--diff`, so its case is the diff-scoped one.
         """
         bait = self.bait("open.py", self.UNTOKENIZED)
         for rule in ("comment-wrap", "comment-case", "issue-ref"):

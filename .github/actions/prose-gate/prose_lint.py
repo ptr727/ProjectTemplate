@@ -570,18 +570,9 @@ def scope_note(
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         note += (
             f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
-            f"so read only in part: {shortlist(unparsed)}"
+            f"so read only in part: {quoted(unparsed, 5)}"
         )
     return note
-
-
-def shortlist(names: list[str]) -> str:
-    """The first five names, quoted and joined, with a marker where the list ran longer.
-
-    Quoted for the reason `quoted` gives, and in the caller's order rather than sorted, since the
-    order is the one the run read the files in.
-    """
-    return ", ".join(repr(n) for n in names[:5]) + (" and more" if len(names) > 5 else "")
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -880,13 +871,17 @@ def comment_syntax_including_docs(path: Path) -> Syntax | None:
     return widened
 
 
-def quoted(paths) -> str:
+def quoted(paths, cap: int | None = None) -> str:
     """Paths as a sorted, quoted, comma-joined list for an error message.
 
     Quoted because a path holding a space or a comma is indistinguishable from two paths once
-    joined, which makes the message unreadable exactly when it names something unexpected.
+    joined, which makes the message unreadable exactly when it names something unexpected. With a
+    `cap`, only the first that many are listed, followed by a marker where the list ran longer.
     """
-    return ", ".join(repr(str(p)) for p in sorted(paths))
+    ordered = sorted(paths)
+    shown = ordered if cap is None else ordered[:cap]
+    more = " and more" if len(shown) < len(ordered) else ""
+    return ", ".join(repr(str(p)) for p in shown) + more
 
 
 def repo_root(path: Path) -> str:
@@ -2934,7 +2929,7 @@ def main(argv: list[str] | None = None) -> int:
         if scope and not matched:
             unread = unread_diff_files(scope, a.paths or ["."], tuple(a.exclude), scan_root)
             if unread:
-                shown = shortlist(unread)
+                shown = quoted(unread, 5)
                 print(
                     f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
                     f"this run was asked about, and the scan matched none of them: {shown}. "
