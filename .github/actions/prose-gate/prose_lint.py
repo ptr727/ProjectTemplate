@@ -1568,11 +1568,11 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
-    r"|(?:noqa|type:\s*ignore|pylint|shellcheck|cSpell|markdownlint|omit from toc|prettier|eslint"
-    r"|SPDX|Copyright)\b)"
+    r"|(?:(?i:noqa)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
+    r"|SPDX|Copyright)\b|(?i:cspell|spell-?checker):)"
 )
 
-TRAILING_DIRECTIVE = re.compile(r"#\s*(?:noqa|type:\s*ignore)\b|\bpylint:")
+TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa)|type:\s*ignore)\b|\bpylint:")
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
 # It cannot be capitalized or restructured without corrupting the address it exists to carry.
