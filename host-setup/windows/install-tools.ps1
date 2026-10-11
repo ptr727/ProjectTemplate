@@ -421,7 +421,7 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # All winget reports is that the installer exited non-zero, with a code the installer chose, so the reason lives in that log and nowhere a person reads by default.
 # A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text, which is the whole reason, so an entry keeps its indented continuation lines rather than being read one line at a time.
 # Capped at the last few matches so a verbose MSI log cannot flood the console, with the log's own path printed beside them for the rest.
-# Whether files were in use is read from every entry before that cap, and the first such entry is kept in what is shown, so a run of later error and abort lines cannot push the actual reason out of the report.
+# Whether files were in use is read from every entry before that cap, and an in-use entry is always among those shown, the first one put back where none survived the cap, so a run of later error and abort lines cannot push the actual reason out of the report.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
     $result = @{ Log = $null; Entries = @(); InUse = $false }
