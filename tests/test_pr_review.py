@@ -10255,6 +10255,27 @@ class TestRequiredContexts(unittest.TestCase):
         clean = {**pr, "mergeStateStatus": "CLEAN"}
         self.assertFalse(pr_review.held_checks_open(clean, nodes, now, 600, 3600, want))
 
+    def test_a_rollup_not_read_whole_never_holds_on_an_absent_context(self) -> None:
+        now = datetime.now(UTC)
+        want = frozenset({"Later"})
+        other = payload([], merge="BLOCKED", checks=[check()], rollup_oid="f" * 40)
+        self.assertFalse(
+            pr_review.held_checks_open(other, pr_review.check_nodes(other), now, 600, 3600, want)
+        )
+        cut = payload([], merge="BLOCKED", checks=[check()])
+        cut["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {
+            "hasNextPage": True
+        }
+        self.assertFalse(
+            pr_review.held_checks_open(cut, pr_review.check_nodes(cut), now, 600, 3600, want)
+        )
+
+    def test_the_rules_are_read_only_for_a_blocked_merge(self) -> None:
+        with mock.patch.object(pr_review, "gh_rest") as rest:
+            clean = payload([], merge="CLEAN", checks=[check()])
+            self.assertEqual(frozenset(), pr_review.required_for(clean, "o", "r"))
+        rest.assert_not_called()
+
 
 class TestAttest(unittest.TestCase):
     """A local pass is published only for the content the pull request's head carries."""
@@ -10383,6 +10404,12 @@ class TestAttest(unittest.TestCase):
         self.assertGreater(sum(self.slept), 0)
         self.assertIn("had not registered it yet", self.out.getvalue())
         self.assertEqual([], self.posted)
+
+    def test_a_head_that_moves_to_a_third_commit_is_not_called_unregistered(self) -> None:
+        old, other = "d" * 40, "c" * 40
+        self.assertEqual(67, self.lagging(self.head, [old, other]))
+        self.assertEqual(1, len(self.slept))
+        self.assertNotIn("had not registered", self.out.getvalue())
 
     def test_a_remote_tip_that_is_not_the_checkout_is_refused_at_once(self) -> None:
         old = "d" * 40

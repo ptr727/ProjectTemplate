@@ -3673,8 +3673,8 @@ def held_checks_open(
     the exit code is chosen by. A pull request no longer open has no merge left to move, and GitHub
     reads UNKNOWN on it for good.
 
-    A BLOCKED merge also holds it while a context the base branch's rules require is absent from the
-    rollup by exact name, which `required` carries. The rollup only knows the checks that have
+    A BLOCKED merge also holds it, where the rollup was read whole, while a context the base
+    branch's rules require is absent from it by exact name, which `required` carries. The rollup only knows the checks that have
     registered, so a push whose other workflows have not started reads five of five passed and
     BLOCKED. An empty `required` is a rules read that found nothing or did not happen, and it
     holds nothing.
@@ -3696,9 +3696,21 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    if merge == "BLOCKED" and required - {n["name"] for n in nodes if not n.get("unreadable")}:
+    if (
+        merge == "BLOCKED"
+        and not checks_unreadable(pr)
+        and not checks_truncated(pr)
+        and required - {n["name"] for n in nodes if not n.get("unreadable")}
+    ):
         return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+
+
+def required_for(pr: dict, owner: str, repo: str) -> frozenset[str]:
+    """The required contexts a BLOCKED merge can be short of, empty wherever none can matter."""
+    if pr.get("mergeStateStatus") != "BLOCKED":
+        return frozenset()
+    return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
 
 @functools.cache
@@ -3711,19 +3723,16 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[str] | None
     nothing being required. The read is one page of a hundred rules, and a full page is taken as
     possibly cut short and returned as None. Memoized for the run, which also prints the note once.
     """
-    proc = (
-        gh_rest(
+    safe = base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
+    read = (
+        reread_json(
             f"repos/{owner}/{repo}/rules/branches/{base}?per_page=100",
             '{n: length, c: [.[] | select(.type=="required_status_checks")'
             " | .parameters.required_status_checks[].context]}",
         )
-        if base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
+        if safe
         else None
     )
-    try:
-        read = json.loads(proc.stdout) if proc is not None and proc.returncode == 0 else None
-    except ValueError:
-        read = None
     answer = read if isinstance(read, dict) else {}
     contexts = answer.get("c")
     if (
@@ -5005,10 +5014,13 @@ def await_registered_head(
     tip = _git(checkout, "ls-remote", source, f"refs/heads/{ref}")
     if tip.returncode != 0 or tip.stdout.split()[:1] != [local]:
         return head, True
+    first = head
     for delay in ATTEST_HEAD_DELAYS:
         time.sleep(delay)
         head = (gql(Q_ATTEST_TARGET, owner, repo, num) or {}).get("headRefOid") or head
         if head == local:
+            return head, True
+        if head != first:
             return head, True
     return head, False
 
@@ -5774,7 +5786,7 @@ def main(argv: list[str] | None = None) -> int:
                     datetime.now(UTC),
                     a.check_grace,
                     a.check_stall,
-                    required_contexts(owner, repo, polled.get("baseRefName") or "") or frozenset(),
+                    required_for(polled, owner, repo),
                 )
             )
 
@@ -5869,12 +5881,13 @@ def main(argv: list[str] | None = None) -> int:
             now,
             a.check_grace,
             a.check_stall,
-            required_contexts(owner, repo, final.get("baseRefName") or "") or frozenset(),
+            required_for(final, owner, repo),
         ):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, none had posted, or the merge was still "
-                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
+                "timeout a check had not concluded, none had posted, a check the base branch "
+                "requires had not registered, or the merge was still UNKNOWN, so the merge is "
+                "not ready yet: wait again, or read the checks above"
             )
             return 30
         # The review loop closing is not the merge gate, and 0 alone was saying it was.
