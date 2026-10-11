@@ -2749,6 +2749,37 @@ class TestCommentSentenceLength(BaitCase):
             [(1, "sentence-length")], self.found(f"# Intro {half}\n#     {half}.\n", "bait.sh")
         )
 
+    def test_a_stray_carriage_return_does_not_crash_the_docstring_reader(self) -> None:
+        text = 'x = 1  # a\rb\ndef f():\n    """Doc."""'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_docstring_opening_on_the_def_line_keeps_its_paragraphs_prose(self) -> None:
+        text = f'class A:\n    def f(self): """Summary.\n\n        {self.over()}\n        """\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_google_leads_with_stars_or_nested_types_are_no_words(self) -> None:
+        for lead in ("*args", "**kw", "x (tuple(int, int))"):
+            with self.subTest(lead=lead):
+                text = f'def f() -> None:\n    """S.\n\n    Args:\n        {lead}: {self.at_cap()}\n    """\n'
+                self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_google_parameters_and_return_headers_open_prose_sections(self) -> None:
+        for header in ("Parameters", "Return", "Raise"):
+            with self.subTest(header=header):
+                text = f'def f() -> None:\n    """S.\n\n    {header}:\n        x: {self.over()}\n    """\n'
+                self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_sentence_after_a_blank_line_is_prose(self) -> None:
+        text = (
+            'def f(x: int) -> int:\n    """S.\n\n    Parameters\n    ----------\n'
+            f'    x : int\n        Short.\n\n    {self.over()}\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_an_indented_bullet_under_a_colon_comment_is_a_list_not_code(self) -> None:
+        text = f"# The script does the following:\n#     - {self.over()}\n"
+        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.sh"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.

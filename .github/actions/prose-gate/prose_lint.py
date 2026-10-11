@@ -1917,8 +1917,7 @@ def sentence_length_findings(
             flush()
             in_table = False
             continue
-        expanded = line.expandtabs(4)
-        indent = len(expanded) - len(expanded.lstrip(" "))
+        indent = leading_indent(line)
         if in_code:
             if indent >= code_indent:
                 continue
@@ -2527,8 +2526,8 @@ def python_tree(raw: str) -> ast.Module | None:
         return None
 
 
-def python_docstrings(raw: str, lines: list[str]) -> list[dict[int, str]]:
-    """Each docstring as its own map of source line to the docstring text on that line.
+def python_docstrings(raw: str, lines: list[str]) -> list[tuple[int, dict[int, str]]]:
+    """Each docstring as the column its quotes open at and a map of line to its text on that line.
 
     `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
     where it opens a body, and a docstring's own text may hold one. Empty where the source will
@@ -2542,7 +2541,7 @@ def python_docstrings(raw: str, lines: list[str]) -> list[dict[int, str]]:
     tree = python_tree(raw)
     if tree is None:
         return []
-    out: list[dict[int, str]] = []
+    out: list[tuple[int, dict[int, str]]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -2563,14 +2562,16 @@ def python_docstrings(raw: str, lines: list[str]) -> list[dict[int, str]]:
             end = first.end_col_offset if n == last and first.end_col_offset is not None else None
             start = first.col_offset if n == first.lineno else 0
             spans[n] = data[start:end].decode("utf-8", "replace")
-        out.append(spans)
+        if spans:
+            prefix = lines[first.lineno - 1].encode("utf-8")[: first.col_offset]
+            out.append((len(prefix.decode("utf-8", "replace").expandtabs(4)), spans))
     return out
 
 
 def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """Each source line a docstring occupies, mapped to the docstring text on that line."""
     out: dict[int, list[str]] = {}
-    for spans in python_docstrings(raw, lines):
+    for _column, spans in python_docstrings(raw, lines):
         for n, text in spans.items():
             out.setdefault(n, []).append(text)
     return out
@@ -2710,9 +2711,9 @@ NUMPY_STRUCTURED = frozenset(
     }
 )
 GOOGLE_HEADER = re.compile(
-    r"^\s*(?:Args|Arguments|Keyword Args|Keyword Arguments|Attributes|Raises|Returns|Yields):\s*$"
+    r"^\s*(?:Args|Arguments|Keyword Args|Keyword Arguments|Parameters|Other Parameters|Attributes|Raise|Raises|Return|Returns|Warns|Yield|Yields|Methods):\s*$"
 )
-GOOGLE_ENTRY = re.compile(r"^\s*\w[\w.*]*(?:\s*\([^)]*\))?:\s+(?=\S)")
+GOOGLE_ENTRY = re.compile(r"^\s*\*{0,2}\w[\w.]*(?:\s*\(.*?\))?:\s+(?=\S)")
 FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
 
 
@@ -2761,7 +2762,8 @@ def comment_sentence_findings(
         fresh = not leading or n != prev_no + 1
         if fresh:
             in_code = prev_colon = False
-        if not fresh and (in_code or prev_colon) and indented_past(indent, reference):
+        opens = prev_colon and not LIST_MARKER.match(body)
+        if not fresh and (in_code or opens) and indented_past(indent, reference):
             flush()
             in_code = True
             prev_no = n
@@ -2779,7 +2781,7 @@ def comment_sentence_findings(
     return out
 
 
-def docstring_indent(line: str) -> int:
+def leading_indent(line: str) -> int:
     """The columns of leading space on a source line, tabs read as four."""
     expanded = line.expandtabs(4)
     return len(expanded) - len(expanded.lstrip(" "))
@@ -2793,15 +2795,15 @@ def docstring_sentence_findings(
     Each docstring is one string node, so adjacent ones are judged apart.
     """
     out: list[tuple[int, str, str]] = []
-    for spans in python_docstrings(raw, lines):
-        out.extend(one_docstring_findings(spans, lines, allowed))
+    for column, spans in python_docstrings(raw, lines):
+        out.extend(one_docstring_findings(column, spans, allowed))
     return out
 
 
 def one_docstring_findings(
-    spans: dict[int, str], lines: list[str], allowed: set[int] | None
+    base: int, spans: dict[int, str], allowed: set[int] | None
 ) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in one docstring, given its source lines.
+    """Over-cap sentences in one docstring opening at column `base`.
 
     A blank docstring line ends a paragraph, as a blank line does in Markdown.
     A doctest and the output under it, and an indented code block, are code and are not counted.
@@ -2815,7 +2817,6 @@ def one_docstring_findings(
     texts = [spans[n].expandtabs(4) for n in group]
     texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
     texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
-    base = docstring_indent(lines[group[0] - 1])
     block: list[tuple[int, str]] = []
 
     def flush() -> None:
@@ -2857,7 +2858,7 @@ def one_docstring_findings(
             continue
         if section == "google" and indent <= base:
             section, code_at = "", base
-        if section == "numpy" and indent <= base:
+        if section == "numpy" and indent <= base and not text.rstrip().endswith((".", "!", "?")):
             flush()
             in_doctest = in_code = False
             prev_blank = prev_colon = False
