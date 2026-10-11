@@ -1555,24 +1555,20 @@ def stopping_refusal(pr: dict) -> dict | None:
 
 
 def refusing_review(pr: dict) -> dict | None:
-    """The reviewer's newest refusal carrying the current head, where one is there.
+    """The reviewer's newest review carrying the current head, where that review is a refusal.
 
     Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
     a push retires it, and the round the push raises either reviews that head or refuses it in
     its own right.
 
-    A refusal alongside a genuine review of the same head is spent too, and that is the caller's
-    reading rather than this one's, since what spends it is coverage this cannot see from a
-    refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
-    here, and the digest reports the field only where nothing covers the head.
+    A genuine round on the same head after the refusal spends it, so the newest review on the
+    head is the one read rather than the newest refusal.
     """
     head = pr["headRefOid"]
-    refusals = [
-        n
-        for n in reviewer_nodes(pr, "reviews")
-        if (n.get("commit") or {}).get("oid") == head and refusal_of(n)
-    ]
-    return newest_of(refusals)
+    newest = newest_of(
+        [n for n in reviewer_nodes(pr, "reviews") if (n.get("commit") or {}).get("oid") == head]
+    )
+    return newest if newest is not None and refusal_of(newest) else None
 
 
 def newest_of(nodes: list[dict]) -> dict | None:
@@ -5048,7 +5044,8 @@ def local_cover(pr: dict) -> bool:
     a head its writer attests, and only where nothing on record says any round read part of a
     diff and the whole review history is in view, the bound a file table stands in under. A fix
     push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
+    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
+    overrules, and only a later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
