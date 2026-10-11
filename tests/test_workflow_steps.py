@@ -34,6 +34,10 @@ class StepScriptCase(unittest.TestCase):
         text = WORKFLOW.replace("run: |", "run: |-")
         self.assertEqual("echo second", step_script_text(text, "Second step").strip())
 
+    def test_keep_chomp_indicator_is_read(self) -> None:
+        text = WORKFLOW.replace("run: |", "run: |+")
+        self.assertEqual("echo second", step_script_text(text, "Second step").strip())
+
     def test_run_key_nested_under_another_key_is_not_the_steps(self) -> None:
         text = "- name: A\n  with:\n    run: |\n      echo nested\n"
         with self.assertRaises(AssertionError):
