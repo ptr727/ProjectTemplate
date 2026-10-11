@@ -15,6 +15,7 @@ import argparse
 import contextlib
 import inspect
 import io
+import itertools
 import json
 import os
 import re
@@ -6808,6 +6809,40 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
         self.assertIn("status=PENDING", self.out.getvalue())
+
+    def test_min_rounds_names_the_baseline_when_a_round_lands_mid_wait_below_it(self) -> None:
+        """Three rounds already sit on the head, a `status` read of `rounds=3`, and a fourth
+        lands while the wait polls. N is the count already seen, so `--min-rounds 3` returns on
+        that fourth round. One above it, `--min-rounds 4`, waits for a fifth and reaches its
+        timeout, which a bare `status=PENDING` reported exactly like a round that never landed.
+        The line names the position it waits for instead, so a caller can tell the two apart.
+        Each clock read advances 100 seconds, so one poll lands the fourth round and the read
+        after it is past the 150-second timeout.
+        """
+        seen = [review(rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)]
+        fourth = review(rid="PRR_fourth", at=LATE)
+        for baseline, code in ((3, 0), (4, 30)):
+            with self.subTest(min_rounds=baseline):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(payload(seen, pending=True), payload([*seen, fourth]))
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", str(baseline), "--timeout", "150"]
+                    self.assertEqual(code, self.cli(argv))
+                slept.assert_called_once()
+                status = [
+                    line for line in self.out.getvalue().splitlines() if line.startswith("status=")
+                ]
+                if code:
+                    self.assertEqual(1, len(status))
+                    self.assertIn("--min-rounds 4 waits for round 5 or later", status[0])
+                    self.assertIn("none of the 4 rounds", status[0])
+                else:
+                    self.assertEqual([], status)
 
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
