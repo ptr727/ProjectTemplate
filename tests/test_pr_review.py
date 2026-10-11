@@ -7991,6 +7991,19 @@ class TestCli(GqlCase):
                     self.assertEqual(30, self.cli(argv))
                 self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", self.out.getvalue())
 
+    def test_an_off_head_round_newer_than_the_refusal_opens_no_quota_stop(self) -> None:
+        """The opening read answers the refusal the way the final one does, from this pull
+        request's own reviews, since the history window can leave them out. Read only from the
+        history, the wait skipped the request and the poll, then ended at once on a bare 30.
+        """
+        self.answer(payload([review(oid=OLD, at=LATE)]))
+        self.wire_history([hist_review(962, QUOTA_REFUSED, at="2026-08-02T10:30:00Z")])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertNotIn("note: the reviewer's own most recent activity", out)
+        self.assertIn("auto-request:", out)
+
     def test_an_unrecognized_shape_ends_the_held_poll_at_once(self) -> None:
         """The 43 outranks every check reading, so polling the checks cannot change it."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))

@@ -1179,8 +1179,8 @@ def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, 
 def history_entry(number: int, node: dict, kind: str) -> tuple[int, dict]:
     """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged.
 
-    Shared with `wait`'s final quota reading, which merges this pull request's own reviews into
-    the history it read, so the two can never spell the entry differently.
+    Shared with `standing_quota`, which merges this pull request's own reviews into the history
+    `wait` read, so the two can never spell the entry differently.
     """
     stamp = node.get("submittedAt" if kind == "review" else "createdAt") or ""
     return number, {**node, "_at": stamp, "_kind": kind}
@@ -1226,6 +1226,23 @@ def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
     """
     newest = history[0] if history else None
     return newest if newest and quota_refusal(newest[1]) else None
+
+
+def standing_quota(
+    history: list[tuple[int, dict]], pr: dict, number: int
+) -> tuple[int, dict] | None:
+    """`quota_signal` over `history` as this pull request's own read leaves it, or None.
+
+    None where a genuine round covers the head, since the reading is about a head carrying no
+    Copilot activity of its own. This pull request's reviews are merged in rather than trusted to
+    sit in `history`, which reads only the most recently updated pull requests, so a review of it
+    on any head newer than the refusal answers that refusal as one anywhere else would. `wait`
+    reads this on its opening snapshot and on its final read, so the two cannot disagree.
+    """
+    if reviewed_head(pr):
+        return None
+    own = [history_entry(number, n, "review") for n in reviewer_nodes(pr, "reviews")]
+    return quota_signal(newest_first([*history, *own]))
 
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
@@ -5520,7 +5537,9 @@ def main(argv: list[str] | None = None) -> int:
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
-    quota_stop = signal if snapshot is None or not reviewed_head(snapshot) else None
+    quota_stop = (
+        None if not signal or snapshot is None else standing_quota(history, snapshot, a.number)
+    )
     stopped = (
         None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
     )
@@ -5768,9 +5787,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    own = [history_entry(a.number, n, "review") for n in reviewer_nodes(final, "reviews")]
-    if signal and not reviewed_head(final) and quota_signal(newest_first([*history, *own])):
-        number, hist_refusal = signal
+    if signal and (standing := standing_quota(history, final, a.number)):
+        number, hist_refusal = standing
         print(
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
             f"Copilot review or comment of its own, and the reviewer's own most recent activity "
