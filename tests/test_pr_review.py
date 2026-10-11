@@ -500,6 +500,8 @@ class GqlCase(unittest.TestCase):
         # Without this a case inherits another's compares and the suite becomes order-dependent.
         pr_review.changed_at.cache_clear()
         self.addCleanup(pr_review.changed_at.cache_clear)
+        pr_review.tree_changed_at.cache_clear()
+        self.addCleanup(pr_review.tree_changed_at.cache_clear)
         pr_review.run_cause.cache_clear()
         self.addCleanup(pr_review.run_cause.cache_clear)
         self.enterContext(
@@ -2744,7 +2746,8 @@ class CarryCase(GqlCase):
                 names = at.get(path.rsplit("...", 1)[-1])
                 if names is None:
                     return subprocess.CompletedProcess([], 1, "", "no read for this commit")
-                return subprocess.CompletedProcess([], 0, json.dumps(names), "")
+                shape = {"files": names, "merge_base": "c" * 40}
+                return subprocess.CompletedProcess([], 0, json.dumps(shape), "")
             return subprocess.CompletedProcess([], 0, "1 1", "")
 
         self.calls: list[str] = []
@@ -3059,11 +3062,13 @@ class TestCoverageCarriesForward(CarryCase):
         self.assertIn("one of three things", text)
         self.assertNotIn("no round on this pull request states changed-file coverage", text)
 
-    def test_a_change_set_at_the_compare_cap_reads_as_unreadable(self) -> None:
-        """The API caps its file list and flags nothing, so a set at the cap proves nothing."""
+    def test_a_change_set_at_the_compare_cap_reads_as_capped(self) -> None:
+        """The API caps its file list and flags nothing, so a set at the cap is not a set."""
         capped = [f"f{n}.py" for n in range(pr_review.COMPARE_FILE_CAP)]
         with self.compare(**{OLD: capped}):
-            self.assertIsNone(pr_review.changed_at("o", "r", "develop", OLD))
+            self.assertEqual(
+                pr_review.Capped("c" * 40), pr_review.changed_at("o", "r", "develop", OLD)
+            )
 
     def test_a_pull_request_that_changes_nothing_is_not_an_unreadable_compare(self) -> None:
         """An empty set and a compare that never happened take opposite decisions."""
@@ -3296,7 +3301,7 @@ class TestFileTableCarriesForward(CarryCase):
         replies = iter(
             [
                 subprocess.CompletedProcess([], 1, "", "gh: Bad Gateway (HTTP 502)"),
-                subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), ""),
+                subprocess.CompletedProcess([], 0, json.dumps({"files": ["a.py"]}), ""),
             ]
         )
         with (
@@ -3404,6 +3409,131 @@ class TestFileTableCarriesForward(CarryCase):
         code, out = self.verdict(pr)
         self.assertEqual(45, code)
         self.assertIn("no earlier round carries one either", out)
+
+
+class TestCarryPastTheCompareCeiling(CarryCase):
+    """A change set at the compare's 300-file cap is read from the trees either side instead.
+
+    The constructed case is a promotion changing 400 files, its first round carrying a full table
+    and a later round on a new head re-reviewing a one-line delta with no table. Both compares
+    return 300 files, so the change set is read past them from the trees.
+    """
+
+    BASE = "c" * 40
+    MANY = tuple(f"src/f{n:03}.py" for n in range(400))
+
+    def trees(
+        self,
+        head: dict[str, str] | None = None,
+        compared: dict[str, list[str]] | None = None,
+        merge_base: str | None = None,
+    ) -> mock._patch:
+        """Answer every compare at the cap, naming its merge base, and the trees either side.
+
+        The merge base keeps every path at one blob and `OLD` moves all of `MANY`. The head
+        moves one of them again by default, the one-line delta past `OLD`, so the change set is
+        the same at both. `head` replaces the head's tree, an empty one standing for a read that
+        failed. `compared` gives a commit a list under the cap instead, and `merge_base`
+        replaces the merge base the compares name.
+        """
+        base_tree = {p: "1" * 40 for p in [*self.MANY, "README.md"]}
+        old_tree = {**base_tree, **{p: "2" * 40 for p in self.MANY}}
+        head_tree = {**old_tree, self.MANY[0]: "3" * 40} if head is None else head
+        served = {self.BASE: base_tree, OLD: old_tree, HEAD: head_tree}
+        named = self.BASE if merge_base is None else merge_base
+
+        def rest(path: str, jq: str | None = None) -> subprocess.CompletedProcess:
+            self.calls.append(path)
+            if "/git/trees/" in path:
+                tree = served.get(path.split("/git/trees/", 1)[1].split("?", 1)[0])
+                if not tree:
+                    return subprocess.CompletedProcess([], 1, "", "no tree for this commit")
+                rows = [[p, "100644", blob] for p, blob in tree.items()]
+                shape = {"truncated": False, "entries": rows}
+                return subprocess.CompletedProcess([], 0, json.dumps(shape), "")
+            if "/compare/" not in path:
+                return subprocess.CompletedProcess([], 1, "", "not a compare")
+            if jq and "@json" in jq:
+                commit = path.rsplit("...", 1)[-1]
+                names = (compared or {}).get(commit, list(self.MANY[: pr_review.COMPARE_FILE_CAP]))
+                answer = {"files": names, "merge_base": named}
+                return subprocess.CompletedProcess([], 0, json.dumps(answer), "")
+            return subprocess.CompletedProcess([], 0, "1 1", "")
+
+        self.calls: list[str] = []
+        return mock.patch.object(pr_review, "gh_rest", side_effect=rest)
+
+    def promotion(self, first: str | None = None) -> dict:
+        body = summarized(list(self.MANY), covers="") if first is None else first
+        return payload(
+            [
+                review(oid=OLD, body=body, at=EARLY, rid="A"),
+                review(oid=HEAD, body=self.NONE, at=LATE, rid="B"),
+            ],
+            files=list(self.MANY),
+        )
+
+    def verdict(self, pr: dict) -> tuple[int, str]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = pr_review.report_verdict(pr, "o", "r")
+        out, _ = pr_review.digest("o", "r", 7, pr=pr)
+        return code, out
+
+    def test_a_400_file_promotion_carries_its_table_onto_an_unchanged_change_set(self) -> None:
+        with self.trees():
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:table ", out)
+        self.assertEqual(4, sum("/git/trees/" in c for c in self.calls))
+
+    def test_a_400_file_promotion_carries_a_statement_onto_an_unchanged_change_set(self) -> None:
+        with self.trees():
+            code, out = self.verdict(self.promotion(first=self.FULL))
+        self.assertEqual(0, code)
+        self.assertIn("coverage=carried:full", out)
+
+    def test_a_change_set_past_the_cap_that_moved_is_not_carried(self) -> None:
+        moved = {
+            **{p: "1" * 40 for p in [*self.MANY, "README.md"]},
+            **{p: "2" * 40 for p in self.MANY},
+            "README.md": "3" * 40,
+        }
+        with self.trees(head=moved):
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(45, code)
+        self.assertIn("changes a different set of files at the two commits", out)
+
+    def test_the_cap_on_one_side_only_is_a_different_set_without_a_tree_read(self) -> None:
+        for whole in (OLD, HEAD):
+            with self.subTest(whole=whole), self.trees(compared={whole: ["a.py"]}):
+                pr_review.changed_at.cache_clear()
+                self.assertIs(False, pr_review.carry_holds("o", "r", self.promotion(), OLD))
+                self.assertFalse(any("/git/trees/" in c for c in self.calls))
+
+    def test_a_tree_read_that_failed_reads_as_unreadable(self) -> None:
+        with self.trees(head={}):
+            code, out = self.verdict(self.promotion())
+        self.assertEqual(45, code)
+        self.assertIn("the change set could not be read at both commits", out)
+
+    def test_a_compare_at_the_cap_naming_no_merge_base_reads_no_tree(self) -> None:
+        with self.trees(merge_base=""):
+            self.assertIsNone(pr_review.carry_holds("o", "r", self.promotion(), OLD))
+        self.assertFalse(any("/git/trees/" in c for c in self.calls))
+
+    def test_the_tree_reading_names_both_paths_of_a_rename(self) -> None:
+        """A rename is a removal and an addition here, where the compare names its new path."""
+        renamed = {p: "1" * 40 for p in [*self.MANY[1:], "README.md", "moved.py"]}
+        with self.trees(head=renamed):
+            changed = pr_review.tree_changed_at("o", "r", self.BASE, HEAD)
+        self.assertEqual(frozenset({self.MANY[0], "moved.py"}), changed)
+
+    def test_a_truncated_tree_reads_as_unread(self) -> None:
+        cut = json.dumps({"truncated": True, "entries": []})
+        with mock.patch.object(
+            pr_review, "gh_rest", return_value=subprocess.CompletedProcess([], 0, cut, "")
+        ):
+            self.assertIsNone(pr_review.tree_at("o", "r", HEAD))
 
 
 class TestTheDeltaSinceTheCarriedRound(unittest.TestCase):
@@ -7830,7 +7960,7 @@ class TestCli(GqlCase):
         landed = self.into(payload(rounds, checks=[check()], files=[]))
         served = self.answer(held, held, landed, landed, self.into(payload(rounds, files=["a.py"])))
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
-        compare = subprocess.CompletedProcess([], 0, json.dumps(["a.py"]), "")
+        compare = subprocess.CompletedProcess([], 0, json.dumps({"files": ["a.py"]}), "")
         with (
             mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
             mock.patch.object(pr_review, "gh_rest", return_value=compare),
