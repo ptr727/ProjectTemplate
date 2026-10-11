@@ -15,6 +15,7 @@ import argparse
 import contextlib
 import inspect
 import io
+import itertools
 import json
 import os
 import re
@@ -6807,7 +6808,67 @@ class TestCli(GqlCase):
         self.answer(payload([review()], pending=True))
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
-        self.assertIn("status=PENDING", self.out.getvalue())
+        self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
+
+    def test_min_rounds_names_the_baseline_when_a_round_lands_mid_wait_below_it(self) -> None:
+        """Three rounds already sit on the head, a `status` read of `rounds=3`, and a fourth
+        lands while the wait polls. N is the count already seen, so `--min-rounds 3` returns on
+        that fourth round. One above it, `--min-rounds 4`, waits for a fifth and reaches its
+        timeout, which a bare `status=PENDING` reported exactly like a round that never landed.
+        The line names the position it waits for instead, so a caller can tell the two apart.
+        Each clock read advances 100 seconds, so one poll lands the fourth round and the read
+        after it is past the 150-second timeout.
+        """
+        seen = [review(rid=f"PRR_{i}", at=f"2026-08-02T10:0{i}:00Z") for i in range(3)]
+        fourth = review(rid="PRR_fourth", at=LATE)
+        for baseline, code in ((3, 0), (4, 30)):
+            with self.subTest(min_rounds=baseline):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(payload(seen, pending=True), payload([*seen, fourth]))
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", str(baseline), "--timeout", "150"]
+                    self.assertEqual(code, self.cli(argv))
+                slept.assert_called_once()
+                status = [
+                    line for line in self.out.getvalue().splitlines() if line.startswith("status=")
+                ]
+                if code:
+                    self.assertEqual(1, len(status))
+                    self.assertIn("now has 4 rounds, up from 3", status[0])
+                    self.assertIn("--min-rounds 4 waits for round 5 or later", status[0])
+                else:
+                    self.assertEqual([], status)
+
+    def test_min_rounds_keeps_the_bare_pending_line_unless_a_new_round_covers_head(self) -> None:
+        """The line naming the baseline says a round landing during the wait covers the head,
+        which holds only where one does. Here a round lands mid-wait, raising the count, but on a
+        superseded head, so it covers nothing. N sits above the count the wait began with, the
+        only case the line can fire in, so the coverage clause alone keeps it bare. That holds
+        whether or not an earlier round covers the head. Each clock read advances 100 seconds,
+        so one poll lands the round and the read after it is past the 150-second timeout.
+        """
+        for label, before in (("uncovered", [review(oid=OLD)]), ("covered", [review()])):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(
+                    payload(before, pending=True),
+                    payload([*before, review(oid=OLD, rid="PRR_two", at=LATE)]),
+                )
+                clock = itertools.count(0, 100).__next__
+                with (
+                    mock.patch.object(pr_review.time, "sleep") as slept,
+                    mock.patch.object(pr_review.time, "monotonic", clock),
+                ):
+                    argv = ["wait", "7", "--min-rounds", "2", "--timeout", "150"]
+                    self.assertEqual(30, self.cli(argv))
+                slept.assert_called_once()
+                self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
 
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the

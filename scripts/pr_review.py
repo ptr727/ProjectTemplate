@@ -5365,8 +5365,10 @@ def main(argv: list[str] | None = None) -> int:
         "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
         "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
         "already carries one: `reviewed_head` alone would report that earlier round as done "
-        "at once, never waiting for the fresh one the re-request was for (default 0, so any "
-        "round counts, unchanged from before this flag existed)",
+        "at once, never waiting for the fresh one the re-request was for. N is the count "
+        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
+        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
+        "unchanged from before this flag existed)",
     )
     # `reply` takes the finding's words rather than its id.
     # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
@@ -5486,6 +5488,7 @@ def main(argv: list[str] | None = None) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
+    rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
         full = gql(Q_FULL, owner, repo, a.number)
@@ -5761,6 +5764,17 @@ def main(argv: list[str] | None = None) -> int:
             "to poll this pull request's own head for the full --timeout"
         )
         return 47
+    if head_review_done(final, rounds_before):
+        rounds = len(reviewer_nodes(final, "reviews"))
+        print(
+            f"status=PENDING this pull request now has {rounds} rounds, up from "
+            f"{rounds_before} when this wait began, and one that landed covers this head, but "
+            f"--min-rounds {a.min_rounds} waits for round {a.min_rounds + 1} or later and none "
+            "past that position covers the head. N is the `rounds=` a `status` read before "
+            "the re-request, so one above it waits for the round after the one the re-request "
+            "was for"
+        )
+        return 30
     print("status=PENDING")
     return 30
 
