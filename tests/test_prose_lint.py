@@ -689,6 +689,7 @@ class TestSemicolon2(BaitCase):
             "***Inputs***:",
             "***Inputs:***",
             "___Inputs___:",
+            "___Inputs:___",
         )
         for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
             for label in labels:
