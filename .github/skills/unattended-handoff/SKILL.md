@@ -216,9 +216,10 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session holds that comment in a closed link, further back where it parked more than
    once, so walk it. List its links with `handoff.py chain --repo "<owner>/<repo>" --track
-   "<track>"`, raising `--limit` until no notice says the walk stopped, and read each link with `gh
-   issue view "<n>" --repo "<owner>/<repo>" --comments`, since `chain` prints one summary line per
-   link. A refusal from `chain` returns `STOP`. Where a parking comment names a decision issue the
+   "<track>"`, raising `--limit` while its only notice names the `--limit` cap, and read each link
+   with `gh issue view "<n>" --repo "<owner>/<repo>" --json body,comments`, since `chain` prints one
+   summary line per link. Any other notice says the walk missed part of the lane, so it returns
+   `STOP`, as a nonzero exit from `chain` does. Where a parking comment names a decision issue the
    lane waits on, read the answer recorded there and follow it, since it is what unblocked the lane.
    A lesson issue the comment also names, per step 6, is its own work rather than this lane's, so
    the worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
@@ -240,13 +241,13 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    full-page check, with `gh issue list --repo "<owner>/<repo>" --label handoff --state open --limit
    100 --json number,body,comments`, and keep those on an `auto-*` track other than this worker's
    own. A lane parked and handed back more than once holds the answer in an older link, so walk each
-   kept track back as step 1 walks the worker's own, reading every link's body and comments, a
-   refusal from `chain` being a read that cannot run. Where any of them names a decision issue that
-   states it blocks the open promotion, whatever that issue's state, the round narrows to develop as
-   well. The worker then merges, opens, and releases no promotion while either holds. It instead
-   brings that promotion's body up to a `Fixes` line for every issue develop fixes, `#<issue>`
-   included, per `backlog-burndown` "Assembling the Promotion Body", so each closes when the
-   promotion merges. It then closes the lane out, naming the decision issue in the close-out
+   kept track back as step 1 walks the worker's own, reading every link's body and comments. A walk
+   step 1 would return `STOP` on is a read that cannot run. Where any of them names a decision issue
+   that states it blocks the open promotion, whatever that issue's state, the round narrows to
+   develop as well. The worker then merges, opens, and releases no promotion while either holds. It
+   instead brings that promotion's body up to a `Fixes` line for every issue develop fixes,
+   `#<issue>` included, per `backlog-burndown` "Assembling the Promotion Body", so each closes when
+   the promotion merges. It then closes the lane out, naming the decision issue in the close-out
    comment. Where neither holds, continue to the promotion pull request, its body carrying a `Fixes`
    line for every issue develop fixes, assembled per that same section, and hand it to
    `merge-and-release`, merging only under `main` and merging and releasing under `release`. **A
