@@ -214,9 +214,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
-   an attended session has a closed predecessor holding that comment, so read the predecessor's
-   comments too. Where the parking comment names the decision issue the lane waits on, read the
-   answer recorded there and follow it, since it is what unblocked the lane. A lesson issue the
+   an attended session holds that comment in a closed link, further back where it parked more than
+   once, so walk it with `handoff.py chain --repo "<owner>/<repo>" --track "<track>"` and read every
+   link's comments, a refusal from `chain` returning `STOP`. Where a parking comment names a
+   decision issue the lane waits on, read the answer recorded there and follow it, since it is
+   what unblocked the lane. A lesson issue the
    comment also names, per step 6, is its own work rather than this lane's, so the worker neither
    follows it nor parks on it. Re-derive live state rather than trusting any of them, per
    `session-handoff` "Resuming".
@@ -238,8 +240,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    100 --json number,body,comments`, and keep those on an `auto-*` track other than this worker's
    own. A lane parked and handed back more than once holds the answer in an older link, so walk each
    kept track back with `handoff.py chain --repo "<owner>/<repo>" --track "<track>"` and read every
-   link's body and comments. Where any of them names a decision issue that states it blocks the open
-   promotion, whatever that issue's state, the round narrows to develop as well. The worker then
+   link's body and comments, a refusal from `chain` being a read that cannot run. Where any of them
+   names a decision issue that states it blocks the open promotion, whatever that issue's state,
+   the round narrows to develop as well. The worker then
    merges, opens, and releases no promotion while either holds. It instead brings that promotion's
    body up to a `Fixes` line for every issue develop fixes, `#<issue>` included, per
    `backlog-burndown` "Assembling the Promotion Body", so each closes when the promotion merges. It
