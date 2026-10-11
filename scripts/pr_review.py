@@ -770,11 +770,11 @@ HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
 WINDOW = 100
 
 # How many of the pull request's own changed files the full query asks for.
-# 100 is the connection's own ceiling, so a longer diff is truncated rather than paged.
 # A truncated list is reported as one and compared against nothing.
 # A path missing from a short window reads exactly like a path the reviewer left out.
 # The record holds a pull request of 301 changed files, so the truncation is reachable here.
 FILES_WINDOW = 100
+FILES_CAP = 3000
 # The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
 COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
@@ -883,9 +883,15 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
     reviewThreads(first:100){ nodes{ id isResolved
       comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage } nodes{ path } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path } }
   }}}
 """.replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
+Q_FILES = """
+query($o:String!,$r:String!,$n:Int!,$after:String!){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
+    files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path } }
+  }}}
+""".replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 # An f-string would need every one of them doubled, which is unreadable against the schema.
 
@@ -1035,7 +1041,52 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     pr = data["repository"]["pullRequest"]
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
+    if query == Q_FULL and isinstance(pr, dict):
+        page_files(owner, repo, num, pr)
     return pr
+
+
+def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
+    """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
+
+    `FILES_WINDOW` is the connection's own ceiling on one page, so a longer list is paged.
+    `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
+    so a list reaching it counts as cut short. The list stays marked as cut short wherever it
+    was not read whole, which is also a page with no cursor, a page read at a head other than
+    the first page's, and a malformed page. Each of those leaves the table compared against
+    nothing, where a list marked whole but missing a path reads exactly like a path the
+    reviewer left out.
+    """
+    files = pr.get("files")
+    if not isinstance(files, dict):
+        return
+    nodes = files.get("nodes")
+    page = files.get("pageInfo")
+    if (
+        not isinstance(nodes, list)
+        or not isinstance(page, dict)
+        or page.get("hasNextPage") is not True
+    ):
+        return
+    while page.get("hasNextPage") is True:
+        cursor = page.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or len(nodes) >= FILES_CAP:
+            return
+        more = gh_graphql(Q_FILES, o=owner, r=repo, n=num, after=cursor)["repository"][
+            "pullRequest"
+        ]
+        conn = more.get("files") if isinstance(more, dict) else None
+        if (
+            not isinstance(more, dict)
+            or more.get("headRefOid") != pr.get("headRefOid")
+            or not isinstance(conn, dict)
+            or not isinstance(conn.get("nodes"), list)
+            or not isinstance(conn.get("pageInfo"), dict)
+        ):
+            return
+        nodes.extend(conn["nodes"])
+        page = conn["pageInfo"]
+    files["pageInfo"] = {"hasNextPage": len(nodes) >= FILES_CAP}
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -2843,8 +2894,8 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     Empty where the table stands in, which is the coverage reading `table_reading` gives.
     Otherwise the reason, which the digest prints under an unstated head, since the remedies
     differ: a missing or mismatched table may be answered by another round, a changed-file list
-    longer than the window this reads by a push bringing it back within it, and a partial on
-    record by nothing but the maintainer's reading.
+    not read whole by reading again where a push moved the head and otherwise by a split, and a
+    partial on record by nothing but the maintainer's reading.
 
     `named` is an earlier round's table where `table_reading` matches a carried one, and the
     head's own table otherwise. Every other check reads the pull request either way, since a
@@ -2870,9 +2921,9 @@ def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
     changed, truncated = changed_paths(pr)
     if truncated:
         return (
-            f"the pull request changes more than the {FILES_WINDOW} files this reads, so the "
-            f"table cannot be compared against all of them until a push brings the pull request "
-            f"back within that window"
+            f"the changed-file list could not be read whole, since the pull request changes "
+            f"{FILES_CAP} files or more, GitHub's own ceiling on the list, or a push landed while "
+            f"it was paged, so the table cannot be compared against all of them"
         )
     diff = {bare_path(p) for p in changed}
     if len(diff) != len(set(changed)):
@@ -3214,9 +3265,10 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
             "effort states no coverage without them, and where they are missing bring them onto the branch, "
             "push, and run wait, which requests a round on the new head. Where the digest says "
             "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that. Where the digest says the pull request changes more files than "
-            "this reads, the table cannot be matched at all, and splitting the pull request is "
-            "the remedy where it applies. "
+            "one cause of that. Where the digest says the changed-file list could not be read "
+            "whole, run status again where a push moved the head, and otherwise the table "
+            "cannot be matched at all, and splitting the pull request is the remedy where it "
+            "applies. "
             "A re-request on this same head is not the remedy it reads as, because it returns a "
             "round stating coverage or carrying a table only by chance. Past those, a develop -> "
             "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
