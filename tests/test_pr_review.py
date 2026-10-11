@@ -7414,6 +7414,46 @@ class TestCli(GqlCase):
         self.assertIn("review_on_head=local", out)
         self.assertIn("coverage=local", out)
 
+    def table_less(self, first: str = OVERVIEW, attest: bool = True) -> dict:
+        """A first round on an earlier head, then a round on this head stating nothing."""
+        rounds = [review(oid=OLD, body=first, rid="PRR_a"), review(body=OVERVIEW, rid="PRR_b")]
+        return self.into(payload(rounds, files=["a.md"]), attest=attest)
+
+    def test_an_attested_head_beside_a_table_less_round_is_covered(self) -> None:
+        """The round on the head states nothing and carries no table, so the attestation covers it."""
+        for cmd in (["status", "7"], ["wait", "7", "--timeout", "0"]):
+            with self.subTest(cmd=cmd[0]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.table_less())
+                calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(cmd))
+                self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+                out = self.out.getvalue()
+                self.assertIn("review_on_head=yes", out)
+                self.assertIn("coverage=local", out)
+                self.assertIn("COVERAGE IS READ FROM THE LOCAL PASS", out)
+                self.assertNotIn("COVERAGE_IS_UNSTATED", out)
+
+    def test_an_unattested_head_beside_a_table_less_round_stays_unstated(self) -> None:
+        self.answer(self.table_less(attest=False))
+        self.assertEqual(45, self.cli(["status", "7"]))
+        self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
+
+    def test_a_partial_on_record_beside_a_table_less_round_is_not_covered(self) -> None:
+        """A round that read part of a diff sends the pull request to the maintainer."""
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        for cmd in (["status", "7"], ["wait", "7", "--timeout", "0"]):
+            with self.subTest(cmd=cmd[0]):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.table_less(first=part))
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertNotEqual(0, self.cli(cmd))
+                self.assertNotIn("coverage=local", self.out.getvalue())
+
     def test_an_attested_head_with_a_check_running_at_the_timeout_is_pending(self) -> None:
         """Covered at once, the wait ended while CI ran and exit 0 read as a mergeable head."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))

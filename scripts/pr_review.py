@@ -46,7 +46,9 @@ Subcommands
            `review_on_head=local` reads a head no Copilot round covers on a pull request into a
            branch other than the default, after Copilot's first round, where an attestation vouches
            for it and no round on record states or appears to state partial coverage, with
-           `coverage=local` beside it.
+           `coverage=local` beside it. The same attestation also covers a head whose Copilot round
+           states no coverage, has none carried to it, and has no file table standing in, which
+           reads `review_on_head=yes coverage=local`.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -3153,6 +3155,8 @@ def report_verdict(pr: dict, owner: str, repo: str) -> int:
         state, line, _from_head = carried
     if state == UNSTATED and not table_reading(owner, repo, pr)[1]:
         state = TABLE
+    if state == UNSTATED and local_cover(pr):
+        state = LOCAL
     if state == PARTIAL:
         # The unread count comes from the line that decided PARTIAL, never from past rounds.
         # None is unreachable there, and narrowing keeps a later change from crashing the gate.
@@ -3942,7 +3946,7 @@ def digest(
     )
     if cover == UNSTATED and on_head and not table_short:
         cover = TABLE
-    local = not on_head and local_cover(pr)
+    local = (not on_head or cover == UNSTATED) and local_cover(pr)
     if local:
         cover = LOCAL
     unknown = unrecognized_shapes(pr)
@@ -4248,10 +4252,16 @@ def digest(
         lines.append(f"  NO FILE TABLE STANDS IN: {table_short}")
     elif cover == LOCAL:
         lines.append(
-            "  COVERAGE IS READ FROM THE LOCAL PASS: no Copilot round covers this head, which "
-            "follows the pull request's first round, and a comment from an owner, member, or "
-            "collaborator attests a recorded local strict-review pass over exactly this head's "
-            f"content, which recorded {attestation(pr)} finding(s)"
+            "  COVERAGE IS READ FROM THE LOCAL PASS: "
+            + (
+                "the Copilot round covering this head states no coverage, none carries to it, "
+                f"and no file table stands in, since {table_short.rstrip('.')}, "
+                if on_head
+                else "no Copilot round covers this head, "
+            )
+            + "which follows the pull request's first round, and a comment from an owner, "
+            "member, or collaborator attests a recorded local strict-review pass over exactly "
+            f"this head's content, which recorded {attestation(pr)} finding(s)"
         )
     if cover == PARTIAL:
         # The line prints under the marker for the reason a suppressed block does.
@@ -4845,8 +4855,9 @@ def holds(pr: dict) -> bool:
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
-    Only on a pull request into a branch other than the default, after Copilot's first round, on
-    a head its writer attests, and only where nothing on record says any round read part of a
+    It stands in for an absent round, and for a round on the head that states no coverage and
+    carries no table, which the callers decide. Only on a pull request into a branch other than
+    the default, after Copilot's first round, on a head its writer attests, and only where nothing on record says any round read part of a
     diff and the whole review history is in view, the bound a file table stands in under. A fix
     push after the first round is covered by the local pass, and a promotion keeps its own
     Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
