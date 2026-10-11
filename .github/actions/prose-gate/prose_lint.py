@@ -533,7 +533,12 @@ def checkout_provenance(script: Path) -> str:
 
 
 def scope_note(
-    read: int, discovered: int, lines: int | None, base: str | None, provenance: str
+    read: int,
+    discovered: int,
+    lines: int | None,
+    base: str | None,
+    provenance: str,
+    unparsed: list[str] | None = None,
 ) -> str:
     """What the run actually read, stated on every verdict rather than only on a busy one.
 
@@ -549,13 +554,26 @@ def scope_note(
     The copy that read that scope is named beside it for the same reason. A scope answers what
     was read and a provenance answers what read it, and a verdict reproducing nowhere is a
     question about the second rather than about the first.
+
+    A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
+    reads Python through a parser ran. Such a rule reads that file by a line scan, not at all, or
+    through a tokenizer older than its grammar, so a pass under an interpreter older than the code
+    it reads is otherwise the same line as a clean one.
     """
     if base is None:
-        return f"scope: {read} file(s) read, whole tree, gate {provenance}"
-    return (
-        f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-        f"diff against {base!r}, gate {provenance}"
-    )
+        note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
+    else:
+        note = (
+            f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
+            f"diff against {base!r}, gate {provenance}"
+        )
+    if unparsed:
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        note += (
+            f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
+            f"so their comments and docstrings may be misread: {quoted(unparsed, 5)}"
+        )
+    return note
 
 
 def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
@@ -854,13 +872,17 @@ def comment_syntax_including_docs(path: Path) -> Syntax | None:
     return widened
 
 
-def quoted(paths) -> str:
+def quoted(paths, cap: int | None = None) -> str:
     """Paths as a sorted, quoted, comma-joined list for an error message.
 
     Quoted because a path holding a space or a comma is indistinguishable from two paths once
-    joined, which makes the message unreadable exactly when it names something unexpected.
+    joined, which makes the message unreadable exactly when it names something unexpected. With a
+    `cap`, only the first that many are listed, followed by a marker where the list ran longer.
     """
-    return ", ".join(repr(str(p)) for p in sorted(paths))
+    ordered = sorted(paths)
+    shown = ordered if cap is None else ordered[:cap]
+    more = " and more" if len(shown) < len(ordered) else ""
+    return ", ".join(repr(str(p)) for p in shown) + more
 
 
 def repo_root(path: Path) -> str:
@@ -2003,11 +2025,13 @@ def python_comments(raw: str) -> list[Comment] | None:
     """Every comment in Python source, or None if it will not parse.
 
     `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
-    trailing comment is one a line-anchored pattern never sees.
+    trailing comment is one a line-anchored pattern never sees. A leading byte order mark is
+    dropped first, since it is not whitespace and would read a first-line comment as trailing.
     """
     out: list[Comment] = []
     try:
-        for tok in tokenize.generate_tokens(io.StringIO(raw).readline):
+        source = io.StringIO(raw.removeprefix("\ufeff"))
+        for tok in tokenize.generate_tokens(source.readline):
             if tok.type == tokenize.COMMENT:
                 col = tok.start[1]
                 leading = not tok.line[:col].strip()
@@ -2411,6 +2435,19 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def python_tree(raw: str) -> ast.Module | None:
+    """The parsed module, or None where this interpreter cannot parse the source.
+
+    A leading byte order mark is dropped first, since `ast` refuses one in a string on every
+    interpreter. Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
+    """
+    try:
+        return ast.parse(raw.removeprefix("\ufeff"))
+    except (SyntaxError, ValueError):
+        return None
+
+
 def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """Each source line a docstring occupies, mapped to the docstring text on that line.
 
@@ -2422,11 +2459,15 @@ def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     the line that carries it. A value has its escapes resolved, which no longer maps to a line.
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
+
+    `python_tree` drops a leading byte order mark, so it is dropped from the first line too, which
+    keeps that line's columns in step with the parse.
     """
-    try:
-        tree = ast.parse(raw)
-    except (SyntaxError, ValueError):
+    tree = python_tree(raw)
+    if tree is None:
         return {}
+    if raw.startswith("\ufeff"):
+        lines = [lines[0].removeprefix("\ufeff"), *lines[1:]]
     out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -2561,12 +2602,23 @@ def issue_ref_findings(
     return out
 
 
+PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+
+
 def check_file(
     path: Path,
     rules: set[str],
     root: Path | None = None,
     allowed: set[int] | None = None,
+    unparsed: list[Path] | None = None,
 ) -> list[tuple[int, str, str]]:
+    """Every finding the rules in `rules` make on `path`.
+
+    `unparsed` collects a `.py` this interpreter cannot parse where a rule in `PARSED_RULES` ran.
+    The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
+    grammar can read a newer f-string as an open string and swallow the comments after it without
+    refusing anything.
+    """
     out: list[tuple[int, str, str]] = []
     try:
         raw = path.read_bytes().decode("utf-8")
@@ -2587,6 +2639,13 @@ def check_file(
         out.extend(comment_added_findings(path, raw))
     if "issue-ref" in rules:
         out.extend(issue_ref_findings(path, raw, lines, root))
+    if (
+        unparsed is not None
+        and PARSED_RULES & rules
+        and path.suffix.lower() == ".py"
+        and python_tree(raw) is None
+    ):
+        unparsed.append(path)
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -2877,7 +2936,7 @@ def main(argv: list[str] | None = None) -> int:
         if scope and not matched:
             unread = unread_diff_files(scope, a.paths or ["."], tuple(a.exclude), scan_root)
             if unread:
-                shown = ", ".join(unread[:5]) + (" and more" if len(unread) > 5 else "")
+                shown = quoted(unread, 5)
                 print(
                     f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
                     f"this run was asked about, and the scan matched none of them: {shown}. "
@@ -2893,9 +2952,10 @@ def main(argv: list[str] | None = None) -> int:
     total = 0
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
+    refused: list[Path] = []
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root, allowed):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
@@ -2906,7 +2966,14 @@ def main(argv: list[str] | None = None) -> int:
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
     print(
-        scope_note(len(files), discovered, inscope, a.diff, gate_provenance(a.provenance)),
+        scope_note(
+            len(files),
+            discovered,
+            inscope,
+            a.diff,
+            gate_provenance(a.provenance),
+            [keys[f] for f in refused],
+        ),
         file=sys.stderr,
     )
     if a.summary or total:

@@ -2710,6 +2710,101 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, "discover", return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
+    UNTOKENIZED = 'def f():\n    """A docstring the gate reads."""\n    return (1,\n'
+    UNPARSED = 'def f():\n    """A docstring the gate reads."""\n    return = 1\n'
+
+    def scope_line(self, paths: list[Path], argv: list[str]) -> str:
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=paths),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(0, prose_lint.main(argv))
+        return err.getvalue()
+
+    def bait(self, name: str, text: str) -> Path:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_python_file_the_interpreter_cannot_parse_is_named_by_every_parser_rule(
+        self,
+    ) -> None:
+        """A file the parser-based rules may have misread is not a clean pass, so the line says so.
+
+        On a file `tokenize` refuses, `comment-wrap` and `comment-case` fall back to a line scan,
+        and `comment-added` and `issue-ref` read no comment. On one it accepts and `ast` refuses,
+        `issue-ref` reads no docstring, and a tokenizer older than the grammar can read a newer
+        f-string as an open string and swallow the comments after it. Either way the run exited 0
+        with the scope line a clean tree prints. Neither fixture parses under any interpreter, so
+        the case holds whichever one runs the suite. `comment-added` runs only under `--diff`, so
+        its case is the diff-scoped one.
+        """
+        for name, text in (("open.py", self.UNTOKENIZED), ("newer.py", self.UNPARSED)):
+            bait = self.bait(name, text)
+            for rule in ("comment-wrap", "comment-case", "issue-ref"):
+                with self.subTest(file=name, rule=rule):
+                    err = self.scope_line([bait], ["--check", rule])
+                    self.assertIn("1 .py file(s) Python", err)
+                    self.assertIn(f"may be misread: {bait.as_posix()!r}", err)
+
+    def test_a_python_file_that_parses_is_not_named(self) -> None:
+        clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
+        self.assertNotIn("may be misread", self.scope_line([clean], []))
+
+    def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
+        """A run reading the file only line by line lost nothing to the parse, so names nothing."""
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        self.assertNotIn("may be misread", self.scope_line([bait], ["--check", "dupword"]))
+
+    def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
+        """No rule reads a file the gate cannot decode, so no parse was refused on it."""
+        latin = self.tmp / "latin.py"
+        latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
+        self.assertNotIn("may be misread", self.scope_line([latin], []))
+
+    def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
+        """An editor-added mark parses on every interpreter, so its docstrings are still read.
+
+        `ast` refuses the mark in a string, which named the file as one the interpreter could not
+        parse and skipped the reference its module docstring holds. The reference closes the
+        docstring, so a first line sliced at columns that still count the mark loses its digits.
+        """
+        marked = self.bait("marked.py", "\ufeff'See #12'\n")
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[marked]),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(1, prose_lint.main(["--check", "issue-ref"]))
+        self.assertIn(
+            "marked.py:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
+        )
+        self.assertNotIn("may be misread", err.getvalue())
+
+    def test_a_byte_order_mark_leaves_a_first_line_comment_leading(self) -> None:
+        """The mark is not whitespace, so read as code it made a first-line comment trailing."""
+        comments = prose_lint.python_comments("\ufeff# See the reason.\nx = 1\n")
+        self.assertEqual([(1, "See the reason.", True, "# See the reason.")], comments)
+
+    def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
+        baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
+        err = self.scope_line(baits, ["--check", "comment-wrap"])
+        self.assertIn("6 .py file(s) Python", err)
+        self.assertIn(f"{baits[4].as_posix()!r} and more", err)
+        self.assertNotIn(baits[5].as_posix(), err)
+
+    def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
+        """The environment override is cleared, since it stands `comment-added` down."""
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        with (
+            mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}),
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"open.py": {1}}),
+        ):
+            err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("may be misread: 'open.py'", err)
+
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
 
