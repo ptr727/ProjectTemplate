@@ -526,8 +526,13 @@ class GqlCase(unittest.TestCase):
 
         `gh_rest` is patched in `setUp` rather than here, so a case that never calls this still
         makes no REST read.
+
+        `page_files` is patched to leave each response as it stands, since a response here is
+        the whole read, a list marked cut short included. A case about paging patches
+        `gh_graphql` itself rather than calling this.
         """
         queue = list(responses)
+        self.enterContext(mock.patch.object(pr_review, "page_files"))
 
         def fake(_query, _owner, _repo, _num):
             return queue.pop(0) if len(queue) > 1 else queue[0]
@@ -5479,6 +5484,14 @@ class TestCoverageExitCodes(GqlCase):
                 self.paged(pages, first + rest, heads)
                 self.assertEqual(45, pr_review.main(["status", "7", "--repo", "o/r"]))
                 self.assertIn(f"NO FILE TABLE STANDS IN: {reason}", self.out.getvalue())
+
+    def test_a_read_outside_the_digest_does_not_page_the_list(self) -> None:
+        """A wait's own reads never look at the list, so they spend no page on it."""
+        first = [f"d/f{i:03}.md" for i in range(100)]
+        calls = self.paged([(first, "c1"), (["d/x.md"], None)], first, [HEAD])
+        pr = pr_review.gql(pr_review.Q_FULL, "o", "r", 7)
+        self.assertTrue(pr["files"]["pageInfo"]["hasNextPage"])
+        self.assertEqual([], [c for c in calls if "after" in c])
 
     def test_a_list_left_unread_by_a_push_is_read_again(self) -> None:
         """A push between pages is transient, so the full read is taken again and matches."""

@@ -1038,8 +1038,6 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     pr = data["repository"]["pullRequest"]
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
-    if query == Q_FULL and isinstance(pr, dict):
-        page_files(owner, repo, num, pr)
     return pr
 
 
@@ -1950,10 +1948,21 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     """The full payload, `pr` where one was read already, read again while `files_unread` holds.
 
     The whole payload is read again rather than the one connection. The digest and the exit code
-    then still come from one read of the pull request.
+    then still come from one read of the pull request. The changed-file list is paged here, on
+    `pr` and on each read again, rather than on every `Q_FULL` read, since this is the payload
+    the digest and the exit code read the list from, and a read deciding only a wait's next step
+    never looks at it. `pr` is a read `page_files` has not yet seen, which every caller passes.
     """
-    read = functools.partial(gql, Q_FULL, owner, repo, num)
-    return backoff(read() if pr is None else pr, read, files_unread, delays=READ_RETRY_DELAYS)
+
+    def read() -> dict:
+        fresh = gql(Q_FULL, owner, repo, num)
+        page_files(owner, repo, num, fresh)
+        return fresh
+
+    if pr is None:
+        return backoff(read(), read, files_unread, delays=READ_RETRY_DELAYS)
+    page_files(owner, repo, num, pr)
+    return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
 @functools.cache
@@ -2723,11 +2732,12 @@ def span_list(text: str) -> list[str]:
 
 
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
-    """The paths this pull request changes, and whether GitHub's ceiling on the list cut it short.
+    """The paths this pull request changes, and whether that list is incomplete.
 
-    Truncation is carried rather than hidden, since a path past the ceiling reads exactly like a
-    path the reviewer left out of its table, and the two take opposite readings. A list
-    `page_files` left unread is carried under `FILES_UNREAD` instead.
+    Incomplete is a list cut short at GitHub's ceiling, and also one `page_files` left unread,
+    whose first page's `hasNextPage` still stands, `FILES_UNREAD` naming which of the two it is.
+    It is carried rather than hidden, since a path missing from the list reads exactly like a
+    path the reviewer left out of its table, and the two take opposite readings.
     """
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
