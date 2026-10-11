@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
@@ -725,6 +726,329 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
             {name: notes[name] for name in ("failing", "absent", "unread")},
             {"failing": [], "absent": [], "unread": []},
         )
+
+
+FAILURE_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Get-InstallerFailureReason', 'Get-InstallRoot', 'Invoke-Utf8Run', 'Get-ToolHolder')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$case = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
+$results = [ordered]@{}
+foreach ($probe in $case.reasons) {
+    $reason = Get-InstallerFailureReason -Id $probe.id -Since ([datetime]$probe.since) -Directory $case.directory
+    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{ log = [bool]$reason.Log; entries = @($reason.Entries); in_use = $reason.InUse }
+}
+$env:ProgramFiles = 'C:\PF'
+${env:ProgramFiles(x86)} = 'C:\PF86'
+$env:LOCALAPPDATA = 'C:\LAD'
+$results['roots'] = @($case.roots | ForEach-Object { [string](Get-InstallRoot -Path $_) })
+$results['absent holders'] = @(
+    (Get-ToolHolder -Probe 'no-such-tool-on-path').Count
+    (Get-ToolHolder -Probe 'no-such-tool-on-path' -Executable '').Count
+)
+if ($IsWindows) {
+    # This harness runs as pwsh from a directory none of the containers above name, so the name fallback finds it, and a tree read from a file elsewhere does not.
+    # Read back through Get-Item, which expands an 8.3 short path such as a hosted runner's temp directory, so the container and the file it holds are compared in the same form.
+    $env:LOCALAPPDATA = Join-Path (Get-Item -LiteralPath $case.directory).FullName 'LAD'
+    $elsewhere = Join-Path $env:LOCALAPPDATA 'Programs\Tool\tool.exe'
+    $byName = Get-ToolHolder -Probe 'pwsh'
+    $byTree = Get-ToolHolder -Probe 'pwsh' -Executable $elsewhere
+    $results['scoped holders'] = @(
+        [bool]($byName | Where-Object { $_.Id -eq $PID })
+        [bool]($byTree | Where-Object { $_.Id -eq $PID })
+        $byTree.Count
+    )
+}
+$before = [Console]::OutputEncoding
+$switchable = $true
+try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $before } catch { $switchable = $false }
+function run { param([string]$Command, [string[]]$Arguments) $script:INSIDE = [Console]::OutputEncoding.WebName; return 5 }
+foreach ($console in @($true, $false)) {
+    $script:CONSOLE = $console
+    function Test-OutputToConsole { return $script:CONSOLE }
+    $script:INSIDE = $null
+    $results["utf8 console=$console"] = [ordered]@{
+        code = (Invoke-Utf8Run 'docker' @('desktop', 'stop'))
+        switchable = $switchable
+        before = $before.WebName
+        inside = $script:INSIDE
+        restored = ([Console]::OutputEncoding.WebName -eq $before.WebName)
+    }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+WRITE_FAILURE_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Write-InstallFailure')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$script:LINES = @()
+function warn { param([string]$Message) $script:LINES += "WARN $Message" }
+function info { param([string]$Message) $script:LINES += "INFO $Message" }
+function Hide-Home { param([string]$Path) return 'LOG' }
+function Get-ToolHolder {
+    param([string]$Probe, [string]$Executable)
+    $script:LINES += "HOLDERS $Probe $Executable".TrimEnd()
+    return , @([pscustomobject]@{ ProcessName = 'helper'; Id = 1234 }, [pscustomobject]@{ ProcessName = 'bash'; Id = 99 })
+}
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $script:REASON = @{
+        Log = 'C:\log.log'
+        Entries = @($case.Value.entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') })
+        InUse = [bool]($case.Value.PSObject.Properties['in_use'] -and $case.Value.in_use)
+    }
+    if ($script:REASON.Entries.Count -eq 0) { $script:REASON.Log = $null }
+    function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return $script:REASON }
+    $script:LINES = @()
+    Write-InstallFailure -ToolName 'tool' -Package 'Example.Tool' -Code $case.Value.code -Since (Get-Date) -Probe 'tool' -Executable $case.Value.executable
+    $results[$case.Name] = @($script:LINES | ForEach-Object { $_.Replace($HOME, '<HOME>') })
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+INNO_LOG = [
+    "2026-01-02 03:04:05.100   Log opened.",
+    "2026-01-02 03:04:05.300   Successfully imported the DLL function. Delay loaded? No",
+    "2026-01-02 03:04:06.000   Defaulting to Cancel for suppressed message box (Retry/Cancel):",
+    "                          The following process(es) use Example Tool:",
+    "                          ",
+    "                          helper.exe (PID 1234)",
+    "                          Please terminate those processes and retry.",
+    "2026-01-02 03:04:06.001   Failed to proceed to next wizard page; aborting.",
+    "2026-01-02 03:04:06.002   Deinitializing Setup.",
+]
+
+BUSY_LOG = [
+    "2026-01-02 03:04:05.100   The file is being used by another process.",
+    *(
+        f"2026-01-02 03:04:06.00{index}   Error {index}: rollback step failed."
+        for index in range(5)
+    ),
+]
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsInstallFailureReason(unittest.TestCase):
+    """The installer log's reason, a tool's install root, and the UTF-8 run's console handling."""
+
+    def run_cases(self) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory, "Example.Tool.1.2.3-26-01-02-03-04-05.log")
+            log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
+            busy = Path(directory, "Busy.Tool.1.0-26-01-02-03-04-05.log")
+            busy.write_text("\r\n".join([*BUSY_LOG, ""]), encoding="utf-8", newline="")
+            elsewhere = Path(directory, "LAD", "Programs", "Tool", "tool.exe")
+            elsewhere.parent.mkdir(parents=True)
+            elsewhere.write_bytes(b"")
+            cases = {
+                "directory": directory,
+                "reasons": [
+                    {"id": "Example.Tool", "since": "2000-01-01"},
+                    {"id": "Example.Tool", "since": "2100-01-01"},
+                    {"id": "Other.Tool", "since": "2000-01-01"},
+                    {"id": "Busy.Tool", "since": "2000-01-01"},
+                ],
+                "roots": [
+                    "C:\\PF\\Git\\cmd\\git.exe",
+                    "C:\\PF\\Git\\mingw64\\bin\\git.exe",
+                    "C:\\PF86\\Tool\\tool.exe",
+                    "C:\\LAD\\Microsoft\\WinGet\\Packages\\Example.Tool_x\\tool.exe",
+                    "C:\\PF\\WinGet\\Packages\\Example.Tool_x\\tool.exe",
+                    "C:\\LAD\\Programs\\Python\\Python313\\python.exe",
+                    "C:\\Windows\\py.exe",
+                    "C:\\PF\\loose.exe",
+                ],
+            }
+            result = run_pwsh_harness(FAILURE_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_the_log_entry_keeps_its_continuation_lines(self) -> None:
+        results = self.run_cases()
+        self.assertEqual(
+            results["reason Example.Tool 2000-01-01"],
+            {
+                "log": True,
+                "entries": [
+                    (
+                        "Defaulting to Cancel for suppressed message box (Retry/Cancel): The"
+                        " following process(es) use Example Tool: helper.exe (PID 1234) Please"
+                        " terminate those processes and retry."
+                    ),
+                    "Failed to proceed to next wizard page; aborting.",
+                ],
+                "in_use": True,
+            },
+        )
+
+    def test_an_in_use_entry_survives_the_cap_on_later_errors(self) -> None:
+        self.assertEqual(
+            self.run_cases()["reason Busy.Tool 2000-01-01"],
+            {
+                "log": True,
+                "entries": [
+                    "The file is being used by another process.",
+                    "Error 2: rollback step failed.",
+                    "Error 3: rollback step failed.",
+                    "Error 4: rollback step failed.",
+                ],
+                "in_use": True,
+            },
+        )
+
+    def test_a_log_older_than_the_attempt_or_for_another_id_is_not_read(self) -> None:
+        results = self.run_cases()
+        unread = {"log": False, "entries": [], "in_use": False}
+        self.assertEqual(results["reason Example.Tool 2100-01-01"], unread)
+        self.assertEqual(results["reason Other.Tool 2000-01-01"], unread)
+
+    @unittest.skipUnless(sys.platform == "win32", "reads this host's own process list")
+    def test_a_same_named_process_outside_the_tree_is_not_a_holder(self) -> None:
+        self.assertEqual(self.run_cases()["scoped holders"], [True, False, 0])
+
+    def test_the_install_root_is_the_containers_child_whichever_copy_resolved(self) -> None:
+        self.assertEqual(
+            self.run_cases()["roots"],
+            [
+                "C:\\PF\\Git",
+                "C:\\PF\\Git",
+                "C:\\PF86\\Tool",
+                "C:\\LAD\\Microsoft\\WinGet\\Packages\\Example.Tool_x",
+                "C:\\PF\\WinGet\\Packages\\Example.Tool_x",
+                "C:\\LAD\\Programs\\Python\\Python313",
+                "",
+                "",
+            ],
+        )
+
+    def test_a_tool_off_path_has_no_holders_rather_than_failing(self) -> None:
+        self.assertEqual(self.run_cases()["absent holders"], [0, 0])
+
+    def test_the_utf8_run_switches_only_for_console_output_and_restores_it(self) -> None:
+        results = self.run_cases()
+        console = results["utf8 console=True"]
+        redirected = results["utf8 console=False"]
+        for utf8 in (console, redirected):
+            self.assertEqual(utf8["code"], 5)
+            self.assertTrue(utf8["restored"])
+        self.assertEqual(redirected["inside"], redirected["before"])
+        if console["switchable"]:
+            self.assertEqual(console["inside"], "utf-8")
+
+
+INSTALLER_FAILED = -1978335226
+SHARING_VIOLATION = -2147024864
+WINGET_FILE_IN_USE = -1978334973
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsInstallFailureReport(unittest.TestCase):
+    """`Write-InstallFailure` blames running processes only where something says files were in use."""
+
+    def run_cases(self) -> dict[str, list[str]]:
+        cases = {
+            "in use": {
+                "entries": ["The following process(es) use Example Tool: helper.exe (PID 1234)"],
+                "in_use": True,
+                "code": INSTALLER_FAILED,
+                "executable": "",
+            },
+            "unrelated": {
+                "entries": [
+                    "Error 0x80070666: Process returned error at <HOME>\\AppData\\Local\\x.log"
+                ],
+                "code": INSTALLER_FAILED,
+                "executable": "",
+            },
+            "no reason": {"entries": [], "code": INSTALLER_FAILED, "executable": ""},
+            "winget file in use": {"entries": [], "code": WINGET_FILE_IN_USE, "executable": ""},
+            "sharing violation": {
+                "entries": [],
+                "code": SHARING_VIOLATION,
+                "executable": "C:\\Tool\\tool.exe",
+            },
+        }
+        result = run_pwsh_harness(WRITE_FAILURE_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        loaded: dict[str, list[str]] = json.loads(result.stdout)
+        return loaded
+
+    def test_files_in_use_names_the_holders_as_the_cause(self) -> None:
+        self.assertEqual(
+            self.run_cases()["in use"],
+            [
+                "WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)",
+                "INFO The installer log says:",
+                "INFO   The following process(es) use Example Tool: helper.exe (PID 1234)",
+                "INFO Full installer log: LOG",
+                "HOLDERS tool",
+                (
+                    "INFO Running from tool's install, and Windows cannot replace a file a"
+                    " running process holds:"
+                ),
+                "INFO   helper (process 1234)",
+                "INFO   bash (process 99)",
+                "INFO Close them, or stop them with the command below, then run this again:",
+                "INFO   Stop-Process -Id 1234, 99",
+            ],
+        )
+
+    def test_an_unrelated_reason_blames_no_process_and_masks_the_home_folder(self) -> None:
+        self.assertEqual(
+            self.run_cases()["unrelated"],
+            [
+                "WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)",
+                "INFO The installer log says:",
+                "INFO   Error 0x80070666: Process returned error at %USERPROFILE%\\AppData\\Local\\x.log",
+                "INFO Full installer log: LOG",
+            ],
+        )
+
+    def test_no_reason_blames_no_process(self) -> None:
+        self.assertEqual(
+            self.run_cases()["no reason"],
+            ["WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)"],
+        )
+
+    def test_wingets_own_file_in_use_code_names_the_holders(self) -> None:
+        lines = self.run_cases()["winget file in use"]
+        self.assertEqual(
+            lines[:2],
+            [
+                "WARN tool failed on Example.Tool, winget exited -1978334973 (0x8A150103)",
+                "HOLDERS tool",
+            ],
+        )
+
+    def test_a_sharing_violation_names_the_holders_from_the_executable_given(self) -> None:
+        lines = self.run_cases()["sharing violation"]
+        self.assertEqual(
+            lines[:2],
+            [
+                "WARN tool failed on Example.Tool, winget exited -2147024864 (0x80070020)",
+                "HOLDERS tool C:\\Tool\\tool.exe",
+            ],
+        )
+        self.assertEqual(lines[-1], "INFO   Stop-Process -Id 1234, 99")
 
 
 if __name__ == "__main__":

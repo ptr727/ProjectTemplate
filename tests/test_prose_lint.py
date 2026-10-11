@@ -1532,6 +1532,209 @@ class TestCommentWrap(BaitCase):
                 self.assertIsNotNone(prose_lint.syntax_for(Path(f"x{label}")))
 
 
+class TestANamedToolIsStillProse(BaitCase):
+    """A comment that names a tool is prose about it, and only a directive the tool reads is exempt.
+
+    The exemption was searched anywhere in the body, so writing a tool's name into a sentence
+    disarmed every comment rule for that line, `comment-added` included.
+    """
+
+    COMMENT_RULES: ClassVar[set[str]] = {"comment-wrap", "comment-case", "comment-added"}
+
+    def test_a_sentence_naming_a_tool_is_judged_as_prose(self) -> None:
+        for text, expected in (
+            ("# The parser cannot read what prettier writes here.\n", ["comment-added"]),
+            ("# The header below states the Copyright the vendor requires.\n", ["comment-added"]),
+            (
+                "# two sentences here. Here is another one about eslint.\n",
+                ["comment-wrap", "comment-case", "comment-added"],
+            ),
+            ("# The noqa marker here is read per line.\n", ["comment-added"]),
+            ("# Each type: ignore here names its code.\n", ["comment-added"]),
+            ("# Bump to v2.3\n", ["comment-added"]),
+            # A name has to end where the directive's word does, so a longer word opening prose is prose.
+            (
+                "# noqable starts here. Another sentence.\n",
+                ["comment-wrap", "comment-case", "comment-added"],
+            ),
+            ("# eslintrc is read from the root.\n", ["comment-case", "comment-added"]),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_directive_opening_the_body_is_still_exempt(self) -> None:
+        for name, text in (
+            ("tool.py", "# Copyright 2024 Example Corp.\n"),
+            ("tool.py", "# SPDX-License-Identifier: MIT\n"),
+            ("tool.py", "# pylint: disable=too-many-branches\n"),
+            ("tool.py", "# noqa: S603 - fixed argv\n"),
+            ("tool.py", "# type: ignore[import-untyped]\n"),
+            ("run.sh", "# shellcheck disable=SC2086\n"),
+            ("run.sh", "# shellcheck disable=SC1091  # A host file, not present at lint time.\n"),
+            ("app.ts", "// eslint-disable-next-line no-console -- Logging is intended here.\n"),
+            ("tool.py", "# ruff: noqa: E501 - the URLs cannot wrap.\n"),
+            ("tool.py", "# flake8: noqa\n"),
+            ("tool.py", "# flake8: noqa: E501\n"),
+            ("tool.py", "# flake8=noqa\n"),
+            ("tool.py", "# Flake8: noqa\n"),
+            ("tool.py", "# v2.3\n"),
+            ("app.ts", "// eslint-disable-next-line no-console\n"),
+            ("app.ts", "// prettier-ignore\n"),
+            ("settings.jsonc", "// cSpell:ignore exampleword\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_directive_is_read_in_any_letter_case_its_tool_reads(self) -> None:
+        """flake8, pycodestyle, and CSpell each read their own directive in any letter case."""
+        for name, text in (
+            ("tool.py", "# NOQA: E501\n"),
+            ("tool.py", "# NoQA\n"),
+            ("tool.py", "# NOPEP8\n"),
+            ("tool.py", "# NoPep8: E501\n"),
+            ("app.ts", "// cspell:ignore vendorid\n"),
+            ("app.ts", "// CSPELL: ignore vendorid\n"),
+            ("app.ts", "// spell-checker: disable\n"),
+            ("app.ts", "// Spell-Checker:ignore vendorid\n"),
+            ("app.ts", "// spellchecker:words vendorid\n"),
+            ("app.ts", "// spell:ignore vendorid\n"),
+            ("app.ts", "// Spell: disable\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_cspell_name_without_its_colon_is_prose(self) -> None:
+        """CSpell reads its directive only with the colon, so a sentence opening on its name is judged."""
+        for name, text in (
+            ("app.ts", "// cspell reads the word list from the root.\n"),
+            ("app.ts", "// spellchecker settings live in the root.\n"),
+            ("app.ts", "// spell checking reads the word list from the root.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual(
+                    ["comment-case", "comment-added"],
+                    self.kinds(text, self.COMMENT_RULES, name=name),
+                )
+
+    def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
+        """A Python checker reads the directive, and the prose in front of it is still prose."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for text, expected in (
+            ("# A new prose comment the reviewer never sees.  # noqa\n", ["comment-added"]),
+            ("# two sentences here. Another one follows.  # noqa: E501\n", both),
+            ("x = 1  # two sentences here. Another one follows.  # noqa\n", ["comment-wrap"]),
+            (
+                "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
+                ["comment-wrap"],
+            ),
+            ("# two sentences here. Another one follows.  # pylint: disable=no-member\n", both),
+            ("# two sentences here. Another one follows, pylint: disable=no-member\n", both),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_does_not_make_prose_read_as_configuration(self) -> None:
+        """A directive's code ends the body where a full stop would, so the cut comes first."""
+        text = (
+            "# Note: two sentences here. Another one follows.  # noqa: E501\n"
+            "# Note: the value is read once.  # noqa: E501\n"
+        )
+        self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
+
+    def test_what_is_left_before_a_directive_keeps_its_exemptions(self) -> None:
+        """The space in front of the directive is cut with it, so an address or a key is still exempt."""
+        for text in (
+            "# https://example.com/a/very/long/reference/path  # noqa: E501\n",
+            "# Note:  # noqa: E501\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_each_trailing_form_ends_what_is_judged(self) -> None:
+        """A sentence after the directive is cut with it, whichever form it is and however the suffix is cased."""
+        for name, text in (
+            ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
+            ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NOQA. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoQA: E501. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # nopep8. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoPep8: E501. Another one follows.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
+        """What is left once the directive is cut is empty or a directive `NOT_PROSE` already exempts."""
+        for text in (
+            "x = 1  # noqa\n",
+            "x = 1  # pylint: disable=no-member\n",
+            "x = 1  # type: ignore  # noqa: E501\n",
+            "# noqa: E501  # noqa\n",
+            "#  # noqa\n",
+            "#  # NOPEP8\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_is_prose_outside_python(self) -> None:
+        """No other language's checker reads these forms, so a mention of one is part of the sentence."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for name, text in (
+            ("a.toml", "# two sentences here. Each line carries a `# noqa` marker.\n"),
+            ("a.yml", "# two sentences here. Another one follows.  # noqa\n"),
+            ("run.sh", "# two sentences here. Another one follows, pylint: disable=no-member\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_the_sentence_after_a_mention_is_judged_outside_python(self) -> None:
+        """Only a Python file is cut at the directive, so a run-on after a mention elsewhere is caught."""
+        text = "# Each line carries a `# noqa` marker. Another sentence follows.\n"
+        for name, expected in (
+            ("a.yml", ["comment-wrap", "comment-added"]),
+            ("a.toml", ["comment-wrap", "comment-added"]),
+            ("tool.py", ["comment-added"]),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
+        for text in (
+            "x = 1  # Read the row.  # noqable. Another one follows.\n",
+            "x = 1  # Read the row mypylint: once. Another one follows.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(
+                    ["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py")
+                )
+
+    def test_a_directive_named_mid_sentence_leaves_no_wrap(self) -> None:
+        """The sentence goes on past a directive it names, so the next line does not continue it."""
+        for text, expected in (
+            ("# Suppress with `# noqa: E501` where needed.\n# max_len - the longest line.\n", []),
+            ("# Lines carry a `# noqa` marker.\n# flake8 reads it.\n", [(2, "comment-case")]),
+            (
+                "# A sentence that keeps  # noqa\n# going onto the next line.\n",
+                [(1, "comment-wrap")],
+            ),
+        ):
+            with self.subTest(text=text.strip()):
+                path = self.tmp / "tool.py"
+                path.write_text(text, encoding="utf-8")
+                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"})
+                self.assertEqual(expected, [(n, kind) for n, kind, _ in found])
+
+    def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
+        """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
+        text = '"""\n# two sentences here. Another one follows.\n"""\n'
+        for name in ("tool.py", "Tool.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(text, {"comment-wrap", "comment-case"}, name=name))
+
+
 class TestMultiLineStrings(BaitCase):
     """A string that spans lines hides its markers on every line it covers, not only the first.
 
@@ -2709,6 +2912,195 @@ class TestCli(unittest.TestCase):
         bait.write_text("# A sentence that wraps\n# across two comment lines.\n", encoding="utf-8")
         with mock.patch.object(prose_lint, "discover", return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
+
+    UNTOKENIZED = 'def f():\n    """A docstring the gate reads."""\n    return (1,\n'
+    UNPARSED = 'def f():\n    """A docstring the gate reads."""\n    return = 1\n'
+
+    def scope_line(self, paths: list[Path], argv: list[str]) -> str:
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=paths),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(0, prose_lint.main(argv))
+        return err.getvalue()
+
+    def bait(self, name: str, text: str) -> Path:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_python_file_the_interpreter_cannot_parse_is_named_by_every_parser_rule(
+        self,
+    ) -> None:
+        """A file the parser-based rules may have misread is not a clean pass, so the line says so.
+
+        On a file `tokenize` refuses, `comment-wrap` and `comment-case` fall back to a line scan,
+        and `comment-added` and `issue-ref` read no comment. On one it accepts and `ast` refuses,
+        `issue-ref` reads no docstring, and a tokenizer older than the grammar can read a newer
+        f-string as an open string and swallow the comments after it. Either way the run exited 0
+        with the scope line a clean tree prints. Neither fixture parses under any interpreter, so
+        the case holds whichever one runs the suite. `comment-added` runs only under `--diff`, so
+        its case is the diff-scoped one.
+        """
+        for name, text in (("open.py", self.UNTOKENIZED), ("newer.py", self.UNPARSED)):
+            bait = self.bait(name, text)
+            for rule in ("comment-wrap", "comment-case", "issue-ref"):
+                with self.subTest(file=name, rule=rule):
+                    err = self.scope_line([bait], ["--check", rule])
+                    self.assertIn("1 .py file(s) Python", err)
+                    self.assertIn(f"may be misread: {bait.as_posix()!r}", err)
+
+    def test_a_python_file_that_parses_is_not_named(self) -> None:
+        clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
+        self.assertNotIn("may be misread", self.scope_line([clean], []))
+
+    def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
+        """A run reading the file only line by line lost nothing to the parse, so names nothing."""
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        self.assertNotIn("may be misread", self.scope_line([bait], ["--check", "dupword"]))
+
+    LATIN = b"# caf\xe9 is fine.\nx = 1\n"
+
+    def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
+        """No rule reads a file the gate cannot decode, so no parse was refused on it."""
+        latin = self.tmp / "latin.py"
+        latin.write_bytes(self.LATIN)
+        self.assertNotIn("may be misread", self.scope_line([latin], []))
+
+    def test_a_file_the_gate_cannot_decode_is_named_whatever_rule_ran(self) -> None:
+        """No rule reads a file that is not UTF-8, so a run that skipped it is not a clean one.
+
+        Every rule skipped it and the run printed the scope line a tree of readable files prints.
+        """
+        for name in ("latin.py", "latin.md"):
+            latin = self.tmp / name
+            latin.write_bytes(self.LATIN)
+            for argv in ([], ["--check", "dupword"], ["--check", "charset"]):
+                with self.subTest(file=name, argv=argv):
+                    err = self.scope_line([latin], argv)
+                    self.assertIn(
+                        f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+                        f"{latin.as_posix()!r}",
+                        err,
+                    )
+
+    def test_a_file_that_decodes_is_not_named_as_undecoded(self) -> None:
+        clean = self.bait("clean.md", "Caf\u00e9 is fine.\n")
+        self.assertNotIn("could not open or decode", self.scope_line([clean], []))
+
+    def test_a_file_that_cannot_be_opened_is_named_too(self) -> None:
+        """A read failing after discovery skips the file the same way a failed decode does.
+
+        The clause names both causes, so an open failure is not reported as an encoding one.
+        """
+        absent = self.tmp / "absent.md"
+        err = self.scope_line([absent], ["--check", "dupword"])
+        self.assertIn(
+            f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+            f"{absent.as_posix()!r}",
+            err,
+        )
+
+    def test_the_diff_scoped_line_names_an_undecoded_file_too(self) -> None:
+        latin = self.tmp / "latin.md"
+        latin.write_bytes(self.LATIN)
+        with (
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"latin.md": {1}}),
+        ):
+            err = self.scope_line([latin], ["--check", "dupword", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("could not open or decode as UTF-8, so no rule read them: 'latin.md'", err)
+
+    def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
+        """An editor-added mark parses on every interpreter, so its docstrings are still read.
+
+        `ast` refuses the mark in a string, which named the file as one the interpreter could not
+        parse and skipped the reference its module docstring holds. The reference closes the
+        docstring, so a first line sliced at columns that still count the mark loses its digits.
+        """
+        marked = self.bait("marked.py", "\ufeff'See #12'\n")
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[marked]),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(1, prose_lint.main(["--check", "issue-ref"]))
+        self.assertIn(
+            "marked.py:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
+        )
+        self.assertNotIn("may be misread", err.getvalue())
+
+    def test_a_byte_order_mark_leaves_a_first_line_comment_leading_in_every_syntax(self) -> None:
+        """The mark is not whitespace, so read as code it made a first-line comment trailing.
+
+        `issue-ref` reads a comment only where its marker opens the line, so a trailing one hid the
+        reference.
+        """
+        for name, written in (
+            ("a.py", "# See #12 for why."),
+            ("a.sh", "# See #12 for why."),
+            ("a.yml", "# See #12 for why."),
+            ("a.toml", "# See #12 for why."),
+            ("a.tf", "# See #12 for why."),
+            ("a.cs", "// See #12 for why."),
+            ("a.c", "/* See #12 for why. */"),
+            ("a.css", "/* See #12 for why. */"),
+            ("a.html", "<!-- See #12 for why. -->"),
+            ("a.ps1", "# See #12 for why."),
+            ("a.ps1", "<# See #12 for why. #>"),
+            ("a.ini", "; See #12 for why."),
+            ("a.kicad_sch", "# See #12 for why."),
+        ):
+            with self.subTest(file=name, comment=written):
+                marked = self.bait(name, f"\ufeff{written}\nx\n")
+                found = prose_lint.check_file(marked, {"issue-ref"})
+                self.assertEqual([(1, "issue-ref")], [(line, rule) for line, rule, _ in found])
+
+    def test_a_byte_order_mark_leaves_a_first_line_comment_counted_as_added(self) -> None:
+        """`comment-added` reads leading comments only, so a trailing one went uncounted."""
+        for name, written in (
+            ("a.py", "# See the reason."),
+            ("a.sh", "# See the reason."),
+            ("a.cs", "// See the reason."),
+        ):
+            with self.subTest(file=name):
+                marked = self.bait(name, f"\ufeff{written}\nx\n")
+                found = prose_lint.check_file(marked, {"comment-added"})
+                self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
+
+    def test_a_byte_order_mark_leaves_a_first_line_fence_opening(self) -> None:
+        """Read as text before the fence, the mark inverted which lines the fence held."""
+        marked = self.bait("a.md", "\ufeff```sh\nx; y\n```\n\nOne; two.\n")
+        found = prose_lint.check_file(marked, {"semicolon"})
+        self.assertEqual([5], [line for line, _rule, _message in found])
+
+    def test_the_character_set_rule_still_reads_a_byte_order_mark(self) -> None:
+        """The structural readers drop the mark, and the character-set rule still reports it."""
+        for name, text in (("a.ps1", "# See the reason.\n"), ("a.md", "```sh\nx\n```\n")):
+            with self.subTest(file=name):
+                marked = self.bait(name, f"\ufeff{text}")
+                found = prose_lint.check_file(marked, {"charset-unknown"})
+                self.assertEqual([1], [line for line, _, message in found if "U+FEFF" in message])
+
+    def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
+        baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
+        err = self.scope_line(baits, ["--check", "comment-wrap"])
+        self.assertIn("6 .py file(s) Python", err)
+        self.assertIn(f"{baits[4].as_posix()!r} and more", err)
+        self.assertNotIn(baits[5].as_posix(), err)
+
+    def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
+        """The environment override is cleared, since it stands `comment-added` down."""
+        bait = self.bait("open.py", self.UNTOKENIZED)
+        with (
+            mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}),
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"open.py": {1}}),
+        ):
+            err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("may be misread: 'open.py'", err)
 
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
@@ -4884,11 +5276,7 @@ class TestTheCommentAddedRule(BaitCase):
         )
 
     def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
-        """A case-insensitive filesystem hands the same file back under either spelling.
-
-        This rule alone. `comment_wrap_findings` still matches the suffix case-sensitively, which
-        is filed rather than fixed here, so the two rules read such a file differently.
-        """
+        """A case-insensitive filesystem hands the same file back under either spelling."""
         for name in ("mixed.py", "mixed.PY"):
             with self.subTest(name=name):
                 self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))

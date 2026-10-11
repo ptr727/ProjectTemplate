@@ -343,6 +343,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # The directory this script sits in, and the anchor every scope answer is read from.
 # One value serves the owner probe and the refusal naming it, so the two cannot disagree.
@@ -1554,24 +1555,20 @@ def stopping_refusal(pr: dict) -> dict | None:
 
 
 def refusing_review(pr: dict) -> dict | None:
-    """The reviewer's newest refusal carrying the current head, where one is there.
+    """The reviewer's newest review carrying the current head, where that review is a refusal.
 
     Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
     a push retires it, and the round the push raises either reviews that head or refuses it in
     its own right.
 
-    A refusal alongside a genuine review of the same head is spent too, and that is the caller's
-    reading rather than this one's, since what spends it is coverage this cannot see from a
-    refusal alone. Both callers hold it: `main` returns 0 on `reviewed_head` before reaching
-    here, and the digest reports the field only where nothing covers the head.
+    A genuine round on the same head after the refusal spends it, so the newest review on the
+    head is the one read rather than the newest refusal.
     """
     head = pr["headRefOid"]
-    refusals = [
-        n
-        for n in reviewer_nodes(pr, "reviews")
-        if (n.get("commit") or {}).get("oid") == head and refusal_of(n)
-    ]
-    return newest_of(refusals)
+    newest = newest_of(
+        [n for n in reviewer_nodes(pr, "reviews") if (n.get("commit") or {}).get("oid") == head]
+    )
+    return newest if newest is not None and refusal_of(newest) else None
 
 
 def newest_of(nodes: list[dict]) -> dict | None:
@@ -1995,9 +1992,19 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
+class Capped(NamedTuple):
+    """A compare whose file list reached `COMPARE_FILE_CAP`, with the merge base it named.
+
+    The merge base is what `tree_changed_at` reads past the cap from, carried here so that
+    reading costs no second compare.
+    """
+
+    merge_base: str
+
+
 @functools.cache
-def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | None:
-    """The paths a pull request off `base` changes at `commit`, or None where that was unreadable.
+def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | Capped | None:
+    """The paths a pull request off `base` changes at `commit`, or why that could not be had.
 
     Read as a three-dot compare, which is the same merge-base reading the pull request's own file
     list is, so the set at an earlier commit and the set at the head are two readings of one
@@ -2008,10 +2015,11 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     None rather than an empty set wherever the read did not happen, since a pull request that
     changes nothing and a compare that could not be fetched take opposite decisions, and the
     caller fails closed on the second. The API caps its file list at 300, and the response carries
-    no flag saying it did, so a set at the cap is returned as unreadable rather than as a set that
-    is probably short. A name the response leaves null would coerce to the literal path `None`
-    and compare equal to another round's null, so an entry that is not a non-empty string makes
-    the whole reading unreadable rather than a set with a fabricated member in it.
+    no flag saying it did, so a set at the cap is returned as `Capped` rather than as a set that
+    is probably short, and `tree_changed_at` reads past it. A name the response leaves null
+    would coerce to the literal path `None` and compare equal to another round's null, so an
+    entry that is not a non-empty string makes the whole reading unreadable rather than a set
+    with a fabricated member in it.
 
     A read that did not happen is taken again on the `READ_RETRY_DELAYS` schedule before it is
     returned as None. One run read `unstated` on a head where the runs either side of it carried a
@@ -2039,7 +2047,32 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
     if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
         return None
 
-    def listed(proc: subprocess.CompletedProcess) -> object:
+    compared = reread_json(
+        f"repos/{owner}/{repo}/compare/{base}...{commit}",
+        r'if (.files | type) == "array" then ({files: [.files[].filename], '
+        r'merge_base: (.merge_base_commit.sha // "")} | @json) else empty end',
+    )
+    if not isinstance(compared, dict):
+        return None
+    names = compared.get("files")
+    if not isinstance(names, list):
+        return None
+    if not all(isinstance(n, str) and n for n in names):
+        return None
+    if len(names) >= COMPARE_FILE_CAP:
+        merge_base = compared.get("merge_base")
+        return Capped(merge_base) if isinstance(merge_base, str) and merge_base else None
+    return frozenset(names)
+
+
+def reread_json(path: str, jq: str) -> object:
+    """One REST read whose filter emits JSON, parsed, re-read on the `READ_RETRY_DELAYS` schedule.
+
+    None wherever nothing parseable came back, an absence GitHub answered included, so the caller
+    has one value to refuse on.
+    """
+
+    def parsed(proc: subprocess.CompletedProcess) -> object:
         if proc.returncode != 0:
             return None
         try:
@@ -2047,25 +2080,64 @@ def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] 
         except json.JSONDecodeError:
             return None
 
-    compare = functools.partial(
-        gh_rest,
-        f"repos/{owner}/{repo}/compare/{base}...{commit}",
-        r'if (.files | type) == "array" then ([.files[].filename] | @json) else empty end',
-    )
+    read = functools.partial(gh_rest, path, jq)
     proc = backoff(
-        compare(),
-        compare,
-        lambda p: not answered_absent(p) and listed(p) is None,
+        read(),
+        read,
+        lambda p: not answered_absent(p) and parsed(p) is None,
         delays=READ_RETRY_DELAYS,
     )
-    names = listed(proc)
-    if names is None:
+    return parsed(proc)
+
+
+def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
+    """Every path in `commit`'s tree with its mode and object id, or None where that was unread.
+
+    A tree GitHub truncated is unread too. Its ceiling on a recursive read is about 100,000
+    entries, which no fleet repository approaches. A directory entry is left out, a submodule
+    kept, since the compare lists a submodule moving as a change.
+    """
+    tree = reread_json(
+        f"repos/{owner}/{repo}/git/trees/{commit}?recursive=1",
+        r'if (.tree | type) == "array" and (.truncated | type) == "boolean" '
+        r'then ({truncated, entries: [.tree[] | select(.type != "tree") | [.path, .mode, .sha]]} '
+        r"| @json) else empty end",
+    )
+    if not isinstance(tree, dict) or tree.get("truncated") is not False:
         return None
-    if not isinstance(names, list) or len(names) >= COMPARE_FILE_CAP:
+    entries = tree.get("entries")
+    if not isinstance(entries, list):
         return None
-    if not all(isinstance(n, str) and n for n in names):
+    paths: dict[str, tuple[str, str]] = {}
+    for entry in entries:
+        if not (
+            isinstance(entry, list)
+            and len(entry) == 3
+            and all(isinstance(e, str) and e for e in entry)
+        ):
+            return None
+        paths[entry[0]] = (entry[1], entry[2])
+    return paths
+
+
+@functools.cache
+def tree_changed_at(owner: str, repo: str, merge_base: str, commit: str) -> frozenset[str] | None:
+    """The paths `commit` changes against `merge_base`, read past the compare's file cap.
+
+    The compare caps its file list at 300 on every page. Measured on a 308-file comparison, the
+    first page carried 300 files and the second none at all, so no paging of it reaches further.
+    The trees either side do: the commit's own and the merge base's, each read whole and diffed
+    here. On that comparison this named exactly the paths `git diff --no-renames --name-only`
+    does, 326 of them. That is not the compare's own reading, which names a rename once by its
+    new path, so `carry_holds` reads both commits this way or neither, never one of each.
+
+    None where either tree was unread. Memoized for the run, for the reason `changed_at` is.
+    """
+    before = tree_at(owner, repo, merge_base)
+    after = tree_at(owner, repo, commit)
+    if before is None or after is None:
         return None
-    return frozenset(names)
+    return frozenset(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
 
 
 def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
@@ -2093,6 +2165,10 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
     None where the comparison could not be made at all, which the caller reads as a refusal
     rather than as a pass. A bound that fell open when it could not be measured would be the
     unbounded carry again, reached by a different route.
+
+    A compare at its cap on one side only is a definite no, since the other side's list is whole
+    and shorter than the cap, so the two sets differ in size. At the cap on both, the change set
+    is read again from the trees, for both commits.
     """
     head = pr.get("headRefOid") or ""
     base = pr.get("baseRefName") or ""
@@ -2100,7 +2176,15 @@ def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | No
     current = changed_at(owner, repo, base, head)
     if earlier is None or current is None:
         return None
-    return earlier == current
+    if isinstance(earlier, frozenset) and isinstance(current, frozenset):
+        return earlier == current
+    if isinstance(earlier, frozenset) or isinstance(current, frozenset):
+        return False
+    before = tree_changed_at(owner, repo, earlier.merge_base, carried_from)
+    after = tree_changed_at(owner, repo, current.merge_base, head)
+    if before is None or after is None:
+        return None
+    return before == after
 
 
 def second_format(body: str) -> bool:
@@ -4960,7 +5044,8 @@ def local_cover(pr: dict) -> bool:
     a head its writer attests, and only where nothing on record says any round read part of a
     diff and the whole review history is in view, the bound a file table stands in under. A fix
     push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal on this head is Copilot's own word on it and is never overruled.
+    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
+    overrules, and only a later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
