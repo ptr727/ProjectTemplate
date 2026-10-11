@@ -84,10 +84,10 @@ maintainer starts a second run on a repository only once the first has ended.
 ## The Loop
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
-invocation, which is the one command it runs apart from the timer "A Dispatch That Fails" names.
-From then on it holds only the scope and any `highest` the invocation named, the round count, the
-dispatched handoff numbers, each round's one-line outcome, and the waits spent on a dispatch being
-retried.
+invocation. Apart from the timer "A Dispatch That Fails" names, that is the one command it runs.
+From then on it holds only the scope and any `highest` the invocation named, the round count, and
+the dispatched handoff numbers. It also holds each round's one-line outcome and the waits spent on
+a dispatch being retried.
 Each round runs:
 
 1. **Dispatch the picker** at `frontier` with the brief below, or at `highest` where the
@@ -104,28 +104,30 @@ Each round runs:
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
 
-The run ends at `NONE`, `STOP`, an unlisted reply, the round cap, the repeat stop above, or a
-dispatch failure per "A Dispatch That Fails". Its final message lists every round's outcome line,
-then the dispatch failure where one ended the run, then the count of parked handoffs, and names the
+The run ends at `NONE`, `STOP`, an unlisted reply, the round cap, the repeat stop, or a dispatch
+failure per "A Dispatch That Fails". Its final message lists every round's outcome line, then the
+dispatch failure where one ended the run. It then gives the count of parked handoffs, and names the
 attended session (`session-handoff`, "resume the handoff") as where they get answered. It writes
 nothing else and asks nothing.
 
 ### A Dispatch That Fails
 
-A dispatch can fail before its subagent starts, the harness or a check in front of it returning an
-error in place of running the call. That is a state of the session rather than of any issue, and no
-picker or worker line describes it, so the orchestrator handles it itself.
+A dispatch can fail before its subagent starts, when the harness or a check in front of it returns
+an error instead. That is a state of the session rather than of any issue. No picker or worker line
+describes it, so the orchestrator handles it itself.
 
-- **An error that states it is transient is retried.** The orchestrator waits on one bounded
-  background timer of about ten minutes, such as a backgrounded `sleep 600` whose exit wakes the
-  session, then dispatches the same brief again unchanged. It spends at most three waits on one
-  dispatch, and a dispatch that runs starts the next one's count from none.
+- **An error naming a temporary condition is retried.** The orchestrator judges that from the
+  error's own text, such as an overload, a rate limit, or a check reporting a transient failure. It
+  then waits on one bounded background timer of about ten minutes, such as a backgrounded
+  `sleep 600` whose exit wakes the session. It then dispatches the same brief again unchanged. It
+  spends at most three waits on one dispatch, and a dispatch that runs starts the next one's count from none.
 - **A dispatch that never ran was not dispatched.** A handoff number joins the dispatched ones only
-  once its worker runs, so a worker brief retried this way does not meet the repeat stop in step 2.
-- **Anything else ends the run at a dispatch failure.** That covers an error that does not state it
-  is transient, a dispatch still failing after its third wait, and a timer that cannot itself
-  start, since an outage refusing every call refuses the timer too. It is an end state of its own,
-  apart from `STOP`, which only a subagent returns. The final message names it in a line of its
+  once its worker runs. A worker brief retried this way therefore does not meet the repeat stop in
+  step 2.
+- **Anything else ends the run at a dispatch failure.** That covers an error naming no temporary
+  condition, and a dispatch still failing after its third wait. It also covers a timer that cannot
+  itself start, since an outage refusing every call refuses the timer too. It is an end state of its
+  own, apart from `STOP`, which only a subagent returns. The final message names it in a line of its
   own, with the seat whose dispatch failed and the error its last attempt returned.
 
 ### The Briefs
