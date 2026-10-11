@@ -1585,21 +1585,111 @@ class TestANamedToolIsStillProse(BaitCase):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
-    def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
-        """A checker reads these after prose on the same line, `noqa` and `type: ignore` behind a `#`."""
+    def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
+        """A Python checker reads the directive, and the prose in front of it is still prose."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for text, expected in (
+            ("# A new prose comment the reviewer never sees.  # noqa\n", ["comment-added"]),
+            ("# two sentences here. Another one follows.  # noqa: E501\n", both),
+            ("x = 1  # two sentences here. Another one follows.  # noqa\n", ["comment-wrap"]),
+            (
+                "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
+                ["comment-wrap"],
+            ),
+            ("# two sentences here. Another one follows.  # pylint: disable=no-member\n", both),
+            ("# two sentences here. Another one follows, pylint: disable=no-member\n", both),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_does_not_make_prose_read_as_configuration(self) -> None:
+        """A directive's code ends the body where a full stop would, so the cut comes first."""
+        text = (
+            "# Note: two sentences here. Another one follows.  # noqa: E501\n"
+            "# Note: the value is read once.  # noqa: E501\n"
+        )
+        self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
+
+    def test_what_is_left_before_a_directive_keeps_its_exemptions(self) -> None:
+        """The space in front of the directive is cut with it, so an address or a key is still exempt."""
         for text in (
-            "# two sentences here. Another one follows.  # noqa: E501\n",
-            "x = 1  # two sentences here. Another one follows.  # noqa\n",
-            "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
-            "# two sentences here. Another one follows.  # pylint: disable=no-member\n",
-            "# two sentences here. Another one follows, pylint: disable=no-member\n",
+            "# https://example.com/a/very/long/reference/path  # noqa: E501\n",
+            "# Note:  # noqa: E501\n",
         ):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
 
+    def test_each_trailing_form_ends_what_is_judged(self) -> None:
+        """A sentence after the directive is cut with it, whichever form it is and however the suffix is cased."""
+        for name, text in (
+            ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
+            ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
+        """What is left once the directive is cut is empty or a directive `NOT_PROSE` already exempts."""
+        for text in (
+            "x = 1  # noqa\n",
+            "x = 1  # pylint: disable=no-member\n",
+            "x = 1  # type: ignore  # noqa: E501\n",
+            "# noqa: E501  # noqa\n",
+            "#  # noqa\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_is_prose_outside_python(self) -> None:
+        """No other language's checker reads these forms, so a mention of one is part of the sentence."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for name, text in (
+            ("a.toml", "# two sentences here. Each line carries a `# noqa` marker.\n"),
+            ("a.yml", "# two sentences here. Another one follows.  # noqa\n"),
+            ("run.sh", "# two sentences here. Another one follows, pylint: disable=no-member\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_the_sentence_after_a_mention_is_judged_outside_python(self) -> None:
+        """Only a Python file is cut at the directive, so a run-on after a mention elsewhere is caught."""
+        text = "# Each line carries a `# noqa` marker. Another sentence follows.\n"
+        for name, expected in (
+            ("a.yml", ["comment-wrap", "comment-added"]),
+            ("a.toml", ["comment-wrap", "comment-added"]),
+            ("tool.py", ["comment-added"]),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
+
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
-        text = "# two sentences here. Another one follows.  # noqable\n"
-        self.assertIn("comment-wrap", self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+        for text in (
+            "x = 1  # Read the row.  # noqable. Another one follows.\n",
+            "x = 1  # Read the row mypylint: once. Another one follows.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(
+                    ["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py")
+                )
+
+    def test_a_directive_named_mid_sentence_leaves_no_wrap(self) -> None:
+        """The sentence goes on past a directive it names, so the next line does not continue it."""
+        for text, expected in (
+            ("# Suppress with `# noqa: E501` where needed.\n# max_len - the longest line.\n", []),
+            ("# Lines carry a `# noqa` marker.\n# flake8 reads it.\n", [(2, "comment-case")]),
+            (
+                "# A sentence that keeps  # noqa\n# going onto the next line.\n",
+                [(1, "comment-wrap")],
+            ),
+        ):
+            with self.subTest(text=text.strip()):
+                path = self.tmp / "tool.py"
+                path.write_text(text, encoding="utf-8")
+                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"})
+                self.assertEqual(expected, [(n, kind) for n, kind, _ in found])
 
     def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
         """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""

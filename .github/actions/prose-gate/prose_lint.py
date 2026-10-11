@@ -1566,13 +1566,13 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 # A pragma, shebang, or divider is machinery rather than prose.
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
-# `noqa` and `type: ignore` may also trail prose behind their own `#`, and `pylint:` anywhere.
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
     r"|(?:noqa|type:\s*ignore|pylint|shellcheck|cSpell|markdownlint|omit from toc|prettier|eslint"
     r"|SPDX|Copyright)\b)"
-    r"|#\s*(?:noqa|type:\s*ignore)\b|\bpylint:"
 )
+
+TRAILING_DIRECTIVE = re.compile(r"#\s*(?:noqa|type:\s*ignore)\b|\bpylint:")
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
 # It cannot be capitalized or restructured without corrupting the address it exists to carry.
@@ -2261,18 +2261,24 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
 
     The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
     run-on is the other half of the same rule, so both are reported.
+
+    A body cut at a trailing directive continues into the next line only where the whole body does
+    not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
+    goes on past.
     """
     comments = python_comments(raw) if path.suffix.lower() == ".py" else None
     if comments is None:
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
-    comments = [c for c in comments if c[0] not in skip]
+    kept = [c for c in comments if c[0] not in skip]
+    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
     configured = config_run_lines(comments)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
+    prev_whole = ""
     prev_no = 0
-    for n, body, leading, _raw in comments:
+    for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
         if (
             not body
             or n in configured
@@ -2301,6 +2307,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             and leading
             and prev_body
             and not SENT_END.search(prev_body)
+            and not SENT_END.search(prev_whole)
             and body[:1].islower()
         )
         if continuation:
@@ -2327,6 +2334,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A trailing comment can start a sentence the next full-line comment continues.
         # The continuation has to be a full-line comment, since a trailing one annotates its own.
         prev_body = body
+        prev_whole = whole.body
         prev_no = n
     return out
 
@@ -2350,6 +2358,24 @@ def is_tool_directive(body: str) -> bool:
     spelling, and its test-name form.
     """
     return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
+
+
+def without_trailing_directive(path: Path, body: str) -> str:
+    """The comment body up to the first directive a Python checker reads.
+
+    A Python checker reads `noqa` and `type: ignore` behind their own `#` after prose on the same
+    line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to any
+    comment switch every comment rule off for that line. The prose can be deleted and the directive
+    kept, so the directive and anything after it are cut off, and what is left is judged by the same
+    exemptions as any other body, an empty one included.
+
+    No other language's checker reads these forms, so in any other file a mention of one is part of
+    the sentence holding it.
+    """
+    if path.suffix.lower() != ".py":
+        return body
+    match = TRAILING_DIRECTIVE.search(body)
+    return body[: match.start()].rstrip() if match else body
 
 
 def is_comment_prose(body: str) -> bool:
@@ -2428,7 +2454,7 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     for comment in bodies:
         n = comment.line
-        if n in seen or not is_comment_prose(comment.body):
+        if n in seen or not is_comment_prose(without_trailing_directive(path, comment.body)):
             continue
         seen.add(n)
         out.append(
