@@ -1462,6 +1462,8 @@ function Resolve-Selection {
 
 function main {
     if ($script:WANT_HELP) { usage; exit 0 }
+    $unknown = @($script:WANT_TOOLS | Where-Object { $_ -like '-*' })
+    if ($unknown.Count -gt 0) { die "Unknown option `"$($unknown[0])`", -Help lists the options" }
     $script:MODE = Resolve-Mode
     Test-HostSupported
     Add-RepositoryToolCatalog

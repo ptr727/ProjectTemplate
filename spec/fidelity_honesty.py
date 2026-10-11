@@ -21,6 +21,7 @@ settings.json bug). Each gap names its carriers, so a `retire` disposition reads
 Usage: python3 spec/fidelity_honesty.py [--report]
 """
 
+import argparse
 import base64
 import sys
 
@@ -379,9 +380,12 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     return "\n".join(out).rstrip() + "\n"
 
 
-def main():
-    argv = sys.argv[1:]
-    report_mode = "--report" in argv
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument(
+        "--report", action="store_true", help=f"write {REPORT_PATH} rather than print"
+    )
+    report_mode = parser.parse_args(list(argv)).report
     spec = {
         "registry": audit.load("registry/repos.json"),
         "files": audit.load("spec/files.json"),
@@ -442,4 +446,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

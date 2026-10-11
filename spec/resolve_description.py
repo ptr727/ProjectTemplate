@@ -15,6 +15,7 @@ Usage: resolve_description.py REGISTRY_PATH NAME
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -71,11 +72,12 @@ def resolve_description(registry: dict, name: str) -> str | None:
     return desc
 
 
-def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: resolve_description.py REGISTRY_PATH NAME", file=sys.stderr)
-        return 1
-    registry_path, name = sys.argv[1], sys.argv[2]
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument("registry_path", metavar="REGISTRY_PATH")
+    parser.add_argument("name", metavar="NAME")
+    args = parser.parse_args(argv)
+    registry_path, name = args.registry_path, args.name
     try:
         registry = json.loads(Path(registry_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -92,4 +94,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
