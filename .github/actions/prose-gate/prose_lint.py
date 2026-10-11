@@ -1568,7 +1568,7 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 # A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
 NOT_PROSE = re.compile(
     r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
-    r"|(?:(?i:noqa)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
+    r"|(?:(?i:noqa|nopep8)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
     r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
 )
 
