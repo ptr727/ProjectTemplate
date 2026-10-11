@@ -1565,10 +1565,12 @@ def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
 
 
 # A pragma, shebang, or divider is machinery rather than prose.
+# A tool name is anchored at the body's start, since a comment naming one mid-sentence is prose.
+# `noqa` and `type: ignore` may also trail prose, but only behind their own `#`, as their tools read them.
 NOT_PROSE = re.compile(
-    r"^(!|\s*[-=#*/<>]+\s*$)|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
-    r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright"
-    r"|^v\d+(\.\d+)*$"
+    r"^(?:!|\s*[-=#*/<>]+\s*$|noqa|type:\s*ignore|pylint|ruff:|mypy:|shellcheck"
+    r"|cSpell|markdownlint|omit from toc|prettier|eslint|SPDX|Copyright|v\d+(?:\.\d+)*$)"
+    r"|#\s*(?:noqa|type:\s*ignore)\b"
 )
 
 # A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
@@ -2260,7 +2262,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
     run-on is the other half of the same rule, so both are reported.
     """
-    comments = python_comments(raw) if path.suffix == ".py" else None
+    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
     if comments is None:
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)

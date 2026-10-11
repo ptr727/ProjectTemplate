@@ -1532,6 +1532,62 @@ class TestCommentWrap(BaitCase):
                 self.assertIsNotNone(prose_lint.syntax_for(Path(f"x{label}")))
 
 
+class TestANamedToolIsStillProse(BaitCase):
+    """A comment that names a tool is prose about it, and only a directive the tool reads is exempt.
+
+    The exemption was searched anywhere in the body, so writing a tool's name into a sentence
+    disarmed every comment rule for that line, `comment-added` included.
+    """
+
+    COMMENT_RULES: ClassVar[set[str]] = {"comment-wrap", "comment-case", "comment-added"}
+
+    def test_a_sentence_naming_a_tool_is_judged_as_prose(self) -> None:
+        for text, expected in (
+            ("# The parser cannot read what prettier writes here.\n", ["comment-added"]),
+            ("# The header below states the Copyright the vendor requires.\n", ["comment-added"]),
+            (
+                "# two sentences here. Here is another one about eslint.\n",
+                ["comment-wrap", "comment-case", "comment-added"],
+            ),
+            ("# The noqa marker here is read per line.\n", ["comment-added"]),
+            ("# Each type: ignore here names its code.\n", ["comment-added"]),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_directive_opening_the_body_is_still_exempt(self) -> None:
+        for name, text in (
+            ("tool.py", "# Copyright 2024 Example Corp.\n"),
+            ("tool.py", "# SPDX-License-Identifier: MIT\n"),
+            ("tool.py", "# pylint: disable=too-many-branches\n"),
+            ("tool.py", "# noqa: S603 - fixed argv\n"),
+            ("tool.py", "# type: ignore[import-untyped]\n"),
+            ("run.sh", "# shellcheck disable=SC2086\n"),
+            ("app.ts", "// eslint-disable-next-line no-console\n"),
+            ("app.ts", "// prettier-ignore\n"),
+            ("settings.jsonc", "// cSpell:ignore exampleword\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
+        """`noqa` and `type: ignore` sit after prose on the same line, which is how their tools read them."""
+        for text in (
+            "# two sentences here. Another one follows.  # noqa: E501\n",
+            "# two sentences here. Another one follows.  # type: ignore[arg-type]\n",
+            "x = 1  # two sentences here. Another one follows.  # noqa\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
+        """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
+        text = '"""\n# two sentences here. Another one follows.\n"""\n'
+        for name in ("tool.py", "Tool.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(text, {"comment-wrap", "comment-case"}, name=name))
+
+
 class TestMultiLineStrings(BaitCase):
     """A string that spans lines hides its markers on every line it covers, not only the first.
 
