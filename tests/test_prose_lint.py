@@ -2756,11 +2756,58 @@ class TestCli(unittest.TestCase):
         bait = self.bait("open.py", self.UNTOKENIZED)
         self.assertNotIn("may be misread", self.scope_line([bait], ["--check", "dupword"]))
 
+    LATIN = b"# caf\xe9 is fine.\nx = 1\n"
+
     def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
         """No rule reads a file the gate cannot decode, so no parse was refused on it."""
         latin = self.tmp / "latin.py"
-        latin.write_bytes(b"# caf\xe9 is fine.\nx = 1\n")
+        latin.write_bytes(self.LATIN)
         self.assertNotIn("may be misread", self.scope_line([latin], []))
+
+    def test_a_file_the_gate_cannot_decode_is_named_whatever_rule_ran(self) -> None:
+        """No rule reads a file that is not UTF-8, so a run that skipped it is not a clean one.
+
+        Every rule skipped it and the run printed the scope line a tree of readable files prints.
+        """
+        for name in ("latin.py", "latin.md"):
+            latin = self.tmp / name
+            latin.write_bytes(self.LATIN)
+            for argv in ([], ["--check", "dupword"], ["--check", "charset"]):
+                with self.subTest(file=name, argv=argv):
+                    err = self.scope_line([latin], argv)
+                    self.assertIn(
+                        f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+                        f"{latin.as_posix()!r}",
+                        err,
+                    )
+
+    def test_a_file_that_decodes_is_not_named_as_undecoded(self) -> None:
+        clean = self.bait("clean.md", "Caf\u00e9 is fine.\n")
+        self.assertNotIn("could not open or decode", self.scope_line([clean], []))
+
+    def test_a_file_that_cannot_be_opened_is_named_too(self) -> None:
+        """A read failing after discovery skips the file the same way a failed decode does.
+
+        The clause names both causes, so an open failure is not reported as an encoding one.
+        """
+        absent = self.tmp / "absent.md"
+        err = self.scope_line([absent], ["--check", "dupword"])
+        self.assertIn(
+            f"1 file(s) the gate could not open or decode as UTF-8, so no rule read them: "
+            f"{absent.as_posix()!r}",
+            err,
+        )
+
+    def test_the_diff_scoped_line_names_an_undecoded_file_too(self) -> None:
+        latin = self.tmp / "latin.md"
+        latin.write_bytes(self.LATIN)
+        with (
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"latin.md": {1}}),
+        ):
+            err = self.scope_line([latin], ["--check", "dupword", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("could not open or decode as UTF-8, so no rule read them: 'latin.md'", err)
 
     def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
         """An editor-added mark parses on every interpreter, so its docstrings are still read.
