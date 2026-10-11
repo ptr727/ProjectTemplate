@@ -2766,9 +2766,10 @@ class TestCli(unittest.TestCase):
         """An editor-added mark parses on every interpreter, so its docstrings are still read.
 
         `ast` refuses the mark in a string, which named the file as one the interpreter could not
-        parse and skipped the reference its module docstring holds.
+        parse and skipped the reference its module docstring holds. The reference closes the
+        docstring, so a first line sliced at columns that still count the mark loses its digits.
         """
-        marked = self.bait("marked.py", '\ufeff"""See #12 for the reason."""\n')
+        marked = self.bait("marked.py", "\ufeff'See #12'\n")
         with (
             mock.patch.object(prose_lint, "discover", return_value=[marked]),
             contextlib.redirect_stdout(io.StringIO()) as out,
