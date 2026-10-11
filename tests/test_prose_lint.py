@@ -98,6 +98,60 @@ def workflow_step_script(name: str) -> str:
     return "\n".join(script_lines)
 
 
+def yaml_step(text: str, name: str) -> str:
+    """The one sequence item named `name`, its dash blanked so its keys read as a mapping.
+
+    Read by indentation, as `spec/audit.py`'s workflow readers are, since the suite runs on the
+    standard library alone. The item ends at the first line at or left of its dash, so a key under
+    a sibling step is never this step's.
+    """
+    lines = text.splitlines()
+    starts = [
+        i for i, line in enumerate(lines) if re.fullmatch(rf"( *)- name: {re.escape(name)}", line)
+    ]
+    if len(starts) != 1:
+        raise AssertionError(f"{len(starts)} steps named {name!r}")
+    first = lines[starts[0]]
+    dash = len(first) - len(first.lstrip())
+    item = [first[:dash] + "  " + first[dash + 2 :]]
+    for line in lines[starts[0] + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) <= dash:
+            break
+        item.append(line)
+    return "\n".join(item)
+
+
+def yaml_value(text: str, *keys: str) -> str | None:
+    """The plain scalar at the nested mapping path `keys`, or None where any key is absent.
+
+    Each key is looked for only among its parent's direct children, the shallowest lines under it,
+    and a comment line is no key at all, so a commented-out or relocated entry reads as absent.
+    """
+    lines = [
+        line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    ]
+    value = None
+    for key in keys:
+        if not lines:
+            return None
+        level = min(len(line) - len(line.lstrip()) for line in lines)
+        found = None
+        for i, line in enumerate(lines):
+            if len(line) - len(line.lstrip()) == level and line[level:].startswith(f"{key}:"):
+                found = i
+                break
+        if found is None:
+            return None
+        value = lines[found][level + len(key) + 1 :].strip()
+        children = []
+        for line in lines[found + 1 :]:
+            if len(line) - len(line.lstrip()) <= level:
+                break
+            children.append(line)
+        lines = children
+    return value
+
+
 def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, str, list[str]]:
     """Run the workflow's own label-reading step against a stub gh.
 
@@ -5176,10 +5230,14 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         """Four surfaces name this label, and a rename that misses one silently disarms it."""
         declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
         self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
-        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(
-            f"contains(github.event.pull_request.labels.*.name, '{prose_lint.COMMENT_LABEL_NAME}')",
-            workflow,
+        step = yaml_step(
+            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
+        )
+        self.assertEqual("comments-label", yaml_value(step, "id"))
+        self.assertEqual(
+            "${{ contains(github.event.pull_request.labels.*.name, "
+            f"'{prose_lint.COMMENT_LABEL_NAME}') }}}}",
+            yaml_value(step, "env", "PAYLOAD_LABELED"),
         )
         self.assertEqual(
             ("0", "labeled=true"),
@@ -5194,29 +5252,55 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         Two mutations survived the whole suite before this: deleting the `env:` mapping, after
         which the label and the promotion stand-down never reach the gate and a labeled pull
         request is still refused, and flipping the input's default to `'true'`, after which any
-        caller that omits the input has the rule stood down on every run and says nothing.
+        caller that omits the input has the rule stood down on every run and says nothing. Both are
+        read off the structure, since a substring match over the file also passed with the `env:`
+        entry commented out.
         """
         action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-        self.assertIn("ALLOW_COMMENTS: ${{ inputs.allow-comments }}", action)
-        # The default has to be the off value, since a caller that passes nothing gets it.
-        declared = action.split("runs:", 1)[0].split("  allow-comments:", 1)[1]
-        self.assertIn("default: 'false'", declared)
+        self.assertEqual(
+            "${{ inputs.allow-comments }}",
+            yaml_value(yaml_step(action, "Check prose step"), "env", "ALLOW_COMMENTS"),
+        )
+        self.assertEqual("'false'", yaml_value(action, "inputs", "allow-comments", "default"))
 
     def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
         """Asserted whole, since a fragment of it left two disarming mutations green.
 
         Flipping the `||` to `&&` refuses every labeled pull request, and dropping the head
         repository term stands the rule down for a fork branch named `develop`. Both passed while
-        this read one fragment, and both fail against the whole expression.
+        this read one fragment, and both fail against the whole expression. It is read under the
+        prose step's own `with:`, since the same line moved to a sibling step passed a substring
+        match while the gate fell back to the input's default.
         """
-        workflow = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(
-            "allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || "
+        step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
+        self.assertEqual(
+            "${{ steps.comments-label.outputs.labeled == 'true' || "
             "(github.event.pull_request.head.repo.full_name == github.repository && "
             "github.head_ref == 'develop' && "
             "github.base_ref == github.event.repository.default_branch) }}",
-            workflow,
+            yaml_value(step, "with", "allow-comments"),
         )
+
+    def test_the_structure_reader_sees_only_a_live_entry_under_its_own_step(self) -> None:
+        """The two mutations the substring matches let through, against the reader the cases use."""
+        steps = (
+            "steps:\n"
+            "  - name: Gate step\n"
+            "    env:\n"
+            "      # FLAG: on\n"
+            "      OTHER: off\n"
+            "    with:\n"
+            "      base: main\n"
+            "  - name: Sibling step\n"
+            "    with:\n"
+            "      flag: on\n"
+        )
+        gate = yaml_step(steps, "Gate step")
+        self.assertIsNone(yaml_value(gate, "env", "FLAG"))
+        self.assertEqual("off", yaml_value(gate, "env", "OTHER"))
+        self.assertIsNone(yaml_value(gate, "with", "flag"))
+        self.assertEqual("main", yaml_value(gate, "with", "base"))
+        self.assertEqual("on", yaml_value(yaml_step(steps, "Sibling step"), "with", "flag"))
 
     def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
         """The payload is a snapshot from the event, which a label applied after it never reaches.
