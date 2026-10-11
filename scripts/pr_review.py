@@ -224,16 +224,16 @@ Subcommands
            no comment url so nothing was resolved, 63 = the resolve did not report the
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
-           current head, then print the digest. The auto-request is skipped once a review already
-           covers the head, once Copilot has already answered outside a formal review, or once one
-           is already in the pending request set, so calling `wait` again on the same PR never
-           double-requests. It is also skipped under 46's and 47's quota readings below, since a
-           request into a reached limit spends quota and returns the same refusal. It is skipped too
-           on a pull request into a branch other than the default once Copilot has reviewed it at
-           all, since a fix push there is covered by an attested local pass: an attested head is
-           covered at once, so the wait polls its checks instead only while they can still move
-           its merge, as 30 below lists, and one with no attestation exits 49 naming the `attest`
-           step.
+           current head, then print the digest. The auto-request is skipped once a review past
+           --min-rounds already covers the head, once Copilot has already answered outside a
+           formal review, or once one is already in the pending request set, so calling `wait`
+           again on the same PR never double-requests. It is also skipped under 46's and 47's quota
+           readings below, since a request into a reached limit spends quota and returns the same
+           refusal. It is skipped too on a pull request into a branch other than the default once
+           Copilot has reviewed it at all, since a fix push there is covered by an attested local
+           pass: an attested head is covered at once, so the wait polls its checks instead only
+           while they can still move its merge, as 30 below lists, and one with no attestation exits
+           49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -293,7 +293,11 @@ Subcommands
            poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
-           on a held head covered by an attested local pass a 30 or a 44.
+           on a held head covered by an attested local pass a 30 or a 44. A genuine round the final
+           read shows on the head rules 47 out, and so does any review of this pull request, on any
+           head, submitted after the refusal and not itself a quota refusal, since it answers that
+           refusal as one anywhere in the repository would. A genuine round already on the head when
+           the wait begins leaves the request and the poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -302,9 +306,9 @@ Subcommands
            requesting account's Copilot allowance was exhausted, where no refusal was posted to
            read and clearing the set and requesting again changed nothing. It is decided one
            poll interval after the request, and the rest of the poll is skipped, since no
-           request exists to answer. It cannot meet 46 or 47, since neither sends a request,
-           and ranks under 0/40/41/42/43/44/45/50. `status` cannot report it, since a request that
-           recorded nothing leaves nothing for a later read to find.
+           request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
+           `status` cannot report it, since a request that recorded nothing leaves nothing for a
+           later read to find.
            49 = no Copilot round covers this head and none was requested, the pull request merging
            into a branch other than the default after Copilot's first round, and no attestation
            vouches for the head. Run the local strict review, record it, push, and run `attest`, or
@@ -1165,14 +1169,25 @@ def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, 
         for review in (node.get("reviews") or {}).get("nodes") or []:
             author = review.get("author") or {}
             if author.get("__typename") == "Bot" and author.get("login") == REVIEWER:
-                entries.append(
-                    (number, {**review, "_at": review.get("submittedAt") or "", "_kind": "review"})
-                )
+                entries.append(history_entry(number, review, "review"))
         for comment in (node.get("comments") or {}).get("nodes") or []:
             if (comment.get("author") or {}).get("login") == REVIEWER:
-                entries.append(
-                    (number, {**comment, "_at": comment.get("createdAt") or "", "_kind": "comment"})
-                )
+                entries.append(history_entry(number, comment, "comment"))
+    return newest_first(entries)
+
+
+def history_entry(number: int, node: dict, kind: str) -> tuple[int, dict]:
+    """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged.
+
+    Shared with `standing_quota`, which merges this pull request's own reviews into the history
+    `wait` read, so the two can never spell the entry differently.
+    """
+    stamp = node.get("submittedAt" if kind == "review" else "createdAt") or ""
+    return number, {**node, "_at": stamp, "_kind": kind}
+
+
+def newest_first(entries: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """History entries ordered newest first, the order `quota_signal` reads its first entry in."""
     return sorted(entries, key=lambda pair: pair[1]["_at"], reverse=True)
 
 
@@ -1211,6 +1226,24 @@ def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
     """
     newest = history[0] if history else None
     return newest if newest and quota_refusal(newest[1]) else None
+
+
+def standing_quota(
+    history: list[tuple[int, dict]], pr: dict, number: int
+) -> tuple[int, dict] | None:
+    """`quota_signal` over `history` as this pull request's own read leaves it, or None.
+
+    None where a genuine round covers the head, since the reading is about a head carrying no
+    Copilot activity of its own. This pull request's reviews are merged in rather than trusted to
+    sit in `history`, which reads only the most recently updated pull requests, so a review of it,
+    on any head, submitted after the refusal answers that refusal as one anywhere else would. `wait`
+    reads this on its opening snapshot and on its final read, so both apply one rule, though a
+    push between them can change what the rule finds.
+    """
+    if reviewed_head(pr):
+        return None
+    own = [history_entry(number, n, "review") for n in reviewer_nodes(pr, "reviews")]
+    return quota_signal(newest_first([*history, *own]))
 
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
@@ -5499,12 +5532,15 @@ def main(argv: list[str] | None = None) -> int:
     # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
     # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
     history = [] if done or answer or drift else copilot_history(owner, repo)
+    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
     # `--ignore-quota-signal` only changes whether the signal below is acted on.
     # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
     # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
     # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
     signal = None if a.ignore_quota_signal else quota_signal(history)
-    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
+    quota_stop = (
+        None if not signal or snapshot is None else standing_quota(history, snapshot, a.number)
+    )
     stopped = (
         None if a.ignore_quota_signal or answer or snapshot is None else stopping_refusal(snapshot)
     )
@@ -5517,14 +5553,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
     # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
-    # Skipped once a review already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    # Skipped once a review past --min-rounds already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
     recorded: bool | None = None
     final: dict | None = None
     if (
         not done
         and not answer
         and not drift
-        and not signal
+        and not quota_stop
         and not stopped
         and not held
         and not reviewer_requested(pr)
@@ -5587,11 +5623,11 @@ def main(argv: list[str] | None = None) -> int:
             "nothing and stops here. Pass --ignore-quota-signal to request and poll anyway, "
             "once the limit is believed to have reset."
         )
-    elif signal and not reviewer_requested(pr):
+    elif quota_stop and not reviewer_requested(pr):
         # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
         # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
         # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
-        number, hist_refusal = signal
+        number, hist_refusal = quota_stop
         print(
             f"note: the reviewer's own most recent activity anywhere in this repository, on "
             f"pull request #{number} at {hist_refusal.get('_at') or 'an unknown time'}, is a "
@@ -5752,8 +5788,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
-    if signal:
-        number, hist_refusal = signal
+    if signal and (standing := standing_quota(history, final, a.number)):
+        number, hist_refusal = standing
         print(
             "status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE this pull request's head carries no "
             f"Copilot review or comment of its own, and the reviewer's own most recent activity "
