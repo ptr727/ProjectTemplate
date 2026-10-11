@@ -182,6 +182,27 @@ function run {
     return $LASTEXITCODE
 }
 
+# The run wrapper above, for a command that writes UTF-8 whatever the console's code page, as Docker's CLI does.
+# A console left at its OEM default decodes those bytes as that code page, so the check mark docker desktop prints on success reads as three unrelated characters.
+# The console is switched to UTF-8 for this one call and put back after, rather than for the whole run, so every other native tool here keeps the decoding it was written against.
+# A host with no console to switch (output redirected to a file or a pipe) refuses the switch, and that is not a failure: nothing renders the bytes there, so the command runs as it would have.
+function Invoke-Utf8Run {
+    param([Parameter(Mandatory)][string]$Command, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    $previous = [Console]::OutputEncoding
+    $switched = $false
+    try {
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $switched = $true
+    } catch {
+        $switched = $false
+    }
+    try {
+        return (run -Command $Command -Arguments $Arguments)
+    } finally {
+        if ($switched) { [Console]::OutputEncoding = $previous }
+    }
+}
+
 function confirm {
     param([Parameter(Mandatory)][string]$Question)
     if ($script:ASSUME_YES -or $script:DRY_RUN) { return $true }
@@ -382,6 +403,69 @@ function Invoke-WingetRemove {
     $arguments = @('uninstall', '--id', $Id, '--exact', '--disable-interactivity', '--silent')
     if ($InScope) { $arguments += @('--scope', $InScope) }
     return (run -Command 'winget' -Arguments $arguments)
+}
+
+# Where App Installer keeps every installer log winget asks a package for, named <package id>.<version>-<timestamp>.log.
+$WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir'
+
+# The entries of the installer log one failed winget call wrote that say why it failed, or none where no such log or entry exists.
+# All winget reports is that the installer exited non-zero, with a code the installer chose, so the reason lives in that log and nowhere a person reads by default.
+# A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text, which is the whole reason, so an entry keeps its indented continuation lines rather than being read one line at a time.
+# Capped at the last few matches so a verbose MSI log cannot flood the console, with the log's own path printed beside them for the rest.
+function Get-InstallerFailureReason {
+    param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
+    $result = @{ Log = $null; Entries = @() }
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $result }
+    $log = Get-ChildItem -LiteralPath $Directory -Filter "$Id.*.log" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | Select-Object -Last 1
+    if (-not $log) { return $result }
+    $result.Log = $log.FullName
+    $entries = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in (Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)) {
+        if (($line -eq '' -or $line -match '^\s') -and $entries.Count -gt 0) {
+            $entries[$entries.Count - 1] = "$($entries[$entries.Count - 1]) $($line.Trim())".TrimEnd()
+        } else {
+            $entries.Add(($line -replace '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+\s+', '').Trim())
+        }
+    }
+    $result.Entries = @($entries | Where-Object { $_ -match '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3' } | Select-Object -Last 4)
+    return $result
+}
+
+# The directory one installed file's package owns, read as the child of the container it was installed into, or nothing where the file sits in no such container.
+# A tool's executable can sit several levels down its own tree and in more than one place, Git for Windows carrying git.exe in both cmd and mingw64\bin, so walking up from the executable a fixed number of levels lands on a different directory depending on which copy PATH resolved.
+# Anything outside these containers is left unread rather than guessed at: py.exe sits in the Windows directory on a machine wide Python install, and reading that as Python's tree would name half the host.
+function Get-InstallRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    $containers = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+    if ($env:LOCALAPPDATA) { $containers += @("$env:LOCALAPPDATA\Programs", "$env:LOCALAPPDATA\Microsoft\WinGet\Packages") }
+    foreach ($container in ($containers | Where-Object { $_ })) {
+        $prefix = "$($container.TrimEnd('\'))\"
+        if (-not $Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $rest = $Path.Substring($prefix.Length).Split('\')
+        # A file sitting directly in the container belongs to no directory of its own, so there is no tree to read.
+        if ($rest.Count -lt 2) { return $null }
+        return "$prefix$($rest[0])"
+    }
+    return $null
+}
+
+# Every running process whose executable sits inside the tree one tool installed, which is what an installer refusing over files in use is refusing over.
+# Matching the tool's own process name misses the helpers a tool ships and leaves running in the background, such as the GnuPG key daemon Git for Windows carries, which outlives the git command that started it and blocks Git's own upgrade.
+function Get-ToolHolder {
+    param([Parameter(Mandatory)][string]$Probe)
+    $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
+    $command = Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $item = if ($command) { Get-Item -LiteralPath $command.Source -ErrorAction SilentlyContinue }
+    if ($item -and $item.LinkTarget) {
+        $resolved = $item.ResolveLinkTarget($true)
+        if ($resolved) { $item = $resolved }
+    }
+    $root = if ($item) { Get-InstallRoot -Path $item.FullName }
+    if ($root) {
+        $holders += @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase) })
+    }
+    return , @($holders | Sort-Object Id -Unique)
 }
 
 # --- Tools ---
@@ -965,7 +1049,7 @@ function Stop-DockerDesktop {
         return 1
     }
     info 'Stopping Docker Desktop'
-    $code = run 'docker' @('desktop', 'stop', '--timeout', '90')
+    $code = Invoke-Utf8Run 'docker' @('desktop', 'stop', '--timeout', '90')
     if ($code -ne 0) { warn "docker desktop stop exited $code" }
     return $code
 }
@@ -976,7 +1060,7 @@ function Start-DockerDesktop {
         return 1
     }
     info 'Starting Docker Desktop'
-    $code = run 'docker' @('desktop', 'start', '--timeout', '180')
+    $code = Invoke-Utf8Run 'docker' @('desktop', 'start', '--timeout', '180')
     if ($code -ne 0) { warn 'docker desktop start did not exit cleanly, start Docker Desktop by hand and check WSL integration per distro' }
     return $code
 }
@@ -1217,19 +1301,29 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
+        $started = Get-Date
         $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
         }
         if ($code -ne 0) {
-            warn "$ToolName failed on $package, winget exited $code"
-            # Windows will not replace a file that is open, and winget reports that as an access denial naming the file rather than whatever holds it.
-            # The holder is usually the tool itself, left running by an editor or a language server, so the process is named here and the reader is spared guessing at a permission problem that is not one.
-            $running = @(Get-Process -Name $record.Probe -ErrorAction SilentlyContinue)
+            # The hex form is the one winget documents its own codes under, where the signed decimal matches nothing a search finds.
+            warn "$ToolName failed on $package, winget exited $code ($('0x{0:X8}' -f $code))"
+            # The winget output names the installer's log and stops, so the reason a person needs is read out of that log here rather than left behind a path.
+            $reason = Get-InstallerFailureReason -Id $package -Since $started
+            if ($reason.Entries.Count -gt 0) {
+                info 'The installer log says:'
+                foreach ($entry in $reason.Entries) { info "  $entry" }
+            }
+            if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
+            # Windows will not replace a file that is open, and an installer reports that as files in use or an access denial naming the file rather than whatever holds it.
+            # The holder is usually the tool itself left running by an editor or a language server, or a helper it started in the background, so each one is named here and the reader is spared guessing at a permission problem that is not one.
+            $running = Get-ToolHolder -Probe $record.Probe
             if ($running.Count -gt 0) {
-                info "$($record.Probe) is running as process $($running.Id -join ', '), and Windows cannot replace a running executable"
-                info 'Close whatever is running it, then run this again'
+                info "Running from $ToolName's install, and Windows cannot replace a file a running process holds:"
+                foreach ($process in $running) { info "  $($process.ProcessName) (process $($process.Id))" }
+                info "Close them, or stop them with: Stop-Process -Id $($running.Id -join ', '); then run this again"
             }
             $script:FAILED += $ToolName
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.

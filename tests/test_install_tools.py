@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
@@ -725,6 +726,127 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
             {name: notes[name] for name in ("failing", "absent", "unread")},
             {"failing": [], "absent": [], "unread": []},
         )
+
+
+FAILURE_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Get-InstallerFailureReason', 'Get-InstallRoot', 'Invoke-Utf8Run')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$case = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
+$results = [ordered]@{}
+foreach ($probe in $case.reasons) {
+    $reason = Get-InstallerFailureReason -Id $probe.id -Since ([datetime]$probe.since) -Directory $case.directory
+    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{ log = [bool]$reason.Log; entries = @($reason.Entries) }
+}
+$env:ProgramFiles = 'C:\PF'
+${env:ProgramFiles(x86)} = 'C:\PF86'
+$env:LOCALAPPDATA = 'C:\LAD'
+$results['roots'] = @($case.roots | ForEach-Object { [string](Get-InstallRoot -Path $_) })
+$before = [Console]::OutputEncoding
+$switchable = $true
+try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $before } catch { $switchable = $false }
+$script:INSIDE = $null
+function run { param([string]$Command, [string[]]$Arguments) $script:INSIDE = [Console]::OutputEncoding.WebName; return 5 }
+$results['utf8'] = [ordered]@{
+    code = (Invoke-Utf8Run 'docker' @('desktop', 'stop'))
+    switchable = $switchable
+    inside = $script:INSIDE
+    restored = ([Console]::OutputEncoding.WebName -eq $before.WebName)
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+INNO_LOG = [
+    "2026-01-02 03:04:05.100   Log opened.",
+    "2026-01-02 03:04:05.300   Successfully imported the DLL function. Delay loaded? No",
+    "2026-01-02 03:04:06.000   Defaulting to Cancel for suppressed message box (Retry/Cancel):",
+    "                          The following process(es) use Example Tool:",
+    "                          ",
+    "                          helper.exe (PID 1234)",
+    "                          Please terminate those processes and retry.",
+    "2026-01-02 03:04:06.001   Failed to proceed to next wizard page; aborting.",
+    "2026-01-02 03:04:06.002   Deinitializing Setup.",
+]
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsInstallFailureReason(unittest.TestCase):
+    """A failed install names why, from the installer's log and the processes holding its tree."""
+
+    def run_cases(self) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory, "Example.Tool.1.2.3-26-01-02-03-04-05.log")
+            log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
+            cases = {
+                "directory": directory,
+                "reasons": [
+                    {"id": "Example.Tool", "since": "2000-01-01"},
+                    {"id": "Example.Tool", "since": "2100-01-01"},
+                    {"id": "Other.Tool", "since": "2000-01-01"},
+                ],
+                "roots": [
+                    "C:\\PF\\Git\\cmd\\git.exe",
+                    "C:\\PF\\Git\\mingw64\\bin\\git.exe",
+                    "C:\\PF86\\Tool\\tool.exe",
+                    "C:\\LAD\\Microsoft\\WinGet\\Packages\\Example.Tool_x\\tool.exe",
+                    "C:\\Windows\\py.exe",
+                    "C:\\PF\\loose.exe",
+                ],
+            }
+            result = run_pwsh_harness(FAILURE_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_the_log_entry_keeps_its_continuation_lines(self) -> None:
+        results = self.run_cases()
+        self.assertEqual(
+            results["reason Example.Tool 2000-01-01"],
+            {
+                "log": True,
+                "entries": [
+                    (
+                        "Defaulting to Cancel for suppressed message box (Retry/Cancel): The"
+                        " following process(es) use Example Tool: helper.exe (PID 1234) Please"
+                        " terminate those processes and retry."
+                    ),
+                    "Failed to proceed to next wizard page; aborting.",
+                ],
+            },
+        )
+
+    def test_a_log_older_than_the_attempt_or_for_another_id_is_not_read(self) -> None:
+        results = self.run_cases()
+        self.assertEqual(results["reason Example.Tool 2100-01-01"], {"log": False, "entries": []})
+        self.assertEqual(results["reason Other.Tool 2000-01-01"], {"log": False, "entries": []})
+
+    def test_the_install_root_is_the_containers_child_whichever_copy_resolved(self) -> None:
+        self.assertEqual(
+            self.run_cases()["roots"],
+            [
+                "C:\\PF\\Git",
+                "C:\\PF\\Git",
+                "C:\\PF86\\Tool",
+                "C:\\LAD\\Microsoft\\WinGet\\Packages\\Example.Tool_x",
+                "",
+                "",
+            ],
+        )
+
+    def test_the_utf8_run_passes_the_exit_code_through_and_restores_the_console(self) -> None:
+        utf8 = self.run_cases()["utf8"]
+        self.assertEqual(utf8["code"], 5)
+        self.assertTrue(utf8["restored"])
+        if utf8["switchable"]:
+            self.assertEqual(utf8["inside"], "utf-8")
 
 
 if __name__ == "__main__":
