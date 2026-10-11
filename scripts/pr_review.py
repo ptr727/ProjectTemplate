@@ -1065,10 +1065,10 @@ def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
     `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
     so a list reaching it stays marked as cut short. A page read at a head other than the first
     page's leaves the list unread instead, under `FILES_UNREAD`, which `files_shortfall`
-    reports and `full_read` reads again. A page that fails to read ends the run as any other
-    failed read does, since that failure is already loud. Either way the
-    table is compared against nothing, where a list marked whole but missing a path reads
-    exactly like a path the reviewer left out.
+    reports and `full_read` reads again. A list cut short or unread is compared against
+    nothing, where a list marked whole but missing a path reads exactly like a path the
+    reviewer left out. A page that fails to read ends the run as any other failed read does,
+    since that failure is already loud.
     """
     files = pr.get("files")
     if not isinstance(files, dict):
