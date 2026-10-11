@@ -1551,13 +1551,9 @@ class TestANamedToolIsStillProse(BaitCase):
             ),
             ("# The noqa marker here is read per line.\n", ["comment-added"]),
             ("# Each type: ignore here names its code.\n", ["comment-added"]),
-            # A body opening on a tool's name and closing as a sentence is prose, not a directive.
+            # A trailing `type: ignore` is prose, since mypy reads one only where it opens the comment.
             (
-                "# eslint cannot see this file. it is generated.\n",
-                ["comment-wrap", "comment-case", "comment-added"],
-            ),
-            (
-                "# prettier rewrites this table. Keep it on one line.\n",
+                "# two sentences here. Another one follows.  # type: ignore[arg-type]\n",
                 ["comment-wrap", "comment-case", "comment-added"],
             ),
         ):
@@ -1573,6 +1569,8 @@ class TestANamedToolIsStillProse(BaitCase):
             ("tool.py", "# type: ignore[import-untyped]\n"),
             ("run.sh", "# shellcheck disable=SC2086\n"),
             ("run.sh", "# shellcheck disable=SC1091  # A host file, not present at lint time.\n"),
+            ("app.ts", "// eslint-disable-next-line no-console -- Logging is intended here.\n"),
+            ("tool.py", "# ruff: noqa: E501 - the URLs cannot wrap.\n"),
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
             ("settings.jsonc", "// cSpell:ignore exampleword\n"),
@@ -1581,10 +1579,9 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
 
     def test_a_directive_behind_its_own_marker_may_trail_prose(self) -> None:
-        """`noqa` and `type: ignore` sit after prose on the same line, which is how their tools read them."""
+        """`noqa` and `pylint:` sit after prose on the same line, where flake8, ruff, and pylint read them."""
         for text in (
             "# two sentences here. Another one follows.  # noqa: E501\n",
-            "# two sentences here. Another one follows.  # type: ignore[arg-type]\n",
             "x = 1  # two sentences here. Another one follows.  # noqa\n",
             "# two sentences here. Another one follows.  # pylint: disable=no-member\n",
         ):
@@ -1592,12 +1589,8 @@ class TestANamedToolIsStillProse(BaitCase):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
 
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
-        for text in (
-            "# two sentences here. Another one follows.  # type: ignored\n",
-            "# two sentences here. Another one follows.  # noqable\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertIn("comment-wrap", self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+        text = "# two sentences here. Another one follows.  # noqable\n"
+        self.assertIn("comment-wrap", self.kinds(text, self.COMMENT_RULES, name="tool.py"))
 
     def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
         """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
