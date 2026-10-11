@@ -6847,11 +6847,10 @@ class TestCli(GqlCase):
     def test_min_rounds_keeps_the_bare_pending_line_unless_a_new_round_covers_head(self) -> None:
         """The line naming the baseline says a round landing during the wait covers the head,
         which holds only where one does. Here a round lands mid-wait, raising the count, but on a
-        superseded head, so it covers nothing. That holds whether no earlier round covers the
-        head or one does, the second being a caller who passed the right N and must not be told
-        to lower it. The timeout is then the ordinary bare `status=PENDING`. Each clock read
-        advances 100 seconds, so one poll lands the round and the read after it is past the
-        150-second timeout.
+        superseded head, so it covers nothing. N sits above the count the wait began with, the
+        only case the line can fire in, so the coverage clause alone keeps it bare. That holds
+        whether or not an earlier round covers the head. Each clock read advances 100 seconds,
+        so one poll lands the round and the read after it is past the 150-second timeout.
         """
         for label, before in (("uncovered", [review(oid=OLD)]), ("covered", [review()])):
             with self.subTest(label):
@@ -6866,7 +6865,7 @@ class TestCli(GqlCase):
                     mock.patch.object(pr_review.time, "sleep") as slept,
                     mock.patch.object(pr_review.time, "monotonic", clock),
                 ):
-                    argv = ["wait", "7", "--min-rounds", "1", "--timeout", "150"]
+                    argv = ["wait", "7", "--min-rounds", "2", "--timeout", "150"]
                     self.assertEqual(30, self.cli(argv))
                 slept.assert_called_once()
                 self.assertIn("\nstatus=PENDING\n", self.out.getvalue())
