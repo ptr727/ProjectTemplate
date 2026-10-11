@@ -1671,7 +1671,7 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:|(?i:nopep8)\b"
+    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
     r"|codespell:|doctest:)"
 )
 
