@@ -6681,6 +6681,18 @@ def _selftest():
         ),
         (
             pub_path,
+            pub_text.replace("refs/heads/main", "refs/heads/develop"),
+            1,
+            "a suffix keyed on another branch",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + pub_value.split("github.ref }}", 1)[1]),
+            1,
+            "the push-only suffix is the publisher's alone",
+        ),
+        (
+            pub_path,
             pub_text.replace(pub_line, "  group: '" + pub_value.replace("'", "''") + "'"),
             0,
             "a single-quoted publisher group",
