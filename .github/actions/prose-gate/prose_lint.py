@@ -2111,6 +2111,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
         return []
     out: list[Comment] = []
     closing = ""
+    block_col = 0
     doc_closing = ""
     carry = CLEAR
     for n, raw in enumerate(lines, 1):
@@ -2138,7 +2139,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
             if closing == "*/" and body.startswith("*") and body[1:2].isspace():
                 body = body[1:].strip()
             if body:
-                out.append(Comment(n, body, True, line if end < 0 else line[:end]))
+                out.append(Comment(n, body, True, (line if end < 0 else line[:end])[block_col:]))
             if end < 0:
                 continue
             pos, closing = end + len(closing), ""
@@ -2209,7 +2210,7 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
                 written = line[at : end + len(closer)] if end >= 0 else line[at:]
                 out.append(Comment(n, body, leading, written))
             if end < 0:
-                closing = closer
+                closing, block_col = closer, at
                 break
             pos = end + len(closer)
         # A string opened here carries into the lines below only where the syntax has that form.
@@ -2822,10 +2823,9 @@ def bare_marker_gap(lines: list[str], before: int, after: int, markers: list[str
 
 
 def next_indent(texts: list[str], idx: int) -> int:
-    """The indent of the first non-blank line after `idx`, or -1 when none follows."""
-    for text in texts[idx + 1 :]:
-        if text.strip():
-            return len(text) - len(text.lstrip())
+    """The indent of the line after `idx`, or -1 when it is blank or absent."""
+    if idx + 1 < len(texts) and texts[idx + 1].strip():
+        return leading_indent(texts[idx + 1])
     return -1
 
 
@@ -2871,7 +2871,12 @@ def one_docstring_findings(
     texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
     quote = base
     later = [len(t) - len(t.lstrip()) for t in texts[1:] if t.strip()]
-    if len(texts) > 1 and closer.strip() and not texts[-1].strip():
+    if (
+        len(texts) > 1
+        and closer.strip()
+        and not texts[-1].strip()
+        and leading_indent(closer) >= quote
+    ):
         later.append(len(closer) - len(closer.lstrip()))  # closing quotes alone on their line
     if later:
         base = min(later)

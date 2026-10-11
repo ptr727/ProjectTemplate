@@ -2908,6 +2908,21 @@ class TestCommentSentenceLength(BaitCase):
             with self.subTest(name=name):
                 self.assertEqual([], self.found(f"{mark} Usage:\n{mark}\n{mark}     {run}\n", name))
 
+    def test_an_indented_block_comment_measures_a_bare_continuation_from_its_opener(self) -> None:
+        text = f"  /* Steps:\n     {self.over()}\n  */\nint x;\n"
+        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.c"))
+
+    def test_numpy_prose_followed_by_a_blank_and_a_deeper_block_is_counted(self) -> None:
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {self.over()}\n\n        >>> f()\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_dedented_closing_quote_does_not_make_the_body_code(self) -> None:
+        text = f'def f() -> None:\n    """Summary.\n\n    {self.over()}\n"""\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
