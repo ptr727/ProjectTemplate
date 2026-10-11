@@ -1633,6 +1633,17 @@ class TestANamedToolIsStillProse(BaitCase):
             with self.subTest(name=name):
                 self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
 
+    def test_the_sentence_after_a_mention_is_judged_outside_python(self) -> None:
+        """Only a Python file is cut at the directive, so a run-on after a mention elsewhere is caught."""
+        text = "# Each line carries a `# noqa` marker. Another sentence follows.\n"
+        for name, expected in (
+            ("a.yml", ["comment-wrap", "comment-added"]),
+            ("a.toml", ["comment-wrap", "comment-added"]),
+            ("tool.py", ["comment-added"]),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
+
     def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
         text = "# two sentences here. Another one follows.  # noqable\n"
         self.assertIn("comment-wrap", self.kinds(text, self.COMMENT_RULES, name="tool.py"))
