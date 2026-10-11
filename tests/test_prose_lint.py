@@ -2745,7 +2745,7 @@ class TestCli(unittest.TestCase):
                 with self.subTest(file=name, rule=rule):
                     err = self.scope_line([bait], ["--check", rule])
                     self.assertIn("1 .py file(s) Python", err)
-                    self.assertIn(f"may be misread: {str(bait)!r}", err)
+                    self.assertIn(f"may be misread: {bait.as_posix()!r}", err)
 
     def test_a_python_file_that_parses_is_not_named(self) -> None:
         clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
@@ -2790,8 +2790,8 @@ class TestCli(unittest.TestCase):
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
         err = self.scope_line(baits, ["--check", "comment-wrap"])
         self.assertIn("6 .py file(s) Python", err)
-        self.assertIn(f"{str(baits[4])!r} and more", err)
-        self.assertNotIn(str(baits[5]), err)
+        self.assertIn(f"{baits[4].as_posix()!r} and more", err)
+        self.assertNotIn(baits[5].as_posix(), err)
 
     def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
         bait = self.bait("open.py", self.UNTOKENIZED)
