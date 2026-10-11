@@ -27,6 +27,6 @@
     // A bare local run and CI both honor that file.
     // Those `ignores` patterns resolve against the directory holding that file rather than against the repository root.
     // Each entry names its target as seen from that directory.
-    // A repository-root path matches nothing there and reports no error saying so.
+    // A repository-root path matches nothing there, and the run reports no error saying so.
     "ignores": ["**/node_modules/**"]
 }

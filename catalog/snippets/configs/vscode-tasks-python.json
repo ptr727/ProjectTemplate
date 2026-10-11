@@ -19,10 +19,10 @@
         // A build-profile directory in its pip form, a `requirements*.txt` with no `uv.lock`, keeps every task here, "Python Test" included.
         // It runs no `uv sync` and no project-scoped `uv run`, since either writes a `uv.lock`.
         // It replaces "uv Sync" with a `dependsOrder: sequence` aggregator over `uv venv --clear`.
-        // The aggregator runs one `uv pip install` taking every `requirements*.txt` as a `-r` argument.
-        // It adds `uv pip install -e .` where its pyproject.toml has a [project] table.
-        // It adapts or drops "uv Upgrade", which runs `uv sync` too.
-        // It runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
+        // The sequence runs one `uv pip install` taking every `requirements*.txt` as a `-r` argument.
+        // The sequence ends with `uv pip install -e .` where the directory's pyproject.toml has a [project] table.
+        // The directory also adapts or drops "uv Upgrade", which runs `uv sync` too.
+        // The directory runs ruff as `uvx ruff@latest`, pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy@latest` for a mypy repo, `uvx pyright@latest` otherwise.
         // It omits "uv Sync" and "uv Upgrade", and "Python Test" runs the unittest command the repository's OPERATIONS.md gives rather than pytest, per the python-codestyle Skill "Two profiles".
