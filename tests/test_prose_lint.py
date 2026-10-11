@@ -2825,6 +2825,13 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([], self.found(text, "bait.py"))
 
+    def test_a_short_sentence_at_the_numpy_entry_indent_continues_the_paragraph(self) -> None:
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {self.words(prose_lint.SENTENCE_WORD_CAP)}\n    more.\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.

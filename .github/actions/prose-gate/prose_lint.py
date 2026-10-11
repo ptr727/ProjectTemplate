@@ -2793,7 +2793,9 @@ def comment_sentence_findings(
 
 def is_numpy_head(text: str) -> bool:
     """Whether a line at a NumPy entry's indent is a `name : type` line or a short type name."""
-    return " : " in text or len(text.split()) <= NUMPY_HEAD_WORDS
+    if " : " in text:
+        return True
+    return len(text.split()) <= NUMPY_HEAD_WORDS and not text.rstrip().endswith((".", "!", "?"))
 
 
 def leading_indent(line: str) -> int:
