@@ -294,9 +294,10 @@ Subcommands
            request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
            this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
            on a held head covered by an attested local pass a 30 or a 44. A genuine round the
-           final read shows on the head rules 47 out, and so does one on any head of this pull
-           request newer than the refusal, since it answers that refusal. One already on the head
-           when the wait begins leaves the request and the poll to run as usual.
+           final read shows on the head rules 47 out, and so does any review of this pull request
+           on any head newer than the refusal other than a quota refusal, since it answers that
+           refusal as one anywhere in the repository would. One already on the head when the wait
+           begins leaves the request and the poll to run as usual.
            A pending request remains pending until a review, an answer, or the timeout. GitHub's
            effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
            event is not evidence that distinguishes queued work from abandoned work.
@@ -5756,14 +5757,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 48
     # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
+    own = [
+        (a.number, {**n, "_at": n.get("submittedAt") or ""})
+        for n in reviewer_nodes(final, "reviews")
+    ]
     if (
         signal
         and not reviewed_head(final)
-        and not any(
-            (n.get("submittedAt") or "") > (signal[1].get("_at") or "")
-            for n in reviewer_nodes(final, "reviews")
-            if not refusal_of(n)
-        )
+        and quota_signal(sorted([*history, *own], key=lambda pair: pair[1]["_at"], reverse=True))
     ):
         number, hist_refusal = signal
         print(
