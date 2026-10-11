@@ -1679,7 +1679,12 @@ def strip_quoted(s: str) -> str:
 # Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
 # The colon is written inside the emphasis as often as outside it, and both spell one construct.
 # Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
-LABEL_COLON = re.compile(r"^\s*(?:[-*]|[0-9]+\.)\s+\*\*[^*]+?(?:\*\*\s*:|:\s*\*\*)")
+LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
+LABEL_COLON = re.compile(
+    rf"^\s*{LIST_MARKER_TOKEN}\s+(?:"
+    r"(?P<star>\*{2,3})[^*\n]+?(?:(?P=star)\s*:|:\s*(?P=star))"
+    r"|(?P<under>_{2,3})[^_\n]+?(?:(?P=under)\s*:|:\s*(?P=under)))"
+)
 
 # A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
 # The guards are the run-on rule's, so an initial or an abbreviation ends nothing.
@@ -1707,7 +1712,7 @@ def sentences(span: str) -> list[str]:
     return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
 
 
-LIST_MARKER = re.compile(r"^\s*(?:[-*+]|([0-9]+)[.)])\s")
+LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
 SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
 THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
 TABLE_DELIMITER = re.compile(
