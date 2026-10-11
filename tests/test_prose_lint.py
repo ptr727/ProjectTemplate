@@ -2807,6 +2807,18 @@ class TestCli(unittest.TestCase):
                 found = prose_lint.check_file(marked, {"issue-ref"})
                 self.assertEqual([(1, "issue-ref")], [(line, rule) for line, rule, _ in found])
 
+    def test_a_byte_order_mark_leaves_a_first_line_comment_counted_as_added(self) -> None:
+        """`comment-added` reads leading comments only, so a trailing one went uncounted."""
+        for name, written in (
+            ("a.py", "# See the reason."),
+            ("a.sh", "# See the reason."),
+            ("a.cs", "// See the reason."),
+        ):
+            with self.subTest(file=name):
+                marked = self.bait(name, f"\ufeff{written}\nx\n")
+                found = prose_lint.check_file(marked, {"comment-added"})
+                self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
+
     def test_a_byte_order_mark_leaves_a_first_line_fence_opening(self) -> None:
         """Read as text before the fence, the mark inverted which lines the fence held."""
         marked = self.bait("a.md", "\ufeff```sh\nx; y\n```\n\nOne; two.\n")
