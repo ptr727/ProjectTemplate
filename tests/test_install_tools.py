@@ -735,7 +735,7 @@ Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-$wanted = @('Get-InstallerFailureReason', 'Get-InstallRoot', 'Invoke-Utf8Run')
+$wanted = @('Get-InstallerFailureReason', 'Get-InstallRoot', 'Invoke-Utf8Run', 'Get-ToolHolder')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -749,6 +749,10 @@ $env:ProgramFiles = 'C:\PF'
 ${env:ProgramFiles(x86)} = 'C:\PF86'
 $env:LOCALAPPDATA = 'C:\LAD'
 $results['roots'] = @($case.roots | ForEach-Object { [string](Get-InstallRoot -Path $_) })
+$results['absent holders'] = @(
+    (Get-ToolHolder -Probe 'no-such-tool-on-path').Count
+    (Get-ToolHolder -Probe 'no-such-tool-on-path' -Executable '').Count
+)
 $before = [Console]::OutputEncoding
 $switchable = $true
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $before } catch { $switchable = $false }
@@ -882,6 +886,9 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             ],
         )
 
+    def test_a_tool_off_path_has_no_holders_rather_than_failing(self) -> None:
+        self.assertEqual(self.run_cases()["absent holders"], [0, 0])
+
     def test_the_utf8_run_switches_only_for_console_output_and_restores_it(self) -> None:
         results = self.run_cases()
         console = results["utf8 console=True"]
@@ -896,6 +903,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
 
 INSTALLER_FAILED = -1978335226
 SHARING_VIOLATION = -2147024864
+WINGET_FILE_IN_USE = -1978334973
 
 
 @unittest.skipUnless(
@@ -919,6 +927,7 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
                 "executable": "",
             },
             "no reason": {"entries": [], "code": INSTALLER_FAILED, "executable": ""},
+            "winget file in use": {"entries": [], "code": WINGET_FILE_IN_USE, "executable": ""},
             "sharing violation": {
                 "entries": [],
                 "code": SHARING_VIOLATION,
@@ -965,6 +974,16 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
         self.assertEqual(
             self.run_cases()["no reason"],
             ["WARN tool failed on Example.Tool, winget exited -1978335226 (0x8A150006)"],
+        )
+
+    def test_wingets_own_file_in_use_code_names_the_holders(self) -> None:
+        lines = self.run_cases()["winget file in use"]
+        self.assertEqual(
+            lines[:2],
+            [
+                "WARN tool failed on Example.Tool, winget exited -1978334973 (0x8A150103)",
+                "HOLDERS tool",
+            ],
         )
 
     def test_a_sharing_violation_names_the_holders_from_the_executable_given(self) -> None:

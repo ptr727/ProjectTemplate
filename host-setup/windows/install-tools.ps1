@@ -472,7 +472,11 @@ function Get-InstallRoot {
 function Get-ToolHolder {
     param([Parameter(Mandatory)][string]$Probe, [string]$Executable)
     $holders = @(Get-Process -Name $Probe -ErrorAction SilentlyContinue)
-    $source = if ($Executable) { $Executable } else { (Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    $source = $Executable
+    if (-not $source) {
+        $command = Get-Command $Probe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) { $source = $command.Source }
+    }
     $item = if ($source) { Get-Item -LiteralPath $source -ErrorAction SilentlyContinue }
     if ($item -and $item.LinkTarget) {
         $resolved = $item.ResolveLinkTarget($true)
@@ -488,7 +492,7 @@ function Get-ToolHolder {
 # What a failed winget call owes its reader: winget's code, the reason the installer's own log gives, and the processes that may hold the tool's files.
 # The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
 # The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
-# Windows will not replace a file that is open, so the processes running from the tool's install are named only where something says files were in use: an installer log entry in Inno Setup's or Windows' own in-use wording, or winget's code being a sharing violation or an access denial, which is how a portable package that writes no installer log reports a locked file.
+# Windows will not replace a file that is open, so the processes running from the tool's install are named only where something says files were in use: an installer log entry in Inno Setup's or Windows' own in-use wording, or winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial.
 # Anything else names nobody, since a Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree, and blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
@@ -503,8 +507,9 @@ function Write-InstallFailure {
     }
     if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
     $logInUse = @($reason.Entries | Where-Object { $_ -match '(?i)process\(es\) use|in use by|used by another process' }).Count -gt 0
+    # 0x8A150101 and 0x8A150103 are winget's own INSTALL_PACKAGE_IN_USE and INSTALL_FILE_IN_USE, which it returns where a manifest maps the installer's exit code to either.
     # 0x80070020 and 0x80070005 are ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED carried as an HRESULT.
-    $codeInUse = ('0x{0:X8}' -f $Code) -in @('0x80070020', '0x80070005')
+    $codeInUse = ('0x{0:X8}' -f $Code) -in @('0x8A150101', '0x8A150103', '0x80070020', '0x80070005')
     if (-not ($logInUse -or $codeInUse)) { return }
     $running = Get-ToolHolder -Probe $Probe -Executable $Executable
     if ($running.Count -eq 0) { return }
