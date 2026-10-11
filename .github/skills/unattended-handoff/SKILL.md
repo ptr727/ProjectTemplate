@@ -116,19 +116,23 @@ A dispatch can fail before its subagent starts, when the harness or a check in f
 an error instead. That is a state of the session rather than of any issue. No picker or worker line
 describes it, so the orchestrator handles it itself.
 
-- **An error naming a temporary condition is retried.** The orchestrator judges that from the
-  error's own text, such as an overload, a rate limit, or a check reporting a transient failure. It
+- **An error naming a temporary condition is retried, where no subagent started.** The
+  orchestrator judges the condition from the error's own text, such as an overload, a rate limit,
+  or a check reporting a transient failure. A retry needs the dispatch mechanism to show that no
+  subagent started. A second seat on the same brief would break one worker at a time. It
   then waits on one bounded background timer of about ten minutes, such as a backgrounded
   `sleep 600` whose exit wakes the session. It then dispatches the same brief again unchanged. It
-  spends at most three waits on one dispatch, and a dispatch that runs starts the next one's count from none.
+  spends at most three waits on one dispatch, and a dispatch that runs resets that count.
 - **A dispatch that never ran was not dispatched.** A handoff number joins the dispatched ones only
   once its worker runs. A worker brief retried this way therefore does not meet the repeat stop in
   step 2.
 - **Anything else ends the run at a dispatch failure.** That covers an error naming no temporary
-  condition, and a dispatch still failing after its third wait. It also covers a timer that cannot
-  itself start, since an outage refusing every call refuses the timer too. It is an end state of its
-  own, apart from `STOP`, which only a subagent returns. The final message names it in a line of its
-  own, with the seat whose dispatch failed and the error its last attempt returned.
+  condition, an error leaving unclear whether a subagent started, and a dispatch still failing after
+  its third wait. It also covers a timer that cannot itself start, since an outage refusing every
+  call refuses the timer too. It is an end state of its own, apart from `STOP`, which only a
+  subagent returns. The final message names it in a line of its own, with the seat whose dispatch
+  failed and the error its last attempt returned. Where the timer could not start, that line also
+  carries the timer's own error.
 
 ### The Briefs
 
