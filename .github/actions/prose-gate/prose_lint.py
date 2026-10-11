@@ -2077,6 +2077,8 @@ def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None)
     carry = CLEAR
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip("\r")
+        if n == 1:  # a byte order mark is not whitespace, so kept it reads a comment as trailing
+            line = line.removeprefix("\ufeff")
         pos = 0
         # Every code span on the line, comments blanked, for a string this line opens.
         # Built up rather than captured once, since code after a closed block comment is code.

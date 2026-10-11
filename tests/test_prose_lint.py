@@ -2786,6 +2786,45 @@ class TestCli(unittest.TestCase):
         comments = prose_lint.python_comments("\ufeff# See the reason.\nx = 1\n")
         self.assertEqual([(1, "See the reason.", True, "# See the reason.")], comments)
 
+    def test_a_byte_order_mark_leaves_a_first_line_comment_leading_in_every_syntax(self) -> None:
+        """The scan for every other language read the mark as code before the comment too."""
+        for name, written in (
+            ("a.sh", "# See the reason."),
+            ("a.yml", "# See the reason."),
+            ("a.toml", "# See the reason."),
+            ("a.tf", "# See the reason."),
+            ("a.cs", "// See the reason."),
+            ("a.c", "/* See the reason. */"),
+            ("a.css", "/* See the reason. */"),
+            ("a.html", "<!-- See the reason. -->"),
+            ("a.ps1", "# See the reason."),
+            ("a.ps1", "<# See the reason. #>"),
+            ("a.ini", "; See the reason."),
+            ("a.kicad_sch", "# See the reason."),
+        ):
+            with self.subTest(file=name, comment=written):
+                found = prose_lint.extracted_comments(Path(name), ["\ufeff" + written, "x"])
+                self.assertEqual([(1, "See the reason.", True, written)], found)
+
+    def test_a_byte_order_mark_leaves_a_first_line_reference_reported(self) -> None:
+        """`issue-ref` reads leading comments only, so a trailing one hid the reference."""
+        marked = self.bait("tool.ps1", "\ufeff# See #12 for why.\n")
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[marked]),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(1, prose_lint.main(["--check", "issue-ref"]))
+        self.assertIn(
+            "tool.ps1:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
+        )
+
+    def test_the_character_set_rule_still_reads_a_byte_order_mark(self) -> None:
+        """Only the comment scan drops the mark, since the character-set rule reports it."""
+        marked = self.bait("tool.ps1", "\ufeff# See the reason.\n")
+        found = prose_lint.check_file(marked, {"charset-unknown"})
+        self.assertEqual([1], [line for line, _rule, message in found if "U+FEFF" in message])
+
     def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
         err = self.scope_line(baits, ["--check", "comment-wrap"])
