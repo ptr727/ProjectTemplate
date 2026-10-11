@@ -2781,10 +2781,57 @@ class TestCli(unittest.TestCase):
         )
         self.assertNotIn("may be misread", err.getvalue())
 
-    def test_a_byte_order_mark_leaves_a_first_line_comment_leading(self) -> None:
-        """The mark is not whitespace, so read as code it made a first-line comment trailing."""
-        comments = prose_lint.python_comments("\ufeff# See the reason.\nx = 1\n")
-        self.assertEqual([(1, "See the reason.", True, "# See the reason.")], comments)
+    def test_a_byte_order_mark_leaves_a_first_line_comment_leading_in_every_syntax(self) -> None:
+        """The mark is not whitespace, so read as code it made a first-line comment trailing.
+
+        `issue-ref` reads a comment only where its marker opens the line, so a trailing one hid the
+        reference.
+        """
+        for name, written in (
+            ("a.py", "# See #12 for why."),
+            ("a.sh", "# See #12 for why."),
+            ("a.yml", "# See #12 for why."),
+            ("a.toml", "# See #12 for why."),
+            ("a.tf", "# See #12 for why."),
+            ("a.cs", "// See #12 for why."),
+            ("a.c", "/* See #12 for why. */"),
+            ("a.css", "/* See #12 for why. */"),
+            ("a.html", "<!-- See #12 for why. -->"),
+            ("a.ps1", "# See #12 for why."),
+            ("a.ps1", "<# See #12 for why. #>"),
+            ("a.ini", "; See #12 for why."),
+            ("a.kicad_sch", "# See #12 for why."),
+        ):
+            with self.subTest(file=name, comment=written):
+                marked = self.bait(name, f"\ufeff{written}\nx\n")
+                found = prose_lint.check_file(marked, {"issue-ref"})
+                self.assertEqual([(1, "issue-ref")], [(line, rule) for line, rule, _ in found])
+
+    def test_a_byte_order_mark_leaves_a_first_line_comment_counted_as_added(self) -> None:
+        """`comment-added` reads leading comments only, so a trailing one went uncounted."""
+        for name, written in (
+            ("a.py", "# See the reason."),
+            ("a.sh", "# See the reason."),
+            ("a.cs", "// See the reason."),
+        ):
+            with self.subTest(file=name):
+                marked = self.bait(name, f"\ufeff{written}\nx\n")
+                found = prose_lint.check_file(marked, {"comment-added"})
+                self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
+
+    def test_a_byte_order_mark_leaves_a_first_line_fence_opening(self) -> None:
+        """Read as text before the fence, the mark inverted which lines the fence held."""
+        marked = self.bait("a.md", "\ufeff```sh\nx; y\n```\n\nOne; two.\n")
+        found = prose_lint.check_file(marked, {"semicolon"})
+        self.assertEqual([5], [line for line, _rule, _message in found])
+
+    def test_the_character_set_rule_still_reads_a_byte_order_mark(self) -> None:
+        """The structural readers drop the mark, and the character-set rule still reports it."""
+        for name, text in (("a.ps1", "# See the reason.\n"), ("a.md", "```sh\nx\n```\n")):
+            with self.subTest(file=name):
+                marked = self.bait(name, f"\ufeff{text}")
+                found = prose_lint.check_file(marked, {"charset-unknown"})
+                self.assertEqual([1], [line for line, _, message in found if "U+FEFF" in message])
 
     def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
         baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
