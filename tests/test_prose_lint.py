@@ -2571,6 +2571,74 @@ class TestCommentSentenceLength(BaitCase):
         text = f'def f() -> None:\n    """Summary.\n\n        {self.over()}\n    """\n'
         self.assertEqual([], self.found(text, "bait.py"))
 
+    def test_a_colon_line_opens_an_indented_command_block_that_is_not_counted(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        text = f'def f() -> None:\n    """Usage:\n        {run}\n        {run}\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_unpunctuated_docstring_bullets_are_separate_sentences(self) -> None:
+        item = self.words(9)
+        text = f'def f() -> None:\n    """Summary.\n\n    - {item}\n    - {item}\n    - {item}\n    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_unpunctuated_comment_bullets_are_separate_sentences(self) -> None:
+        item = self.words(9)
+        text = f"# Steps:\n#   - {item}\n#   - {item}\n#   - {item}\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_adjacent_docstrings_are_judged_apart(self) -> None:
+        half = self.words(13)
+        text = f'class C:\n    """{half}"""\n    def f(self): """{half}"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_tab_indented_docstring_code_block_is_not_counted(self) -> None:
+        text = f'def f() -> None:\n\t"""Summary.\n\n\t\t{self.over()}\n\t"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_an_ellipsis_opening_prose_is_not_a_doctest(self) -> None:
+        text = f'def f() -> None:\n    """Summary.\n\n    ... {self.over()}\n    """\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_doctest_output_and_continuation_lines_are_not_counted(self) -> None:
+        long = self.words(prose_lint.SENTENCE_WORD_CAP + 1)
+        text = (
+            'def f() -> None:\n    """Summary.\n\n    >>> x = (\n    ...     1)\n'
+            f'    {long}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_prose_resumes_after_a_docstring_code_block(self) -> None:
+        text = (
+            'def f() -> None:\n    """Summary.\n\n        code line\n\n'
+            f'    {self.over()}\n    """\n'
+        )
+        self.assertEqual([(6, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_the_diff_scope_reaches_a_docstring_continuation_line(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f'def f() -> None:\n    """Summary.\n\n    {half}\n    {half}.\n    """\n'
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py", allowed={5}))
+
+    def test_a_trailing_comment_ends_the_block(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        self.assertEqual([], self.found(f"x=1 # {half}\n# {half}.\n", "bait.sh"))
+
+    def test_a_non_prose_comment_ends_the_block(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"# {half}\n# https://example.com/a\n# {half}.\n"
+        self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_single_quoted_and_a_raw_docstring_are_read(self) -> None:
+        single = chr(39) * 3
+        for opener in ("r" + single, single, 'r"""'):
+            with self.subTest(opener=opener):
+                text = f"def f() -> None:\n    {opener}{self.over()}{opener[-3:]}\n"
+                self.assertEqual([(2, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_double_backtick_span_is_one_word(self) -> None:
+        span = "``" + self.words(prose_lint.SENTENCE_WORD_CAP) + "``"
+        self.assertEqual([], self.found(f"# The value {span} is read.\n", "bait.sh"))
+
     def test_a_python_comment_is_judged_too(self) -> None:
         self.assertEqual(
             [(1, "sentence-length")], self.found(f"# {self.over()}\nx = 1\n", "bait.py")

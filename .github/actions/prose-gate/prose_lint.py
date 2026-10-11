@@ -1801,7 +1801,7 @@ def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> st
             return '"' * (len(inner) + 1) + inner[-1]
         return '"' * len(m.group())
 
-    text = re.sub(r"`[^`]*`", code, text)
+    text = re.sub(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", code, text, flags=re.DOTALL)
     out = list(text)
     for start, length in zip(starts, lengths, strict=True):
         masked = re.sub(r'"([^"]*)"', quote, text[start : start + length])
@@ -2268,6 +2268,34 @@ def config_run_lines(comments: list[Comment]) -> set[int]:
     return out
 
 
+def prose_comment_candidates(
+    path: Path, raw: str, lines: list[str]
+) -> tuple[list[Comment], list[Comment], set[int]]:
+    """The comments a prose rule reads, the originals beside them, and the config-run lines.
+
+    The bodies have a trailing checker directive cut off, and fenced lines are dropped.
+    """
+    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
+    if comments is None:
+        comments = extracted_comments(path, lines)
+    skip = fenced_lines(lines)
+    kept = [c for c in comments if c[0] not in skip]
+    trimmed = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
+    return trimmed, kept, config_run_lines(trimmed)
+
+
+def is_non_prose_comment(n: int, body: str, configured: set[int]) -> bool:
+    """Whether a comment body is not a sentence, so no prose rule judges it."""
+    return bool(
+        not body
+        or n in configured
+        or NOT_PROSE.search(body)
+        or BARE_URI.match(body.strip())
+        or KEY_ONLY.match(body)
+        or (SNIPPET.match(body) and not SNIPPET_END.search(body))
+    )
+
+
 def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
     """Comment lines whose sentence wraps into the next, or that carry two sentences.
 
@@ -2278,27 +2306,14 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
     goes on past.
     """
-    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
-    if comments is None:
-        comments = extracted_comments(path, lines)
-    skip = fenced_lines(lines)
-    kept = [c for c in comments if c[0] not in skip]
-    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
-    configured = config_run_lines(comments)
+    comments, kept, configured = prose_comment_candidates(path, raw, lines)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
     prev_whole = ""
     prev_no = 0
     for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
-        if (
-            not body
-            or n in configured
-            or NOT_PROSE.search(body)
-            or BARE_URI.match(body.strip())
-            or KEY_ONLY.match(body)
-            or (SNIPPET.match(body) and not SNIPPET_END.search(body))
-        ):
+        if is_non_prose_comment(n, body, configured):
             prev_body = ""
             continue
         # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
@@ -2649,7 +2664,9 @@ PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issu
 
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
 DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
-DOCTEST_PROMPT = re.compile(r"^\s*(?:>>>|\.\.\.)(?:\s|$)")
+DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
+DOCSTRING_CLOSED = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
+FIELD_LINE = re.compile(r"^\s*\w+(?:\s*\([^)]*\))?:(?:\s|$)")
 
 
 def comment_sentence_findings(
@@ -2661,13 +2678,7 @@ def comment_sentence_findings(
     A line that is not prose, a trailing comment, or a gap ends the block.
     The prose filters are `comment_wrap_findings`', so the two rules agree on what a comment is.
     """
-    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
-    if comments is None:
-        comments = extracted_comments(path, lines)
-    skip = fenced_lines(lines)
-    kept = [c for c in comments if c[0] not in skip]
-    comments = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
-    configured = config_run_lines(comments)
+    comments, _kept, configured = prose_comment_candidates(path, raw, lines)
     out: list[tuple[int, str, str]] = []
     block: list[tuple[int, str]] = []
     prev_no = 0
@@ -2677,21 +2688,14 @@ def comment_sentence_findings(
         block.clear()
 
     for n, body, leading, _raw in comments:
-        if (
-            not body
-            or n in configured
-            or NOT_PROSE.search(body)
-            or BARE_URI.match(body.strip())
-            or KEY_ONLY.match(body)
-            or (SNIPPET.match(body) and not SNIPPET_END.search(body))
-        ):
+        if is_non_prose_comment(n, body, configured):
             flush()
             continue
-        if not leading or n != prev_no + 1:
+        if not leading or n != prev_no + 1 or LIST_MARKER.match(body) or FIELD_LINE.match(body):
             flush()
         block.append((n, body.strip()))
         prev_no = n
-        if not leading:
+        if not leading or body.rstrip().endswith(":"):
             flush()
     flush()
     return out
@@ -2710,12 +2714,16 @@ def docstring_sentence_findings(
     numbers = sorted(spans)
     groups: list[list[int]] = []
     for n in numbers:
-        if groups and n == groups[-1][-1] + 1:
+        prior = "".join(spans[groups[-1][-1]]) if groups else ""
+        joined = bool(groups) and n == groups[-1][-1] + 1
+        if joined and DOCSTRING_CLOSED.search(prior) and DOCSTRING_OPEN.match("".join(spans[n])):
+            joined = False
+        if joined:
             groups[-1].append(n)
         else:
             groups.append([n])
     for group in groups:
-        texts = ["".join(spans[n]) for n in group]
+        texts = ["".join(spans[n]).expandtabs(4) for n in group]
         texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
         texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
         rest = [t for t in texts[1:] if t.strip()]
@@ -2725,6 +2733,7 @@ def docstring_sentence_findings(
         block: list[tuple[int, str]] = []
         in_doctest = in_code = False
         prev_blank = True
+        prev_colon = False
         for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
             indent = len(text) - len(text.lstrip()) if idx else base
             if not text.strip():
@@ -2732,6 +2741,7 @@ def docstring_sentence_findings(
                 block.clear()
                 in_doctest = in_code = False
                 prev_blank = True
+                prev_colon = False
                 continue
             if DOCTEST_PROMPT.match(text):
                 out.extend(over_cap_findings(block, allowed))
@@ -2739,14 +2749,21 @@ def docstring_sentence_findings(
                 in_doctest = True
             elif in_doctest or (in_code and indent >= base + 4):
                 pass
-            elif prev_blank and indent >= base + 4:
+            elif (prev_blank or prev_colon) and indent >= base + 4:
                 out.extend(over_cap_findings(block, allowed))
                 block.clear()
                 in_code = True
             else:
                 in_code = False
+                if LIST_MARKER.match(text) or FIELD_LINE.match(text):
+                    out.extend(over_cap_findings(block, allowed))
+                    block.clear()
                 block.append((n, text.strip()))
+                if text.rstrip().endswith(":"):
+                    out.extend(over_cap_findings(block, allowed))
+                    block.clear()
             prev_blank = False
+            prev_colon = text.rstrip().endswith(":")
         out.extend(over_cap_findings(block, allowed))
     return out
 
@@ -2815,7 +2832,7 @@ def check_file(
     if "sentence-length" in rules:
         if path.suffix == ".md":
             out.extend(sentence_length_findings(lines, allowed))
-        else:
+        elif path.suffix.lower() != ".md":
             out.extend(comment_sentence_findings(path, raw, lines, allowed))
             if path.suffix.lower() == ".py":
                 out.extend(docstring_sentence_findings(raw, lines, allowed))
