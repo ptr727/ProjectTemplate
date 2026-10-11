@@ -556,8 +556,9 @@ def scope_note(
     question about the second rather than about the first.
 
     A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
-    needs the parse ran. That rule then reads the file by a line scan or not at all, so a pass
-    under an interpreter older than the code it reads is otherwise the same line as a clean one.
+    reads Python through a parser ran. Such a rule reads that file by a line scan, not at all, or
+    through a tokenizer older than its grammar, so a pass under an interpreter older than the code
+    it reads is otherwise the same line as a clean one.
     """
     if base is None:
         note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
@@ -570,7 +571,7 @@ def scope_note(
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         note += (
             f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
-            f"so read without the parse a rule needed: {quoted(unparsed, 5)}"
+            f"so their comments and docstrings may be misread: {quoted(unparsed, 5)}"
         )
     return note
 
@@ -2245,19 +2246,14 @@ def config_run_lines(comments: list[Comment]) -> set[int]:
     return out
 
 
-def comment_wrap_findings(
-    path: Path, raw: str, lines: list[str], unparsed: set[str] | None = None
-) -> list[tuple[int, str, str]]:
+def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
     """Comment lines whose sentence wraps into the next, or that carry two sentences.
 
     The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
-    run-on is the other half of the same rule, so both are reported. A `.py` that does not tokenize
-    is read by the line scan instead, which `unparsed` records.
+    run-on is the other half of the same rule, so both are reported.
     """
     comments = python_comments(raw) if path.suffix == ".py" else None
     if comments is None:
-        if path.suffix == ".py" and unparsed is not None:
-            unparsed.add("tokenize")
         comments = extracted_comments(path, lines)
     skip = fenced_lines(lines)
     comments = [c for c in comments if c[0] not in skip]
@@ -2357,30 +2353,23 @@ def is_comment_prose(body: str) -> bool:
     )
 
 
-def comment_bodies(
-    path: Path, raw: str, spec: Syntax | None = None, unparsed: set[str] | None = None
-) -> list[Comment] | None:
+def comment_bodies(path: Path, raw: str, spec: Syntax | None = None) -> list[Comment] | None:
     """The file's comments, or None where none can be read.
 
     A `.py` whose source does not tokenize returns None rather than falling back to the
     hash-anchored scan. That scan carries an open single-line string across the line, and a
-    triple-quoted one it does not, so it reads a `#` inside a docstring as a comment. `unparsed`
-    records that return.
+    triple-quoted one it does not, so it reads a `#` inside a docstring as a comment.
     """
     if path.suffix.lower() == ".py":
         comments = python_comments(raw)
         if comments is None:
-            if unparsed is not None:
-                unparsed.add("tokenize")
             return None
     else:
         comments = extracted_comments(path, raw.split("\n"), spec)
     return comments
 
 
-def comment_added_findings(
-    path: Path, raw: str, unparsed: set[str] | None = None
-) -> list[tuple[int, str, str]]:
+def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     """Every prose comment line the file holds, which the diff scope narrows to the ones in a change.
 
     The whole file is read and `main` keeps only the lines the diff touches, which is the path every
@@ -2410,7 +2399,7 @@ def comment_added_findings(
     if path.suffix.lower() == ".md" or syntax_for(path) is None:
         return []
     spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
-    bodies = comment_bodies(path, raw, spec, unparsed)
+    bodies = comment_bodies(path, raw, spec)
     if bodies is None:
         return []
     # A comment whose marker opens the line, and no other.
@@ -2446,41 +2435,39 @@ def comment_added_findings(
     return out
 
 
+@functools.lru_cache(maxsize=1)
 def python_tree(raw: str) -> ast.Module | None:
-    """The parsed module, or None where this interpreter cannot parse the source."""
+    """The parsed module, or None where this interpreter cannot parse the source.
+
+    A leading byte order mark is dropped first, since `ast` refuses one in a string on every
+    interpreter. Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
+    """
     try:
-        return ast.parse(raw)
+        return ast.parse(raw.removeprefix("\ufeff"))
     except (SyntaxError, ValueError):
         return None
 
 
-def python_docstring_spans(
-    raw: str, lines: list[str], unparsed: set[str] | None = None
-) -> dict[int, list[str]]:
+def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
     """Each source line a docstring occupies, mapped to the docstring text on that line.
 
     `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
     where it opens a body, and a docstring's own text may hold one. Empty where the source will
-    not parse, which `unparsed` records.
+    not parse.
 
     The source text is returned rather than the docstring's value, so a reference is reported on
     the line that carries it. A value has its escapes resolved, which no longer maps to a line.
     Sliced at the node's own columns rather than taken as whole lines, since a statement can share
     a line with the closing quote and reading it would report a string literal this rule excludes.
 
-    A leading byte order mark is dropped before the parse and from the first line alike. `ast`
-    refuses one in a string on every interpreter, so leaving it would name the file as one this
-    interpreter cannot parse, and dropping it from the parse alone would shift the first line's
-    columns.
+    `python_tree` drops a leading byte order mark, so it is dropped from the first line too, which
+    keeps that line's columns in step with the parse.
     """
-    if raw.startswith("\ufeff"):
-        raw = raw[1:]
-        lines = [lines[0].removeprefix("\ufeff"), *lines[1:]]
     tree = python_tree(raw)
     if tree is None:
-        if unparsed is not None:
-            unparsed.add("ast")
         return {}
+    if raw.startswith("\ufeff"):
+        lines = [lines[0].removeprefix("\ufeff"), *lines[1:]]
     out: dict[int, list[str]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -2525,7 +2512,7 @@ def without_lookalikes(text: str, markdown: bool) -> str:
 
 
 def issue_ref_findings(
-    path: Path, raw: str, lines: list[str], root: Path | None, unparsed: set[str] | None = None
+    path: Path, raw: str, lines: list[str], root: Path | None
 ) -> list[tuple[int, str, str]]:
     """Every issue or pull request reference on a surface the ban reaches.
 
@@ -2567,8 +2554,7 @@ def issue_ref_findings(
                 spans.setdefault(n, []).append(without_lookalikes(line, True))
                 links.setdefault(n, []).append(line)
     else:
-        syntax = comment_syntax_including_docs(path)
-        for comment in comment_bodies(path, raw, syntax, unparsed) or ():
+        for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
             # A comment whose marker opens its line, and no other.
             # Which mid-line marker opens a comment is a parser fact that differs by language.
             # The scan takes the first one on the line whatever that language does with it.
@@ -2583,7 +2569,7 @@ def issue_ref_findings(
             if comment.raw:
                 spans[comment.line].append(without_lookalikes(comment.raw, False))
         if path.suffix.lower() == ".py":
-            for n, texts in python_docstring_spans(raw, lines, unparsed).items():
+            for n, texts in python_docstring_spans(raw, lines).items():
                 spans.setdefault(n, []).extend(without_lookalikes(t, False) for t in texts)
     # One finding per line per distinct reference, the line being the unit this rule reports on.
     # `comment-added` counts a line once for the same reason, a line with two comments being one line.
@@ -2616,17 +2602,22 @@ def issue_ref_findings(
     return out
 
 
+PARSED_RULES = frozenset({"comment-wrap", "comment-case", "comment-added", "issue-ref"})
+
+
 def check_file(
     path: Path,
     rules: set[str],
     root: Path | None = None,
     allowed: set[int] | None = None,
-    unparsed: set[str] | None = None,
+    unparsed: list[Path] | None = None,
 ) -> list[tuple[int, str, str]]:
     """Every finding the rules in `rules` make on `path`.
 
-    `unparsed` collects the parsers that refused a `.py`, each recorded by the rule that asked, so
-    a rule that did not run never records one and the set is empty for a file read whole.
+    `unparsed` collects a `.py` this interpreter cannot parse where a rule in `PARSED_RULES` ran.
+    The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
+    grammar can read a newer f-string as an open string and swallow the comments after it without
+    refusing anything.
     """
     out: list[tuple[int, str, str]] = []
     try:
@@ -2643,12 +2634,18 @@ def check_file(
         if found:
             dead_root = Path(found)
     if {"comment-wrap", "comment-case"} & rules:
-        shaped = comment_wrap_findings(path, raw, lines, unparsed)
-        out.extend(f for f in shaped if f[1] in rules)
+        out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
     if "comment-added" in rules:
-        out.extend(comment_added_findings(path, raw, unparsed))
+        out.extend(comment_added_findings(path, raw))
     if "issue-ref" in rules:
-        out.extend(issue_ref_findings(path, raw, lines, root, unparsed))
+        out.extend(issue_ref_findings(path, raw, lines, root))
+    if (
+        unparsed is not None
+        and PARSED_RULES & rules
+        and path.suffix.lower() == ".py"
+        and python_tree(raw) is None
+    ):
+        unparsed.append(path)
     # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
@@ -2955,10 +2952,9 @@ def main(argv: list[str] | None = None) -> int:
     total = 0
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
-    unparsed: list[str] = []
+    refused: list[Path] = []
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        refused: set[str] = set()
         for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused):
             if allowed is not None and ln not in allowed:
                 continue
@@ -2967,13 +2963,16 @@ def main(argv: list[str] | None = None) -> int:
             byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
                 print(f"{keys[f]}:{ln}: {kind}: {msg}")
-        if refused:
-            unparsed.append(keys[f])
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
     print(
         scope_note(
-            len(files), discovered, inscope, a.diff, gate_provenance(a.provenance), unparsed
+            len(files),
+            discovered,
+            inscope,
+            a.diff,
+            gate_provenance(a.provenance),
+            [keys[f] for f in refused],
         ),
         file=sys.stderr,
     )
