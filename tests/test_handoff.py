@@ -2514,6 +2514,35 @@ class ConsistentReadCase(unittest.TestCase):
         self.assertIn("issue connection", err.getvalue())
         self.assertNotIn("unmodeled", err.getvalue())
 
+    def test_a_graphql_transport_failure_is_exit_2_never_a_refusal(self) -> None:
+        """A read that did not run reports 2, where 1 is the refusal a caller can act on.
+
+        The response carries a page of rows beside an `errors` set, so a reader ignoring the
+        errors would answer from the rows and exit 0. The shared transport raises instead, and
+        this script maps what it raises to the exit for a command that did not run.
+        """
+        for label, payload in (
+            ("errors beside rows", {"data": json.loads(connection([]))["data"], "errors": [{}]}),
+            ("no data", {"errors": [{"message": "boom"}]}),
+            ("not an object", ["data"]),
+        ):
+            with self.subTest(label=label):
+
+                def failing(argv, payload=payload):
+                    if argv[:2] == ["label", "list"]:
+                        return json.dumps([{"name": handoff.LABEL}])
+                    return json.dumps(payload)
+
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(handoff, "run_gh", failing),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(err),
+                ):
+                    code = handoff.main(["tracks", "--repo", "o/r"])
+                self.assertEqual(code, 2)
+                self.assertNotIn("unmodeled", err.getvalue())
+
 
 class SurfaceCase(unittest.TestCase):
     """A floor on what a healthy run reaches, since a shrunken table reports what a whole one does."""

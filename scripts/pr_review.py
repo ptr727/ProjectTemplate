@@ -347,6 +347,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
+import gh_graphql as shared
+
 # The directory this script sits in, and the anchor every scope answer is read from.
 # One value serves the owner probe and the refusal naming it, so the two cannot disagree.
 HERE = Path(__file__).resolve().parent
@@ -998,41 +1000,21 @@ WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
 
 def gh_graphql(query: str, **variables) -> dict:
-    """Run one GraphQL document and return its `data`, raising rather than reporting a blank.
+    """Run one GraphQL document and return its `data`, ending the run on a failed read.
 
-    A string goes through `-f` and an int through `-F`, because `-F` infers a type from the text:
-    a reply body of `123` or `true` arrives as an Int or a Boolean and the mutation fails on a
-    type nobody passed it, and a body opening with `@` is read as a filename.
+    The transport is `gh_graphql.request`, which raises `GraphQLError` and never exits. This is
+    the exit contract of this script, where a failed read prints what the transport had to show
+    and ends the run with the transport's one-line message, at exit 1.
 
-    `errors` is checked rather than trusted to the exit code, since a GraphQL document can fail
-    per-field while the request itself succeeds, and the caller would read the null that leaves.
-
-    `gh api graphql` exits non-zero with the JSON still on stdout when the response carries errors,
-    so that stdout is read first. Only an error set made of `workflowRun` paths is tolerated.
+    Only an error set made of `workflowRun` paths is tolerated.
     """
-    # Every read below decodes as UTF-8 rather than as whatever the platform's locale is.
-    # `gh` emits UTF-8 on every platform, where a Windows console locale is cp1252.
-    # A review body carrying one typographic quote crashed the decode and left the caller reading a null stdout.
-    argv = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for name, value in variables.items():
-        argv += ["-F" if isinstance(value, int) else "-f", f"{name}={value}"]
-    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
     try:
-        payload = json.loads(r.stdout)
-    except ValueError:
-        payload = None
-    if not isinstance(payload, dict) or (r.returncode != 0 and not payload.get("errors")):
-        sys.stderr.write(r.stderr[:800])
-        raise SystemExit(f"gh graphql failed rc={r.returncode}")
-    errors = payload.get("errors")
-    if errors and not all(_is_workflow_run_error(e) for e in errors):
-        sys.stderr.write(json.dumps(errors)[:800])
-        raise SystemExit("gh graphql reported errors")
-    if payload.get("data") is None:
-        sys.stderr.write(json.dumps(errors)[:800])
-        raise SystemExit("gh graphql returned no data")
-    data = payload["data"]
-    if errors:
+        response = shared.request(query, variables, tolerate=_is_workflow_run_error)
+    except shared.GraphQLError as exc:
+        sys.stderr.write(exc.detail)
+        raise SystemExit(str(exc)) from exc
+    data = response.data
+    if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
         data[WORKFLOW_KEYS_UNAVAILABLE] = True
     return data
@@ -1063,14 +1045,16 @@ def follow(
 
     One cursor walk for every paged read, so a fix to how a page is followed lands once.
     """
-    while True:
-        extra: dict[str, str] = {"after": after} if after else {}
-        pr = gh_graphql(query, o=owner, r=repo, n=num, **extra)["repository"]["pullRequest"]
-        yield pr
-        page = pr[connection].get("pageInfo") or {}
-        if not page.get("hasNextPage"):
-            return
-        after = page["endCursor"]
+
+    def fetch(cursor: str | None) -> dict:
+        extra: dict[str, str] = {"after": cursor} if cursor else {}
+        return gh_graphql(query, o=owner, r=repo, n=num, **extra)
+
+    try:
+        yield from shared.walk(fetch, ("repository", "pullRequest", connection), after)
+    except shared.GraphQLError as exc:
+        sys.stderr.write(exc.detail)
+        raise SystemExit(str(exc)) from exc
 
 
 def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
