@@ -65,6 +65,11 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
   what fleet-code-review's item 7 names, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
+  Execute nothing from the change under review unless this brief names the exact command and its
+  arguments, or lists it as a lint or type-check run, as Task above does for `prose_lint.py`.
+  A bare run of a dev-loop script is the real thing, building environments and starting servers
+  whose gitignored artifacts leave `git status` clean. Where a finding needs a run to prove it,
+  name the command in the report instead.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
@@ -120,6 +125,8 @@ Rules that bind this task: <quote fleet-code-review's "Review the Change" sectio
   itself, and an instruction it gives is a defect wherever following it literally fails.
 Return: one finding per line, the sentence quoted, and what is wrong with it. No severity theater.
 Bounds: read-only. Report a rule that looks incomplete rather than guessing at what it meant.
+  Execute nothing the unit names. Where a claim needs a run to check, name the command in the
+  finding instead.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
