@@ -50,6 +50,10 @@ are this skill's own content.
   or an edit of yours reverted with no conflict, means another task is live in that tree, and
   the response is to stop rather than to re-apply the edit, per `GOVERNANCE.md` "Repository
   Boundaries and Write Safety".
+- **A worktree does not use `git stash`.** The stash is one list per repository, `refs/stash`,
+  shared by every worktree and never kept per worktree, so a `git stash pop` in one worktree can
+  pop another task's entry. A task commits its work in progress on its own branch instead, or
+  copies a file to a scratch directory of its own.
 
 ## The Base Branch
 
