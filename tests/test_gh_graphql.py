@@ -140,6 +140,7 @@ class SiblingImportCase(unittest.TestCase):
                         cwd=elsewhere,
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
                         check=False,
                     )
                     self.assertEqual(r.returncode, 0, r.stderr)
