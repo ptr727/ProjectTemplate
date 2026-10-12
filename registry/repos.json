@@ -73,6 +73,7 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "push",
             "releaseTrigger": "dispatch-only",
+            "pythonDirectories": ["."],
             "driftNotes": [
                 "ruff/pyright in standalone .ruff.toml + pyrightconfig.json instead of pyproject.toml (canonicalize).",
                 "Enforces a 99%+ coverage threshold, beyond the fleet's report-only codecov default."
