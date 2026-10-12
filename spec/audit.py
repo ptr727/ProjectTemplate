@@ -2217,6 +2217,125 @@ def python_directories_caller_findings(path, text, entry):
     ]
 
 
+CONCURRENCY_CALLERS = {
+    ".github/workflows/publish-release.yml": "${{ github.workflow }}-${{ github.ref }}",
+    ".github/workflows/merge-bot-pull-request.yml": (
+        "${{ github.workflow }}-${{ github.event.pull_request.number }}"
+    ),
+}
+_RUN_ID_SUFFIX = re.compile(
+    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\((?:github\.actor!='ptr727-codegen\[bot\]'&&github\.actor!='dependabot\[bot\]'"
+    r"|github\.actor!='dependabot\[bot\]'&&github\.actor!='ptr727-codegen\[bot\]')\)\)"
+    r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
+)
+_TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
+_EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
+
+
+def _yaml_scalar(value):
+    """A plain or quoted scalar's text, trailing comment dropped, or None where it cannot be read as one."""
+    value = value.strip()
+    quoted = re.match(r"""^(?:'((?:[^']|'')*)'|"((?:[^"\\]|\\.)*)")\s*(?:#.*)?$""", value)
+    if quoted:
+        single = quoted.group(1)
+        return single.replace("''", "'") if single is not None else quoted.group(2)
+    if value[:1] in ("'", '"', ">", "|"):
+        return None
+    return re.sub(r"[ \t]+#.*$", "", value)
+
+
+def _strip_unquoted_space(value):
+    """Whitespace removed except inside single-quoted strings, so a name such as `'a b'` stays distinct from `'ab'`."""
+    parts = value.split("'")
+    return "'".join(
+        re.sub(r"\s+", "", part) if i % 2 == 0 else part for i, part in enumerate(parts)
+    )
+
+
+def _tight(value):
+    return _EXPRESSION_SPACE.sub(lambda m: "${{" + m.group(1) + "}}", value)
+
+
+def concurrency_caller_findings(path, text):
+    """DRIFT when the publisher or the merge-bot declares a concurrency group other than the one WORKFLOW.md pins.
+
+    The publisher's group is the ref-scoped base, optionally followed by one `${{ }}` expression naming both
+    `github.event_name` and `github.run_id`, the shape of the push-only suffix. The merge-bot's group is the
+    base keyed on the PR number. Either must leave `cancel-in-progress` false or unset. Only the
+    workflow-level `concurrency:` is read, as a block mapping or a bare group scalar. A shape this cannot
+    read is reported rather than skipped. A file absent from the repo never reaches here, since the
+    interface unit reports that.
+    """
+    base = CONCURRENCY_CALLERS.get(path)
+    if base is None:
+        return []
+    unreadable = [
+        (
+            "DRIFT",
+            f"concurrency: {path} writes its concurrency in a shape the audit cannot read. Write a block mapping with group and cancel-in-progress, each a single-line scalar.",
+        )
+    ]
+    code = _code_view(text)
+    head = _TOP_CONCURRENCY.search(code)
+    if head is None:
+        return [
+            (
+                "DRIFT",
+                f"concurrency: {path} declares no workflow-level concurrency, expected group '{base}'",
+            )
+        ]
+    group = cancel = None
+    inline = re.sub(r"^(?:&\S+[ \t]*)?(?:#.*)?", "", head.group(1)).strip()
+    if inline.startswith("{"):
+        return unreadable
+    if inline:
+        group = _yaml_scalar(inline)
+        following = next((ln for ln in code[head.end() :].splitlines()[1:] if ln.strip()), "")
+        if group is None or following[:1] in (" ", "\t"):
+            return unreadable
+    else:
+        child_indent = None
+        for line in code[head.end() :].splitlines()[1:]:
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip())
+            if indent == 0:
+                break
+            if child_indent is None:
+                child_indent = indent
+            if indent > child_indent:
+                return unreadable
+            m = re.match(r"^[ \t]+(group|cancel-in-progress):[ \t]*(.*)$", line)
+            if m:
+                value = _yaml_scalar(m.group(2))
+                if value is None:
+                    return unreadable
+                if m.group(1) == "group":
+                    group = value
+                else:
+                    cancel = value
+    findings = []
+    if not group:
+        findings.append(("DRIFT", f"concurrency: {path} reads no group value, expected '{base}'"))
+    else:
+        tight_group, tight_base = _tight(group), _tight(base)
+        suffix = tight_group[len(tight_base) :] if tight_group.startswith(tight_base) else None
+        suffix_ok = suffix is not None and (
+            suffix == ""
+            or (
+                path.endswith("publish-release.yml")
+                and _RUN_ID_SUFFIX.match(_strip_unquoted_space(suffix))
+            )
+        )
+        if not suffix_ok:
+            findings.append(("DRIFT", f"concurrency: {path} group is '{group}', expected '{base}'"))
+    if cancel is not None and _tight(cancel).lower() not in ("false", "${{false}}"):
+        findings.append(
+            ("DRIFT", f"concurrency: {path} sets cancel-in-progress to '{cancel}', expected false")
+        )
+    return findings
+
+
 # A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment such as ` # v1.2.3`, where the leading `v` or digit is required.
 # Dependabot bumps both per repo, so that drift is governed the way EOL is rather than being a fidelity deviation.
 # It is anchored to `uses:`, so a 64-hex docker digest and a tag or branch ref such as `@v4` do not match.
@@ -2959,6 +3078,7 @@ def audit_repo(entry, spec, branch=None):
                 contract = item.get("contract", {})
                 findings.extend(check_interface(path, contract, text))
                 findings.extend(python_directories_caller_findings(path, text, entry))
+                findings.extend(concurrency_caller_findings(path, text))
                 canonical_rel = item.get("reference") or path
                 for job in contract.get("verbatimJobs", []):
                     findings.extend(
@@ -6491,6 +6611,260 @@ def _selftest():
     if python_caller_ok:
         print(
             "  ok   python_directories_caller_findings: a caller's declared python-directories input is compared against the registry"
+        )
+
+    concurrency_ok = True
+    snippet_dir = ROOT / "catalog" / "snippets" / "workflows"
+    pub_path = ".github/workflows/publish-release.yml"
+    bot_path = ".github/workflows/merge-bot-pull-request.yml"
+    pub_text = (snippet_dir / "publish-release.yml").read_text(encoding="utf-8")
+    bot_text = (snippet_dir / "merge-bot-pull-request.yml").read_text(encoding="utf-8")
+    pub_group = "group: ${{ github.workflow }}-${{ github.ref }}"
+    pub_line = next(ln for ln in pub_text.splitlines() if ln.strip().startswith("group:"))
+    bot_line = next(ln for ln in bot_text.splitlines() if ln.strip().startswith("group:"))
+    pub_value = pub_line.split("group:", 1)[1].strip()
+    concurrency_cases = [
+        (pub_path, pub_text, 0, "the reference publisher, run_id suffix included"),
+        (bot_path, bot_text, 0, "the reference merge-bot"),
+        (
+            pub_path,
+            pub_text.replace(
+                "github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]'",
+                "github.actor != 'dependabot[bot]' && github.actor != 'ptr727-codegen[bot]'",
+            ),
+            0,
+            "the allowlisted actors in the other order",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  " + pub_group),
+            0,
+            "a bare ref-scoped publisher group",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: ${{ github.workflow }}"),
+            1,
+            "a global publisher group",
+        ),
+        (pub_path, pub_text.replace(pub_line, "  group: publish"), 1, "a literal publisher group"),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  " + pub_group + "-extra"),
+            1,
+            "a literal publisher suffix",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  " + pub_group + "${{ github.sha }}"),
+            1,
+            "a non-run_id publisher suffix",
+        ),
+        (
+            pub_path,
+            pub_text.replace("cancel-in-progress: false", "cancel-in-progress: true"),
+            1,
+            "a cancelling publisher",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, "  group: ${{ github.workflow }}-${{ github.ref }}"),
+            1,
+            "a ref-keyed merge-bot",
+        ),
+        (
+            bot_path,
+            bot_text.replace("cancel-in-progress: false", "cancel-in-progress: true"),
+            1,
+            "a cancelling merge-bot",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + "${{ github.run_id }}"),
+            1,
+            "a run_id suffix is the publisher's alone",
+        ),
+        (
+            pub_path,
+            re.sub(r"(?s)\nconcurrency:.*?cancel-in-progress: \w+\n", "\n", pub_text),
+            1,
+            "no concurrency block",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                "github.actor != 'dependabot[bot]'", "github.actor == 'dependabot[bot]'"
+            ),
+            1,
+            "an actor predicate that is not an exclusion list",
+        ),
+        (
+            pub_path,
+            pub_text.replace("refs/heads/main", "refs/heads/develop"),
+            1,
+            "a suffix keyed on another branch",
+        ),
+        (
+            pub_path,
+            pub_text.replace("github.actor != 'dependabot[bot]'", "github.actor != 'other[bot]'"),
+            1,
+            "an actor list that is not the plan task's allowlist",
+        ),
+        (
+            pub_path,
+            pub_text.replace("ptr727-codegen[bot]", "ptr727-codegen [bot]"),
+            1,
+            "whitespace inside an allowlisted actor name",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + pub_value.split("github.ref }}", 1)[1]),
+            1,
+            "the push-only suffix is the publisher's alone",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: '" + pub_value.replace("'", "''") + "'"),
+            0,
+            "a single-quoted publisher group",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: " + pub_value + " # note"),
+            0,
+            "a trailing comment",
+        ),
+        (
+            pub_path,
+            pub_text.replace("concurrency:\n", "concurrency: # note\n", 1),
+            0,
+            "a comment on the key line",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: ${{github.workflow}}-${{github.ref}}"),
+            0,
+            "tight expression spacing",
+        ),
+        (
+            pub_path,
+            pub_text.replace("cancel-in-progress: false", "cancel-in-progress: ${{ false }}"),
+            0,
+            "an expression false",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
+            1,
+            "a folded scalar is refused",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  " + pub_group + "${{ github.run_id }}"),
+            1,
+            "an unconditional run_id suffix",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  " + pub_group + "${{ github.ref == 'refs/heads/main' && github.run_id }}",
+            ),
+            1,
+            "a suffix naming no event_name",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  " + pub_group + "${{ github.sha }}-${{ github.event_name }}${{ github.run_id }}",
+            ),
+            1,
+            "several suffix expressions",
+        ),
+        (
+            bot_path,
+            "concurrency: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n",
+            0,
+            "a bare scalar merge-bot group",
+        ),
+        (
+            pub_path,
+            "concurrency: ${{ github.workflow }}-${{ github.ref }}\njobs:\n  x:\n    concurrency:\n      group: y\n",
+            0,
+            "a bare scalar group, job-level concurrency ignored",
+        ),
+        (
+            ".github/workflows/test-pull-request.yml",
+            "concurrency:\n  group: x\n",
+            0,
+            "another workflow is not read",
+        ),
+    ]
+    refusal_cases = [
+        (
+            pub_path,
+            "concurrency: ${{ github.workflow }}-${{ github.ref }}\n  -extra\njobs:\n  x: {}\n",
+            "cannot read",
+            "a continuation after an inline scalar",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
+            "cannot read",
+            "a folded scalar",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, pub_line + "\n      more"),
+            "cannot read",
+            "a continuation line",
+        ),
+        (pub_path, "concurrency: { group: x }\n", "cannot read", "a flow mapping"),
+        (
+            pub_path,
+            pub_text.replace("concurrency:\n", "concurrency: &c\n", 1),
+            "",
+            "an anchor on the key",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  "
+                + pub_group
+                + "${{ github.event_name == 'push' && format('-{0}', github.run_id) || '' }}",
+            ),
+            "group is",
+            "a suffix without the main clause",
+        ),
+        (
+            pub_path,
+            pub_text.replace(
+                pub_line,
+                "  " + pub_group + "${{ format('-{0}{1}', github.run_id, github.event_name) }}",
+            ),
+            "group is",
+            "an unconditional suffix naming event_name",
+        ),
+    ]
+    for path_in, text_in, needle, label in refusal_cases:
+        got = concurrency_caller_findings(path_in, text_in)
+        if (needle == "" and got) or (needle and not any(needle in f[1] for f in got)):
+            ok = False
+            concurrency_ok = False
+            print(f"  FAIL concurrency_caller_findings [{label}] -> {got}")
+    for path_in, text_in, expected, label in concurrency_cases:
+        got = len(concurrency_caller_findings(path_in, text_in))
+        if got != expected:
+            ok = False
+            concurrency_ok = False
+            print(
+                f"  FAIL concurrency_caller_findings [{label}] -> {got} finding(s), expected {expected}"
+            )
+    if concurrency_ok:
+        print(
+            "  ok   concurrency_caller_findings: the publisher and merge-bot groups match the WORKFLOW.md pins"
         )
 
     id_cases = [

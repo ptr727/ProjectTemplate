@@ -2832,6 +2832,147 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
 
+    def test_a_docstring_body_deeper_than_its_quotes_is_prose(self) -> None:
+        text = (
+            f'def f() -> None:\n    """\n        Summary.\n\n        {self.over()}\n        """\n'
+        )
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_block_deeper_than_a_deep_docstring_body_stays_code(self) -> None:
+        text = (
+            'def f() -> None:\n    """\n        Summary.\n\n'
+            f'            {self.over()}\n        """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_deep_docstring_colon_line_opens_a_code_block(self) -> None:
+        text = (
+            f'def f() -> None:\n    """\n        Usage:\n\n            {self.over()}\n        """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_non_prose_line_inside_a_comment_command_run_keeps_it_code(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        for middle in ("https://example.com/path", "key:"):
+            with self.subTest(middle=middle):
+                text = f"# Usage:\n#     first\n#     {middle}\n#     {run}\n#     {run}\n"
+                self.assertEqual([], self.found(text, "bait.sh"))
+
+    def test_a_block_comment_continuation_carries_its_indent(self) -> None:
+        run = " ".join(["tool list item"] * 5)
+        text = f"/* Usage:\n *     {run}\n *     {run}\n */\nint x;\n"
+        self.assertEqual([], self.found(text, "bait.c"))
+        bare = f"/* Usage:\n     {run}\n     {run}\n */\nint x;\n"
+        self.assertEqual([], self.found(bare, "bait.c"))
+
+    def test_a_block_comment_prose_continuation_is_still_counted(self) -> None:
+        half = self.words(13)
+        text = f"/* Intro\n *     {half}\n *     {half}.\n */\nint x;\n"
+        self.assertEqual([(1, "sentence-length")], self.found(text, "bait.c"))
+
+    def test_google_free_text_sections_are_prose(self) -> None:
+        for header in ("Note", "Warning", "See Also", "Todo"):
+            with self.subTest(header=header):
+                text = f'def f() -> None:\n    """S.\n\n    {header}:\n        {self.over()}\n    """\n'
+                self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_google_free_text_body_keeps_no_entry_lead_stripped(self) -> None:
+        text = f'def f() -> None:\n    """S.\n\n    Note:\n        x: {self.at_cap()}\n    """\n'
+        self.assertEqual([(5, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_code_deeper_than_a_free_text_body_stays_code(self) -> None:
+        text = (
+            'def f() -> None:\n    """S.\n\n    Note:\n        Call it like this:\n\n'
+            f'            {self.over()}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_numpy_prose_with_a_short_first_line_at_the_entry_indent_is_counted(self) -> None:
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    Short lead\n    {self.words(prose_lint.SENTENCE_WORD_CAP - 1)}.\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_bare_type_with_an_indented_description_stays_a_head(self) -> None:
+        part = self.words(prose_lint.SENTENCE_WORD_CAP - 2) + "."
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n'
+            f'        {part}\n    str\n        {part}\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_comment_marker_gap_keeps_a_colon_block_open_outside_python(self) -> None:
+        run = " ".join(["tool list item"] * 9)
+        for name, mark in (("bait.sh", "#"), ("bait.js", "//"), ("bait.py", "#")):
+            with self.subTest(name=name):
+                self.assertEqual([], self.found(f"{mark} Usage:\n{mark}\n{mark}     {run}\n", name))
+
+    def test_an_indented_block_comment_measures_a_bare_continuation_from_its_opener(self) -> None:
+        text = f"  /* Steps:\n     {self.over()}\n  */\nint x;\n"
+        self.assertEqual([(2, "sentence-length")], self.found(text, "bait.c"))
+
+    def test_numpy_prose_followed_by_a_blank_and_a_deeper_block_is_counted(self) -> None:
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {self.over()}\n\n        >>> f()\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_dedented_closing_quote_does_not_make_the_body_code(self) -> None:
+        text = f'def f() -> None:\n    """Summary.\n\n    {self.over()}\n"""\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_an_over_cap_summary_is_counted_when_the_body_is_left_of_the_quotes(self) -> None:
+        text = f'class A:\n    def f(self) -> None:\n        """{self.over()}\n\n    Body line.\n        """\n'
+        self.assertEqual([(3, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_block_continuation_left_of_the_opener_keeps_its_url_whole(self) -> None:
+        path = self.tmp / "bait.c"
+        path.write_text(
+            "void f(void) {\n    foo(); /* See the spec at\n    https://example.com/spec#123 */\n}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual([], prose_lint.check_file(path, {"issue-ref"}))
+
+    def test_a_numpy_list_of_bare_names_is_heads_not_one_sentence(self) -> None:
+        names = "".join(f"    method_{i}\n" for i in range(prose_lint.SENTENCE_WORD_CAP + 1))
+        text = f'class A:\n    """S.\n\n    Methods\n    -------\n{names}    """\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_numpy_name_does_not_chain_onto_the_description_above(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP)
+        text = (
+            'class A:\n    """S.\n\n    Attributes\n    ----------\n    shape : tuple\n'
+            f'        {desc}\n    dtype\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_bare_numpy_type_before_a_blank_and_its_description_is_a_head(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP)
+        text = (
+            'def f():\n    """S.\n\n    Returns\n    -------\n    x : int\n'
+            f'        {desc}\n    ndarray\n\n        Other.\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_one_token_line_inside_numpy_entry_indent_prose_does_not_cut_the_sentence(
+        self,
+    ) -> None:
+        head = "Returns\n    -------\n    int\n        The count.\n\n"
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        for token in ("several", "https://example.invalid/path", "fourteen,"):
+            with self.subTest(token=token):
+                text = (
+                    f'def f() -> int:\n    """S.\n\n    {head}    {half}\n    {token}\n'
+                    f'    {half}.\n    """\n'
+                )
+                self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_an_aligned_closer_does_not_lower_the_margin_of_a_quote_alone_docstring(self) -> None:
+        text = f'"""\n    Summary.\n\n    {self.over()}\n"""\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
@@ -4053,13 +4194,15 @@ class TestDiffScopeFloor(unittest.TestCase):
         (self.tmp / "scripts").mkdir()
         changed = self.tmp / "scripts" / "tool.py"
         changed.write_text("# A clean comment.\n", encoding="utf-8")
+        narrowed = self.tmp / "catalog"
+        narrowed.mkdir()
         with (
             mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
             mock.patch.object(prose_lint, "discover", return_value=[]),
             mock.patch.object(prose_lint, "changed_lines", return_value={"scripts/tool.py": {1}}),
         ):
             self.assertEqual(
-                0, prose_lint.main(["--check", "dupword", "--diff", "HEAD", "catalog"])
+                0, prose_lint.main(["--check", "dupword", "--diff", "HEAD", str(narrowed)])
             )
 
     def test_an_excluded_file_is_not_counted_as_one_the_run_should_have_read(self) -> None:
