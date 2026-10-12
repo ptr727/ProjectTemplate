@@ -3032,7 +3032,7 @@ def partial_shaped(pr: dict) -> str:
     of reading a table at all.
 
     A table row opening with a code-span path is dropped before reading.
-    A file-summary cell about the review skill names the marker in prose, not as a statement.
+    A file-summary cell about the review skill names the marker in prose rather than stating coverage.
     """
     for node in reviewer_nodes(pr, "reviews"):
         for view in body_views(FILE_ROW.sub("", node.get("body") or "")):
