@@ -18,8 +18,11 @@ Run as `python3 tests/test_handoff.py`, or under
 
 import argparse
 import contextlib
+import copy
 import io
+import itertools
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -79,18 +82,38 @@ def projected(row: dict, argv: list[str]) -> dict:
     return {field: row[field] for field in wanted if field in row}
 
 
+def fields(argv: list[str]) -> dict[str, list[str]]:
+    """Every `-f`/`-F` field of a `gh api` call, keyed by name, each value a list in call order."""
+    out: dict[str, list[str]] = {}
+    for flag, pair in itertools.pairwise(argv):
+        if flag in ("-f", "-F"):
+            key, _, value = pair.partition("=")
+            out.setdefault(key.removesuffix("[]"), []).append(value)
+    return out
+
+
+def connection(
+    rows: list, more: bool = False, cursor: str | None = None, *, enabled: bool = True
+) -> str:
+    """`rows` as one page of the issue connection `handoff.LIST_QUERY` reads."""
+    page = {"hasNextPage": more, "endCursor": cursor}
+    issues = {"pageInfo": page, "nodes": rows}
+    return json.dumps({"data": {"repository": {"hasIssuesEnabled": enabled, "issues": issues}}})
+
+
 class FakeGh:
     """An in-memory repository `handoff.gh` reads and writes, recording every argv it is given.
 
-    It honors `--json`, `--state`, `--label`, and `--limit`, because a stub looser than the tool
-    it stands in for is a stub that green-lights a crash.
+    It honors `--json`, `--state`, `--label`, and `--limit`, and the GraphQL list's labels,
+    states, page size, cursor, and node selection. A stub looser than the tool it stands in for is
+    a stub that green-lights a crash.
 
     It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
     repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
     would answer a call missing its repository by resolving it from the working directory's
-    remote. That is the failure this whole script is built
-    against, and without this the argument could be dropped from any of nine call sites with every
-    case still green.
+    remote. That is the failure this whole script is built against. Without this the argument
+    could be dropped from any call site with every case still green. The GraphQL list names its
+    repository as `owner` and `name` instead, and is refused alike.
     """
 
     def __init__(
@@ -119,6 +142,8 @@ class FakeGh:
                 raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
             flags = {"hasIssuesEnabled": self.issues_on, "isFork": self.fork}
             return json.dumps(projected(flags, argv))
+        if argv[:2] == ["api", "graphql"]:
+            return self._graphql(argv)
         if "--repo" not in argv:
             raise AssertionError(
                 f"{' '.join(argv)} carries no --repo, so real gh would resolve the repository "
@@ -162,6 +187,48 @@ class FakeGh:
         ]
         limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else len(rows)
         return rows[:limit]
+
+    def _graphql(self, argv: list[str]) -> str:
+        """One page of `handoff.LIST_QUERY`, newest first, its cursor the offset of the next row.
+
+        The owner and name stand in for `--repo`, so a call naming no repository is refused here too.
+        """
+        f = fields(argv)
+        if (
+            len(f.get("owner", [])) != 1
+            or len(f.get("name", [])) != 1
+            or not all((*f["owner"], *f["name"]))
+        ):
+            raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
+        rows = sorted(
+            (
+                row
+                for row in self.issues.values()
+                if row["state"] in f["states"]
+                and all(self._labeled(row, name) for name in f["labels"])
+            ),
+            key=lambda row: row["number"],
+            reverse=True,
+        )
+        query = f["query"][0]
+        declared = dict(re.findall(r"\$(\w+):\s*([\w\[\]!]+)", query))
+        passed = set(f) - {"query"}
+        required = {k for k, kind in declared.items() if kind.endswith("!")}
+        if not passed <= set(declared) or not required <= passed:
+            raise AssertionError(f"passed {sorted(passed)} against declared {sorted(declared)}")
+        if not any(a == "-F" and b.startswith("first=") for a, b in itertools.pairwise(argv)):
+            raise AssertionError("first must go through -F, or GitHub reads it as a string")
+        first = int(f["first"][0])
+        if not 1 <= first <= 100:
+            raise AssertionError(f"first={first} is outside GitHub's 1 to 100")
+        selected = re.search(r"nodes\s*\{([^}]*)\}", query)
+        if selected is None:
+            raise AssertionError("the query selects no nodes")
+        node = selected.group(1).split()
+        start = int(f.get("after", ["0"])[0])
+        end = start + first
+        nodes = [{k: row[k] for k in node if k in row} for row in rows[start:end]]
+        return connection(nodes, end < len(rows), str(end), enabled=self.issues_on)
 
     @staticmethod
     def _labeled(row: dict, name: str) -> bool:
@@ -752,7 +819,7 @@ class ExitCodeCase(unittest.TestCase):
         gh = FakeGh(rows)
         code, _, _ = run(gh, "chain", "--repo", "o/r", "--track", "lane")
         self.assertEqual(code, 0)
-        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        reads = [c for c in gh.calls if c[:2] == ["api", "graphql"] and "states[]=CLOSED" in c]
         self.assertEqual(len(reads), 1)
 
     def test_a_usage_error_refuses_at_one_rather_than_sharing_argparse_s_two(self) -> None:
@@ -802,7 +869,7 @@ class ExitCodeCase(unittest.TestCase):
                 return json.dumps([{"name": handoff.LABEL}])
             # A row of the right shape carrying a timestamp `gh` would never emit.
             # No reader validates that, because none could name every field's own grammar.
-            return json.dumps([{"number": 1, "updatedAt": None, "title": "t", "body": ""}])
+            return connection([{"number": 1, "updatedAt": None, "title": "t", "body": ""}])
 
         out, err = io.StringIO(), io.StringIO()
         with (
@@ -864,7 +931,7 @@ class NewCase(unittest.TestCase):
             "--dry-run",
         )
         self.assertEqual(code, 0)
-        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        reads = [c for c in gh.calls if c[:2] == ["api", "graphql"] and "states[]=CLOSED" in c]
         self.assertEqual(len(reads), 1)
 
     def test_the_round_increments_from_the_previous_link(self) -> None:
@@ -1670,14 +1737,14 @@ class GhBoundaryCase(unittest.TestCase):
         """Reaching the blind catch reports exit 2 without saying what `gh` returned."""
         for argv_head, payload, phrase in (
             (["label", "list"], [{"no": "name"}], "label list"),
-            (["issue", "list"], [{"no": "number"}], "handoff list"),
+            (["api", "graphql"], [{"no": "number"}], "handoff list"),
         ):
             with self.subTest(phrase=phrase):
 
                 def shaped(argv, head=argv_head, rows=payload):
                     if argv[:2] == ["label", "list"] and head != ["label", "list"]:
                         return json.dumps([{"name": handoff.LABEL}])
-                    return json.dumps(rows)
+                    return connection(rows) if head == ["api", "graphql"] else json.dumps(rows)
 
                 err = io.StringIO()
                 with (
@@ -2273,6 +2340,125 @@ class LinkCase(unittest.TestCase):
         self.assertIn("Continued in #21", posted[0][posted[0].index("--body") + 1])
         # The early return is the point: a closed predecessor must not be closed a second time.
         self.assertNotIn(["issue", "close"], [c[:2] for c in fake.calls])
+
+
+class StaleSearch(FakeGh):
+    """A repository whose label search answers from a snapshot taken before any write.
+
+    That is how `gh issue list --label` behaves straight after a write, since it reads the search
+    index and the index lags the write. A reader taking its chain from that list reads the link
+    `new` has just closed as still open.
+    """
+
+    def __init__(self, issues: dict[int, dict]) -> None:
+        super().__init__(issues)
+        self.snapshot = copy.deepcopy(self.issues)
+
+    def _list(self, argv: list[str]) -> list[dict]:
+        live, self.issues = self.issues, self.snapshot
+        try:
+            return super()._list(argv)
+        finally:
+            self.issues = live
+
+
+class ConsistentReadCase(unittest.TestCase):
+    """The chain is read from the repository itself, so a read straight after a write sees it."""
+
+    def test_current_straight_after_new_names_the_new_link(self) -> None:
+        fake = StaleSearch({5: link(5, "default", 1, None)})
+        args = ("--title", "T", "--body-file", body_file(self, "w"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        code, out, _ = run(fake, "current", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#1001", out)
+        self.assertNotIn("#5", out)
+
+    def test_a_second_new_chains_onto_the_first_rather_than_its_predecessor(self) -> None:
+        """A stale read here resolves the closed link as head and forks the chain at it."""
+        fake = StaleSearch({5: link(5, "default", 1, None)})
+        for _ in range(2):
+            args = ("--title", "T", "--body-file", body_file(self, "w"))
+            self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        self.assertEqual(
+            fake.issues[1002]["body"].splitlines()[-1], handoff.render_marker("default", 3, 1001)
+        )
+        self.assertEqual(fake.issues[1001]["state"], "CLOSED")
+
+    def test_no_read_goes_through_the_search_backed_list(self) -> None:
+        fake = FakeGh({5: link(5, "default", 1, None)})
+        for argv in (("tracks",), ("current",), ("resume",), ("chain",)):
+            with self.subTest(argv=argv):
+                self.assertEqual(run(fake, *argv, "--repo", "o/r")[0], 0)
+        self.assertFalse([c for c in fake.calls if c[:2] == ["issue", "list"]])
+
+    def test_the_closed_side_pages_past_one_graphql_page(self) -> None:
+        """Newer links on another track fill the first page, so the track's head is on the second."""
+        rows = {1: link(1, "default", 1, None, state="CLOSED")}
+        for n in range(2, handoff.PAGE + 22):
+            rows[n] = link(n, "other", n - 1, n - 1 if n > 2 else None, state="CLOSED")
+        fake = FakeGh(rows)
+        args = ("--title", "T", "--body-file", body_file(self, "w"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        tail = fake.issues[1001]["body"].splitlines()[-1]
+        self.assertEqual(tail, handoff.render_marker("default", 2, 1))
+        pages = [fields(c) for c in fake.calls if c[:2] == ["api", "graphql"]]
+        self.assertTrue(all(int(f["first"][0]) <= handoff.PAGE for f in pages))
+        self.assertTrue(any("after" in f for f in pages))
+
+    def test_a_repository_with_issues_turned_off_refuses_rather_than_reading_empty(self) -> None:
+        """GitHub answers the connection empty there, which would read as a chain never started."""
+        fake = FakeGh({5: link(5, "default", 1, None)}, issues_on=False)
+        for argv in (("tracks",), ("current",)):
+            with self.subTest(argv=argv):
+                code, _, err = run(fake, *argv, "--repo", "o/r")
+                self.assertEqual(code, 1)
+                self.assertIn("issues turned off", err)
+                self.assertIn("--enable-issues", err)
+
+    def test_a_cursor_that_does_not_advance_fails_rather_than_looping(self) -> None:
+        """An empty page claiming more with a stuck cursor would otherwise be re-read forever."""
+        for cursor in (None, "same"):
+            with self.subTest(cursor=cursor):
+                calls: list[list[str]] = []
+
+                def stuck(argv, cursor=cursor, calls=calls):
+                    if argv[:2] == ["label", "list"]:
+                        return json.dumps([{"name": handoff.LABEL}])
+                    calls.append(argv)
+                    if len(calls) > 5:
+                        raise AssertionError(
+                            "the read kept re-requesting a page that never advanced"
+                        )
+                    return connection([], more=True, cursor=cursor)
+
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(handoff, "run_gh", stuck),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(err),
+                ):
+                    code = handoff.main(["tracks", "--repo", "o/r"])
+                self.assertEqual(code, 2)
+                self.assertIn("cursor that advances", err.getvalue())
+                self.assertLessEqual(len(calls), 2)
+
+    def test_a_response_that_is_no_issue_connection_is_an_execution_failure(self) -> None:
+        def broken(argv):
+            if argv[:2] == ["label", "list"]:
+                return json.dumps([{"name": handoff.LABEL}])
+            return json.dumps({"data": {"repository": None}})
+
+        err = io.StringIO()
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", broken),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(err),
+        ):
+            code = handoff.main(["tracks", "--repo", "o/r"])
+        self.assertEqual(code, 2)
+        self.assertIn("issue connection", err.getvalue())
+        self.assertNotIn("unmodeled", err.getvalue())
 
 
 class SurfaceCase(unittest.TestCase):
