@@ -2748,6 +2748,7 @@ def comment_sentence_findings(
     A line that is not prose, a trailing comment, or a gap ends the block.
     The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
     A comment run indented past its own text after a colon line, or after a gap that follows one, is a command or table.
+    A star-only line inside a block comment is such a gap, as a bare marker is.
     The indent is read from the comment as written, since extraction strips it from the body.
     """
     comments, _kept, configured = prose_comment_candidates(path, raw, lines)
@@ -2767,7 +2768,7 @@ def comment_sentence_findings(
     for comment in comments:
         n, body, leading = comment.line, comment.body, comment.leading
         if body == "*" and leading and lines[n - 1].strip() == "*":
-            body = ""  # a star-only line inside a block comment is a gap, as a bare marker is
+            body = ""
         indent = comment_indent(comment)
         if leading and prev_no and bare_marker_gap(lines, prev_no, n, markers):
             flush()
@@ -2826,7 +2827,7 @@ def is_numpy_head(text: str, below: int, mid_sentence: bool = False, after_blank
     """
     words = text.split()
     indent = len(text) - len(text.lstrip())
-    sentence = text.rstrip().endswith((".", "!", "?", ":"))
+    sentence = text.rstrip().rstrip("*_`\"')]").endswith((".", "!", "?", ":"))
     return (
         " : " in text
         or (below > indent and not sentence)
@@ -2896,6 +2897,8 @@ def one_docstring_findings(
     A Google free-text section such as `Note:` is prose with no entry leads to strip.
     Lines after the first are measured from the least indented of them, as `inspect.cleandoc` does.
     A docstring whose every later line is an indented code block, closing quotes included, reads it as prose.
+    A bare URL left of the quotes is a stray line that sets no margin, and closing quotes left of them set none.
+    A body past a blank sits at the margin, not past a colon summary.
     """
     out: list[tuple[int, str, str]] = []
     group = sorted(spans)
@@ -2904,9 +2907,11 @@ def one_docstring_findings(
     closer = texts[-1]
     texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
     quote = base
-    later = [len(t) - len(t.lstrip()) for t in texts[1:] if t.strip()]
-    if any(col >= quote for col in later):
-        later = [col for col in later if col >= quote]  # a stray dedented line sets no margin
+    later = [
+        len(t) - len(t.lstrip())
+        for t in texts[1:]
+        if t.strip() and not (leading_indent(t) < quote and BARE_URI.match(t.strip()))
+    ]
     if (
         len(texts) > 1
         and closer.strip()
@@ -2916,7 +2921,7 @@ def one_docstring_findings(
     ):
         later.append(len(closer) - len(closer.lstrip()))  # closing quotes alone on their line
     elif len(texts) > 1 and texts[0].strip() and not texts[-1].strip() and closer.strip():
-        later.append(quote)  # closing quotes left of the quotes say nothing about the margin
+        later.append(quote)
     if later:
         base = min(later)
     block: list[tuple[int, str]] = []
@@ -2943,9 +2948,7 @@ def one_docstring_findings(
             flush()
             in_doctest = in_code = False
             prev_blank = True
-            colon_ref = max(
-                colon_ref, base
-            )  # a body past a blank sits at the margin, not past the summary
+            colon_ref = max(colon_ref, base)
             continue
         following = texts[idx + 1] if idx + 1 < len(texts) else ""
         if indent <= base and NUMPY_UNDERLINE.match(following) and not NUMPY_UNDERLINE.match(text):
