@@ -110,6 +110,18 @@ class WalkCase(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(gh_graphql.GraphQLError):
                 list(gh_graphql.walk(lambda after, d=data: d, ("a", "b")))  # type: ignore[misc]
 
+    def test_a_strict_walk_refuses_a_page_without_page_info(self) -> None:
+        for page in (None, {}, {"endCursor": "c"}):
+            with self.subTest(page=page):
+                data = {"a": {"b": {"pageInfo": page}}}
+
+                def fetch(after, data=data):
+                    return data
+
+                self.assertEqual(len(list(gh_graphql.walk(fetch, ("a", "b")))), 1)
+                with self.assertRaises(gh_graphql.GraphQLError):
+                    list(gh_graphql.walk(fetch, ("a", "b"), strict_page=True))
+
     def test_stopping_early_reads_no_further_page(self) -> None:
         fetch, calls = pages((True, "c1"), (True, "c2"))
         next(gh_graphql.walk(fetch, ("a", "b")))

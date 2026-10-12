@@ -536,7 +536,9 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
         return graphql.request(LIST_QUERY, variables, run=gh_runner).data
 
     try:
-        for repository in graphql.walk(fetch, ("repository", "issues")):
+        for repository in graphql.walk(fetch, ("repository", "issues"), strict_page=True):
+            if "hasIssuesEnabled" not in repository:
+                raise graphql.GraphQLError("the repository carries no hasIssuesEnabled")
             if repository.get("hasIssuesEnabled") is not True:
                 raise Refusal(
                     f"{repo} has issues turned off, so it holds no readable {what}. Run "
@@ -546,7 +548,8 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
             if len(rows) >= limit:
                 break
     except graphql.GraphQLError as exc:
-        sys.stderr.write(exc.detail)
+        if exc.detail:
+            sys.stderr.write(f"{exc.detail}\n")
         raise Execution(f"the {what} did not read as an issue connection: {exc}") from exc
     return rows
 

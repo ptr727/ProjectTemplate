@@ -2525,6 +2525,12 @@ class ConsistentReadCase(unittest.TestCase):
             ("errors beside rows", {"data": json.loads(connection([]))["data"], "errors": [{}]}),
             ("no data", {"errors": [{"message": "boom"}]}),
             ("not an object", ["data"]),
+            ("issues null", {"data": {"repository": {"hasIssuesEnabled": True, "issues": None}}}),
+            ("no issues flag", {"data": {"repository": {"issues": {"nodes": []}}}}),
+            (
+                "no page info",
+                {"data": {"repository": {"hasIssuesEnabled": True, "issues": {"nodes": []}}}},
+            ),
         ):
             with self.subTest(label=label):
 

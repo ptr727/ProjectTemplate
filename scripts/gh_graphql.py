@@ -114,6 +114,8 @@ def walk(
     fetch: Callable[[str | None], dict],
     path: Sequence[str],
     after: str | None = None,
+    *,
+    strict_page: bool = False,
 ) -> Iterator[dict]:
     """Each page of the connection at `path`, from the one past `after` to the last.
 
@@ -122,6 +124,9 @@ def walk(
     yielded is the object holding the connection, the last key's parent, so a caller reads its
     siblings too. The connection is read for its `pageInfo`, so the walk is one place a fix to how
     a page is followed lands. A caller wanting fewer pages simply stops iterating.
+
+    A page whose `pageInfo` or `hasNextPage` is absent reads as the last page, unless `strict_page`
+    is set, which raises instead for a caller that would otherwise answer from a cut short list.
 
     A page claiming another without a cursor that moves past the one just sent raises, since the
     same page would otherwise be read forever.
@@ -132,11 +137,14 @@ def walk(
         parent = _descend(fetch(after), path[:-1])
         if not isinstance(parent, dict):
             raise GraphQLError(f"the response holds no {'.'.join(path[:-1])}")
-        yield parent
         connection = parent.get(path[-1])
         if not isinstance(connection, dict):
             raise GraphQLError(f"the response holds no {'.'.join(path)}")
-        page = connection.get("pageInfo") or {}
+        page = connection.get("pageInfo")
+        if strict_page and (not isinstance(page, dict) or "hasNextPage" not in page):
+            raise GraphQLError(f"the {'.'.join(path)} carries no pageInfo.hasNextPage")
+        yield parent
+        page = page or {}
         if not page.get("hasNextPage"):
             return
         cursor = page.get("endCursor")
