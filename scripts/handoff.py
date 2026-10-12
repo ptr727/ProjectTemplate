@@ -134,8 +134,6 @@ TITLE = "Session Handoff [{track}]: {subject}"
 WARN_BYTES = 12 * 1024
 MAX_BYTES = 60 * 1024
 
-# An explicit page size, because `gh issue list` defaults to 30.
-# A default that truncates reads exactly like a repository with 30 issues.
 # A result filling the page is reported as truncated rather than treated as whole.
 WINDOW = 100
 
@@ -143,8 +141,22 @@ WINDOW = 100
 # Open handoffs are bounded by the one-per-track invariant.
 # Closed ones accumulate one per round and nothing prunes them.
 # A window sized for the first is therefore a wall the second reaches by working.
-# `gh issue list` paginates internally above one page, so this costs requests rather than accuracy.
 CLOSED_WINDOW = 1000
+
+PAGE = 100
+
+LIST_QUERY = """
+query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!],
+      $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issues(labels: $labels, states: $states, first: $first, after: $after,
+           orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { number title body state createdAt updatedAt url }
+    }
+  }
+}
+"""
 
 # How much of `gh`'s own stderr is passed through before it is cut.
 # The cut says how much it left, and the count is of characters, since that is what is measured.
@@ -489,32 +501,63 @@ def issue(repo: str, number: int) -> dict:
     return data
 
 
+def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
+    """Up to `limit` issues in `state` carrying the label, newest first, read per `LIST_QUERY`.
+
+    This reads the repository's own issue connection rather than `gh issue list --label`, which
+    `gh` answers from the search index. That index is updated after a write lands rather than with
+    it, so a read straight after `new` returned the link it had just closed as still open.
+
+    Paging stops at `limit` or at the last page, whichever comes first, so a caller comparing the
+    count against its own window still sees a full window as full.
+    """
+    owner, _, name = repo.partition("/")
+    rows: list[dict] = []
+    after: str | None = None
+    while len(rows) < limit:
+        argv = [
+            "api",
+            "graphql",
+            "-f",
+            f"query={LIST_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"name={name}",
+            "-f",
+            f"labels[]={LABEL}",
+            "-f",
+            f"states[]={state}",
+            "-F",
+            f"first={min(PAGE, limit - len(rows))}",
+        ]
+        if after is not None:
+            argv += ["-f", f"after={after}"]
+        data = gh_json(argv)
+        try:
+            issues = typing.cast("dict", data)["data"]["repository"]["issues"]
+            nodes, more, after = (
+                issues["nodes"],
+                issues["pageInfo"]["hasNextPage"],
+                issues["pageInfo"]["endCursor"],
+            )
+        except (KeyError, TypeError) as exc:
+            raise Execution(
+                f"the {what} did not read as an issue connection: {cut(repr(data))}"
+            ) from exc
+        rows += rows_of(nodes, what, "number")
+        if not more or not after:
+            break
+    return rows
+
+
 def open_handoffs(repo: str) -> list[dict]:
     """Every open issue carrying the label, newest first, with its metadata block parsed.
 
     A page that fills is reported as truncated rather than treated as whole, since an open handoff
     past the window is exactly as invisible as one that does not exist.
     """
-    rows = rows_of(
-        gh_json(
-            [
-                "issue",
-                "list",
-                "--repo",
-                repo,
-                "--label",
-                LABEL,
-                "--state",
-                "open",
-                "--limit",
-                str(WINDOW),
-                "--json",
-                "number,title,body,state,createdAt,updatedAt,url",
-            ]
-        ),
-        f"handoff list for {repo}",
-        "number",
-    )
+    rows = labeled(repo, "OPEN", WINDOW, f"handoff list for {repo}")
     if len(rows) >= WINDOW:
         raise Refusal(
             f"{repo} has at least {WINDOW} open `{LABEL}` issues, which fills the read window, so "
@@ -873,23 +916,7 @@ def cut(text: str) -> str:
 
 def read_closed(repo: str) -> list[dict]:
     """The closed `handoff` issues, up to `CLOSED_WINDOW`, with their bodies."""
-    rows = gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--label",
-            LABEL,
-            "--state",
-            "closed",
-            "--limit",
-            str(CLOSED_WINDOW),
-            "--json",
-            "number,body,state",
-        ]
-    )
-    return rows_of(rows, f"closed handoff list for {repo}", "number")
+    return labeled(repo, "CLOSED", CLOSED_WINDOW, f"closed handoff list for {repo}")
 
 
 def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> dict | None:

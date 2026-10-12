@@ -18,7 +18,9 @@ Run as `python3 tests/test_handoff.py`, or under
 
 import argparse
 import contextlib
+import copy
 import io
+import itertools
 import json
 import shutil
 import subprocess
@@ -79,11 +81,28 @@ def projected(row: dict, argv: list[str]) -> dict:
     return {field: row[field] for field in wanted if field in row}
 
 
+def fields(argv: list[str]) -> dict[str, list[str]]:
+    """Every `-f`/`-F` field of a `gh api` call, keyed by name, each value a list in call order."""
+    out: dict[str, list[str]] = {}
+    for flag, pair in itertools.pairwise(argv):
+        if flag in ("-f", "-F"):
+            key, _, value = pair.partition("=")
+            out.setdefault(key.removesuffix("[]"), []).append(value)
+    return out
+
+
+def connection(rows: list, more: bool = False, cursor: str | None = None) -> str:
+    """`rows` as one page of the issue connection `handoff.LIST_QUERY` reads."""
+    page = {"hasNextPage": more, "endCursor": cursor}
+    return json.dumps({"data": {"repository": {"issues": {"pageInfo": page, "nodes": rows}}}})
+
+
 class FakeGh:
     """An in-memory repository `handoff.gh` reads and writes, recording every argv it is given.
 
-    It honors `--json`, `--state`, `--label`, and `--limit`, because a stub looser than the tool
-    it stands in for is a stub that green-lights a crash.
+    It honors `--json`, `--state`, `--label`, and `--limit`, and the GraphQL list's labels,
+    states, page size, and cursor, because a stub looser than the tool it stands in for is a stub
+    that green-lights a crash.
 
     It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
     repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
@@ -119,6 +138,8 @@ class FakeGh:
                 raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
             flags = {"hasIssuesEnabled": self.issues_on, "isFork": self.fork}
             return json.dumps(projected(flags, argv))
+        if argv[:2] == ["api", "graphql"]:
+            return self._graphql(argv)
         if "--repo" not in argv:
             raise AssertionError(
                 f"{' '.join(argv)} carries no --repo, so real gh would resolve the repository "
@@ -162,6 +183,35 @@ class FakeGh:
         ]
         limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else len(rows)
         return rows[:limit]
+
+    NODE = ("number", "title", "body", "state", "createdAt", "updatedAt", "url")
+
+    def _graphql(self, argv: list[str]) -> str:
+        """One page of `handoff.LIST_QUERY`, newest first, its cursor the offset of the next row.
+
+        The owner and name stand in for `--repo`, so a call naming no repository is refused here too.
+        """
+        f = fields(argv)
+        if (
+            len(f.get("owner", [])) != 1
+            or len(f.get("name", [])) != 1
+            or not all((*f["owner"], *f["name"]))
+        ):
+            raise AssertionError(f"{' '.join(argv)} names no OWNER/NAME repository")
+        rows = sorted(
+            (
+                row
+                for row in self.issues.values()
+                if row["state"] in f["states"]
+                and all(self._labeled(row, name) for name in f["labels"])
+            ),
+            key=lambda row: row["number"],
+            reverse=True,
+        )
+        start = int(f.get("after", ["0"])[0])
+        end = start + int(f["first"][0])
+        nodes = [{k: row[k] for k in self.NODE if k in row} for row in rows[start:end]]
+        return connection(nodes, end < len(rows), str(end))
 
     @staticmethod
     def _labeled(row: dict, name: str) -> bool:
@@ -752,7 +802,7 @@ class ExitCodeCase(unittest.TestCase):
         gh = FakeGh(rows)
         code, _, _ = run(gh, "chain", "--repo", "o/r", "--track", "lane")
         self.assertEqual(code, 0)
-        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        reads = [c for c in gh.calls if c[:2] == ["api", "graphql"] and "states[]=CLOSED" in c]
         self.assertEqual(len(reads), 1)
 
     def test_a_usage_error_refuses_at_one_rather_than_sharing_argparse_s_two(self) -> None:
@@ -802,7 +852,7 @@ class ExitCodeCase(unittest.TestCase):
                 return json.dumps([{"name": handoff.LABEL}])
             # A row of the right shape carrying a timestamp `gh` would never emit.
             # No reader validates that, because none could name every field's own grammar.
-            return json.dumps([{"number": 1, "updatedAt": None, "title": "t", "body": ""}])
+            return connection([{"number": 1, "updatedAt": None, "title": "t", "body": ""}])
 
         out, err = io.StringIO(), io.StringIO()
         with (
@@ -864,7 +914,7 @@ class NewCase(unittest.TestCase):
             "--dry-run",
         )
         self.assertEqual(code, 0)
-        reads = [c for c in gh.calls if c[:2] == ["issue", "list"] and "closed" in c]
+        reads = [c for c in gh.calls if c[:2] == ["api", "graphql"] and "states[]=CLOSED" in c]
         self.assertEqual(len(reads), 1)
 
     def test_the_round_increments_from_the_previous_link(self) -> None:
@@ -1670,14 +1720,14 @@ class GhBoundaryCase(unittest.TestCase):
         """Reaching the blind catch reports exit 2 without saying what `gh` returned."""
         for argv_head, payload, phrase in (
             (["label", "list"], [{"no": "name"}], "label list"),
-            (["issue", "list"], [{"no": "number"}], "handoff list"),
+            (["api", "graphql"], [{"no": "number"}], "handoff list"),
         ):
             with self.subTest(phrase=phrase):
 
                 def shaped(argv, head=argv_head, rows=payload):
                     if argv[:2] == ["label", "list"] and head != ["label", "list"]:
                         return json.dumps([{"name": handoff.LABEL}])
-                    return json.dumps(rows)
+                    return connection(rows) if head == ["api", "graphql"] else json.dumps(rows)
 
                 err = io.StringIO()
                 with (
@@ -2273,6 +2323,90 @@ class LinkCase(unittest.TestCase):
         self.assertIn("Continued in #21", posted[0][posted[0].index("--body") + 1])
         # The early return is the point: a closed predecessor must not be closed a second time.
         self.assertNotIn(["issue", "close"], [c[:2] for c in fake.calls])
+
+
+class StaleSearch(FakeGh):
+    """A repository whose label search answers from a snapshot taken before any write.
+
+    That is how `gh issue list --label` behaves straight after a write, since it reads the search
+    index and the index lags the write. A reader taking its chain from that list reads the link
+    `new` has just closed as still open.
+    """
+
+    def __init__(self, issues: dict[int, dict]) -> None:
+        super().__init__(issues)
+        self.snapshot = copy.deepcopy(self.issues)
+
+    def _list(self, argv: list[str]) -> list[dict]:
+        live, self.issues = self.issues, self.snapshot
+        try:
+            return super()._list(argv)
+        finally:
+            self.issues = live
+
+
+class ConsistentReadCase(unittest.TestCase):
+    """The chain is read from the repository itself, so a read straight after a write sees it."""
+
+    def test_current_straight_after_new_names_the_new_link(self) -> None:
+        fake = StaleSearch({5: link(5, "default", 1, None)})
+        args = ("--title", "T", "--body-file", body_file(self, "w"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        code, out, _ = run(fake, "current", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("#1001", out)
+        self.assertNotIn("#5", out)
+
+    def test_a_second_new_chains_onto_the_first_rather_than_its_predecessor(self) -> None:
+        """A stale read here resolves the closed link as head and forks the chain at it."""
+        fake = StaleSearch({5: link(5, "default", 1, None)})
+        for _ in range(2):
+            args = ("--title", "T", "--body-file", body_file(self, "w"))
+            self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        self.assertEqual(
+            fake.issues[1002]["body"].splitlines()[-1], handoff.render_marker("default", 3, 1001)
+        )
+        self.assertEqual(fake.issues[1001]["state"], "CLOSED")
+
+    def test_no_read_goes_through_the_search_backed_list(self) -> None:
+        fake = FakeGh({5: link(5, "default", 1, None)})
+        for argv in (("tracks",), ("current",), ("resume",), ("chain",)):
+            with self.subTest(argv=argv):
+                self.assertEqual(run(fake, *argv, "--repo", "o/r")[0], 0)
+        self.assertFalse([c for c in fake.calls if c[:2] == ["issue", "list"]])
+
+    def test_the_closed_side_pages_past_one_graphql_page(self) -> None:
+        """A closed list cut at one page would resolve a link a page old as the newest."""
+        count = handoff.PAGE + 20
+        rows = {
+            n: link(n, "default", n, n - 1 if n > 1 else None, state="CLOSED")
+            for n in range(1, count + 1)
+        }
+        fake = FakeGh(rows)
+        args = ("--title", "T", "--body-file", body_file(self, "w"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        tail = fake.issues[1001]["body"].splitlines()[-1]
+        self.assertEqual(tail, handoff.render_marker("default", count + 1, count))
+        pages = [fields(c) for c in fake.calls if c[:2] == ["api", "graphql"]]
+        self.assertTrue(all(int(f["first"][0]) <= handoff.PAGE for f in pages))
+        self.assertTrue(any("after" in f for f in pages))
+
+    def test_a_response_that_is_no_issue_connection_is_an_execution_failure(self) -> None:
+        def broken(argv):
+            if argv[:2] == ["label", "list"]:
+                return json.dumps([{"name": handoff.LABEL}])
+            return json.dumps({"data": {"repository": None}})
+
+        err = io.StringIO()
+        with (
+            unittest.mock.patch.object(handoff, "run_gh", broken),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(err),
+        ):
+            code = handoff.main(["tracks", "--repo", "o/r"])
+        self.assertEqual(code, 2)
+        self.assertIn("issue connection", err.getvalue())
+        self.assertNotIn("unmodeled", err.getvalue())
 
 
 class SurfaceCase(unittest.TestCase):
