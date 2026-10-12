@@ -1928,6 +1928,7 @@ def _code_view(text):
     A block-scalar `if:` body, the form the Workflow YAML convention sets for a multi-line condition, is kept,
     since an `if:` value is always an expression.
     It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
+    A trailing comment on that key line is dropped first, so it never reads as part of the condition.
     """
     out = []
     skip_indent = None
@@ -1959,6 +1960,7 @@ def _code_view(text):
         if _BLOCK_SCALAR_KEY.match(stripped):
             if _IF_KEY.match(stripped):
                 fold_indent = key_col
+                ln = re.sub(r"[ \t]+#.*$", "", ln)
             else:
                 skip_indent = key_col
         elif dash and _BARE_BLOCK_SCALAR.match(stripped):
@@ -1977,18 +1979,20 @@ def job_level_names(blocks):
     """
     out = set()
     for block in blocks.values():
-        body = [
-            ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")
-        ]
-        if not body:
-            continue
-        child = min(len(ln) - len(ln.lstrip()) for ln in body)
-        for ln in body:
-            if len(ln) - len(ln.lstrip()) == child:
-                m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln[child:])
-                if m:
-                    out.add(m.group(1))
+        for ln in job_child_lines(block):
+            m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln)
+            if m:
+                out.add(m.group(1))
     return out
+
+
+def job_child_lines(block):
+    """A job block's direct-child lines, dedented, read at the shallowest indent below its key line."""
+    body = [ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")]
+    if not body:
+        return []
+    child = min(len(ln) - len(ln.lstrip()) for ln in body)
+    return [ln[child:] for ln in body if len(ln) - len(ln.lstrip()) == child]
 
 
 def check_interface(path, contract, text):
@@ -2228,7 +2232,10 @@ _RUN_ID_SUFFIX = re.compile(
     r"|github\.actor!='dependabot\[bot\]'&&github\.actor!='ptr727-codegen\[bot\]')\)\)"
     r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
 )
+_SCHEDULE_RUN_ID_SUFFIX = "${{github.event_name=='schedule'&&format('-{0}',github.run_id)||''}}"
+_DISPATCH_TESTS = {"github.event_name=='workflow_dispatch'", "github.event_name!='schedule'"}
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
+_TOP_ON = re.compile(r"^on:[ \t]*(.*)$", re.MULTILINE)
 _EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 
 
@@ -2256,11 +2263,71 @@ def _tight(value):
     return _EXPRESSION_SPACE.sub(lambda m: "${{" + m.group(1) + "}}", value)
 
 
+def _workflow_triggers(code):
+    """The event names keyed under a block-mapping workflow-level `on:`, or None for any other shape.
+
+    Only the block-mapping form is read, the shape a `schedule` trigger with its `cron` list takes in practice.
+    """
+    head = _TOP_ON.search(code)
+    if head is None or re.sub(r"(?:^|[ \t]+)#.*$", "", head.group(1)).strip():
+        return None
+    events = set()
+    child_indent = None
+    for line in code[head.end() :].splitlines()[1:]:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            break
+        if child_indent is None:
+            child_indent = indent
+        if indent != child_indent:
+            continue
+        m = re.match(r"^['\"]?([A-Za-z_]+)['\"]?[ \t]*:", line.strip())
+        if m is None:
+            return None
+        events.add(m.group(1))
+    return events
+
+
+def _schedule_never_publishes(code):
+    """True where the publisher's `on:` admits a `schedule` and no `push`, and every release job requires a dispatch.
+
+    The plan task reports a schedule as a publish. A schedule therefore publishes nothing only where each job
+    calling `build-release-task.yml` holds a dispatch test as a top-level conjunct of its job-level `if:`.
+    A dispatch test is `github.event_name == 'workflow_dispatch'` or `github.event_name != 'schedule'`.
+    A condition holding any `||` or a negated group is not read as such a gate. A publisher where no job
+    calls `build-release-task.yml` returns False.
+    """
+    triggers = _workflow_triggers(code)
+    if triggers is None or "schedule" not in triggers or "push" in triggers:
+        return False
+    release_jobs = 0
+    for block in split_jobs(code).values():
+        keys = {}
+        for ln in job_child_lines(block):
+            m = re.match(r"^(uses|if):[ \t]*(.*)$", ln)
+            if m:
+                keys[m.group(1)] = m.group(2)
+        if "build-release-task.yml" not in keys.get("uses", ""):
+            continue
+        release_jobs += 1
+        condition = _yaml_scalar(re.sub(r"^[|>][0-9+-]*[ \t]*", "", keys.get("if", "")))
+        tight = _strip_unquoted_space(condition or "")
+        if tight.startswith("${{") and tight.endswith("}}"):
+            tight = tight[3:-2]
+        conjuncts = {term.strip("()") for term in tight.split("&&")}
+        if "||" in tight or "!(" in tight or not conjuncts & _DISPATCH_TESTS:
+            return False
+    return release_jobs > 0
+
+
 def concurrency_caller_findings(path, text):
     """DRIFT when the publisher or the merge-bot declares a concurrency group other than the one WORKFLOW.md pins.
 
     The publisher's group is the ref-scoped base, optionally followed by one `${{ }}` expression naming both
-    `github.event_name` and `github.run_id`, the shape of the push-only suffix. The merge-bot's group is the
+    `github.event_name` and `github.run_id`. That is the push-only suffix, or the schedule-only suffix
+    on a publisher whose schedule never publishes. The merge-bot's group is the
     base keyed on the PR number. Either must leave `cancel-in-progress` false or unset. Only the
     workflow-level `concurrency:` is read, as a block mapping or a bare group scalar. A shape this cannot
     read is reported rather than skipped. A file absent from the repo never reaches here, since the
@@ -2320,14 +2387,29 @@ def concurrency_caller_findings(path, text):
     else:
         tight_group, tight_base = _tight(group), _tight(base)
         suffix = tight_group[len(tight_base) :] if tight_group.startswith(tight_base) else None
+        tight_suffix = _strip_unquoted_space(suffix) if suffix else ""
         suffix_ok = suffix is not None and (
             suffix == ""
             or (
                 path.endswith("publish-release.yml")
-                and _RUN_ID_SUFFIX.match(_strip_unquoted_space(suffix))
+                and (
+                    bool(_RUN_ID_SUFFIX.match(tight_suffix))
+                    or (tight_suffix == _SCHEDULE_RUN_ID_SUFFIX and _schedule_never_publishes(code))
+                )
             )
         )
-        if not suffix_ok:
+        if (
+            not suffix_ok
+            and path.endswith("publish-release.yml")
+            and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX
+        ):
+            findings.append(
+                (
+                    "DRIFT",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and a dispatch test in each build-release-task.yml job's if:.",
+                )
+            )
+        elif not suffix_ok:
             findings.append(("DRIFT", f"concurrency: {path} group is '{group}', expected '{base}'"))
     if cancel is not None and _tight(cancel).lower() not in ("false", "${{false}}"):
         findings.append(
@@ -6623,7 +6705,109 @@ def _selftest():
     pub_line = next(ln for ln in pub_text.splitlines() if ln.strip().startswith("group:"))
     bot_line = next(ln for ln in bot_text.splitlines() if ln.strip().startswith("group:"))
     pub_value = pub_line.split("group:", 1)[1].strip()
+    sched_line = (
+        "  "
+        + pub_group
+        + "${{ github.event_name == 'schedule' && format('-{0}', github.run_id) || '' }}"
+    )
+    pub_gate = (
+        "if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}"
+    )
+    sched_gate = "if: ${{ github.event_name == 'workflow_dispatch' && needs.plan.outputs.publish == 'true' }}"
+    sched_text = re.sub(
+        r"(?s)\non:\n.*?\n(?=\S)",
+        "\non:\n  workflow_dispatch:\n  schedule:\n    - cron: '0 2 * * MON'\n\n",
+        pub_text.replace(pub_line, sched_line).replace(pub_gate, sched_gate),
+        count=1,
+    )
     concurrency_cases = [
+        (
+            pub_path,
+            sched_text,
+            0,
+            "a schedule-only suffix on a publisher whose schedule never publishes",
+        ),
+        (
+            pub_path,
+            pub_text.replace(pub_line, sched_line),
+            1,
+            "a schedule-only suffix on a push-triggered publisher",
+        ),
+        (
+            pub_path,
+            sched_text.replace(sched_gate, pub_gate),
+            1,
+            "a schedule-only suffix on a publisher whose schedule publishes",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ github.event_name == 'workflow_dispatch' || needs.plan.outputs.publish == 'true' }}",
+            ),
+            1,
+            "a dispatch gate behind a disjunction",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: >-\n      github.event_name == 'workflow_dispatch' &&\n      needs.plan.outputs.publish == 'true'",
+            ),
+            0,
+            "a folded dispatch gate",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: >- # note\n      github.event_name == 'workflow_dispatch' &&\n      needs.plan.outputs.publish == 'true'",
+            ),
+            0,
+            "a folded dispatch gate with a comment on its key line",
+        ),
+        (
+            pub_path,
+            sched_text.replace("\non:\n", "\non: # triggers\n", 1),
+            0,
+            "a comment on the on: key line",
+        ),
+        (
+            pub_path,
+            sched_text.replace(sched_gate, "if: ${{ github.event_name == 'workflow_dispatch' }}"),
+            0,
+            "a dispatch test alone",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ needs.plan.outputs.publish == 'true' && (github.event_name != 'schedule') }}",
+            ),
+            0,
+            "a parenthesized not-schedule test as the last conjunct",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ !(needs.plan.outputs.publish == 'true' && (github.event_name == 'workflow_dispatch')) }}",
+            ),
+            1,
+            "a dispatch test inside a negated group",
+        ),
+        (
+            pub_path,
+            sched_text.replace("build-release-task.yml@", "other-task.yml@"),
+            1,
+            "a schedule-only suffix with no release job",
+        ),
+        (
+            pub_path,
+            sched_text.replace("  schedule:\n", "  push:\n  schedule:\n", 1),
+            1,
+            "a schedule-only suffix beside a push trigger",
+        ),
         (pub_path, pub_text, 0, "the reference publisher, run_id suffix included"),
         (bot_path, bot_text, 0, "the reference merge-bot"),
         (
@@ -6723,6 +6907,12 @@ def _selftest():
             "the push-only suffix is the publisher's alone",
         ),
         (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + sched_line.split("github.ref }}", 1)[1]),
+            1,
+            "the schedule-only suffix is the publisher's alone",
+        ),
+        (
             pub_path,
             pub_text.replace(pub_line, "  group: '" + pub_value.replace("'", "''") + "'"),
             0,
@@ -6802,6 +6992,18 @@ def _selftest():
         ),
     ]
     refusal_cases = [
+        (
+            pub_path,
+            pub_text.replace(pub_line, sched_line),
+            "cannot read its schedule",
+            "a schedule-only suffix names what keeps it from qualifying",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + sched_line.split("github.ref }}", 1)[1]),
+            "group is",
+            "a merge-bot schedule suffix gets no publisher advice",
+        ),
         (
             pub_path,
             "concurrency: ${{ github.workflow }}-${{ github.ref }}\n  -extra\njobs:\n  x: {}\n",
