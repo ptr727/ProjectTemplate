@@ -2889,6 +2889,7 @@ def one_docstring_findings(
         and closer.strip()
         and not texts[-1].strip()
         and leading_indent(closer) >= quote
+        and (texts[0].strip() or leading_indent(closer) > quote)
     ):
         later.append(len(closer) - len(closer.lstrip()))  # closing quotes alone on their line
     if later:

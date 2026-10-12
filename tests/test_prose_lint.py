@@ -2969,6 +2969,10 @@ class TestCommentSentenceLength(BaitCase):
                 )
                 self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
 
+    def test_an_aligned_closer_does_not_lower_the_margin_of_a_quote_alone_docstring(self) -> None:
+        text = f'"""\n    Summary.\n\n    {self.over()}\n"""\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
