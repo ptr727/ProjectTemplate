@@ -5674,6 +5674,43 @@ class TestToolDirectivesLeaveCommentCase(BaitCase):
         self.assertEqual(["comment-case"], self.flag("tool.py", "# details are allowed here.\n"))
 
 
+class TestToolDirectivesLeaveCommentWrap(BaitCase):
+    """A directive that `TOOL_DIRECTIVE` names is not a sentence, so it cannot wrap into the next line."""
+
+    def flag(self, text: str) -> list[str]:
+        return self.kinds(text, {"comment-wrap"}, name="tool.py")
+
+    def test_the_line_after_a_directive_is_not_its_continuation(self) -> None:
+        self.assertEqual([], self.flag("# nosec B404\n# the next call is checked below.\nx = 1\n"))
+
+    def test_a_lowercase_line_after_a_directive_is_judged_for_case_instead(self) -> None:
+        self.assertEqual(
+            ["comment-case"],
+            self.kinds(
+                "# nosec B404\n# the next call is checked below.\nx = 1\n",
+                {"comment-wrap", "comment-case"},
+                name="tool.py",
+            ),
+        )
+
+    def test_a_trailing_directive_is_not_a_continuation_either(self) -> None:
+        self.assertEqual(
+            [],
+            self.flag("import os  # nosec B404\n# the call is checked below.\n"),
+        )
+
+    def test_a_directive_followed_by_a_directive_draws_nothing(self) -> None:
+        self.assertEqual([], self.flag("# nosec B404\n# hadolint ignore=DL3008\nx = 1\n"))
+
+    def test_a_two_line_wrap_with_no_directive_is_still_reported(self) -> None:
+        self.assertEqual(
+            ["comment-wrap"], self.flag("# the next call is\n# checked below.\nx = 1\n")
+        )
+
+    def test_a_sentence_wrapping_into_a_directive_is_still_reported(self) -> None:
+        self.assertEqual(["comment-wrap"], self.flag("# the value is\n# nosec B404\nx = 1\n"))
+
+
 class TestTheCommentAddedRule(BaitCase):
     """The rule that refuses a comment line a change adds to code or config.
 
