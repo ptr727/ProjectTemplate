@@ -538,7 +538,9 @@ MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
 LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
 BARE_TAG = re.compile(r"<(?!!--)[^<>]*>")
 MARKER_REACH = 300
-FILE_ROW = re.compile(r"^[ \t]*\|[ \t]*`[^|`\n]+`[ \t]*\|[^\n]*$", re.MULTILINE)
+FILE_ROW = re.compile(
+    r"^(?![^\n]*<!--)[ \t]*\|[ \t]*`[^|`\n]*[./][^|`\n]*`[ \t]*\|[^\n]*$", re.MULTILINE
+)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
