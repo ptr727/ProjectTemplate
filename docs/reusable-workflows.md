@@ -622,7 +622,7 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --api-key "$NUGET_API_KEY" \
             --skip-duplicate
-      # Gated on the download rather than on the push, per D5.2.
+      # See D5.2.
       - name: Delete consumed NuGet build artifact step
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true
@@ -668,7 +668,7 @@ A Docker repo's stub removes the `push:` block (its paths filter with it) and ad
         with:
           packages-dir: ./dist
           skip-existing: true
-      # Gated on the download rather than on the publish, per D5.2.
+      # See D5.2.
       - name: Delete consumed PyPI build artifact step
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true
