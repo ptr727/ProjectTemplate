@@ -199,7 +199,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
   - [ ] VSCode-Server-DotNetCore (`get-version-task.yml`)
   - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `build-release-task.yml`, which calls `get-version-task.yml`, in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
   - [ ] aiopurpleair (`get-version-task.yml`)
-  - [x] homeassistant-purpleair (`get-version-task.yml`): adopted on `develop` in ptr727/homeassistant-purpleair#372 at `2725f91`, which deleted its copy and pointed its local `build-release-task.yml` at the hub's, and promoted to `main` in ptr727/homeassistant-purpleair#373 at `32a33d1`. Since the Stage 4 adoption below, the call runs through the hub's `build-release-task.yml`, and `main` carries no `get-version-task.yml`.
+  - [x] homeassistant-purpleair (`get-version-task.yml`): adopted on `develop` in ptr727/homeassistant-purpleair#372 at `2725f91`, which deleted its copy and pointed its local `build-release-task.yml` at the hub's. It is promoted to `main` in ptr727/homeassistant-purpleair#373 at `32a33d1`. Since the Stage 4 adoption below, the call runs through the hub's `build-release-task.yml`, and `main` carries no `get-version-task.yml`.
   - [ ] Utilities (`publish-plan-task.yml`)
 - [ ] `reports/workflow-reuse.md` regenerated with `get-version-task.yml` and `publish-plan-task.yml` at 0 copies, since both are hub-only files no repo carries.
 
