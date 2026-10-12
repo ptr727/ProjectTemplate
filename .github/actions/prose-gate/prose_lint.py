@@ -2324,6 +2324,9 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     A body cut at a trailing directive continues into the next line only where the whole body does
     not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
     goes on past.
+
+    A line `is_tool_directive` matches is an instruction to a tool, so it never becomes the previous
+    body and the comment line after it is not read as that line's continuation.
     """
     comments, kept, configured = prose_comment_candidates(path, raw, lines)
 
@@ -2384,7 +2387,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             )
         # A trailing comment can start a sentence the next full-line comment continues.
         # The continuation has to be a full-line comment, since a trailing one annotates its own.
-        prev_body = body
+        prev_body = "" if is_tool_directive(body) else body
         prev_whole = whole.body
         prev_no = n
     return out
