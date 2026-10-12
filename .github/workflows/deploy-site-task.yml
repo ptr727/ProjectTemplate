@@ -239,7 +239,7 @@ jobs:
             "${RUNNER_TEMP}/bundle/current" \
             "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
 
-      # Pruning is the hook's own concern, since only a repo whose credential can observe the destination prunes at all.
+      # See WORKFLOW.md D5.6 for which side owns the prune.
       # A credential confined write-only skips this by carrying a hook whose prune mode is a no-op, and the repo's runbook records the host-side timer that owns it instead.
       - name: Run deploy hook prune step
         if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}

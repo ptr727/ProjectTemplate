@@ -512,7 +512,7 @@ jobs:
   # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
   # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
   # See D1.6 for a declared Python directory with no tests/.
-  # The root default keeps the old gate, a pytest suite in tests/ beside a uv.lock or requirements*.txt, since a caller declaring nothing owes no tests/ suite.
+  # The root default runs tests only where a pytest suite in tests/ sits beside a uv.lock or requirements*.txt, since a caller declaring nothing owes none.
   # The matrix dimension is the interpreter, or the test-matrix leg when that is set.
   # A caller naming neither runs the single leg this job ran before the input existed.
   # A python-versions leg names an interpreter whether or not one ran.
