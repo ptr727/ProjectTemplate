@@ -2406,7 +2406,7 @@ def concurrency_caller_findings(path, text):
             findings.append(
                 (
                     "DRIFT",
-                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and github.event_name == 'workflow_dispatch' as a top-level conjunct of each build-release-task.yml job's if:.",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and github.event_name == 'workflow_dispatch' as a top-level conjunct of each build-release-task.yml job's if:, an if: holding no || or negated group.",
                 )
             )
         elif not suffix_ok:
