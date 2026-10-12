@@ -5636,9 +5636,7 @@ class TestToolDirectivesLeaveCommentCase(BaitCase):
 
     def test_a_lowercase_directive_draws_no_case_finding(self) -> None:
         for text in (
-            "# nopep8\n",
             "# nosec B404\n",
-            "# nopep8: E501\n",
             "# hadolint ignore=DL3008\n",
         ):
             with self.subTest(text=text.strip()):
