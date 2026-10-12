@@ -92,10 +92,13 @@ def fields(argv: list[str]) -> dict[str, list[str]]:
     return out
 
 
-def connection(rows: list, more: bool = False, cursor: str | None = None) -> str:
+def connection(
+    rows: list, more: bool = False, cursor: str | None = None, *, enabled: bool = True
+) -> str:
     """`rows` as one page of the issue connection `handoff.LIST_QUERY` reads."""
     page = {"hasNextPage": more, "endCursor": cursor}
-    return json.dumps({"data": {"repository": {"issues": {"pageInfo": page, "nodes": rows}}}})
+    issues = {"pageInfo": page, "nodes": rows}
+    return json.dumps({"data": {"repository": {"hasIssuesEnabled": enabled, "issues": issues}}})
 
 
 class FakeGh:
@@ -108,9 +111,9 @@ class FakeGh:
     It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
     repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
     would answer a call missing its repository by resolving it from the working directory's
-    remote. That is the failure this whole script is built
-    against, and without this the argument could be dropped from any of nine call sites with every
-    case still green.
+    remote. That is the failure this whole script is built against. Without this the argument
+    could be dropped from any call site with every case still green. The GraphQL list names its
+    repository as `owner` and `name` instead, and is refused alike.
     """
 
     def __init__(
@@ -225,7 +228,7 @@ class FakeGh:
         start = int(f.get("after", ["0"])[0])
         end = start + first
         nodes = [{k: row[k] for k in node if k in row} for row in rows[start:end]]
-        return connection(nodes, end < len(rows), str(end))
+        return connection(nodes, end < len(rows), str(end), enabled=self.issues_on)
 
     @staticmethod
     def _labeled(row: dict, name: str) -> bool:
@@ -2402,6 +2405,15 @@ class ConsistentReadCase(unittest.TestCase):
         pages = [fields(c) for c in fake.calls if c[:2] == ["api", "graphql"]]
         self.assertTrue(all(int(f["first"][0]) <= handoff.PAGE for f in pages))
         self.assertTrue(any("after" in f for f in pages))
+
+    def test_a_repository_with_issues_turned_off_fails_rather_than_reading_empty(self) -> None:
+        """GitHub answers the connection empty there, which would read as a chain never started."""
+        fake = FakeGh({5: link(5, "default", 1, None)}, issues_on=False)
+        for argv in (("tracks",), ("current",)):
+            with self.subTest(argv=argv):
+                code, _, err = run(fake, *argv, "--repo", "o/r")
+                self.assertEqual(code, 2)
+                self.assertIn("issues turned off", err)
 
     def test_a_response_that_is_no_issue_connection_is_an_execution_failure(self) -> None:
         def broken(argv):

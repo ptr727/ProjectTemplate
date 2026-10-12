@@ -150,6 +150,7 @@ LIST_QUERY = """
 query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!],
       $first: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
+    hasIssuesEnabled
     issues(labels: $labels, states: $states, first: $first, after: $after,
            orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
@@ -511,6 +512,9 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
 
     Paging stops at `limit` or at the last page, whichever comes first. A caller comparing the
     count against its own window therefore still sees a full window as full.
+
+    A repository with issues turned off answers this connection empty rather than with an error.
+    That is refused here, as `gh issue list` refused it, rather than read as a chain never started.
     """
     owner, _, name = repo.partition("/")
     rows: list[dict] = []
@@ -536,7 +540,8 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
             argv += ["-f", f"after={after}"]
         data = gh_json(argv)
         try:
-            issues = typing.cast("dict", data)["data"]["repository"]["issues"]
+            repository = typing.cast("dict", data)["data"]["repository"]
+            enabled, issues = repository["hasIssuesEnabled"], repository["issues"]
             nodes, more, after = (
                 issues["nodes"],
                 issues["pageInfo"]["hasNextPage"],
@@ -546,6 +551,8 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
             raise Execution(
                 f"the {what} did not read as an issue connection: {cut(repr(data))}"
             ) from exc
+        if enabled is not True:
+            raise Execution(f"{repo} has issues turned off, so it holds no readable {what}")
         rows += rows_of(nodes, what, "number")
         if not more:
             break
@@ -555,8 +562,8 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
 def open_handoffs(repo: str) -> list[dict]:
     """Every open issue carrying the label, newest first, with its metadata block parsed.
 
-    A page that fills is reported as truncated rather than treated as whole, since an open handoff
-    past the window is exactly as invisible as one that does not exist.
+    A window that fills is reported as truncated rather than treated as whole. An open handoff past
+    the window is exactly as invisible as one that does not exist.
     """
     rows = labeled(repo, "OPEN", WINDOW, f"handoff list for {repo}")
     if len(rows) >= WINDOW:
