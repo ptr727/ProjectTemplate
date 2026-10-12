@@ -1977,18 +1977,20 @@ def job_level_names(blocks):
     """
     out = set()
     for block in blocks.values():
-        body = [
-            ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")
-        ]
-        if not body:
-            continue
-        child = min(len(ln) - len(ln.lstrip()) for ln in body)
-        for ln in body:
-            if len(ln) - len(ln.lstrip()) == child:
-                m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln[child:])
-                if m:
-                    out.add(m.group(1))
+        for ln in job_child_lines(block):
+            m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln)
+            if m:
+                out.add(m.group(1))
     return out
+
+
+def job_child_lines(block):
+    """A job block's direct-child lines, dedented, read at the shallowest indent below its key line."""
+    body = [ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")]
+    if not body:
+        return []
+    child = min(len(ln) - len(ln.lstrip()) for ln in body)
+    return [ln[child:] for ln in body if len(ln) - len(ln.lstrip()) == child]
 
 
 def check_interface(path, contract, text):
@@ -2229,7 +2231,7 @@ _RUN_ID_SUFFIX = re.compile(
     r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
 )
 _SCHEDULE_RUN_ID_SUFFIX = "${{github.event_name=='schedule'&&format('-{0}',github.run_id)||''}}"
-_DISPATCH_GATE = "github.event_name=='workflow_dispatch'"
+_DISPATCH_TESTS = {"github.event_name=='workflow_dispatch'", "github.event_name!='schedule'"}
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
 _TOP_ON = re.compile(r"^on:[ \t]*(.*)$", re.MULTILINE)
 _EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -2260,22 +2262,13 @@ def _tight(value):
 
 
 def _workflow_triggers(code):
-    """The event names under the workflow-level `on:`, or None where its shape cannot be read.
+    """The event names keyed under a block-mapping workflow-level `on:`, or None for any other shape.
 
-    Reads a bare scalar, a flow sequence, and a block mapping or block sequence. A flow mapping is refused.
+    A `schedule` trigger is valid only as a mapping key carrying its `cron` list, so no inline form can hold one.
     """
     head = _TOP_ON.search(code)
-    if head is None:
+    if head is None or re.sub(r"[ \t]+#.*$", "", head.group(1)).strip():
         return None
-    inline = re.sub(r"[ \t]+#.*$", "", head.group(1)).strip()
-    if inline.startswith("{"):
-        return None
-    if inline.startswith("["):
-        if not inline.endswith("]"):
-            return None
-        return {item.strip().strip("'\"") for item in inline[1:-1].split(",") if item.strip()}
-    if inline:
-        return {inline.strip("'\"")}
     events = set()
     child_indent = None
     for line in code[head.end() :].splitlines()[1:]:
@@ -2288,7 +2281,7 @@ def _workflow_triggers(code):
             child_indent = indent
         if indent != child_indent:
             continue
-        m = re.match(r"^(?:-[ \t]+)?['\"]?([A-Za-z_]+)['\"]?[ \t]*:?", line.strip())
+        m = re.match(r"^['\"]?([A-Za-z_]+)['\"]?[ \t]*:", line.strip())
         if m is None:
             return None
         events.add(m.group(1))
@@ -2299,8 +2292,9 @@ def _schedule_never_publishes(code):
     """True where the publisher's `on:` admits a `schedule` and no `push`, and every release job requires a dispatch.
 
     The plan task reports a schedule as a publish. A schedule therefore publishes nothing only where each job
-    calling `build-release-task.yml` gates on `github.event_name == 'workflow_dispatch'` as a conjunct of its
-    job-level `if:`. A condition holding any `||` is not read as such a gate. A publisher where no job
+    calling `build-release-task.yml` holds a dispatch test as a top-level conjunct of its job-level `if:`.
+    A dispatch test is `github.event_name == 'workflow_dispatch'` or `github.event_name != 'schedule'`.
+    A condition holding any `||` or a negated group is not read as such a gate. A publisher where no job
     calls `build-release-task.yml` returns False.
     """
     triggers = _workflow_triggers(code)
@@ -2308,14 +2302,10 @@ def _schedule_never_publishes(code):
         return False
     release_jobs = 0
     for block in split_jobs(code).values():
-        body = [ln for ln in block.splitlines()[1:] if ln.strip()]
-        if not body:
-            continue
-        child = min(len(ln) - len(ln.lstrip()) for ln in body)
         keys = {}
-        for ln in body:
-            m = re.match(r"^(uses|if):[ \t]*(.*)$", ln[child:])
-            if len(ln) - len(ln.lstrip()) == child and m:
+        for ln in job_child_lines(block):
+            m = re.match(r"^(uses|if):[ \t]*(.*)$", ln)
+            if m:
                 keys[m.group(1)] = m.group(2)
         if "build-release-task.yml" not in keys.get("uses", ""):
             continue
@@ -2324,9 +2314,8 @@ def _schedule_never_publishes(code):
         tight = _strip_unquoted_space(condition or "")
         if tight.startswith("${{") and tight.endswith("}}"):
             tight = tight[3:-2]
-        if "||" in tight or not (
-            tight == _DISPATCH_GATE or tight.startswith(_DISPATCH_GATE + "&&")
-        ):
+        conjuncts = {term.strip("()") for term in tight.split("&&")}
+        if "||" in tight or "!(" in tight or not conjuncts & _DISPATCH_TESTS:
             return False
     return release_jobs > 0
 
@@ -2407,7 +2396,14 @@ def concurrency_caller_findings(path, text):
                 )
             )
         )
-        if not suffix_ok:
+        if not suffix_ok and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX:
+            findings.append(
+                (
+                    "DRIFT",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs no push trigger and a dispatch test in each build-release-task.yml job's if:.",
+                )
+            )
+        elif not suffix_ok:
             findings.append(("DRIFT", f"concurrency: {path} group is '{group}', expected '{base}'"))
     if cancel is not None and _tight(cancel).lower() not in ("false", "${{false}}"):
         findings.append(
@@ -6757,14 +6753,33 @@ def _selftest():
         ),
         (
             pub_path,
-            re.sub(
-                r"(?s)\non:\n.*?\n(?=\S)",
-                "\non: [workflow_dispatch, schedule]\n\n",
-                sched_text,
-                count=1,
+            sched_text.replace(sched_gate, "if: ${{ github.event_name == 'workflow_dispatch' }}"),
+            0,
+            "a dispatch test alone",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ needs.plan.outputs.publish == 'true' && (github.event_name != 'schedule') }}",
             ),
             0,
-            "a flow-sequence trigger list",
+            "a parenthesized not-schedule test as the last conjunct",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ !(needs.plan.outputs.publish == 'true' && (github.event_name == 'workflow_dispatch')) }}",
+            ),
+            1,
+            "a dispatch test inside a negated group",
+        ),
+        (
+            pub_path,
+            sched_text.replace("build-release-task.yml@", "other-task.yml@"),
+            1,
+            "a schedule-only suffix with no release job",
         ),
         (
             pub_path,
@@ -6950,6 +6965,12 @@ def _selftest():
         ),
     ]
     refusal_cases = [
+        (
+            pub_path,
+            pub_text.replace(pub_line, sched_line),
+            "cannot read its schedule",
+            "a schedule-only suffix names what keeps it from qualifying",
+        ),
         (
             pub_path,
             "concurrency: ${{ github.workflow }}-${{ github.ref }}\n  -extra\njobs:\n  x: {}\n",
