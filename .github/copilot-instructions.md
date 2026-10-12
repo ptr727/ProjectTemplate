@@ -47,6 +47,11 @@ Review effort is user-controlled. The automation observes `Lite`, `Balanced`, or
   - **Proved against** - the paragraph following the agent snippet in `STANDUP.md` section 0 on `develop` at `676a2bd`, unchanged since `77be3a3`.
   - **Delete when** - the sentence is reworded for any reason, since the entry is about this phrasing rather than about the rule it states.
 
+- **A workflow comment may not cite a `WORKFLOW.md` contract section such as `D5.2`, because the fleet comment style forbids citing internal rules.** Raised on two separate pull requests as a high-priority finding, asking that a contract citation in a snippet comment be replaced by a plain description.
+  - **Disproved by** - reading the rule the finding invokes and a comment that already does it. The [GOVERNANCE.md "References"](../GOVERNANCE.md#references) rule bans a comment naming an issue, a pull request, or a commit, and says nothing about a contract section. And the canonical snippet `catalog/snippets/workflows/publish-release.yml` itself cites `D5.2` in a step comment explaining why the step is gated on the download rather than on the push.
+  - **Proved against** - the "References" rule in `GOVERNANCE.md` and the `D5.2` comment in `catalog/snippets/workflows/publish-release.yml` on `develop` at `c978e6e4`.
+  - **Delete when** - the "References" rule starts banning contract citations, or the snippet no longer cites a contract section.
+
 ## When in Doubt
 
 Stop and report the uncertainty. Do not guess at an instruction, suppress a possible finding, or claim coverage that the review did not perform.
