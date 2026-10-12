@@ -3107,7 +3107,7 @@ def audit_repo(entry, spec, branch=None):
                 check_intent_staleness(slug, ground, path, intent_canonical_rel(item, path), text)
             )
         # Heading-based presence is only meaningful for Markdown.
-        # A "section" named on a non-md file, a tasks.json task group being one, is an intent marker judged per AUDIT.md rather than a heading grep.
+        # A section named on a non-md file (a tasks.json task group) is not checked, only the file's presence, and RESYNC.md aligns it by hand.
         needed = wanted_sections[path]
         verbatim_needed = verbatim_secs[path]
         if (needed or verbatim_needed) and path.endswith(".md"):
