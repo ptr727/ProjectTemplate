@@ -2264,7 +2264,7 @@ def _tight(value):
 def _workflow_triggers(code):
     """The event names keyed under a block-mapping workflow-level `on:`, or None for any other shape.
 
-    A `schedule` trigger is valid only as a mapping key carrying its `cron` list, so no inline form can hold one.
+    Only the block-mapping form is read, the shape a `schedule` trigger with its `cron` list takes in practice.
     """
     head = _TOP_ON.search(code)
     if head is None or re.sub(r"[ \t]+#.*$", "", head.group(1)).strip():
@@ -2396,11 +2396,15 @@ def concurrency_caller_findings(path, text):
                 )
             )
         )
-        if not suffix_ok and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX:
+        if (
+            not suffix_ok
+            and path.endswith("publish-release.yml")
+            and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX
+        ):
             findings.append(
                 (
                     "DRIFT",
-                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs no push trigger and a dispatch test in each build-release-task.yml job's if:.",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and a dispatch test in each build-release-task.yml job's if:.",
                 )
             )
         elif not suffix_ok:
@@ -6886,6 +6890,12 @@ def _selftest():
             "the push-only suffix is the publisher's alone",
         ),
         (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + sched_line.split("github.ref }}", 1)[1]),
+            1,
+            "the schedule-only suffix is the publisher's alone",
+        ),
+        (
             pub_path,
             pub_text.replace(pub_line, "  group: '" + pub_value.replace("'", "''") + "'"),
             0,
@@ -6970,6 +6980,12 @@ def _selftest():
             pub_text.replace(pub_line, sched_line),
             "cannot read its schedule",
             "a schedule-only suffix names what keeps it from qualifying",
+        ),
+        (
+            bot_path,
+            bot_text.replace(bot_line, bot_line + sched_line.split("github.ref }}", 1)[1]),
+            "group is",
+            "a merge-bot schedule suffix gets no publisher advice",
         ),
         (
             pub_path,
