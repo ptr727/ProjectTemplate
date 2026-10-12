@@ -536,6 +536,7 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
             "-F",
             f"first={min(PAGE, limit - len(rows))}",
         ]
+        sent = after
         if after is not None:
             argv += ["-f", f"after={after}"]
         data = gh_json(argv)
@@ -559,6 +560,8 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
         rows += rows_of(nodes, what, "number")
         if not more:
             break
+        if not after or after == sent:
+            raise Execution(f"the {what} reported another page without a cursor that advances")
     return rows
 
 

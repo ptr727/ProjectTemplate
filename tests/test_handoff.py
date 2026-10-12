@@ -2416,6 +2416,33 @@ class ConsistentReadCase(unittest.TestCase):
                 self.assertIn("issues turned off", err)
                 self.assertIn("--enable-issues", err)
 
+    def test_a_cursor_that_does_not_advance_fails_rather_than_looping(self) -> None:
+        """An empty page claiming more with a stuck cursor would otherwise be re-read forever."""
+        for cursor in (None, "same"):
+            with self.subTest(cursor=cursor):
+                calls: list[list[str]] = []
+
+                def stuck(argv, cursor=cursor, calls=calls):
+                    if argv[:2] == ["label", "list"]:
+                        return json.dumps([{"name": handoff.LABEL}])
+                    calls.append(argv)
+                    if len(calls) > 5:
+                        raise AssertionError(
+                            "the read kept re-requesting a page that never advanced"
+                        )
+                    return connection([], more=True, cursor=cursor)
+
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(handoff, "run_gh", stuck),
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(err),
+                ):
+                    code = handoff.main(["tracks", "--repo", "o/r"])
+                self.assertEqual(code, 2)
+                self.assertIn("cursor that advances", err.getvalue())
+                self.assertLessEqual(len(calls), 2)
+
     def test_a_response_that_is_no_issue_connection_is_an_execution_failure(self) -> None:
         def broken(argv):
             if argv[:2] == ["label", "list"]:
