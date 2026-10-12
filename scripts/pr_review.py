@@ -1041,8 +1041,9 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
 def gql_required(query: str, owner: str, repo: str, num: int) -> dict:
     """`gql` for a read that cannot proceed without the pull request, ended like a failed read.
 
-    A number naming no pull request answers a null `pullRequest`, which `gql` returns as it
-    is because the comment and attest reads report that case in their own status lines.
+    GitHub answers a missing number with a null `pullRequest` and a NOT_FOUND error, which the
+    transport already ends at exit 1. This guards the same null arriving without an error, so
+    no caller dereferences it. `gql` returns the null as it is for the reads tolerating it.
     """
     pr = gql(query, owner, repo, num)
     if pr is None:

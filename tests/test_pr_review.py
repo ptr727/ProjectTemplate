@@ -6805,6 +6805,22 @@ class TestGqlTransport(unittest.TestCase):
             pr_review.full_read("o", "r", 99)
         self.assertEqual("gh graphql: pull request o/r#99 not found", str(raised.exception))
 
+    def test_every_required_read_ends_on_a_null_pull_request(self) -> None:
+        body = json.dumps({"data": {"repository": {"pullRequest": None}}})
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")
+        reads = {
+            "live_state": lambda: pr_review.live_state("o", "r", 99),
+            "check_claims": lambda: pr_review.check_claims("o", "r", 99),
+        }
+        for name, read in reads.items():
+            with (
+                self.subTest(name),
+                mock.patch.object(pr_review.subprocess, "run", return_value=done),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                read()
+            self.assertIn("not found", str(raised.exception))
+
     def test_a_successful_call_unwraps_to_the_pull_request(self) -> None:
         body = json.dumps({"data": {"repository": {"pullRequest": {"headRefOid": HEAD}}}})
         done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")

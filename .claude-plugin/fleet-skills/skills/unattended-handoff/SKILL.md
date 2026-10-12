@@ -270,8 +270,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    open develop -> main pull request, as "Parking" step 2 has it state, the round narrows to
    develop. **A lane parked on that promotion holds it until the lane closes, answered or not.** An
    answer closes the decision issue and takes its label off, so the read above stops seeing it
-   before the lane holding the answer has applied it. Read the open handoffs with `python3 "$handoff" tracks
-   --repo "<owner>/<repo>" --json`, as picker step 1 does, and keep those on an `auto-*` track
+   before the lane holding the answer has applied it. Read the open handoffs with
+   `python3 "$handoff" tracks --repo "<owner>/<repo>" --json`, with `$handoff` as picker step 1
+   sets it and as picker step 1 does, and keep those on an `auto-*` track
    other than this worker's own. Walk each kept track back as step 1 walks the worker's own,
    starting at its open link and reading every link's body and comments, since a lane parked and
    handed back more than once holds the answer in an older link. A walk
