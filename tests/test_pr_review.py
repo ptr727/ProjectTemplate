@@ -6794,6 +6794,17 @@ class TestGqlTransport(unittest.TestCase):
             pr_review.gql("query", "o", "r", 1)
         self.assertIn("boom", err.getvalue())
 
+    def test_a_null_pull_request_ends_the_run_with_one_line(self) -> None:
+        """A number naming no pull request must end at exit 1 and never reach a dereference."""
+        body = json.dumps({"data": {"repository": {"pullRequest": None}}})
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")
+        with (
+            mock.patch.object(pr_review.subprocess, "run", return_value=done),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            pr_review.full_read("o", "r", 99)
+        self.assertEqual("gh graphql: pull request o/r#99 not found", str(raised.exception))
+
     def test_a_successful_call_unwraps_to_the_pull_request(self) -> None:
         body = json.dumps({"data": {"repository": {"pullRequest": {"headRefOid": HEAD}}}})
         done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")

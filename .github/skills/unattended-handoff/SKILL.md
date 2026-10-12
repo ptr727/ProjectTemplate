@@ -211,15 +211,16 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Picker
 
-1. **Read the open handoffs** with labels and update times, `handoff.py tracks --repo
+1. **Read the open handoffs** with labels and update times, `python3 "$handoff" tracks --repo
    "<owner>/<repo>" --json`, which prints number, title, track, labels, and updatedAt for each. It
    reads the repository's issue connection rather than the search index, so a link a worker's `new`
    just closed or opened is already read correctly. A nonzero exit, including the refusal over a
    read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
-   ranking a partial list. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff`
-   "Running the Chain". **The full-page check** that picker step 3 and the worker's `decision` read apply to their own
-   `gh issue list` reads is that a read returning as many rows as its limit may be truncated, so raise the
-   limit and read again until it returns fewer.
+   ranking a partial list. `$handoff` is the hub checkout's `scripts/handoff.py`, per
+   `session-handoff` "Running the Chain". **The full-page check** that picker step 3 and the
+   worker's `decision` read apply to their own `gh issue list` reads is that a read returning as
+   many rows as its limit may be truncated, so raise the limit and read again until it returns
+   fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
@@ -269,7 +270,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    open develop -> main pull request, as "Parking" step 2 has it state, the round narrows to
    develop. **A lane parked on that promotion holds it until the lane closes, answered or not.** An
    answer closes the decision issue and takes its label off, so the read above stops seeing it
-   before the lane holding the answer has applied it. Read the open handoffs with `handoff.py tracks
+   before the lane holding the answer has applied it. Read the open handoffs with `python3 "$handoff" tracks
    --repo "<owner>/<repo>" --json`, as picker step 1 does, and keep those on an `auto-*` track
    other than this worker's own. Walk each kept track back as step 1 walks the worker's own,
    starting at its open link and reading every link's body and comments, since a lane parked and
