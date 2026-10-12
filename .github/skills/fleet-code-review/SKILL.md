@@ -22,8 +22,8 @@ description: >-
    - `python-codestyle` for Python changes.
    - `shell-codestyle` for shell changes.
    - `workflow-ci-contract` for GitHub Actions and CI/CD changes.
-4. Treat a missing executable on `PATH` as no evidence that its check is unavailable. Read the
-   repository's documented local invocation before reporting a check as skipped.
+4. Treat a missing executable on `PATH` as no evidence that a check the requester names is
+   unavailable. Read the repository's documented local invocation before reporting it as skipped.
 
 Do not substitute a familiar convention for the repository's written contract. Report a
 conflict between instructions instead of silently choosing one.
@@ -32,9 +32,10 @@ conflict between instructions instead of silently choosing one.
 
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
 resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
-lines when the behavior depends on unchanged callers or consumers. Running the repository's code or
-tests, changed or not, is left to the change's author and to CI, beyond a check the review's
-requester names.
+lines when the behavior depends on unchanged callers or consumers. Beyond reading files and git
+state, run only the checks the review's requester names, since running code belongs to the change's
+author and CI. A finding that only an unnamed run could prove is still published, naming that
+command as the proof it needs.
 
 For each candidate finding:
 
