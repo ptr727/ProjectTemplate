@@ -2233,7 +2233,7 @@ _RUN_ID_SUFFIX = re.compile(
     r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
 )
 _SCHEDULE_RUN_ID_SUFFIX = "${{github.event_name=='schedule'&&format('-{0}',github.run_id)||''}}"
-_DISPATCH_TESTS = {"github.event_name=='workflow_dispatch'", "github.event_name!='schedule'"}
+_DISPATCH_TEST = "github.event_name=='workflow_dispatch'"
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
 _TOP_ON = re.compile(r"^on:[ \t]*(.*)$", re.MULTILINE)
 _EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -2294,8 +2294,8 @@ def _schedule_never_publishes(code):
     """True where the publisher's `on:` admits a `schedule` and no `push`, and every release job requires a dispatch.
 
     The plan task reports a schedule as a publish. A schedule therefore publishes nothing only where each job
-    calling `build-release-task.yml` holds a dispatch test as a top-level conjunct of its job-level `if:`.
-    A dispatch test is `github.event_name == 'workflow_dispatch'` or `github.event_name != 'schedule'`.
+    calling `build-release-task.yml` holds `github.event_name == 'workflow_dispatch'` as a top-level conjunct
+    of its job-level `if:`.
     A condition holding any `||` or a negated group is not read as such a gate. A publisher where no job
     calls `build-release-task.yml` returns False.
     """
@@ -2317,7 +2317,7 @@ def _schedule_never_publishes(code):
         if tight.startswith("${{") and tight.endswith("}}"):
             tight = tight[3:-2]
         conjuncts = {term.strip("()") for term in tight.split("&&")}
-        if "||" in tight or "!(" in tight or not conjuncts & _DISPATCH_TESTS:
+        if "||" in tight or "!(" in tight or _DISPATCH_TEST not in conjuncts:
             return False
     return release_jobs > 0
 
@@ -2406,7 +2406,7 @@ def concurrency_caller_findings(path, text):
             findings.append(
                 (
                     "DRIFT",
-                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and a dispatch test in each build-release-task.yml job's if:.",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and github.event_name == 'workflow_dispatch' as a top-level conjunct of each build-release-task.yml job's if:, an if: holding no || or negated group.",
                 )
             )
         elif not suffix_ok:
@@ -6784,8 +6784,17 @@ def _selftest():
                 sched_gate,
                 "if: ${{ needs.plan.outputs.publish == 'true' && (github.event_name != 'schedule') }}",
             ),
-            0,
+            1,
             "a parenthesized not-schedule test as the last conjunct",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: ${{ needs.plan.outputs.publish == 'true' && (github.event_name == 'workflow_dispatch') }}",
+            ),
+            0,
+            "a parenthesized dispatch test as the last conjunct",
         ),
         (
             pub_path,
