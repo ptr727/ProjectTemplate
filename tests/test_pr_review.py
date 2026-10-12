@@ -5763,7 +5763,7 @@ class TestCoverageExitCodes(GqlCase):
     def test_a_partial_stated_inside_a_file_table_row_is_still_read(self) -> None:
         for row in (
             "| `a.md` | Prose. Copilot reviewed 1 of 2 files. |",
-            "| `a.md` | Prose. | <!-- fleet-review: reviewed=1 changed=2 findings=0 --> |",
+            "| `a.md` | Prose. | &lt;!-- fleet-review: reviewed=1 changed=2 findings=0 --&gt; |",
         ):
             for wrap in ("{}", "```\n{}\n```"):
                 with self.subTest(row=row, wrap=wrap):
