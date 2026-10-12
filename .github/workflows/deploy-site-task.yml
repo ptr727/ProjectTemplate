@@ -240,7 +240,7 @@ jobs:
             "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/${ENVIRONMENT}/"
 
       # See WORKFLOW.md D5.6 for which side owns the prune.
-      # A credential confined write-only skips this by carrying a hook whose prune mode is a no-op.
+      # A repo whose credential is confined write-only carries a hook whose prune mode is a no-op.
       - name: Run deploy hook prune step
         if: ${{ hashFiles('.github/actions/deploy/action.yml') != '' }}
         uses: ./.github/actions/deploy
