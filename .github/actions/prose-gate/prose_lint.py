@@ -2810,18 +2810,23 @@ def comment_sentence_findings(
     return out
 
 
-def is_numpy_head(text: str, below: int) -> bool:
+def is_numpy_head(text: str, below: int, mid_sentence: bool = False) -> bool:
     """Whether a line at a NumPy entry's indent heads an entry rather than being prose.
 
     A head is a `name : type` line, a line with an indented description right under it, or a single
     token with no closing punctuation, which is a name or a type and never a sentence.
     `below` is the indent of the next line, or -1 where it is blank or absent.
+    A single token is no head when `mid_sentence`, the prose above it sitting at the entry indent.
     """
     words = text.split()
     return (
         " : " in text
         or below > len(text) - len(text.lstrip())
-        or (len(words) == 1 and not words[0].endswith((".", "!", "?")))
+        or (
+            len(words) == 1
+            and not mid_sentence
+            and not words[0].rstrip("*_`\"')]").endswith((".", "!", "?"))
+        )
     )
 
 
@@ -2902,6 +2907,7 @@ def one_docstring_findings(
     code_at = base
     skip = 0
     colon_ref = base
+    entry_indent: dict[int, int] = {}
     for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
         if skip:
             skip -= 1
@@ -2935,7 +2941,13 @@ def one_docstring_findings(
             continue
         if section in ("google", "text") and indent <= base:
             section, code_at = "", base
-        if section == "numpy" and indent <= base and is_numpy_head(text, next_indent(texts, idx)):
+        if (
+            section == "numpy"
+            and indent <= base
+            and is_numpy_head(
+                text, next_indent(texts, idx), bool(block) and entry_indent[block[-1][0]] <= base
+            )
+        ):
             flush()
             in_doctest = in_code = False
             prev_blank = False
@@ -2970,6 +2982,7 @@ def one_docstring_findings(
             if LIST_MARKER.match(text) or FIELD_LINE.match(text):
                 flush()
             block.append((n, strip_list_marker(text.strip())))
+            entry_indent[n] = indent
             if text.rstrip().endswith(":"):
                 flush()
         prev_blank = False

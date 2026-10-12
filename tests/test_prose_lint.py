@@ -2956,6 +2956,19 @@ class TestCommentSentenceLength(BaitCase):
         )
         self.assertEqual([], self.found(text, "bait.py"))
 
+    def test_a_one_token_line_inside_numpy_entry_indent_prose_does_not_cut_the_sentence(
+        self,
+    ) -> None:
+        head = "Returns\n    -------\n    int\n        The count.\n\n"
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        for token in ("several", "https://example.invalid/path", "fourteen,"):
+            with self.subTest(token=token):
+                text = (
+                    f'def f() -> int:\n    """S.\n\n    {head}    {half}\n    {token}\n'
+                    f'    {half}.\n    """\n'
+                )
+                self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
