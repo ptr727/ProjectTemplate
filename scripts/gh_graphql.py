@@ -49,7 +49,10 @@ def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
     on every platform, where a Windows console locale is cp1252, and one typographic quote in a
     review body crashed the decode and left the caller reading a null stdout.
     """
-    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
+    except OSError as exc:
+        raise GraphQLError(f"could not run {argv[0]}: {exc}") from exc
     return r.returncode, r.stdout, r.stderr
 
 
@@ -99,6 +102,8 @@ def request(
         raise GraphQLError("gh graphql reported errors", json.dumps(errors)[:DETAIL_CAP])
     if payload.get("data") is None:
         raise GraphQLError("gh graphql returned no data", json.dumps(errors)[:DETAIL_CAP])
+    if not isinstance(payload["data"], dict):
+        raise GraphQLError("gh graphql returned data that is not an object")
     return Response(payload["data"], list(errors or []))
 
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
@@ -32,9 +33,18 @@ class RequestCase(unittest.TestCase):
             ("not an object", answering(0, ["x"])),
             ("errors", answering(0, {"data": {"a": 1}, "errors": [{"path": ["a"]}]})),
             ("null data", answering(0, {"data": None})),
+            ("data not an object", answering(0, {"data": []})),
         ):
             with self.subTest(label=label), self.assertRaises(gh_graphql.GraphQLError):
                 gh_graphql.request("q", {}, run=run)
+
+    def test_a_failed_launch_raises_graphql_error(self) -> None:
+        with (
+            unittest.mock.patch("subprocess.run", side_effect=OSError("no gh")),
+            self.assertRaises(gh_graphql.GraphQLError) as caught,
+        ):
+            gh_graphql.run_subprocess(["gh"])
+        self.assertIn("could not run gh", str(caught.exception))
 
     def test_the_detail_is_bounded(self) -> None:
         with self.assertRaises(gh_graphql.GraphQLError) as caught:
