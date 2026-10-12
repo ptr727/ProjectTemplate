@@ -3031,8 +3031,8 @@ def partial_shaped(pr: dict) -> str:
     pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
     of reading a table at all.
 
-    A table row opening with a code-span path is dropped before reading, since a file-summary cell describing a change
-    to the review skill names the marker in prose and is not a statement of coverage.
+    A table row opening with a code-span path is dropped before reading.
+    A file-summary cell about the review skill names the marker in prose, not as a statement.
     """
     for node in reviewer_nodes(pr, "reviews"):
         for view in body_views(FILE_ROW.sub("", node.get("body") or "")):
