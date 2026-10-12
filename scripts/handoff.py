@@ -41,7 +41,9 @@ Subcommands
   link     Finish a chain that half-applied, so a failed `new` is recoverable without a second
            issue.
   tracks   Every open handoff with its track and age, so an abandoned lane is visible rather
-           than silently current. Read-only.
+           than silently current. `--json` prints the same rows as one JSON array carrying
+           number, title, track, labels, and updatedAt, read from the same issue connection.
+           Read-only.
 
 Exit codes
   0  the command did what it says.
@@ -61,7 +63,7 @@ Usage
   python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
                                      [--create-label]
   python3 scripts/handoff.py link    --repo OWNER/NAME --new N --previous N
-  python3 scripts/handoff.py tracks  --repo OWNER/NAME
+  python3 scripts/handoff.py tracks  --repo OWNER/NAME [--json]
 
 Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one: an
 issue number resolves in every repository, and a chain read out of the wrong one is well formed.
@@ -154,7 +156,7 @@ query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!
     issues(labels: $labels, states: $states, first: $first, after: $after,
            orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
-      nodes { number title body state createdAt updatedAt url }
+      nodes { number title body state createdAt updatedAt url labels(first: 100) { nodes { name } } }
     }
   }
 }
@@ -429,7 +431,7 @@ def without_label(a: argparse.Namespace) -> int | None:
             file=sys.stderr,
         )
         if a.cmd == "tracks":
-            print(f"(no open `{LABEL}` issues in {repo})")
+            print("[]" if a.json else f"(no open `{LABEL}` issues in {repo})")
             return 0
         raise Refusal(
             f"{repo} has no handoff on track {a.track!r}. Zero is the state before the first "
@@ -1005,6 +1007,23 @@ def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> di
 
 def cmd_tracks(a: argparse.Namespace) -> int:
     rows = open_handoffs(a.repo)
+    if a.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "number": row["number"],
+                        "title": row["title"],
+                        "track": row["marker"]["track"] if row["marker"] else None,
+                        "labels": [node["name"] for node in row["labels"]["nodes"]],
+                        "updatedAt": row["updatedAt"],
+                    }
+                    for row in rows
+                ],
+                indent=2,
+            )
+        )
+        return 0
     if not rows:
         print(f"(no open `{LABEL}` issues in {a.repo})")
         return 0
@@ -1410,6 +1429,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("tracks", help="every open handoff with its track and age")
     add_repo(p)
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="print number, title, track, labels, and updatedAt per handoff as a JSON array",
+    )
 
     return ap
 

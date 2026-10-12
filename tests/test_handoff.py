@@ -225,9 +225,13 @@ class FakeGh:
         if selected is None:
             raise AssertionError("the query selects no nodes")
         node = selected.group(1).split()
+        nested = "labels(" in selected.group(1)
         start = int(f.get("after", ["0"])[0])
         end = start + first
         nodes = [{k: row[k] for k in node if k in row} for row in rows[start:end]]
+        if nested:
+            for shaped, row in zip(nodes, rows[start:end], strict=True):
+                shaped["labels"] = {"nodes": list(row.get("labels") or [])}
         return connection(nodes, end < len(rows), str(end), enabled=self.issues_on)
 
     @staticmethod
@@ -466,6 +470,12 @@ class OutsideFleetLabelCase(unittest.TestCase):
                 self.assertIn("no handoff on track", err)
                 self.assertNotIn("configure.sh", err)
                 self.assertEqual([c[:2] for c in fake.calls], [["label", "list"], ["repo", "view"]])
+
+    def test_json_on_a_fork_without_the_label_is_an_empty_array(self) -> None:
+        code, out, err = run(FakeGh(label=False), "tracks", "--repo", "o/r", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), [])
+        self.assertIn("warning:", err)
 
     def test_tracks_warns_and_lists_nothing(self) -> None:
         code, out, err = run(FakeGh(label=False), "tracks", "--repo", "o/r")
@@ -1657,6 +1667,50 @@ class TracksCase(unittest.TestCase):
         code, out, _ = run(FakeGh(), "tracks", "--repo", "o/r")
         self.assertEqual(code, 0)
         self.assertIn("no open", out)
+
+    def test_json_carries_what_a_picker_ranks_by(self) -> None:
+        """The picker reads labels and update times from here, not from the search index."""
+        fake = FakeGh(
+            {
+                4: link(
+                    4,
+                    "auto-9",
+                    1,
+                    None,
+                    updatedAt="2026-09-03T04:05:06Z",
+                    labels=[{"name": handoff.LABEL}, {"name": "blocked"}],
+                ),
+                5: link(5, "lane-b", 1, None, body="hand-written"),
+            }
+        )
+        code, out, _ = run(fake, "tracks", "--repo", "o/r", "--json")
+        self.assertEqual(code, 0)
+        rows = {row["number"]: row for row in json.loads(out)}
+        self.assertEqual(set(rows), {4, 5})
+        self.assertEqual(rows[4]["track"], "auto-9")
+        self.assertEqual(rows[4]["labels"], [handoff.LABEL, "blocked"])
+        self.assertEqual(rows[4]["updatedAt"], "2026-09-03T04:05:06Z")
+        self.assertEqual(rows[4]["title"], fake.issues[4]["title"])
+        self.assertIsNone(rows[5]["track"])
+        self.assertEqual(rows[5]["labels"], [handoff.LABEL])
+
+    def test_json_on_an_empty_repository_is_an_empty_array(self) -> None:
+        code, out, _ = run(FakeGh(), "tracks", "--repo", "o/r", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), [])
+
+    def test_json_reads_the_connection_never_the_search_index(self) -> None:
+        fake = FakeGh({4: link(4, "lane", 1, None)})
+        run(fake, "tracks", "--repo", "o/r", "--json")
+        self.assertFalse(any(call[:2] == ["issue", "list"] for call in fake.calls))
+        self.assertTrue(any(call[:2] == ["api", "graphql"] for call in fake.calls))
+
+    def test_json_refuses_a_filled_window_rather_than_printing_a_partial_array(self) -> None:
+        fake = FakeGh({n: link(n, f"lane-{n}", 1, None) for n in range(1, handoff.WINDOW + 1)})
+        code, out, err = run(fake, "tracks", "--repo", "o/r", "--json")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "")
+        self.assertIn("read window", err)
 
 
 class GhBoundaryCase(unittest.TestCase):
