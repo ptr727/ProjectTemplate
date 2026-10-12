@@ -5693,6 +5693,12 @@ class TestToolDirectivesLeaveCommentWrap(BaitCase):
             ),
         )
 
+    def test_a_trailing_directive_is_not_a_continuation_either(self) -> None:
+        self.assertEqual(
+            [],
+            self.flag("import os  # nosec B404\n# the call is checked below.\n"),
+        )
+
     def test_a_directive_followed_by_a_directive_draws_nothing(self) -> None:
         self.assertEqual([], self.flag("# nosec B404\n# hadolint ignore=DL3008\nx = 1\n"))
 

@@ -1668,7 +1668,8 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 # A directive a tool reads, exempt because deleting one changes what the file does.
 # Anchored at the body's start, since a comment that merely names one of these is prose.
 # Read by `comment-added`, `comment-case`, and `comment-wrap` rather than added to the shared `NOT_PROSE`.
-# So a name here is exempt from those three rules, and a name in `NOT_PROSE` from every reader.
+# So a name here is exempt from the first two rules, and a name in `NOT_PROSE` from every reader.
+# `comment-wrap` only declines to read a directive line as a sentence that wraps.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
     r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
