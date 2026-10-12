@@ -259,6 +259,7 @@ python3 scripts/handoff.py new     --repo ptr727/ProjectTemplate --track default
   --title "What this round did" --body-file handoff.md --dry-run
 python3 scripts/handoff.py link    --repo ptr727/ProjectTemplate --new 1500 --previous 1469
 python3 scripts/handoff.py tracks  --repo ptr727/ProjectTemplate
+python3 scripts/handoff.py tracks  --repo ptr727/ProjectTemplate --json
 ```
 
 The chain is machine-readable from one HTML comment on the body's last line, `<!-- handoff: v1 track=<slug> round=<n> previous=<issue number or none> -->`, so a retitled or hand-edited issue still chains and the title is free to carry a human subject. Nothing parses the title. The `handoff` label is the index, which is what makes the chain findable without a title search, and a track is a short kebab-case slug naming a lane of work, `default` where a session names none. Parallel lanes each name their own, so each closes its own predecessor and neither reads the other's state as current.
