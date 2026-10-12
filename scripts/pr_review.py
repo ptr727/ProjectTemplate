@@ -2995,12 +2995,16 @@ def body_views(body: str) -> list[str]:
     ]
 
 
-def partial_in(view: str) -> str:
-    """The first partial marker, marker mention, or count in one reading of a body, or ""."""
+def partial_in(view: str, rowless: str | None = None) -> str:
+    """The first partial marker, marker mention, or count in one reading of a body, or "".
+
+    `rowless` is the same reading with file-summary rows removed, and only the bare marker-name
+    mention is looked for there. A well-formed marker and a count are read in `view` whole.
+    """
     for m in FLEET_REVIEW.finditer(view):
         if count_value(m.group(1)) != count_value(m.group(2)):
             return m.group(0)[:200]
-    rest = FLEET_REVIEW.sub(" ", view)
+    rest = FLEET_REVIEW.sub(" ", view if rowless is None else rowless)
     for name in (MARKER_NAME, MARKER_NAME_TIGHT):
         for m in name.finditer(rest):
             if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
@@ -3031,12 +3035,14 @@ def partial_shaped(pr: dict) -> str:
     pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
     of reading a table at all.
 
-    A table row opening with a code-span path is dropped before reading.
+    A table row opening with a code-span path is dropped from the marker-name mention reading only.
     A file-summary cell about the review skill names the marker in prose rather than stating coverage.
+    A well-formed marker and a count inside such a row are still read.
     """
     for node in reviewer_nodes(pr, "reviews"):
-        for view in body_views(FILE_ROW.sub("", node.get("body") or "")):
-            if found := partial_in(view):
+        body = node.get("body") or ""
+        for view, rowless in zip(body_views(body), body_views(FILE_ROW.sub("", body)), strict=True):
+            if found := partial_in(view, rowless):
                 return found
     return ""
 
