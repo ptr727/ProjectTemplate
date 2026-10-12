@@ -2244,6 +2244,14 @@ def _yaml_scalar(value):
     return re.sub(r"[ \t]+#.*$", "", value)
 
 
+def _strip_unquoted_space(value):
+    """Whitespace removed except inside single-quoted strings, so a name such as `'a b'` stays distinct from `'ab'`."""
+    parts = value.split("'")
+    return "'".join(
+        re.sub(r"\s+", "", part) if i % 2 == 0 else part for i, part in enumerate(parts)
+    )
+
+
 def _tight(value):
     return _EXPRESSION_SPACE.sub(lambda m: "${{" + m.group(1) + "}}", value)
 
@@ -2316,7 +2324,7 @@ def concurrency_caller_findings(path, text):
             suffix == ""
             or (
                 path.endswith("publish-release.yml")
-                and _RUN_ID_SUFFIX.match(re.sub(r"\s+", "", suffix))
+                and _RUN_ID_SUFFIX.match(_strip_unquoted_space(suffix))
             )
         )
         if not suffix_ok:
@@ -6620,6 +6628,15 @@ def _selftest():
         (bot_path, bot_text, 0, "the reference merge-bot"),
         (
             pub_path,
+            pub_text.replace(
+                "github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]'",
+                "github.actor != 'dependabot[bot]' && github.actor != 'ptr727-codegen[bot]'",
+            ),
+            0,
+            "the allowlisted actors in the other order",
+        ),
+        (
+            pub_path,
             pub_text.replace(pub_line, "  " + pub_group),
             0,
             "a bare ref-scoped publisher group",
@@ -6692,6 +6709,12 @@ def _selftest():
             pub_text.replace("github.actor != 'dependabot[bot]'", "github.actor != 'other[bot]'"),
             1,
             "an actor list that is not the plan task's allowlist",
+        ),
+        (
+            pub_path,
+            pub_text.replace("ptr727-codegen[bot]", "ptr727-codegen [bot]"),
+            1,
+            "whitespace inside an allowlisted actor name",
         ),
         (
             bot_path,
