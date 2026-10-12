@@ -47,6 +47,11 @@ no reminder.
 One worker runs at a time, so no two rounds claim the same file and no round needs the grouping
 `backlog-burndown` does.
 
+Every command below that runs the chain's script writes it as `python3 "$handoff" ...`, with
+`handoff="<hub-checkout>/scripts/handoff.py"` (in the hub itself, `scripts/handoff.py`), as
+`session-handoff` "Running the Chain" sets it. Each seat sets it for itself, since the picker and
+the worker are separate subagents and share no shell.
+
 ## Invocation and What It Authorizes
 
 The maintainer names the scope when invoking the skill, and the scope is the whole grant.
@@ -195,7 +200,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   own guard, and it is worked only in an attended session, so a human approves every change to it.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
+  which `python3 "$handoff" chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
   refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes.
   No open pull request body names it in a fix-intent reference, and no body of a pull request whose
   squash commit is in `origin/main..origin/develop` does. A fix merged to develop leaves its issue
@@ -216,11 +221,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    reads the repository's issue connection rather than the search index, so a link a worker's `new`
    just closed or opened is already read correctly. A nonzero exit, including the refusal over a
    read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
-   ranking a partial list. `$handoff` is the hub checkout's `scripts/handoff.py`, per
-   `session-handoff` "Running the Chain". **The full-page check** that picker step 3 and the
-   worker's `decision` read apply to their own `gh issue list` reads is that a read returning as
-   many rows as its limit may be truncated, so raise the limit and read again until it returns
-   fewer.
+   ranking a partial list. **The full-page check** that picker step 3 and the worker's `decision`
+   read apply to their own `gh issue list` reads is that a read returning as many rows as its
+   limit may be truncated, so raise the limit and read again until it returns fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
@@ -232,7 +235,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with `gh issue list
    --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it returns 30 rows unless
    told otherwise, and apply step 1's full-page check to it.
-4. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
+4. **Create its handoff** with `python3 "$handoff" new --repo "<owner>/<repo>" --track "auto-<issue>"`,
    adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the Chain"
    shows, and `--dry-run` first. The body carries the sections `session-handoff` "What Goes in the
    Body" names, with the next steps naming the issue and what done looks like. That skill's rules on
@@ -244,11 +247,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Worker
 
-1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
+1. **Resume the handoff** with `python3 "$handoff" resume --repo "<owner>/<repo>" --track "<track>"`, then
    read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
    prints only the body and a parked lane's state is in its parking comment. A lane handed back by
    an attended session holds that comment in a closed link, further back where it parked more than
-   once, so walk it. List its links with `handoff.py chain --repo "<owner>/<repo>" --track
+   once, so walk it. List its links with `python3 "$handoff" chain --repo "<owner>/<repo>" --track
    "<track>"`, raising `--limit` while its only notice names the `--limit` cap, and read each link
    with `gh issue view "<n>" --repo "<owner>/<repo>" --json body,comments`, since `chain` prints one
    summary line per link. Any other notice says the walk missed part of the lane, so it returns
@@ -271,10 +274,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    develop. **A lane parked on that promotion holds it until the lane closes, answered or not.** An
    answer closes the decision issue and takes its label off, so the read above stops seeing it
    before the lane holding the answer has applied it. Read the open handoffs with
-   `python3 "$handoff" tracks --repo "<owner>/<repo>" --json`, with `$handoff` as picker step 1
-   sets it and as picker step 1 does, and keep those on an `auto-*` track
-   other than this worker's own. Walk each kept track back as step 1 walks the worker's own,
-   starting at its open link and reading every link's body and comments, since a lane parked and
+   `python3 "$handoff" tracks --repo "<owner>/<repo>" --json`, as picker step 1 does, and keep
+   those on an `auto-*` track other than this worker's own. Walk each kept track back as step 1
+   walks the worker's own, starting at its open link and reading every link's body and comments, since a lane parked and
    handed back more than once holds the answer in an older link. A walk
    step 1 would return `STOP` on is a read that cannot run. Where any of them names a decision issue
    that states it blocks the open promotion, whatever that issue's state, the round narrows to

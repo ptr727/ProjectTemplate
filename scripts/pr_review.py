@@ -1038,19 +1038,6 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     return pr
 
 
-def gql_required(query: str, owner: str, repo: str, num: int) -> dict:
-    """`gql` for a read that cannot proceed without the pull request, ended like a failed read.
-
-    GitHub answers a missing number with a null `pullRequest` and a NOT_FOUND error, which the
-    transport already ends at exit 1. This guards the same null arriving without an error, so
-    no caller dereferences it. `gql` returns the null as it is for the reads tolerating it.
-    """
-    pr = gql(query, owner, repo, num)
-    if pr is None:
-        raise SystemExit(f"gh graphql: pull request {owner}/{repo}#{num} not found")
-    return pr
-
-
 def follow(
     query: str, owner: str, repo: str, num: int, connection: str, after: str | None = None
 ) -> Iterator[dict]:
@@ -1989,7 +1976,7 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     """
 
     def read() -> dict:
-        fresh = gql_required(Q_FULL, owner, repo, num)
+        fresh = gql(Q_FULL, owner, repo, num)
         page_files(owner, repo, num, fresh)
         return fresh
 
@@ -3858,7 +3845,7 @@ def live_state(
     owner: str, repo: str, num: int, min_rounds: int = 0
 ) -> tuple[bool, dict | None, list[str]]:
     """Return `liveness` off one fresh `Q_LIVE`, since a push during the wait moves the head."""
-    return liveness(gql_required(Q_LIVE, owner, repo, num), min_rounds)
+    return liveness(gql(Q_LIVE, owner, repo, num), min_rounds)
 
 
 def heading_of(block: str) -> str:
@@ -5517,7 +5504,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
 
 def check_claims(owner: str, repo: str, num: int) -> int:
     """Report every reference the description makes that its own head tree does not carry."""
-    pr = gql_required(Q_CLAIMS, owner, repo, num)
+    pr = gql(Q_CLAIMS, owner, repo, num)
     head, body = pr["headRefOid"], pr.get("body") or ""
     uses, shas = body_references(body)
 
@@ -5761,7 +5748,7 @@ def main(argv: list[str] | None = None) -> int:
         return 64
 
     start = time.monotonic()
-    pr = gql_required(Q_LIVE, owner, repo, a.number)
+    pr = gql(Q_LIVE, owner, repo, a.number)
     rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
