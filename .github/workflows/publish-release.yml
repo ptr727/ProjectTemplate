@@ -6,16 +6,14 @@ name: Publish project release action
 on:
   workflow_dispatch:
 
-# A publish is a deliberate dispatch, so runs on one ref queue rather than cancel.
-# Queuing leaves no run with a half-created GitHub release.
-# The group is ref-scoped so a supersede dispatch on one branch never replaces a pending publish of the other.
+# GOVERNANCE.md "Workflow YAML Conventions" Concurrency exception (2).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
 
-  # Fail fast (D2.3) on a dispatch from anything but main or develop, before validation or the build run.
+  # Runs before validation or the build, per D2.3.
   assert-dispatch-ref:
     name: Assert dispatch ref job
     runs-on: ubuntu-latest

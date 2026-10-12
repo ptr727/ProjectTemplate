@@ -638,7 +638,7 @@ jobs:
           directories: ${{ steps.python.outputs.projects }}
 
       # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
-      # --cov-report=xml names the report format and selects nothing to measure, so a pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
+      # A pytest directory's own pyproject.toml supplies the --cov selector, per D1.6.
       # The report is checked rather than assumed, because the best-effort upload below reads a missing file exactly as it reads a healthy run.
       # The pre-run delete makes that a check on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
       # Each directory's run reads /dev/null, since the loop's own list is its stdin and a suite reading stdin would swallow the directories after it.

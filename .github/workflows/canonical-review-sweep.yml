@@ -1,6 +1,6 @@
 name: Sweep canonical review coverage action
 
-# The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule, which no push and no pull request is gated on any more.
+# The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule.
 # This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units it asks for and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
 # A schedule fires from this file as the default branch holds it, and a dispatch is offered only once it is there, so the first run comes at the promotion that carries this file to main rather than at the merge into develop that removes the gate it replaces.
@@ -12,9 +12,7 @@ on:
     - cron: '23 5 * * 1'
   workflow_dispatch:
 
-# Workflow-only group, with no -${{ github.ref }} and cancel-in-progress false, per GOVERNANCE.md "Workflow YAML Conventions".
-# The one thing a run writes is a single repository-scoped issue, so a ref-scoped group would separate a dispatch made from any branch other than the default from the weekly schedule, which always runs on the default, and let each read no open issue and file one.
-# Cancelling is worse than queueing here for the same reason: the closing path comments and then closes, and a cancel between the two leaves the comment posted on an issue that stays open.
+# GOVERNANCE.md "Workflow YAML Conventions" Concurrency exception (4).
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
