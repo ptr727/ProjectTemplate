@@ -33,9 +33,10 @@ conflict between instructions instead of silently choosing one.
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
 resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
 lines when the behavior depends on unchanged callers or consumers. Beyond reading files, git state,
-and the pull request, run no command the review's requester does not name. Running code belongs to
-the change's author and CI. A finding that only an unnamed command could prove counts as supported
-for "Publish Every Finding" once it names that command.
+and the pull request, run no command the review's requester does not name. Running code is left to
+the author and CI, since even a `--help` run can build environments and start servers that
+`git status` misses. A finding that only an unnamed command could prove still counts as supported
+once it names that command.
 
 For each candidate finding:
 

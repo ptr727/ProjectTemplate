@@ -65,10 +65,8 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
   what fleet-code-review's item 7 names, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
-  Run nothing beyond commands that only read files and git state, and the exact commands, with
-  their arguments, that Task above names. A script under review may mishandle its arguments, so
-  even its `--help` run can build environments and start servers whose gitignored artifacts
-  `git status` misses.
+  Run no command beyond what "Review the Change" allows, which in this brief means the exact
+  commands, with their arguments, that Task above names.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
