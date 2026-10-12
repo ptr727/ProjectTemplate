@@ -552,7 +552,10 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
                 f"the {what} did not read as an issue connection: {cut(repr(data))}"
             ) from exc
         if enabled is not True:
-            raise Execution(f"{repo} has issues turned off, so it holds no readable {what}")
+            raise Refusal(
+                f"{repo} has issues turned off, so it holds no readable {what}. Run "
+                f"gh repo edit {repo} --enable-issues to read the chain there."
+            )
         rows += rows_of(nodes, what, "number")
         if not more:
             break

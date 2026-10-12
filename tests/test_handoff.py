@@ -2406,14 +2406,15 @@ class ConsistentReadCase(unittest.TestCase):
         self.assertTrue(all(int(f["first"][0]) <= handoff.PAGE for f in pages))
         self.assertTrue(any("after" in f for f in pages))
 
-    def test_a_repository_with_issues_turned_off_fails_rather_than_reading_empty(self) -> None:
+    def test_a_repository_with_issues_turned_off_refuses_rather_than_reading_empty(self) -> None:
         """GitHub answers the connection empty there, which would read as a chain never started."""
         fake = FakeGh({5: link(5, "default", 1, None)}, issues_on=False)
         for argv in (("tracks",), ("current",)):
             with self.subTest(argv=argv):
                 code, _, err = run(fake, *argv, "--repo", "o/r")
-                self.assertEqual(code, 2)
+                self.assertEqual(code, 1)
                 self.assertIn("issues turned off", err)
+                self.assertIn("--enable-issues", err)
 
     def test_a_response_that_is_no_issue_connection_is_an_execution_failure(self) -> None:
         def broken(argv):
