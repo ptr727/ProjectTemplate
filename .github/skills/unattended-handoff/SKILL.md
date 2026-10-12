@@ -47,6 +47,11 @@ no reminder.
 One worker runs at a time, so no two rounds claim the same file and no round needs the grouping
 `backlog-burndown` does.
 
+Every command below that runs the chain's script writes it as `python3 "$handoff" ...`, with
+`handoff="<hub-checkout>/scripts/handoff.py"` (in the hub itself, `scripts/handoff.py`), as
+`session-handoff` "Running the Chain" sets it. Each seat sets it for itself, since the picker and
+the worker are separate subagents and share no shell.
+
 ## Invocation and What It Authorizes
 
 The maintainer names the scope when invoking the skill, and the scope is the whole grant.
@@ -195,8 +200,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   own guard, and it is worked only in an attended session, so a human approves every change to it.
 - **It reverses no settled decision** recorded in an issue, a handoff, or the rule text.
 - **Nothing has worked it or is working it.** The track `auto-<issue>` has no link, open or closed,
-  which `handoff.py chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1` answers with its
-  refusal naming no handoff on that track. Any other refusal from it is a `STOP` rather than a yes.
+  which `python3 "$handoff" chain --repo "<owner>/<repo>" --track "auto-<issue>" --limit 1`
+  answers with its refusal naming no handoff on that track. Any other refusal from it is a `STOP`
+  rather than a yes.
   No open pull request body names it in a fix-intent reference, and no body of a pull request whose
   squash commit is in `origin/main..origin/develop` does. A fix merged to develop leaves its issue
   open until it is promoted, whoever merged it. A fix-intent reference is `Closes on promotion:`,
@@ -211,11 +217,14 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Picker
 
-1. **Read the open handoffs** with labels and update times, `gh issue list --repo "<owner>/<repo>"
-   --label handoff --state open --limit 100 --json number,title,labels,updatedAt`, since `handoff.py
-   tracks` prints neither. Where it returns as many rows as the limit, the list may be truncated, so
-   raise the limit and read again until it returns fewer, rather than ranking a partial list. Reach
-   `scripts/handoff.py` from a hub checkout, per `session-handoff` "Running the Chain".
+1. **Read the open handoffs** with labels and update times, `python3 "$handoff" tracks --repo
+   "<owner>/<repo>" --json`, which prints number, title, track, labels, and updatedAt for each. It
+   reads the repository's issue connection rather than the search index, so a link a worker's `new`
+   just closed or opened is already read correctly. A nonzero exit, including the refusal over a
+   read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
+   ranking a partial list. **The full-page check** that picker step 3 and the worker's `decision`
+   read apply to their own `gh issue list` reads is that a read returning as many rows as its
+   limit may be truncated, so raise the limit and read again until it returns fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
    link is work already framed. Handoffs on any other track belong to the maintainer's attended
@@ -227,11 +236,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    criteria, keep the auto-resolvable ones, and take the top one. Read the list with `gh issue list
    --repo "<owner>/<repo>" --state open` and an explicit `--limit`, since it returns 30 rows unless
    told otherwise, and apply step 1's full-page check to it.
-4. **Create its handoff** with `handoff.py new --repo "<owner>/<repo>" --track "auto-<issue>"`,
-   adding the `--title` and `--body-file` it also requires, as `session-handoff` "Running the Chain"
-   shows, and `--dry-run` first. The body carries the sections `session-handoff` "What Goes in the
-   Body" names, with the next steps naming the issue and what done looks like. That skill's rules on
-   the body bind it.
+4. **Create its handoff** with `python3 "$handoff" new --repo "<owner>/<repo>" --track
+   "auto-<issue>"`, adding the `--title` and `--body-file` it also requires, as `session-handoff`
+   "Running the Chain" shows, and `--dry-run` first. The body carries the sections `session-handoff`
+   "What Goes in the Body" names, with the next steps naming the issue and what done looks like.
+   That skill's rules on the body bind it.
 5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier", naming
    `frontier` or `standard` and never a model.
 6. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
@@ -239,19 +248,19 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 ## The Worker
 
-1. **Resume the handoff** with `handoff.py resume --repo "<owner>/<repo>" --track "<track>"`, then
-   read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`, since `resume`
-   prints only the body and a parked lane's state is in its parking comment. A lane handed back by
-   an attended session holds that comment in a closed link, further back where it parked more than
-   once, so walk it. List its links with `handoff.py chain --repo "<owner>/<repo>" --track
-   "<track>"`, raising `--limit` while its only notice names the `--limit` cap, and read each link
-   with `gh issue view "<n>" --repo "<owner>/<repo>" --json body,comments`, since `chain` prints one
-   summary line per link. Any other notice says the walk missed part of the lane, so it returns
-   `STOP`, as a nonzero exit from `chain` does. Where a parking comment names a decision issue the
-   lane waits on, read the answer recorded there and follow it, since it is what unblocked the lane.
-   A lesson issue the comment also names, per step 6, is its own work rather than this lane's, so
-   the worker neither follows it nor parks on it. Re-derive live state rather than trusting any of
-   them, per `session-handoff` "Resuming".
+1. **Resume the handoff** with `python3 "$handoff" resume --repo "<owner>/<repo>" --track
+   "<track>"`, then read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`,
+   since `resume` prints only the body and a parked lane's state is in its parking comment. A lane
+   handed back by an attended session holds that comment in a closed link, further back where it
+   parked more than once, so walk it. List its links with `python3 "$handoff" chain --repo
+   "<owner>/<repo>" --track "<track>"`, raising `--limit` while its only notice names the `--limit`
+   cap, and read each link with `gh issue view "<n>" --repo "<owner>/<repo>" --json body,comments`,
+   since `chain` prints one summary line per link. Any other notice says the walk missed part of the
+   lane, so it returns `STOP`, as a nonzero exit from `chain` does. Where a parking comment names a
+   decision issue the lane waits on, read the answer recorded there and follow it, since it is what
+   unblocked the lane. A lesson issue the comment also names, per step 6, is its own work rather
+   than this lane's, so the worker neither follows it nor parks on it. Re-derive live state rather
+   than trusting any of them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
@@ -265,32 +274,32 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    open develop -> main pull request, as "Parking" step 2 has it state, the round narrows to
    develop. **A lane parked on that promotion holds it until the lane closes, answered or not.** An
    answer closes the decision issue and takes its label off, so the read above stops seeing it
-   before the lane holding the answer has applied it. Read the open handoffs under the same
-   full-page check, with `gh issue list --repo "<owner>/<repo>" --label handoff --state open --limit
-   100 --json number,body,comments`, and keep those on an `auto-*` track other than this worker's
-   own. A lane parked and handed back more than once holds the answer in an older link, so walk each
-   kept track back as step 1 walks the worker's own, reading every link's body and comments. A walk
-   step 1 would return `STOP` on is a read that cannot run. Where any of them names a decision issue
-   that states it blocks the open promotion, whatever that issue's state, the round narrows to
-   develop as well. The worker then merges, opens, and releases no promotion while either holds. It
-   instead brings that promotion's body up to a `Fixes` line for every issue develop fixes,
-   `#<issue>` included, per `backlog-burndown` "Assembling the Promotion Body", so each closes when
-   the promotion merges. It then closes the lane out, naming the decision issue in the close-out
-   comment. Where neither holds, continue to the promotion pull request, its body carrying a `Fixes`
-   line for every issue develop fixes, assembled per that same section, and hand it to
-   `merge-and-release`, merging only under `main` and merging and releasing under `release`. **A
-   read this step names that cannot run returns `STOP`** rather than continuing, since a read that
-   did not run shows nothing about whether the promotion is blocked. **Repeat both blocked-promotion
-   reads immediately before each head of the promotion merges**, a head `merge-and-release` re-gates
-   included. Run the `decision` read with `--state all` and with `state,closedAt` added to `--json`,
-   never with a `--search` query, since search can lag a close. Where a `decision` issue blocking
-   that promotion is open, or the lane read finds the promotion held, the round narrows to develop.
-   Otherwise, where a `decision` issue blocking that promotion has a `closedAt` at or after the time
-   noted before the first read, park. That answer may not be to merge, so the `decision` issue the
-   park files asks whether it lets the promotion merge. Exit `45` on a promotion blocks no merge
-   where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a
-   promotion merges with no `decision` issue, and the worker records that item's evidence on the
-   handoff. Any other shortfall parks.
+   before the lane holding the answer has applied it. Read the open handoffs with `python3
+   "$handoff" tracks --repo "<owner>/<repo>" --json`, as picker step 1 does, and keep those on an
+   `auto-*` track other than this worker's own. Walk each kept track back as step 1 walks the
+   worker's own, starting at its open link and reading every link's body and comments, since a lane
+   parked and handed back more than once holds the answer in an older link. A walk step 1 would
+   return `STOP` on is a read that cannot run. Where any of them names a decision issue that states
+   it blocks the open promotion, whatever that issue's state, the round narrows to develop as well.
+   The worker then merges, opens, and releases no promotion while either holds. It instead brings
+   that promotion's body up to a `Fixes` line for every issue develop fixes, `#<issue>` included,
+   per `backlog-burndown` "Assembling the Promotion Body", so each closes when the promotion merges.
+   It then closes the lane out, naming the decision issue in the close-out comment. Where neither
+   holds, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
+   develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
+   under `main` and merging and releasing under `release`. **A read this step names that cannot run
+   returns `STOP`** rather than continuing, since a read that did not run shows nothing about
+   whether the promotion is blocked. **Repeat both blocked-promotion reads immediately before each
+   head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
+   read with `--state all` and with `state,closedAt` added to `--json`, never with a `--search`
+   query, since search can lag a close. Where a `decision` issue blocking that promotion is open, or
+   the lane read finds the promotion held, the round narrows to develop. Otherwise, where a
+   `decision` issue blocking that promotion has a `closedAt` at or after the time noted before the
+   first read, park. That answer may not be to merge, so the `decision` issue the park files asks
+   whether it lets the promotion merge. Exit `45` on a promotion blocks no merge where the promotion
+   meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a promotion merges with no
+   `decision` issue, and the worker records that item's evidence on the handoff. Any other shortfall
+   parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in
    the worker's own turn. The `local-strict-review` pass is a wait like any other, so the worker
    replies only after its reviewer has reported. It dispatches the reviewer in the background only

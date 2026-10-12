@@ -410,8 +410,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # GITHUB_TOKEN cannot hold the workflows scope, so its tag create answers 403 once the branch head carries different workflow files, per D4.7.
-      # Where every push since was a release bot's, the actor allowlist publish-plan-task.yml gates on, the calling publisher is dispatched to release the head and this run cancels itself.
+      # See WORKFLOW.md D4.7.
       - name: Supersede a release the token cannot tag step
         if: ${{ steps.release-exists.outputs.exists == 'false' }}
         env:

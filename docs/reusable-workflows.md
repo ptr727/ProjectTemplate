@@ -261,9 +261,7 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize, closed]
 
-# Concurrency keys on the PR number rather than on github.ref, which under pull_request_target is the base branch and would serialize every bot PR against it.
-# Each PR therefore queues independently.
-# The cancel-in-progress setting is false so a follow-up synchronize does not cancel an in-flight opened run before it enables auto-merge.
+# GOVERNANCE.md "Workflow YAML Conventions" Concurrency exception (1).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -346,7 +344,7 @@ jobs:
               - 'version.json'
               - '.github/actions/**'
 
-  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, or its pull request coverage upload runs without the token and can skip silently (D1.6).
+  # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
@@ -523,7 +521,7 @@ name: Publish project release action
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
 # This is the NuGet-library shape, and a Docker, PyPI, or file-target repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 # A dispatch-only repo whose schedule only retests also gates the publish job on github.event_name == 'workflow_dispatch', since the plan publishes every schedule.
-# That repo swaps the push term in the group below for WORKFLOW.md D7.1's schedule term, so a retest never replaces a pending dispatch.
+# That repo swaps the push term in the group below for WORKFLOW.md D7.1's schedule term.
 
 on:
   push:
@@ -536,7 +534,7 @@ on:
       - 'global.json'
   workflow_dispatch:
 
-# A push the plan cannot publish gets a per-run group, so it never replaces a pending publish.
+# GOVERNANCE.md "Workflow YAML Conventions" Concurrency exception (2).
 # The expression must track publish-plan-task.yml's push rule and actor allowlist.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'push' && (github.ref != 'refs/heads/main' || (github.actor != 'ptr727-codegen[bot]' && github.actor != 'dependabot[bot]')) && format('-{0}', github.run_id) || '' }}
@@ -624,7 +622,7 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --api-key "$NUGET_API_KEY" \
             --skip-duplicate
-      # Gated on the download rather than on the push, per D5.2: a step with no if: inherits success() and would skip on exactly the failed push where the artifact is already downloaded and the release is already cut.
+      # See D5.2.
       - name: Delete consumed NuGet build artifact step
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true
@@ -670,7 +668,7 @@ A Docker repo's stub removes the `push:` block (its paths filter with it) and ad
         with:
           packages-dir: ./dist
           skip-existing: true
-      # Gated on the download rather than on the publish, per D5.2, for the same reason the NuGet stub above gives.
+      # See D5.2.
       - name: Delete consumed PyPI build artifact step
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
         continue-on-error: true

@@ -146,8 +146,10 @@ Applies to code and workflow (`#`) comments alike.
   Self-evident code needs no comment.
 - State only the non-obvious *why*, for the human reading *this* project's code now. No
   cross-project references, no historic or design narrative, and no rule restated inline.
-  Governance lives in the fleet's own instruction set. A comment may name the contract section
-  holding its why, such as `D5.2`, and never echoes that section's text.
+  Governance lives in the fleet's own instruction set. A comment may name the instruction-set
+  section holding its why, such as `D5.2`, and never echoes or paraphrases that section's text.
+  An id unique across that set, such as a `WORKFLOW.md` D-id, may stand alone, and any other
+  citation names its file.
 - **Keep it short**: one line is the default. A second line is earned only by a constraint the
   code cannot otherwise carry.
 - **Structured, not prose**: one sentence per line, never wrapped across lines, never a
