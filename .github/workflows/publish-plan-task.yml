@@ -19,6 +19,7 @@ name: Publish plan task
 # A Docker/wrapper repo also triggers the weekly schedule and gates main-only jobs on `stable`.
 # A case a given caller never triggers (e.g. schedule for a library) is simply inert for it.
 # That is expected of a single-source task.
+# A schedule kept only to retest still yields publish=true, so its caller gates each release job on a dispatch event.
 
 on:
   workflow_call:
