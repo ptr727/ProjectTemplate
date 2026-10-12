@@ -5683,6 +5683,16 @@ class TestToolDirectivesLeaveCommentWrap(BaitCase):
     def test_the_line_after_a_directive_is_not_its_continuation(self) -> None:
         self.assertEqual([], self.flag("# nosec B404\n# the next call is checked below.\nx = 1\n"))
 
+    def test_a_lowercase_line_after_a_directive_is_judged_for_case_instead(self) -> None:
+        self.assertEqual(
+            ["comment-case"],
+            self.kinds(
+                "# nosec B404\n# the next call is checked below.\nx = 1\n",
+                {"comment-wrap", "comment-case"},
+                name="tool.py",
+            ),
+        )
+
     def test_a_directive_followed_by_a_directive_draws_nothing(self) -> None:
         self.assertEqual([], self.flag("# nosec B404\n# hadolint ignore=DL3008\nx = 1\n"))
 
@@ -5690,6 +5700,9 @@ class TestToolDirectivesLeaveCommentWrap(BaitCase):
         self.assertEqual(
             ["comment-wrap"], self.flag("# the next call is\n# checked below.\nx = 1\n")
         )
+
+    def test_a_sentence_wrapping_into_a_directive_is_still_reported(self) -> None:
+        self.assertEqual(["comment-wrap"], self.flag("# the value is\n# nosec B404\nx = 1\n"))
 
 
 class TestTheCommentAddedRule(BaitCase):
