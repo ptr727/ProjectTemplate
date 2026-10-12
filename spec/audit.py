@@ -2224,7 +2224,8 @@ CONCURRENCY_CALLERS = {
     ),
 }
 _RUN_ID_SUFFIX = re.compile(
-    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\(github\.actor!='[^']+'(?:&&github\.actor!='[^']+')*\)\)"
+    r"^\$\{\{github\.event_name=='push'&&\(github\.ref!='refs/heads/main'\|\|\((?:github\.actor!='ptr727-codegen\[bot\]'&&github\.actor!='dependabot\[bot\]'"
+    r"|github\.actor!='dependabot\[bot\]'&&github\.actor!='ptr727-codegen\[bot\]')\)\)"
     r"&&format\('-\{0\}',github\.run_id\)\|\|''\}\}$"
 )
 _TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
@@ -6685,6 +6686,12 @@ def _selftest():
             pub_text.replace("refs/heads/main", "refs/heads/develop"),
             1,
             "a suffix keyed on another branch",
+        ),
+        (
+            pub_path,
+            pub_text.replace("github.actor != 'dependabot[bot]'", "github.actor != 'other[bot]'"),
+            1,
+            "an actor list that is not the plan task's allowlist",
         ),
         (
             bot_path,
