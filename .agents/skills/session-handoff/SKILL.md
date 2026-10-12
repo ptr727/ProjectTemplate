@@ -192,13 +192,14 @@ A maintainer resuming work says little, often only "resume the handoff", and tha
 the whole procedure below. Run every step without being reminded of any of them.
 
 1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
-   `gh issue list --repo OWNER/NAME --label handoff --state open --limit 100 --json
-   number,title,labels,updatedAt`, since `tracks` prints neither labels nor exact update times.
-   Where it returns as many rows as the limit, the list may be truncated, so raise the limit and
-   read again until it returns fewer, rather than picking from a partial list. Take a link carrying
-   `blocked` first, newest update first among them, since its blocker is a decision only the
-   maintainer can make and the maintainer is now present. Otherwise take the newest update among the
-   rest. An `auto-*` link not carrying `blocked` is skipped unless named, since an
+   `python3 "$handoff" tracks --repo OWNER/NAME --json`, which prints each open handoff's
+   number, title, track, labels, and updatedAt from the repository's issue connection rather than
+   the search index, so a link written moments ago is already read correctly. `$handoff` is the hub
+   checkout path "Running the Chain" sets. A nonzero exit, including the refusal over a read window that
+   filled, means the list is not whole, so say so and ask rather than picking from it. Take a link
+   carrying `blocked` first, newest update first among them, since its blocker is a decision only
+   the maintainer can make and the maintainer is now present. Otherwise take the newest update
+   among the rest. An `auto-*` link not carrying `blocked` is skipped unless named, since an
    `unattended-handoff` worker may hold it right now, and where one is named, confirm with the
    maintainer that no unattended run is live before working it. Where every open link is skipped,
    say so and ask the maintainer which to take. Say which link was picked in one line before
@@ -302,7 +303,9 @@ comments on whatever link that lane has, closing it too where it was open.
 - **`tracks`** surveys every open handoff, one carrying no metadata block included, and it is the
   one command that reports that state rather than refusing over it. That state is settled by a
   hand edit, adding the block to the issue's body or taking the label off it, since no read can
-  place an issue on a track until its own block says which track that is.
+  place an issue on a track until its own block says which track that is. With `--json` it prints
+  the same rows as an array of number, title, track, labels, and updatedAt, the track null for
+  an issue whose block is absent or unreadable, which is what a picker ranks by.
 - **`new`** performs as many of the chain's three steps as the track has links for. On a track
   with no link at all it creates and stops, since there is nothing to comment on or close. On one
   whose newest link is closed it creates and comments, since the close already happened. Only a
@@ -320,7 +323,7 @@ python3 "$handoff" chain   --repo OWNER/NAME --track "<slug>" --grep "an escaped
 python3 "$handoff" new     --repo OWNER/NAME --track "<slug>" --title "<subject>" \
   --body-file "<path>" --dry-run
 python3 "$handoff" link    --repo OWNER/NAME --new "<successor>" --previous "<predecessor>"
-python3 "$handoff" tracks  --repo OWNER/NAME
+python3 "$handoff" tracks  --repo OWNER/NAME [--json]
 ```
 
 Read `--dry-run` output before the first real `new` of a session, since the run can close an issue.
