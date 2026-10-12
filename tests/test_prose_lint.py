@@ -5628,6 +5628,31 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
+class TestToolDirectivesLeaveCommentCase(BaitCase):
+    """A directive `TOOL_DIRECTIVE` names is an instruction to a tool, not a sentence to capitalize."""
+
+    def flag(self, name: str, text: str) -> list[str]:
+        return self.kinds(text, {"comment-case"}, name=name)
+
+    def test_a_lowercase_directive_draws_no_case_finding(self) -> None:
+        for text in (
+            "# nopep8\n",
+            "# nosec B404\n",
+            "# nopep8: E501\n",
+            "# hadolint ignore=DL3008\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.flag("tool.py", text))
+
+    def test_a_punctuated_sentence_opening_on_a_directive_name_is_still_judged(self) -> None:
+        self.assertEqual(
+            ["comment-case"], self.flag("tool.py", "# nosec the value is read once.\n")
+        )
+
+    def test_an_ordinary_lowercase_comment_still_draws_the_finding(self) -> None:
+        self.assertEqual(["comment-case"], self.flag("tool.py", "# details are allowed here.\n"))
+
+
 class TestTheCommentAddedRule(BaitCase):
     """The rule that refuses a comment line a change adds to code or config.
 
