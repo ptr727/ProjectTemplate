@@ -5629,7 +5629,7 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
 
 
 class TestToolDirectivesLeaveCommentCase(BaitCase):
-    """A directive `TOOL_DIRECTIVE` names is an instruction to a tool, not a sentence to capitalize."""
+    """A directive that `TOOL_DIRECTIVE` names is an instruction to a tool, not a sentence to capitalize."""
 
     def flag(self, name: str, text: str) -> list[str]:
         return self.kinds(text, {"comment-case"}, name=name)
