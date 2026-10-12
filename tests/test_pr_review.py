@@ -5760,6 +5760,16 @@ class TestCoverageExitCodes(GqlCase):
                 body = self.balanced(["a.md"]) + "\n" + row + "\n"
                 self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
 
+    def test_a_partial_stated_inside_a_file_table_row_is_still_read(self) -> None:
+        for row in (
+            "| `a.md` | Prose. Copilot reviewed 1 of 2 files. |",
+            "| `a.md` | Prose. | &lt;!-- fleet-review: reviewed=1 changed=2 findings=0 --&gt; |",
+        ):
+            for wrap in ("{}", "```\n{}\n```"):
+                with self.subTest(row=row, wrap=wrap):
+                    body = self.balanced(["a.md"]) + "\n" + wrap.format(row) + "\n"
+                    self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
     def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
         """Prose about the marker and its placeholder are not statements, so they block nothing."""
         for mention in (
