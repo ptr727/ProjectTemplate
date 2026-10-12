@@ -2326,7 +2326,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
     goes on past.
 
-    A line `is_tool_directive` matches is an instruction to a tool, so it never becomes the previous
+    A line that `is_tool_directive` matches is an instruction to a tool, so it never becomes the previous
     body and the comment line after it is not read as that line's continuation.
     """
     comments, kept, configured = prose_comment_candidates(path, raw, lines)
