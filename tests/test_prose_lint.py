@@ -3430,7 +3430,9 @@ class TestChangedLines(unittest.TestCase):
 
 class TestCli(unittest.TestCase):
     def setUp(self) -> None:
+        """Run from a directory that is no ancestor of the fixtures, which would print relative paths."""
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.chdir(self.enterContext(tempfile.TemporaryDirectory())))
         # The main() call prints findings, which would read as real ones in a CI log.
         self.enterContext(contextlib.redirect_stdout(io.StringIO()))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
@@ -4326,6 +4328,27 @@ class TestDiffScopeFloor(unittest.TestCase):
         nested.write_text("# A clean comment.\n", encoding="utf-8")
         found = prose_lint.unread_diff_files({"scripts/tool.py": {1}}, ["."], (), self.tmp)
         self.assertEqual(["scripts/tool.py"], found)
+
+    def test_an_absolute_path_argument_still_resolves_against_the_repository(self) -> None:
+        """An absolute argument covering the changed file must not empty the unread list.
+
+        Keying the diff's paths with the working-directory-relative form instead of the
+        repository-relative one leaves an absolute argument matching nothing, so the run exits 0.
+        """
+        (self.tmp / "scripts").mkdir()
+        changed = self.tmp / "scripts" / "tool.py"
+        changed.write_text("# A clean comment.\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "discover", return_value=[]),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"scripts/tool.py": {1}}),
+        ):
+            self.assertEqual(
+                2,
+                prose_lint.main(
+                    ["--check", "dupword", "--diff", "HEAD", str(self.tmp / "scripts")]
+                ),
+            )
 
     def test_asked_about_reads_a_prefix_as_a_directory_boundary(self) -> None:
         """`catalog` must not claim `catalogue/x.md`, which shares its first seven characters."""
@@ -5626,6 +5649,29 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         """
         self.assertIsNone(prose_lint.diff_header_path("/dev/null"))
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
+
+
+class TestToolDirectivesLeaveCommentCase(BaitCase):
+    """A directive that `TOOL_DIRECTIVE` names is an instruction to a tool, not a sentence to capitalize."""
+
+    def flag(self, name: str, text: str) -> list[str]:
+        return self.kinds(text, {"comment-case"}, name=name)
+
+    def test_a_lowercase_directive_draws_no_case_finding(self) -> None:
+        for text in (
+            "# nosec B404\n",
+            "# hadolint ignore=DL3008\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.flag("tool.py", text))
+
+    def test_a_punctuated_sentence_opening_on_a_directive_name_is_still_judged(self) -> None:
+        self.assertEqual(
+            ["comment-case"], self.flag("tool.py", "# nosec the value is read once.\n")
+        )
+
+    def test_an_ordinary_lowercase_comment_still_draws_the_finding(self) -> None:
+        self.assertEqual(["comment-case"], self.flag("tool.py", "# details are allowed here.\n"))
 
 
 class TestTheCommentAddedRule(BaitCase):

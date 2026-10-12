@@ -65,6 +65,8 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
   what fleet-code-review's item 7 names, no severity theater.
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
+  Beyond what "Review the Change" allows, run only the exact commands, with their arguments,
+  that Task above names.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
