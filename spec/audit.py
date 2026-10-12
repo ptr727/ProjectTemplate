@@ -1928,6 +1928,7 @@ def _code_view(text):
     A block-scalar `if:` body, the form the Workflow YAML convention sets for a multi-line condition, is kept,
     since an `if:` value is always an expression.
     It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
+    A trailing comment on that key line is dropped first, so it never reads as part of the condition.
     """
     out = []
     skip_indent = None
@@ -1959,6 +1960,7 @@ def _code_view(text):
         if _BLOCK_SCALAR_KEY.match(stripped):
             if _IF_KEY.match(stripped):
                 fold_indent = key_col
+                ln = re.sub(r"[ \t]+#.*$", "", ln)
             else:
                 skip_indent = key_col
         elif dash and _BARE_BLOCK_SCALAR.match(stripped):
@@ -2267,7 +2269,7 @@ def _workflow_triggers(code):
     Only the block-mapping form is read, the shape a `schedule` trigger with its `cron` list takes in practice.
     """
     head = _TOP_ON.search(code)
-    if head is None or re.sub(r"[ \t]+#.*$", "", head.group(1)).strip():
+    if head is None or re.sub(r"(?:^|[ \t]+)#.*$", "", head.group(1)).strip():
         return None
     events = set()
     child_indent = None
@@ -6754,6 +6756,21 @@ def _selftest():
             ),
             0,
             "a folded dispatch gate",
+        ),
+        (
+            pub_path,
+            sched_text.replace(
+                sched_gate,
+                "if: >- # note\n      github.event_name == 'workflow_dispatch' &&\n      needs.plan.outputs.publish == 'true'",
+            ),
+            0,
+            "a folded dispatch gate with a comment on its key line",
+        ),
+        (
+            pub_path,
+            sched_text.replace("\non:\n", "\non: # triggers\n", 1),
+            0,
+            "a comment on the on: key line",
         ),
         (
             pub_path,
