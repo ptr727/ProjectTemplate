@@ -2973,6 +2973,85 @@ class TestCommentSentenceLength(BaitCase):
         text = f'"""\n    Summary.\n\n    {self.over()}\n"""\n'
         self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
 
+    def test_a_numpy_multi_word_bare_type_before_a_blank_is_a_head(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP - 1)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n'
+            f'        {desc}\n    numpy array\n\n        Other.\n    """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_numpy_unpunctuated_line_before_a_blank_and_code_stays_prose_after_prose(
+        self,
+    ) -> None:
+        head = self.words(prose_lint.SENTENCE_WORD_CAP - 1)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {head}\n    more words\n\n        >>> f()\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_numpy_line_over_the_head_word_bound_is_prose(self) -> None:
+        desc = self.words(prose_lint.SENTENCE_WORD_CAP - 1)
+        long_line = self.words(7)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n'
+            f'        {desc}\n    {long_line}\n\n        More.\n    """\n'
+        )
+        self.assertEqual([(7, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_dedented_non_url_body_keeps_code_under_the_quotes_code(self) -> None:
+        call = ", ".join(["arg"] * 28)
+        text = f'def f():\n    """Summary.\n\nShort body.\n\n    call({call})\n"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_numpy_sentence_ending_in_a_closed_colon_over_code_is_prose(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP - 1)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {half}\n    as in `example:`\n        code()\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_docstring_code_block_with_a_dedented_closer_stays_code(self) -> None:
+        text = f'def f():\n    """Summary.\n\n        {self.over()}\n"""\n'
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_star_only_block_comment_line_is_a_gap_inside_a_colon_block(self) -> None:
+        text = f"/* Usage:\n *\n *     {self.over()}\n */\nint x;\n"
+        self.assertEqual([], self.found(text, "bait.c"))
+
+    def test_a_star_only_line_still_ends_a_block_comment_paragraph(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP // 2 + 1)
+        text = f"/* {half}\n *\n * {half}\n */\nint x;\n"
+        self.assertEqual([], self.found(text, "bait.c"))
+
+    def test_a_dedented_url_line_does_not_make_quote_column_prose_code(self) -> None:
+        text = (
+            f'def f():\n    """Summary.\n\n    {self.over()}\n\n'
+            'https://example.invalid/path\n    """\n'
+        )
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_deep_body_after_a_colon_summary_is_prose(self) -> None:
+        text = f'def f():\n    """Do the thing as follows:\n\n        {self.over()}\n        """\n'
+        self.assertEqual([(4, "sentence-length")], self.found(text, "bait.py"))
+
+    def test_a_block_deeper_than_a_deep_body_after_a_colon_summary_stays_code(self) -> None:
+        text = (
+            'def f():\n    """Do the thing as follows:\n\n        Call it:\n\n'
+            f'            {self.over()}\n        """\n'
+        )
+        self.assertEqual([], self.found(text, "bait.py"))
+
+    def test_a_numpy_sentence_ending_in_a_colon_over_code_is_prose(self) -> None:
+        half = self.words(prose_lint.SENTENCE_WORD_CAP - 1)
+        text = (
+            'def f() -> int:\n    """S.\n\n    Returns\n    -------\n    int\n        The count.\n\n'
+            f'    {half}\n    as below:\n        code()\n    """\n'
+        )
+        self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
+
 
 class TestSpelling(BaitCase):
     """US English, read from Markdown prose and from the comments of every other syntax.
