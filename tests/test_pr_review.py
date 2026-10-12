@@ -5748,6 +5748,10 @@ class TestCoverageExitCodes(GqlCase):
             + '</details> Review effort: Lite --- <a href="/o/r/new/main?filename=x/SKILL.md">tip 1</a>\n'
         )
         self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+        even = body.replace(self.balanced(["a.md"]), self.balanced(["a.md", "b.md"]))
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=even)])))
+        drifted = self.balanced(["a.md"]) + "\n| Fleet review | reviewed 1 of 2 |\n"
+        self.assertTrue(pr_review.partial_shaped(payload([review(body=drifted)])))
 
     def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
         """Prose about the marker and its placeholder are not statements, so they block nothing."""
