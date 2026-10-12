@@ -32,8 +32,9 @@ conflict between instructions instead of silently choosing one.
 
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
 resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
-lines when the behavior depends on unchanged callers or consumers. Executing the change belongs to
-its author, whose own verification covers its behavior.
+lines when the behavior depends on unchanged callers or consumers. Running code to observe the
+change's behavior is left to its author and to CI rather than done by the review. A finding that
+only such a run could prove names the command instead of running it.
 
 For each candidate finding:
 
