@@ -97,6 +97,8 @@ import typing
 from datetime import UTC, datetime
 from pathlib import Path
 
+import gh_graphql as graphql
+
 # The label is the chain's index.
 # Finding a link by label rather than by title search is what frees the title.
 # It carries a human subject, and nothing parses it.
@@ -520,51 +522,44 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
     """
     owner, _, name = repo.partition("/")
     rows: list[dict] = []
-    after: str | None = None
-    while len(rows) < limit:
-        argv = [
-            "api",
-            "graphql",
-            "-f",
-            f"query={LIST_QUERY}",
-            "-f",
-            f"owner={owner}",
-            "-f",
-            f"name={name}",
-            "-f",
-            f"labels[]={LABEL}",
-            "-f",
-            f"states[]={state}",
-            "-F",
-            f"first={min(PAGE, limit - len(rows))}",
-        ]
-        sent = after
+
+    def fetch(after: str | None) -> dict:
+        variables: dict[str, object] = {
+            "owner": owner,
+            "name": name,
+            "labels": [LABEL],
+            "states": [state],
+            "first": min(PAGE, limit - len(rows)),
+        }
         if after is not None:
-            argv += ["-f", f"after={after}"]
-        data = gh_json(argv)
-        try:
-            repository = typing.cast("dict", data)["data"]["repository"]
-            enabled, issues = repository["hasIssuesEnabled"], repository["issues"]
-            nodes, more, after = (
-                issues["nodes"],
-                issues["pageInfo"]["hasNextPage"],
-                issues["pageInfo"]["endCursor"],
-            )
-        except (KeyError, TypeError) as exc:
-            raise Execution(
-                f"the {what} did not read as an issue connection: {cut(repr(data))}"
-            ) from exc
-        if enabled is not True:
-            raise Refusal(
-                f"{repo} has issues turned off, so it holds no readable {what}. Run "
-                f"gh repo edit {repo} --enable-issues to read the chain there."
-            )
-        rows += rows_of(nodes, what, "number")
-        if not more:
-            break
-        if not after or after == sent:
-            raise Execution(f"the {what} reported another page without a cursor that advances")
+            variables["after"] = after
+        return graphql.request(LIST_QUERY, variables, run=gh_runner).data
+
+    try:
+        for repository in graphql.walk(fetch, ("repository", "issues"), strict_page=True):
+            if "hasIssuesEnabled" not in repository:
+                raise graphql.GraphQLError("the repository carries no hasIssuesEnabled")
+            if repository.get("hasIssuesEnabled") is not True:
+                raise Refusal(
+                    f"{repo} has issues turned off, so it holds no readable {what}. Run "
+                    f"gh repo edit {repo} --enable-issues to read the chain there."
+                )
+            rows += rows_of(repository["issues"].get("nodes"), what, "number")
+            if len(rows) >= limit:
+                break
+    except graphql.GraphQLError as exc:
+        if exc.detail:
+            sys.stderr.write(f"{exc.detail}\n")
+        raise Execution(f"the {what} did not read as an issue connection: {exc}") from exc
     return rows
+
+
+def gh_runner(argv: list[str]) -> tuple[int, str, str]:
+    """`run_gh` in the shape the shared GraphQL transport runs, so every read keeps one path.
+
+    `run_gh` raises `Execution` on a failed command, which is exit 2 here already.
+    """
+    return 0, run_gh(argv[1:]), ""
 
 
 def open_handoffs(repo: str) -> list[dict]:
