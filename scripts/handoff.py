@@ -156,7 +156,7 @@ query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!
     issues(labels: $labels, states: $states, first: $first, after: $after,
            orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
-      nodes { number title body state createdAt updatedAt url labels(first: 30) { nodes { name } } }
+      nodes { number title body state createdAt updatedAt url labels(first: 100) { nodes { name } } }
     }
   }
 }
@@ -1015,9 +1015,7 @@ def cmd_tracks(a: argparse.Namespace) -> int:
                         "number": row["number"],
                         "title": row["title"],
                         "track": row["marker"]["track"] if row["marker"] else None,
-                        "labels": [
-                            node["name"] for node in (row.get("labels") or {}).get("nodes") or []
-                        ],
+                        "labels": [node["name"] for node in row["labels"]["nodes"]],
                         "updatedAt": row["updatedAt"],
                     }
                     for row in rows

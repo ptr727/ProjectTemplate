@@ -217,8 +217,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    just closed or opened is already read correctly. A nonzero exit, including the refusal over a
    read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
    ranking a partial list. Reach `scripts/handoff.py` from a hub checkout, per `session-handoff`
-   "Running the Chain". **The full-page check** that steps 3 and 5 apply to their own `gh issue
-   list` reads is that a read returning as many rows as its limit may be truncated, so raise the
+   "Running the Chain". **The full-page check** that picker step 3 and the worker's `decision` read apply to their own
+   `gh issue list` reads is that a read returning as many rows as its limit may be truncated, so raise the
    limit and read again until it returns fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died, and a live
@@ -271,8 +271,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    answer closes the decision issue and takes its label off, so the read above stops seeing it
    before the lane holding the answer has applied it. Read the open handoffs with `handoff.py tracks
    --repo "<owner>/<repo>" --json`, as picker step 1 does, and keep those on an `auto-*` track
-   other than this worker's own. A lane parked and handed back more than once holds the answer in an older link, so walk each
-   kept track back as step 1 walks the worker's own, reading every link's body and comments. A walk
+   other than this worker's own. Walk each kept track back as step 1 walks the worker's own,
+   starting at its open link and reading every link's body and comments, since a lane parked and
+   handed back more than once holds the answer in an older link. A walk
    step 1 would return `STOP` on is a read that cannot run. Where any of them names a decision issue
    that states it blocks the open promotion, whatever that issue's state, the round narrows to
    develop as well. The worker then merges, opens, and releases no promotion while either holds. It
