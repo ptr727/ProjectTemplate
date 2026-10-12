@@ -538,6 +538,9 @@ MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
 LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
 BARE_TAG = re.compile(r"<(?!!--)[^<>]*>")
 MARKER_REACH = 300
+FILE_ROW = re.compile(
+    r"^(?![^\n]*<!--)[ \t]*\|[ \t]*`[^|`\n]*[./][^|`\n]*`[ \t]*\|[^\n]*$", re.MULTILINE
+)
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
@@ -3027,9 +3030,12 @@ def partial_shaped(pr: dict) -> str:
     followed by no digit, prose or a placeholder, is skipped. Prose can word a partial in ways no
     pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
     of reading a table at all.
+
+    A table row opening with a code-span path is dropped before reading.
+    A file-summary cell about the review skill names the marker in prose rather than stating coverage.
     """
     for node in reviewer_nodes(pr, "reviews"):
-        for view in body_views(node.get("body") or ""):
+        for view in body_views(FILE_ROW.sub("", node.get("body") or "")):
             if found := partial_in(view):
                 return found
     return ""

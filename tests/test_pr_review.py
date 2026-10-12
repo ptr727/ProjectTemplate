@@ -5741,6 +5741,25 @@ class TestCoverageExitCodes(GqlCase):
         body = self.balanced(["a.md"]) + "\nPer fleet review, " + "x" * 320 + " item 1 of 2.\n"
         self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
 
+    def test_a_file_table_row_naming_the_marker_is_not_a_partial(self) -> None:
+        body = (
+            self.balanced(["a.md"])
+            + "\n| `skills/fleet-code-review/SKILL.md` | Updates fleet review guidance. |\n"
+            + '</details> Review effort: Lite --- <a href="/o/r/new/main?filename=x/SKILL.md">tip 1</a>\n'
+        )
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=body)])))
+        even = body.replace(self.balanced(["a.md"]), self.balanced(["a.md", "b.md"]))
+        self.assertEqual("", pr_review.partial_shaped(payload([review(body=even)])))
+        drifted = self.balanced(["a.md"]) + "\n| Fleet review | reviewed 1 of 2 |\n"
+        self.assertTrue(pr_review.partial_shaped(payload([review(body=drifted)])))
+        for row in (
+            "| `fleet-review` | reviewed 1 of 2 |",
+            "| `b.md` | Prose. | <!-- fleet-review: reviewed=1 changed=2 findings=0 -->",
+        ):
+            with self.subTest(row=row):
+                body = self.balanced(["a.md"]) + "\n" + row + "\n"
+                self.assertTrue(pr_review.partial_shaped(payload([review(body=body)])))
+
     def test_a_marker_mention_carrying_no_count_is_not_a_partial(self) -> None:
         """Prose about the marker and its placeholder are not statements, so they block nothing."""
         for mention in (
