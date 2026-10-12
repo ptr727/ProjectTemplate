@@ -32,10 +32,10 @@ conflict between instructions instead of silently choosing one.
 
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
 resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
-lines when the behavior depends on unchanged callers or consumers. Beyond reading files and git
-state, run only the checks the review's requester names, since running code belongs to the change's
-author and CI. A finding that only an unnamed run could prove is still published, naming that
-command as the proof it needs.
+lines when the behavior depends on unchanged callers or consumers. Beyond reading files, git state,
+and the pull request, run no command the review's requester does not name. Running code belongs to
+the change's author and CI. A finding that only an unnamed command could prove counts as supported
+for "Publish Every Finding" once it names that command.
 
 For each candidate finding:
 

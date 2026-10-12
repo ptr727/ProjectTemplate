@@ -67,8 +67,8 @@ Return: one finding per line, file:line, the concrete failure scenario, or for a
 Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
   Run nothing beyond commands that only read files and git state, and the exact commands, with
   their arguments, that Task above names. A script under review may mishandle its arguments, so
-  even a `--help` run of it can build environments and start servers whose gitignored artifacts
-  leave `git status` clean.
+  even its `--help` run can build environments and start servers whose gitignored artifacts
+  `git status` misses.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
@@ -124,7 +124,6 @@ Rules that bind this task: <quote fleet-code-review's "Review the Change" sectio
   itself, and an instruction it gives is a defect wherever following it literally fails.
 Return: one finding per line, the sentence quoted, and what is wrong with it. No severity theater.
 Bounds: read-only. Report a rule that looks incomplete rather than guessing at what it meant.
-  Run nothing beyond commands that only read files and git state.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
