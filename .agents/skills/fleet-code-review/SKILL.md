@@ -32,8 +32,9 @@ conflict between instructions instead of silently choosing one.
 
 Review for correctness, regressions, security, compatibility, error handling, concurrency,
 resource lifetime, tests, design, and contract drift. Follow data and control flow beyond the edited
-lines when the behavior depends on unchanged callers or consumers. Running the change's code or
-tests is left to its author and to CI, beyond a check the review's requester names.
+lines when the behavior depends on unchanged callers or consumers. Running the repository's code or
+tests, changed or not, is left to the change's author and to CI, beyond a check the review's
+requester names.
 
 For each candidate finding:
 
