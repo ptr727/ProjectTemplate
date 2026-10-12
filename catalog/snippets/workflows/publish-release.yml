@@ -3,6 +3,7 @@ name: Publish project release action
 # Thin caller: the release chain is the hub's reusable build-release-task.yml, which every release repo reaches rather than carries.
 # This is the NuGet-library shape, and a Docker, PyPI, or file-target repo varies it as docs/reusable-workflows.md "Adopting the Release Chain" documents.
 # A dispatch-only repo whose schedule only retests also gates the publish job on github.event_name == 'workflow_dispatch', since the plan publishes every schedule.
+# That repo's concurrency group appends github.run_id on a schedule run rather than a push, so a retest never replaces a pending dispatch.
 
 on:
   push:
