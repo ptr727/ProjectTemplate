@@ -134,7 +134,7 @@ TITLE = "Session Handoff [{track}]: {subject}"
 WARN_BYTES = 12 * 1024
 MAX_BYTES = 60 * 1024
 
-# A result filling the page is reported as truncated rather than treated as whole.
+# A result filling the window is reported as truncated rather than treated as whole.
 WINDOW = 100
 
 # The closed side needs its own, much larger window, for a reason about the shape of the data.
@@ -143,6 +143,7 @@ WINDOW = 100
 # A window sized for the first is therefore a wall the second reaches by working.
 CLOSED_WINDOW = 1000
 
+# GitHub's own ceiling on `first` for one page of a connection, which a larger value fails.
 PAGE = 100
 
 LIST_QUERY = """
@@ -504,12 +505,12 @@ def issue(repo: str, number: int) -> dict:
 def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
     """Up to `limit` issues in `state` carrying the label, newest first, read per `LIST_QUERY`.
 
-    This reads the repository's own issue connection rather than `gh issue list --label`, which
-    `gh` answers from the search index. That index is updated after a write lands rather than with
-    it, so a read straight after `new` returned the link it had just closed as still open.
+    This reads the repository's own issue connection rather than `gh issue list --label`. That
+    command answers from the search index, which is updated after a write lands. So a read straight
+    after `new` returned the link it had just closed as still open.
 
-    Paging stops at `limit` or at the last page, whichever comes first, so a caller comparing the
-    count against its own window still sees a full window as full.
+    Paging stops at `limit` or at the last page, whichever comes first. A caller comparing the
+    count against its own window therefore still sees a full window as full.
     """
     owner, _, name = repo.partition("/")
     rows: list[dict] = []
@@ -546,7 +547,7 @@ def labeled(repo: str, state: str, limit: int, what: str) -> list[dict]:
                 f"the {what} did not read as an issue connection: {cut(repr(data))}"
             ) from exc
         rows += rows_of(nodes, what, "number")
-        if not more or not after:
+        if not more:
             break
     return rows
 

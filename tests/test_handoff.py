@@ -22,6 +22,7 @@ import copy
 import io
 import itertools
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -101,8 +102,8 @@ class FakeGh:
     """An in-memory repository `handoff.gh` reads and writes, recording every argv it is given.
 
     It honors `--json`, `--state`, `--label`, and `--limit`, and the GraphQL list's labels,
-    states, page size, and cursor, because a stub looser than the tool it stands in for is a stub
-    that green-lights a crash.
+    states, page size, cursor, and node selection. A stub looser than the tool it stands in for is
+    a stub that green-lights a crash.
 
     It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
     repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
@@ -184,8 +185,6 @@ class FakeGh:
         limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else len(rows)
         return rows[:limit]
 
-    NODE = ("number", "title", "body", "state", "createdAt", "updatedAt", "url")
-
     def _graphql(self, argv: list[str]) -> str:
         """One page of `handoff.LIST_QUERY`, newest first, its cursor the offset of the next row.
 
@@ -208,9 +207,24 @@ class FakeGh:
             key=lambda row: row["number"],
             reverse=True,
         )
+        query = f["query"][0]
+        declared = dict(re.findall(r"\$(\w+):\s*([\w\[\]!]+)", query))
+        passed = set(f) - {"query"}
+        required = {k for k, kind in declared.items() if kind.endswith("!")}
+        if not passed <= set(declared) or not required <= passed:
+            raise AssertionError(f"passed {sorted(passed)} against declared {sorted(declared)}")
+        if not any(a == "-F" and b.startswith("first=") for a, b in itertools.pairwise(argv)):
+            raise AssertionError("first must go through -F, or GitHub reads it as a string")
+        first = int(f["first"][0])
+        if not 1 <= first <= 100:
+            raise AssertionError(f"first={first} is outside GitHub's 1 to 100")
+        selected = re.search(r"nodes\s*\{([^}]*)\}", query)
+        if selected is None:
+            raise AssertionError("the query selects no nodes")
+        node = selected.group(1).split()
         start = int(f.get("after", ["0"])[0])
-        end = start + int(f["first"][0])
-        nodes = [{k: row[k] for k in self.NODE if k in row} for row in rows[start:end]]
+        end = start + first
+        nodes = [{k: row[k] for k in node if k in row} for row in rows[start:end]]
         return connection(nodes, end < len(rows), str(end))
 
     @staticmethod
@@ -2376,17 +2390,15 @@ class ConsistentReadCase(unittest.TestCase):
         self.assertFalse([c for c in fake.calls if c[:2] == ["issue", "list"]])
 
     def test_the_closed_side_pages_past_one_graphql_page(self) -> None:
-        """A closed list cut at one page would resolve a link a page old as the newest."""
-        count = handoff.PAGE + 20
-        rows = {
-            n: link(n, "default", n, n - 1 if n > 1 else None, state="CLOSED")
-            for n in range(1, count + 1)
-        }
+        """Newer links on another track fill the first page, so the track's head is on the second."""
+        rows = {1: link(1, "default", 1, None, state="CLOSED")}
+        for n in range(2, handoff.PAGE + 22):
+            rows[n] = link(n, "other", n - 1, n - 1 if n > 2 else None, state="CLOSED")
         fake = FakeGh(rows)
         args = ("--title", "T", "--body-file", body_file(self, "w"))
         self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
         tail = fake.issues[1001]["body"].splitlines()[-1]
-        self.assertEqual(tail, handoff.render_marker("default", count + 1, count))
+        self.assertEqual(tail, handoff.render_marker("default", 2, 1))
         pages = [fields(c) for c in fake.calls if c[:2] == ["api", "graphql"]]
         self.assertTrue(all(int(f["first"][0]) <= handoff.PAGE for f in pages))
         self.assertTrue(any("after" in f for f in pages))
