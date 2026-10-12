@@ -127,7 +127,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] Proof: the first `pull_request_target` run on PhotoCleaner `develop` after `a3158ce` resolves the owner-scoped `uses:` and merges the Dependabot PR that opened it. Tick with the run URL.
 - [ ] Proof: Dependabot opens a `Bump ptr727/ProjectTemplate` PR on PhotoCleaner after the next hub release. Tick with the PR.
 - [x] HomeAutomation-Config (operational model at adoption, the direct-to-develop path, and release model since its 2026-09-24 reclassification): adopted on `develop` in ptr727/HomeAutomation-Config#58 at `d920805`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin, and `python3 spec/audit.py HomeAutomation-Config` reports no `interface` finding on the file.
-- [ ] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`)
+- [x] homeassistant-purpleair (third, `rules: '[{"head-prefix": "ha-version-bump/", "base": "develop"}]'` and `delete-branch: true`): adopted on `develop` in ptr727/homeassistant-purpleair#371 at `532ab78` and promoted to `main`, its ground-truth branch, in ptr727/homeassistant-purpleair#373 at `32a33d1`, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin with both inputs.
 - [x] Proof: the `rules` input end to end. The stub landed on homeassistant-purpleair `develop` in ptr727/homeassistant-purpleair#371 at `532ab78`. The first App pull request its `check-ha-version.yml` tracker opened after that is ptr727/homeassistant-purpleair#417 from `ha-version-bump/matrix`. No built-in pair matches that head, and the stub's `rules` entry matched it in [run-purpleair-417][run-purpleair-417].
 - [x] Proof: the `merge-app` job merges a pull request the App opened. The `Merge App pull request job` in [run-purpleair-417][run-purpleair-417] resolved the rule and enabled auto-merge under the App token. `app/ptr727-codegen` merged ptr727/homeassistant-purpleair#417 to `develop` on 2026-10-07.
 - [ ] ESPHome-NonRoot (`delete-branch: true`, built-in upstream-version pairs cover its tracker)
@@ -199,7 +199,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
   - [ ] VSCode-Server-DotNetCore (`get-version-task.yml`)
   - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `build-release-task.yml`, which calls `get-version-task.yml`, in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
   - [ ] aiopurpleair (`get-version-task.yml`)
-  - [ ] homeassistant-purpleair (`get-version-task.yml`)
+  - [x] homeassistant-purpleair (`get-version-task.yml`): its copy deleted in ptr727/homeassistant-purpleair#372 at `2725f91`, promoted to `main` in ptr727/homeassistant-purpleair#373 at `32a33d1`, with versioning now through the hub's `build-release-task.yml`, which calls `get-version-task.yml`, adopted in ptr727/homeassistant-purpleair#404 and promoted in ptr727/homeassistant-purpleair#405, where `main` carries no `get-version-task.yml`.
   - [ ] Utilities (`publish-plan-task.yml`)
 - [ ] `reports/workflow-reuse.md` regenerated with `get-version-task.yml` and `publish-plan-task.yml` at 0 copies, since both are hub-only files no repo carries.
 
@@ -217,7 +217,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
 - [x] KiCadLibrary (`build-release-asset` hook for its library zip, the hook's first caller): adopted in ptr727/KiCadLibrary#60, promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding, and first published as 2.1.48.
-- [ ] homeassistant-purpleair (`build-release-asset` hook for its integration zip)
+- [x] homeassistant-purpleair (`build-release-asset` hook for its integration zip): adopted on `develop` in ptr727/homeassistant-purpleair#404 at `a9d5060`, promoted to `main`, its ground-truth branch, in ptr727/homeassistant-purpleair#405 at `cfbb112`, where `publish-release.yml` and `test-pull-request.yml` call `build-release-task.yml` by pin and the `build-release-asset` hook builds the zip.
 - [ ] The NuGet, PyPI and remaining release repos, one checkbox each added when the pilots close.
 - [x] The [pilot smoke run][pilot-smoke-run] exercised `build-release-task.yml` on PhotoCleaner's pull request. Hub defaults ran get-version, validate-release, `dotnet-publish`, `docker-prepare`, and `build-docker`. NuGet, PyPI, and the base build skipped.
 - [x] Cross-repository `$/` resolution observed on PhotoCleaner pull request #58 in [self-reference smoke run][self-reference-smoke-run]: nested get-version and Docker tasks, the .NET publish default, and the Docker prepare default all resolved from the pinned hub feature commit and passed.
