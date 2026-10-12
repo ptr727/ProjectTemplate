@@ -1667,8 +1667,8 @@ CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 
 # A directive a tool reads, exempt because deleting one changes what the file does.
 # Anchored at the body's start, since a comment that merely names one of these is prose.
-# Read by `comment-added` alone rather than added to `NOT_PROSE`, which two gating rules share.
-# So a name here is exempt from that one rule, and a name in `NOT_PROSE` from all three.
+# Read by `comment-added` and `comment-case` rather than added to the shared `NOT_PROSE`.
+# So a name here is exempt from those two rules, and a name in `NOT_PROSE` from every reader.
 TOOL_DIRECTIVE = re.compile(
     r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
     r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
@@ -2366,7 +2366,12 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             )
         # A lowercase opening that is not a continuation is a sentence that failed to start.
         # A label opening a definition is exempt, since the lowercase word is the name being defined.
-        elif leading and body[:1].islower() and not COMMENT_LABEL.match(body):
+        elif (
+            leading
+            and body[:1].islower()
+            and not COMMENT_LABEL.match(body)
+            and not is_tool_directive(body)
+        ):
             out.append(
                 (
                     n,
