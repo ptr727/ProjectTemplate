@@ -1989,7 +1989,10 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
     if leading_cd is None and not c_dirs:
         return _current_push_branch(cwd)
     if leading_cd is not None:
-        leading_cd = os.path.normpath(_expand_dir(leading_cd))
+        leading_cd = _expand_dir(leading_cd)
+        if ".." in leading_cd.replace("\\", "/").split("/"):
+            return _UNRESOLVED
+        leading_cd = os.path.normpath(leading_cd)
     target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
     if not target or not os.path.isdir(target) or not os.access(target, os.R_OK | os.X_OK):
         return _UNRESOLVED
@@ -7366,6 +7369,21 @@ _PUSH_DIR_CASES = [
         "a -C dot-dot is resolved physically by git, so the guard does not read it",
     ),
     (
+        "cd {wt}/sub/.. && git push",
+        "deny",
+        "a leading cd with a dot-dot component is resolved physically by the shell, so the guard does not read it",
+    ),
+    (
+        "cd {wt}/sub/../ && git push",
+        "deny",
+        "a trailing slash after the dot-dot component is still unresolved",
+    ),
+    (
+        "@wt cd ../wt ; git push",
+        "deny",
+        "a relative leading cd that climbs out and back is unresolved, not normalized to the same checkout",
+    ),
+    (
         "cd {wt} && git push",
         "allow",
         "a bare push after a leading cd into a feature worktree reads that branch",
@@ -7505,7 +7523,7 @@ _PUSH_DIR_CASES = [
     (
         "cd {base}/s/..; git push",
         "deny",
-        "a cd resolves dot-dot logically, through a symlink, back into develop",
+        "a cd through a symlink with a dot-dot is unresolved, since the shell resolves it physically",
     ),
     (
         "cd {wt}; bash -c \"cd sub; bash -c 'git push'\"",
