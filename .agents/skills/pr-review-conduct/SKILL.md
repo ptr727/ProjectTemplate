@@ -93,10 +93,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      the file or a later one. A Copilot table row with no note is such evidence. It counts only
      where no Copilot round on that pull request, on any commit, states or appears to state
      partial coverage. A round stating full coverage is evidence for every file. So is the
-     attestation `pr_review.py attest` published on that pull request, for each file the
-     attested head's diff held. It counts only where `status` would read it, posted by an owner,
-     member, or collaborator. That head is held to the same rule, the head that last changed the
-     file or a later one. A local receipt does not count, since removing its worktree deletes it.
+     attestation `pr_review.py attest` published on that pull request, for each file the attested
+     head's diff held. That head is held to the same rule, the head that last changed the file or a
+     later one. The attestation counts only where an owner, member, or collaborator posted it, with
+     the marker on its own line outside a fence. A local receipt does not count, since removing its
+     worktree deletes it.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code, since exit `45` returns before the
@@ -244,11 +245,11 @@ Run `local-strict-review` against the branch's current diff before every push th
    request it explicitly, which step 4's `wait` is what does. On a fix push into any other branch
    after the first round, `wait` requests nothing, since step 1 attests the pass covering it. Pass
    `wait --request` where a fix deserves a Copilot round anyway. `status` and `wait` never read an
-   attestation on the head the first round lands on as that round's coverage. `wait` also skips the
-   request where a review already covers the head, where the answer came outside a formal review,
-   where it detects drift, under a quota or error refusal, and where something is already in the
-   request set, which is the condition the recovery below clears. Requesting in the pull request UI
-   is the maintainer's route rather than this loop's.
+   attestation on the head the first round lands on as coverage. `wait` also skips the request where
+   a review already covers the head, where the answer came outside a formal review, where it detects
+   drift, under a quota or error refusal, and where something is already in the request set, which
+   is the condition the recovery below clears. Requesting in the pull request UI is the maintainer's
+   route rather than this loop's.
 4. Run a bounded `scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
