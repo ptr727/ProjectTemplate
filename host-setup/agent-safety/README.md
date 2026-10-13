@@ -61,7 +61,11 @@ text says, because the harm it covers was never in the text.
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
    unresolvable), deny rather than allow, because the harm is a silent success under the
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
-   passes this requirement instead, since there is nothing yet on record to bypass. Every other
+   passes this requirement instead, since there is nothing yet on record to bypass. A push whose
+   target the hook cannot read at all is denied whatever branch it names. That covers a push in
+   text the hook does not parse and a push carrying a `-c` config override. It also covers a bare
+   push whose directory or branch may change before it runs. The workaround is an explicit refspec
+   run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
@@ -139,9 +143,9 @@ text says, because the harm it covers was never in the text.
    same `wipe` alias persisted in the checkout's own config) is denied exactly as the builtin itself
    would be. A `!`-prefixed alias hands git an arbitrary shell string rather than naming another git
    subcommand, and this requirement does not and cannot safely interpret one, so it denies that
-   shape outright against a primary checkout, one of two places this requirement departs from its
-   own fail-open stance, because the alias definition itself is concrete evidence of an attempt to
-   run something via git in exactly the directory this requirement protects. The other is a
+   shape outright against a primary checkout. This is one of two places this requirement departs
+   from its own fail-open stance. The alias definition itself is concrete evidence of an attempt to
+   run something via git in exactly the directory this requirement protects. The other place is a
    directory value holding a `..` component, below.
 
    Resolve the target directory the way real git itself does, not by a last-option-wins scan across
@@ -174,11 +178,11 @@ text says, because the harm it covers was never in the text.
    by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
    a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
    the hook process's own OS-level cwd happens to be. A value holding a `..` component is not
-   joined at all, since git and a `cd -P` resolve it physically through any symlink before it while
-   a join folds it logically, so the two can name different checkouts. A mutating invocation naming
+   joined at all. Git and a `cd -P` resolve it physically through any symlink before it, while a
+   join folds it logically, so the two can name different checkouts. A mutating invocation naming
    one is denied wherever it points. So is a bare `checkout`/`switch` argument, which cannot then be
-   told from a pathspec, and a subcommand git does not ship, which may be an alias defined there.
-   An absolute path with no `..` is the workaround. On Windows, a Git Bash drive spelling such as
+   told from a pathspec. So is a subcommand git neither ships nor finds on `PATH`, which may be an
+   alias defined there. An absolute path with no `..` is the workaround. On Windows, a Git Bash drive spelling such as
    `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
    the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
    maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
