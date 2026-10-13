@@ -13,6 +13,8 @@ non-zero without a crash, with a refusal naming it as an unknown option. A scrip
 subcommand or a positional refuses on the missing argument before it reaches the flag. So
 BEFORE_FLAG gives it arguments that satisfy its parser, and the run with them must name the flag.
 Those arguments alone exit 0 or leave an effect, so a script that warns and carries on still fails.
+The run that must name the flag may not also report a missing or required argument. So an unlisted
+script that warns on the flag and then stops on a missing argument fails too.
 
 No run reaches a stub or the listener, leaves a process running, or changes the working tree. The
 tree check covers ignored paths and a directory created or emptied anywhere in the tree.
@@ -72,6 +74,8 @@ BEFORE_FLAG = {
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
 }
+
+MISSING_ARGUMENT = re.compile(r"\b(missing|required)\b", re.IGNORECASE)
 
 REFUSED_AS_OPTION = re.compile(
     r"(unrecogni[sz]ed argument|unknown (option|argument|flag|parameter)"
@@ -357,7 +361,7 @@ def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str],
         env.update({name: str(home) for name, home in homes.items()})
         env.update(
             PATH=f"{scratch / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
-            GIT_CONFIG_GLOBAL=str(scratch / "gitconfig"),
+            GIT_CONFIG_GLOBAL=str(homes["HOME"] / ".gitconfig"),
             PYTHONDONTWRITEBYTECODE="1",
             NO_PROXY="",
             no_proxy="",
@@ -450,6 +454,7 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(effects, "")
                     if before == before_flag:
                         self.assertRegex(output, REFUSED_AS_OPTION)
+                        self.assertNotRegex(output, MISSING_ARGUMENT)
 
     def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
         """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect.
@@ -500,6 +505,16 @@ class EntryPointCase(unittest.TestCase):
 
 class ControlCase(unittest.TestCase):
     """The controls for the hardened checks: each catches the shape it exists for."""
+
+    def test_a_flag_warning_before_a_missing_argument_is_caught(self) -> None:
+        output = "unknown option: --bogus-flag\nerror: missing NAME\n"
+        self.assertIsNotNone(REFUSED_AS_OPTION.search(output))
+        self.assertIsNotNone(MISSING_ARGUMENT.search(output))
+
+    def test_a_global_git_config_write_is_seen(self) -> None:
+        write = "import os; open(os.environ['GIT_CONFIG_GLOBAL'], 'w')"
+        _, effects = run_sandboxed([sys.executable, "-c", write])
+        self.assertIn("wrote $HOME/.gitconfig", effects)
 
     def test_a_refusal_must_name_the_flag_as_an_option(self) -> None:
         self.assertIsNone(REFUSED_AS_OPTION.search("cannot read --bogus-flag"))
