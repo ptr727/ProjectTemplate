@@ -895,6 +895,9 @@ class CarryStatusTests(unittest.TestCase):
             sorted(carry.git_status_records(root)),
             [(" M", "edited.txt"), ("??", "new.txt"), ("R ", "moved.txt"), ("R ", "renamed.txt")],
         )
+        records = carry.git_status_records(root)
+        destination = records.index(("R ", "renamed.txt"))
+        self.assertEqual(records[destination + 1], ("R ", "moved.txt"))
 
     def test_ignored_paths_are_listed_only_when_asked(self) -> None:
         root = self.repository()
