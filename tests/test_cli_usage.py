@@ -2,7 +2,7 @@
 """Hold every tracked command-line entry point to CODESTYLE.md's argument rule by running it.
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
-the real commands on PATH record any call to gh or another network or host-changing command,
+the real commands on PATH record any call to gh, git, or another network or host-changing command,
 no credential is passed, and the proxy is a local listener that records every connection made to
 it. Help exits 0 printing its usage. The unknown flag exits non-zero with a refusal that names it or
 prints the usage, rather than a crash. No run reaches a stub or the listener, or changes the working
@@ -44,7 +44,7 @@ NOT_COMMAND_LINE = {
     "host-setup/agent-safety/claude/test_install.py": "a test module",
 }
 
-RECORDED = ("gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", "uv", "uvx")
+RECORDED = ("git", "gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", "uv", "uvx")
 
 
 def entry_points() -> list[str]:
