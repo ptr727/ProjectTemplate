@@ -13,8 +13,8 @@ non-zero without a crash, with a refusal naming it as an unknown option. A scrip
 subcommand or a positional refuses on the missing argument before it reaches the flag. So
 BEFORE_FLAG gives it arguments that satisfy its parser, and the run with them must name the flag.
 Those arguments alone exit 0 or leave an effect, so a listed script that warns and carries on still
-fails. An unlisted script that needs an argument is held only to a non-zero exit with no effect.
-Its output cannot show whether the flag or the missing argument stopped it.
+fails. An unlisted script must still name the flag, but nothing runs it without the flag. So one
+that warns on the flag and then stops on a missing argument passes until it is listed.
 
 No run reaches a stub or the listener, leaves a process running, or changes the working tree. The
 tree check covers ignored paths and a directory created or emptied anywhere in the tree.
