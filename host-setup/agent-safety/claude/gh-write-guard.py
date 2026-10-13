@@ -7374,9 +7374,14 @@ _PUSH_DIR_CASES = [
         "a leading cd with a dot-dot component is resolved physically by the shell, so the guard does not read it",
     ),
     (
+        "cd {wt}/sub/../ && git push",
+        "deny",
+        "a trailing slash after the dot-dot component is still unresolved",
+    ),
+    (
         "@wt cd ../wt ; git push",
         "deny",
-        "a relative leading cd that climbs out and back is not normalized into a sibling checkout",
+        "a relative leading cd that climbs out and back is unresolved, not normalized to the same checkout",
     ),
     (
         "cd {wt} && git push",
