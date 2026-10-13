@@ -12,7 +12,7 @@ the script, so a default mode whose report merely mentions usage fails. The unkn
 non-zero without a crash, with a refusal naming it as an unknown option. A script needing a
 subcommand or a positional refuses on the missing argument before it reaches the flag. So
 BEFORE_FLAG gives it arguments that satisfy its parser, and the run with them must name the flag.
-Those arguments alone exit 0 or reach a stub, so a script that warns and carries on still fails.
+Those arguments alone exit 0 or leave an effect, so a script that warns and carries on still fails.
 
 No run reaches a stub or the listener, leaves a process running, or changes the working tree. The
 tree check covers ignored paths and a directory created or emptied anywhere in the tree.
@@ -449,7 +449,7 @@ class EntryPointCase(unittest.TestCase):
                         self.assertRegex(output, REFUSED_AS_OPTION)
 
     def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
-        """The control: each BEFORE_FLAG set alone exits 0 or reaches a stub, either of which fails the case."""
+        """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect, either of which fails the case."""
         for path, before in BEFORE_FLAG.items():
             with self.subTest(path=path):
                 result, effects = self.run_entry(path, *before)
