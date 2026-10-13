@@ -2128,7 +2128,7 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
     """A rooted directory with no drive segment is unresolved where Git Bash and Windows Python disagree.
 
     Git Bash resolves `/repos/wt-example` under the Git install root while Windows Python joins it
-    onto the session drive, so reading the branch there would let a failed `cd` push from the
+    onto the session drive. Reading the branch there would let a failed `cd` push from the
     session's own branch. The decision is pure logic, so it runs on POSIX with the Windows regime
     switched on and the branch lookup replaced.
     """

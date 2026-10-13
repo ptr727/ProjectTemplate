@@ -233,10 +233,10 @@ Subcommands
            again on the same PR never double-requests. It is also skipped under 46's and 47's quota
            readings below, since a request into a reached limit spends quota and returns the same
            refusal. It is skipped too on a pull request into a branch other than the default once
-           Copilot has reviewed an earlier head, since a fix push there is covered by an attested
-           local pass: an attested head is covered at once, so the wait polls its checks instead
-           only while they can still move its merge, as 30 below lists, and one with no attestation
-           exits 49 naming the `attest` step.
+           Copilot has reviewed an earlier head. A fix push there is covered by an attested local
+           pass. An attested head is covered at once. The wait then polls its checks instead, only
+           while they can still move its merge, as 30 below lists. One with no attestation exits
+           49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
            or a review history past the window are requested as before. The comment also carries the
@@ -313,8 +313,8 @@ Subcommands
            request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
            `status` cannot report it, since a request that recorded nothing leaves nothing for a
            later read to find.
-           49 = no Copilot round covers this head and none was requested, the pull request merging
-           into a branch other than the default with Copilot having reviewed an earlier head, and no
+           49 = no Copilot round covers this head and none was requested. The pull request merges
+           into a branch other than the default, Copilot has reviewed an earlier head, and no
            attestation vouches for the head. Run the local strict review, record it, push, and run
            `attest`, or pass --request.
            64 = the write scope could not be established or excludes the target, checked before

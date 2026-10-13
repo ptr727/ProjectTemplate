@@ -1154,8 +1154,8 @@ def _msys_drive_path(value):
 def _msys_rooted_without_drive(value):
     """Whether a directory value is rooted but names no drive, such as `/primary`.
 
-    Git Bash resolves it under the Git install root while Windows Python joins it onto the session
-    drive, so the two disagree on the directory and the guard must not read either.
+    Git Bash resolves it under the Git install root while Windows Python joins it onto the session drive.
+    The two disagree on the directory, so the guard must not read either.
     """
     return bool(value) and value[0] in "/\\"
 
