@@ -1915,6 +1915,8 @@ def _line_heredocs_are_data(line):
     body to a shell and an interpreter owning it reads it as a script. Anything less certain is not
     data, and its body stays in view.
     """
+    if any(m in line for m in ("$(", "`", "<(", ">(")):
+        return False
     delims = _HEREDOC_DELIMITER.findall(line)
     if not delims or any(d not in ("'", '"', "\\") for d in delims):
         return False
@@ -1972,7 +1974,9 @@ def _push_scan_texts(cmd):
     A body no line closes, or more readings than the limit, scans the command whole.
     """
     readings = _heredoc_readings(cmd, _data_heredoc_openers)
-    if readings is None or _has_unclosed_heredoc(cmd) or _runs_stored_script(cmd):
+    if readings is None or _has_unclosed_heredoc(cmd):
+        return [cmd]
+    if any(_runs_stored_script(r) for r in readings):
         return [cmd]
     return readings
 
@@ -1983,7 +1987,8 @@ def _runs_stored_script(cmd):
     for k, t in enumerate(toks):
         if _is_shell_wrapper_exe(t) or t in ("eval", "source", "exec"):
             return True
-        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
+        at_command = k == 0 or _is_separator(toks[k - 1])
+        if at_command and (t == "." or t.startswith("$") or "`" in t):
             return True
     return False
 
@@ -2069,7 +2074,7 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
     if leading_cd is not None:
         leading_cd = os.path.normpath(_expand_dir(leading_cd))
     target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
-    if not target or not os.path.isdir(target) or not os.access(target, os.X_OK):
+    if not target or not os.path.isdir(target) or not os.access(target, os.R_OK | os.X_OK):
         return _UNRESOLVED
     return _current_push_branch(target)
 
@@ -7534,6 +7539,21 @@ _PUSH_DIR_CASES = [
         "cd {wt}; find {base} -maxdepth 0 -execdir git push \\;",
         "deny",
         "a push run as another command's argument may run elsewhere",
+    ),
+    (
+        "cat > f.md <<'EOF'\nrun bash -c 'git push' here\nEOF\necho done",
+        "allow",
+        "a document body naming a shell does not keep itself in view",
+    ),
+    (
+        "x=$(cat <<'EOF'\ngit push\nEOF\n); $x",
+        "deny",
+        "a heredoc inside a substitution is run as a command",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\nc=bash; $c x.sh",
+        "deny",
+        "a stored script run through a run-time command word stays in view",
     ),
     (
         "true # note\\\ngit push",
