@@ -150,6 +150,8 @@ Applies to code and workflow (`#`) comments alike.
   section holding its why, such as `D5.2`, and never echoes or paraphrases that section's text.
   An id unique across that set, such as a `WORKFLOW.md` D-id, may stand alone, and any other
   citation names its file.
+  A hub-only file may cite a hub `docs/` section by repository path.
+  A carried file cites only instruction-set sections a carrier holds.
 - **Keep it short**: one line is the default. A second line is earned only by a constraint the
   code cannot otherwise carry.
 - **Structured, not prose**: one sentence per line, never wrapped across lines, never a
