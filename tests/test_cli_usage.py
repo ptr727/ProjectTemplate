@@ -3,9 +3,9 @@
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
 the real commands on PATH record a call to gh, git, or another command in RECORDED. No credential
-is passed. Each home and config-home variable in HOMES points into an empty scratch directory. A
-file a run leaves in one is an effect, PowerShell's own cache aside. The proxy is a local listener
-that records every connection made to it.
+is passed. Each home and config-home variable in HOMES points into an empty scratch directory. An
+entry a run leaves in one is an effect, aside from a pwsh run's startup cache. The proxy is a local
+listener that records every connection made to it.
 
 Help exits 0 and prints the same text for both spellings. That text opens on a usage line naming
 the script, so a default mode whose report merely mentions usage fails. The unknown flag exits
@@ -310,14 +310,17 @@ def recording_proxy() -> Iterator[tuple[str, list[int]]]:
             worker.join()
 
 
-def home_writes(homes: dict[str, Path]) -> str:
-    """Every file a run left in a scratch home, aside from what PowerShell caches as it starts."""
+def home_writes(homes: dict[str, Path], pwsh: bool) -> str:
+    """Every entry a run left in a scratch home, each home starting empty.
+
+    A pwsh run's startup cache, the `powershell` directory under XDG_CACHE_HOME, is set aside.
+    """
+    cache = homes["XDG_CACHE_HOME"] / "powershell"
     written = []
     for name, home in homes.items():
         for path in sorted(home.rglob("*")):
-            relative = path.relative_to(home)
-            if path.is_file() and "powershell" not in (part.lower() for part in relative.parts):
-                written.append(f"wrote ${name}/{relative.as_posix()}\n")
+            if not (pwsh and (path == cache or cache in path.parents)):
+                written.append(f"wrote ${name}/{path.relative_to(home).as_posix()}\n")
     return "".join(written)
 
 
@@ -374,7 +377,12 @@ def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str],
             err.read_text(encoding="utf-8", errors="replace"),
         )
         recorded = calls.read_text(encoding="utf-8") if calls.exists() else ""
-        effects = recorded + "proxy connection\n" * len(connections) + effects + home_writes(homes)
+        effects = (
+            recorded
+            + "proxy connection\n" * len(connections)
+            + effects
+            + home_writes(homes, Path(command[0]).stem.lower() == "pwsh")
+        )
     return result, effects + tree_changes(before)
 
 
@@ -487,9 +495,17 @@ class ControlCase(unittest.TestCase):
         self.assertTrue(opens_on_usage("usage: example.py [-h]\n", "bin/example.py"))
 
     def test_a_write_into_a_scratch_home_is_seen(self) -> None:
-        write = "import os; open(os.path.join(os.environ['XDG_CONFIG_HOME'], 'example'), 'w')"
+        """A file, an empty directory, and a non-pwsh write where pwsh caches each count."""
+        write = (
+            "import os; env = os.environ; "
+            "open(os.path.join(env['XDG_CONFIG_HOME'], 'example'), 'w'); "
+            "os.mkdir(os.path.join(env['XDG_STATE_HOME'], 'example')); "
+            "os.mkdir(os.path.join(env['XDG_CACHE_HOME'], 'powershell'))"
+        )
         _, effects = run_sandboxed([sys.executable, "-c", write])
         self.assertIn("wrote $XDG_CONFIG_HOME/example", effects)
+        self.assertIn("wrote $XDG_STATE_HOME/example", effects)
+        self.assertIn("wrote $XDG_CACHE_HOME/powershell", effects)
 
     def test_powershell_finds_the_stub_ahead_of_the_real_command(self) -> None:
         """On Windows this is the `.cmd` stub, the one shadowing the PowerShell entry points rely on."""
