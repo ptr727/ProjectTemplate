@@ -479,6 +479,7 @@ def tree_path_included(path, patterns):
     )
 
 
+@functools.cache
 def hub_name():
     """This repo's name on the remote, and whether it came from the remote.
 
@@ -499,7 +500,8 @@ def hub_name():
     return ROOT.name, False
 
 
-HUB_NAME, HUB_NAME_FROM_REMOTE = hub_name()
+def hub_repo_name():
+    return hub_name()[0]
 
 
 def gh(path, ok404=False) -> Any:
@@ -764,7 +766,7 @@ def repo_slug(entry):
     gate.
 
     Anything else answers with UNRESOLVED_OWNER and the entry's name, so every read 404s and the message names the
-    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": HUB_NAME}` as its own fallback
+    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": hub_repo_name()}` as its own fallback
     when the hub has no registry entry and calling this on it.
 
     Each half of that sentinel answers a way a fallback slug has already addressed the wrong thing. It carries two
@@ -3184,7 +3186,7 @@ def audit_repo(entry, spec, branch=None):
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
         # Intent staleness: the one advisory an intent unit gets, a last-modified comparison.
         # The hub's own copies are the canonicals, so the hub itself has nothing to trail.
-        elif item is not None and fid == "intent" and entry.get("name") != HUB_NAME:
+        elif item is not None and fid == "intent" and entry.get("name") != hub_repo_name():
             findings.extend(
                 check_intent_staleness(slug, ground, path, intent_canonical_rel(item, path), text)
             )
@@ -3228,7 +3230,7 @@ def audit_repo(entry, spec, branch=None):
                 # It covers UNDECLARED_HEADING_SCANNED, not only AGENTS.md and GOVERNANCE.md, and never names which destination file an undeclared heading belongs in.
                 # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
                 # A downstream repo carrying such a section is still flagged, which is the point.
-                if path in UNDECLARED_HEADING_SCANNED and entry.get("name") != HUB_NAME:
+                if path in UNDECLARED_HEADING_SCANNED and entry.get("name") != hub_repo_name():
                     declared = {n.strip().lower() for n in (needed | verbatim_needed)}
                     for h in undeclared_h2_headings(text, declared):
                         findings.append(
@@ -3245,7 +3247,7 @@ def audit_repo(entry, spec, branch=None):
         # A downstream repo naming it in prose it owns is still flagged, which is the point.
         # Verbatim sections are excised first, and template_ref_outside_verbatim carries why that is not a loophole.
         # Sited here, in the file loop, so the scan reuses the content already fetched for the section checks and reads the same selector-resolved verbatim list they were judged against.
-        if path in TEMPLATE_REF_SCANNED and entry.get("name") != HUB_NAME:
+        if path in TEMPLATE_REF_SCANNED and entry.get("name") != hub_repo_name():
             if text is None:
                 findings.append(
                     (
@@ -3253,7 +3255,7 @@ def audit_repo(entry, spec, branch=None):
                         f"carried: could not read {path} content on {ground} to scan for a coordination reference (no inline content returned); verify by hand",
                     )
                 )
-            elif template_ref_outside_verbatim(text, verbatim_secs[path], HUB_NAME):
+            elif template_ref_outside_verbatim(text, verbatim_secs[path], hub_repo_name()):
                 findings.append(
                     (
                         "DRIFT",
@@ -3272,7 +3274,7 @@ def audit_repo(entry, spec, branch=None):
                     )
                 )
             else:
-                excised = set() if entry.get("name") == HUB_NAME else verbatim_secs[path]
+                excised = set() if entry.get("name") == hub_repo_name() else verbatim_secs[path]
                 literals = version_literals_outside_verbatim(text, excised)
                 if literals:
                     findings.append(
@@ -3291,7 +3293,7 @@ def audit_repo(entry, spec, branch=None):
                 f"tree: could not read the file tree for {slug}@{ground} in full, so verbatim trees are undecided",
             )
         )
-    elif entry.get("name") != HUB_NAME:
+    elif entry.get("name") != hub_repo_name():
         for declaration in spec["files"].get("trees", []):
             if not applies(declaration.get("appliesTo", "*"), sel):
                 continue
@@ -3361,7 +3363,7 @@ def audit_repo(entry, spec, branch=None):
     # The manifest declares what a repo carries, so a path the hub tracks and the manifest omits is hub-hosted content per GOVERNANCE.md "Hub-Hosted Tooling".
     # A downstream copy of one is drift whose remedy is a deletion rather than a re-vendor, which no other check reports: every check above reads a path the manifest names, so nothing looks at what a repo carries beyond the baseline.
     # Skipped for the hub, whose own tracked files are the source and are all "hub-only" by construction.
-    if entry.get("name") != HUB_NAME:
+    if entry.get("name") != hub_repo_name():
         carried = None if carried_entries is None else set(carried_entries)
         if carried is None:
             findings.append(
@@ -7519,9 +7521,9 @@ def main(argv=None):
 
     override = f" | branch override {a.branch}" if a.branch else ""
     print(f"audit run {run_utc} | hub {hub_sha}{override}")
-    if not HUB_NAME_FROM_REMOTE:
+    if not hub_name()[1]:
         print(
-            f"warning: no git remote; the hub name falls back to the directory name '{HUB_NAME}', so every check that depends on the hub's identity is unreliable in this run",
+            f"warning: no git remote; the hub name falls back to the directory name '{hub_repo_name()}', so every check that depends on the hub's identity is unreliable in this run",
             file=sys.stderr,
         )
     print()

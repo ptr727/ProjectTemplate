@@ -44,7 +44,7 @@ NOT_COMMAND_LINE = {
     "host-setup/agent-safety/claude/test_install.py": "a test module",
 }
 
-RECORDED = ("gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", "uv", "uvx")
+RECORDED = ("git", "gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", "uv", "uvx")
 
 
 def entry_points() -> list[str]:
