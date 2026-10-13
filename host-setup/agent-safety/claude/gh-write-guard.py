@@ -887,7 +887,7 @@ def _collect_arglist(toks, start, quoted=None):
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
     The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`.
     Such a token ends the invocation at its separator, so the next command's words are not read as this one's.
-    It does so only where `quoted`, a `_quoted_mask`, marks it unquoted, since a quoted `';<'` is an ordinary word.
+    It does so only where `quoted`, a `_modeled_quoted_mask`, marks it unquoted, since a quoted `';<'` is an ordinary word.
     With no mask, it is read as a redirection, as before.
 
     Returns (args, index_after_this_invocation).
@@ -938,7 +938,7 @@ def _git_subcommand_index(toks, k):
 def _git_subcommand_invocations(cmd, sub):
     """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
-    quoted = _quoted_mask(cmd, toks)
+    quoted = _modeled_quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -1048,7 +1048,7 @@ def _git_invocations_at(cmd):
     """
     # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
-    quoted = _quoted_mask(cmd, toks)
+    quoted = _modeled_quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -2210,8 +2210,8 @@ def _unreadable_push(cmd):
     - a `-c` config value, an inline alias expanding to a push among them
     - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
       overrides names no command git lists, so it may be an alias that file defines
-    - a separator fused with a redirection where the quoting does not parse, which leaves no
-      way to tell an ending `;<` from a quoted word (see `_collect_arglist`)
+    - a separator fused with a redirection where `_marked_lex` cannot model the quoting, which
+      leaves no way to tell an ending `;<` from a quoted word (see `_collect_arglist`)
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2229,7 +2229,7 @@ def _unreadable_push(cmd):
         if (
             _GIT_PUSH.search(text)
             and any(_is_redir_op(t) and _opens_with_separator(t) for t in toks)
-            and _quoted_mask(text, toks) is None
+            and _modeled_quoted_mask(text, toks) is None
         ):
             return "a separator fused with a redirection in a command whose quoting the guard cannot read"
         for k, t in enumerate(toks):
@@ -2792,6 +2792,21 @@ def _quoted_mask(cmd, toks):
         marked = _marked_lex(cmd)
     except _UnmodeledSyntax:
         return _quote_kept_mask(cmd, toks)
+    except ValueError:
+        return None
+    if [t for t, _ in marked] != toks:
+        return None
+    return [m for _, m in marked]
+
+
+def _modeled_quoted_mask(cmd, toks):
+    """`_quoted_mask` where `_marked_lex` models the whole command, else None.
+
+    The quote-keeping fallback cannot see a word inside a backtick substitution or a `$'...'`
+    quote, so a caller that ends an argument list on its say reads only this one.
+    """
+    try:
+        marked = _marked_lex(cmd)
     except ValueError:
         return None
     if [t for t, _ in marked] != toks:
@@ -5362,6 +5377,27 @@ _GIT_CASES = [
         {"feature/x": set(), "develop": _CODE_RULES},
         "deny",
         "a fused separator in a command whose quoting the guard cannot read is not trusted as a word",
+    ),
+    (
+        "git push origin `true;</dev/null` develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a fused separator inside a backtick substitution does not end the push's own words",
+    ),
+    (
+        "git push origin >$'\\';<' 2>\\' develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "nor does one inside a $'...' quote",
+    ),
+    (
+        "git commit `true;</dev/null` --no-verify -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a fused separator inside a backtick substitution does not hide a later --no-verify",
     ),
     (
         "git -c include.path=/example/config status",
