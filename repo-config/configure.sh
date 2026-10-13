@@ -168,7 +168,7 @@ if [ -f "$registry" ]; then
     fi
     # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().
     # A description that passes that check can never contain a newline, so command substitution has nothing to strip.
-    if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" "$registry" "$name")"; then
+    if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" -- "$registry" "$name")"; then
         exit 1
     fi
 fi
