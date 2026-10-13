@@ -1964,6 +1964,7 @@ def _push_invocations(cmd):
         for inner in inners:
             batches.append((inner, outer_cd, outer_extra, wrapper_moves))
         for body, leading_cd, extra, wrapped_cd in batches:
+            first = len(out)
             for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
                 if sub == "push":
                     redirected = (
@@ -1974,6 +1975,12 @@ def _push_invocations(cmd):
                     )
                     moved = extra > 0
                     out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
+            unmatched = [a for _c, _w, _l, _u, a in out[first:]]
+            for _opts, args in _git_subcommand_invocations(body, "push"):
+                if args in unmatched:
+                    unmatched.remove(args)
+                else:
+                    out.append(([], None, leading_cd, True, args))
     return out
 
 
@@ -7540,6 +7547,26 @@ _PUSH_DIR_CASES = [
         "deny",
         "an opaque word inside a wrapper makes a nested push unresolved",
     ),
+    (
+        "@wt git bisect run git push origin develop",
+        "deny",
+        "a push run by another git command is checked against its explicit target",
+    ),
+    (
+        "@wt git bisect run git push --force origin main",
+        "deny",
+        "a forced push run by another git command is still denied",
+    ),
+    (
+        "@wt git submodule foreach git push --force origin HEAD:main",
+        "deny",
+        "a push run by submodule foreach is checked for its force and target",
+    ),
+    (
+        "@wt git bisect run git push",
+        "deny",
+        "a bare push run by another git command may run elsewhere, so it is unresolved",
+    ),
 ]
 
 
@@ -7583,7 +7610,9 @@ def _push_dir_selftest(origin):
         os.symlink(os.path.join(wt, "sub"), os.path.join(base, "s"))
         os.makedirs(os.path.join(base, "sub2"))
         os.symlink(os.path.join(base, "sub2"), os.path.join(wt, "t"))
-        rules = lambda br: {"pull_request"} if br == "develop" else set()
+        rules = lambda br: (
+            {"pull_request", "non_fast_forward"} if br in ("develop", "main") else set()
+        )
         for template, want, label in _PUSH_DIR_CASES:
             session = base
             if template.startswith("@wt "):
