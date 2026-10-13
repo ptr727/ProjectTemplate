@@ -233,9 +233,9 @@ Subcommands
            again on the same PR never double-requests. It is also skipped under 46's and 47's quota
            readings below, since a request into a reached limit spends quota and returns the same
            refusal. It is skipped too on a pull request into a branch other than the default once
-           Copilot has reviewed it at all, since a fix push there is covered by an attested local
-           pass: an attested head is covered at once, so the wait polls its checks instead only
-           while they can still move its merge, as 30 below lists, and one with no attestation exits
+           Copilot has reviewed an earlier head. A fix push there is covered by an attested local
+           pass. An attested head is covered at once. The wait then polls its checks instead, only
+           while they can still move its merge, as 30 below lists. One with no attestation exits
            49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
@@ -313,10 +313,10 @@ Subcommands
            request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
            `status` cannot report it, since a request that recorded nothing leaves nothing for a
            later read to find.
-           49 = no Copilot round covers this head and none was requested, the pull request merging
-           into a branch other than the default after Copilot's first round, and no attestation
-           vouches for the head. Run the local strict review, record it, push, and run `attest`, or
-           pass --request.
+           49 = no Copilot round covers this head and none was requested. The pull request merges
+           into a branch other than the default, Copilot has reviewed an earlier head, and no
+           attestation vouches for the head. Run the local strict review, record it, push, and run
+           `attest`, or pass --request.
            64 = the write scope could not be established or excludes the target, checked before
            the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
@@ -5828,7 +5828,7 @@ def main(argv: list[str] | None = None) -> int:
     elif held:
         print(
             "note: this pull request merges into a branch other than the default and Copilot "
-            "has reviewed it already, so a fix push is covered by an attested local pass rather "
+            "has reviewed an earlier head, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
@@ -6011,7 +6011,7 @@ def main(argv: list[str] | None = None) -> int:
     if held and not refusal:
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            "since a fix push after the first round is covered by a local pass. Run the local "
+            "since a fix push after Copilot has reviewed an earlier head is covered by a local pass. Run the local "
             "strict review, record it, push, and run `pr_review.py attest` from the checkout, "
             "or pass --request to ask Copilot for a round instead"
         )

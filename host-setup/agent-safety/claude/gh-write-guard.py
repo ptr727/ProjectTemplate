@@ -1151,6 +1151,15 @@ def _msys_drive_path(value):
     return f"{m.group(1).upper()}:{value[m.end() :] or '/'}"
 
 
+def _msys_rooted_without_drive(value):
+    """Whether a directory value is rooted but names no drive, such as `/primary`.
+
+    Git Bash resolves it under the Git install root while Windows Python joins it onto the session drive.
+    The two disagree on the directory, so the guard must not read either.
+    """
+    return bool(value) and value[0] in "/\\"
+
+
 def _join_relative(base, value):
     """Expand `~`/`$HOME` in `value`, then join it onto `base` when it is relative and `base` is
     known, or return the expanded value as-is when it is already absolute or there is no base to
@@ -2000,6 +2009,9 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
         if ".." in leading_cd.replace("\\", "/").split("/"):
             return _UNRESOLVED
         leading_cd = os.path.normpath(leading_cd)
+    dirs = ([leading_cd] if leading_cd is not None else []) + [_expand_dir(c) for c in c_dirs]
+    if _MSYS_DRIVE_PATHS and any(_msys_rooted_without_drive(d) for d in dirs):
+        return _UNRESOLVED
     target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
     if not target or not os.path.isdir(target) or not os.access(target, os.R_OK | os.X_OK):
         return _UNRESOLVED

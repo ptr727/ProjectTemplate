@@ -2124,6 +2124,54 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
         self.assertEqual(status, 0, "\n".join(fails))
 
 
+class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
+    """A rooted directory with no drive segment is unresolved where Git Bash and Windows Python disagree.
+
+    Git Bash resolves `/repos/wt-example` under the Git install root while Windows Python joins it
+    onto the session drive. Reading the branch there would let a failed `cd` push from the
+    session's own branch. The decision is pure logic, so it runs on POSIX with the Windows regime
+    switched on and the branch lookup replaced.
+    """
+
+    def _guard(self):
+        spec = importlib.util.spec_from_file_location("guard_rooted", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        return guard
+
+    def _branch(self, guard, msys, c_dirs, leading_cd):
+        with (
+            mock.patch.object(guard, "_MSYS_DRIVE_PATHS", msys),
+            mock.patch.object(guard, "_current_push_branch", return_value="feature/example"),
+            mock.patch.object(guard.os.path, "isdir", return_value=True),
+            mock.patch.object(guard.os, "access", return_value=True),
+        ):
+            return guard._bare_push_branch("/c/session", c_dirs, None, leading_cd, False)
+
+    def test_a_rooted_leading_cd_without_a_drive_is_unresolved_on_windows(self):
+        guard = self._guard()
+        got = self._branch(guard, True, [], "/repos/wt-example")
+        self.assertIs(got, guard._UNRESOLVED)
+
+    def test_a_rooted_dash_c_without_a_drive_is_unresolved_on_windows(self):
+        guard = self._guard()
+        got = self._branch(guard, True, ["/repos/wt-example"], None)
+        self.assertIs(got, guard._UNRESOLVED)
+
+    def test_a_drive_spelling_still_resolves_on_windows(self):
+        guard = self._guard()
+        self.assertEqual(self._branch(guard, True, [], "/c/repos/wt-example"), "feature/example")
+        self.assertEqual(
+            self._branch(guard, True, ["D:/repos/wt-example"], None), "feature/example"
+        )
+
+    def test_a_rooted_directory_still_resolves_off_windows(self):
+        guard = self._guard()
+        self.assertEqual(self._branch(guard, False, [], "/repos/wt-example"), "feature/example")
+
+
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
 class TestContainmentHookSelftests(unittest.TestCase):
     """The prefix's and the sweep's own matrices, the session tree's cases included, run in this suite.
