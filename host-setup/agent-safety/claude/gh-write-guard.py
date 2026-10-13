@@ -1987,10 +1987,12 @@ def _runs_stored_script(cmd):
     for k, t in enumerate(toks):
         if _is_shell_wrapper_exe(t) or t in ("eval", "source", "exec"):
             return True
-        at_command = k == 0 or _is_separator(toks[k - 1])
-        if at_command and (t == "." or t.startswith("$") or "`" in t):
+        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
             return True
-    return False
+        plain = t.replace("$?", "")
+        if "$" in plain or "`" in plain:
+            return True
+    return "<(" in cmd or ">(" in cmd
 
 
 def _opaque_cd(toks):
@@ -2009,6 +2011,11 @@ def _opaque_cd(toks):
         if any(c in plain for c in "{[*?"):
             return True
     return False
+
+
+def _attached_c(body):
+    """True when a word spells git's `-C<dir>` with the directory attached, which the option parser does not read."""
+    return any(t.startswith("-C") and len(t) > 2 for t in _shell_tokens(body))
 
 
 def _git_off_command_position(toks):
@@ -2053,7 +2060,10 @@ def _push_invocations(cmd):
             for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
                 if sub == "push":
                     redirected = (
-                        git_dir is not None or any(export_dirs) or any(_leading_export_dirs(body))
+                        git_dir is not None
+                        or any(export_dirs)
+                        or any(_leading_export_dirs(body))
+                        or _attached_c(body)
                     )
                     moved = extra > 0 and (leading_cd is not None or bool(c_dirs))
                     out.append((c_dirs, None, leading_cd, moved or redirected, args))
@@ -7554,6 +7564,21 @@ _PUSH_DIR_CASES = [
         "cat > x.sh <<'EOF'\ngit push\nEOF\nc=bash; $c x.sh",
         "deny",
         "a stored script run through a run-time command word stays in view",
+    ),
+    (
+        "cd {wt}; git -C{base} push",
+        "deny",
+        "an attached -C value is not read, so the push is unresolved",
+    ),
+    (
+        "x=$(\ncat <<'EOF'\ngit push\nEOF\n); X=1 $x",
+        "deny",
+        "a substitution opened on an earlier line makes the body a command",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\nc=bash; X=1 $c x.sh",
+        "deny",
+        "a stored script run after an assignment prefix stays in view",
     ),
     (
         "true # note\\\ngit push",
