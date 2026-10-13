@@ -500,7 +500,7 @@ def hub_name():
     return ROOT.name, False
 
 
-def hub_repo_name():
+def hub_repo_name() -> str:
     return hub_name()[0]
 
 
