@@ -3748,7 +3748,9 @@ def classify(
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
-    split_word = bool(_SPLIT_WORD.search(cmd))
+    split_word = bool(_SPLIT_WORD.search(cmd)) and any(
+        _SPLIT_WORD.search(t) for t in _push_scan_texts(cmd)
+    )
     cmd = re.sub(r"\\\r?\n", " ", cmd)
     cwd = _msys_drive_path(cwd)
     # Rule 4 covers a git operation that would only succeed by bypassing an active branch rule.
@@ -7602,6 +7604,11 @@ _PUSH_DIR_CASES = [
         "cd {wt}; VAR=1 . ./x.sh; git push",
         "deny",
         "a prefixed dot command may change the directory",
+    ),
+    (
+        "cat > f.md <<'EOF'\nrun git push on a spl\\\nit word\nEOF\necho done",
+        "allow",
+        "a split word inside a document body is data",
     ),
     (
         "true # note\\\ngit push",
