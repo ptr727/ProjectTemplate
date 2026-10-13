@@ -358,6 +358,7 @@ _PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"
 _GIT_GLOBAL_VALUE_OPTS = {
     "-C",
     "-c",
+    "--attr-source",
     "--git-dir",
     "--work-tree",
     "--namespace",
@@ -946,18 +947,28 @@ def _git_subcommand_invocations(cmd, sub):
     return out
 
 
-def _overrides_hooks_path(global_opts):
-    """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
+def _git_config_overrides(global_opts):
+    """Every `-c`/`--config-env` value in a git invocation's global options, in each spelling.
+
+    That is `-c <v>`, `--config-env <v>`, and `--config-env=<v>`. An attached `-c<v>` is read as
+    an override too. Git rejects that spelling, so this only fails closed on it.
+    """
+    values = []
     for i, t in enumerate(global_opts):
         if t in ("-c", "--config-env"):
-            value = global_opts[i + 1] if i + 1 < len(global_opts) else ""
+            values.append(global_opts[i + 1] if i + 1 < len(global_opts) else "")
         elif t.startswith("--config-env="):
-            value = t[len("--config-env=") :]
-        else:
-            continue
-        if value.split("=", 1)[0].lower() == "core.hookspath":
-            return True
-    return False
+            values.append(t[len("--config-env=") :])
+        elif t.startswith("-c") and len(t) > 2:
+            values.append(t[2:])
+    return values
+
+
+def _overrides_hooks_path(global_opts):
+    """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
+    return any(
+        v.split("=", 1)[0].lower() == "core.hookspath" for v in _git_config_overrides(global_opts)
+    )
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1001,6 +1012,11 @@ _INLINE_ALIAS_RE = re.compile(r"^alias\.(\S+)=(.*)$")
 
 
 def _git_invocations(cmd):
+    """`_git_invocations_at` without the index of each invocation's `git` word."""
+    return [inv for _word, inv in _git_invocations_at(cmd)]
+
+
+def _git_invocations_at(cmd):
     """Every `git [global-options] <sub> [args...]` invocation in the command, as
     `(c_dirs, work_tree, git_dir, inline_aliases, sub, args)` tuples. `c_dirs` is the list of
     `-C <dir>` values on this specific invocation, in argv order, since real git composes multiple
@@ -1015,7 +1031,8 @@ def _git_invocations(cmd):
     expansion` dict of every `-c alias.<name>=<value>` override on this invocation, in argv order
     (a later `-c` for the same name wins, matching real git's own repeated `-c` semantics), read
     here since an inline alias is exactly as effective at hiding a mutating command behind an
-    unrecognized name as a persisted one, per requirement 6's alias-resolution rule.
+    unrecognized name as a persisted one, per requirement 6's alias-resolution rule. Each tuple
+    comes paired with the index of its `git` word in the command's shell tokens.
     """
     # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
@@ -1077,7 +1094,7 @@ def _git_invocations(cmd):
         if j < n and not _is_shell_op(toks[j]):
             sub = toks[j]
             args, k = _collect_arglist(toks, j + 1)
-            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args))
+            out.append((i, (c_dirs, work_tree, git_dir, inline_aliases, sub, args)))
             i = k
         else:
             i = j if j > i else i + 1  # a bare `git` with no subcommand at all; keep scanning
@@ -2070,29 +2087,64 @@ _HEAD_KEEPING_SUBS = frozenset(
 )
 
 
-def _head_may_move(toks):
-    """True when something before the last push in these tokens may change what a bare push targets.
+_OUT_OF_ORDER_WORDS = frozenset({"for", "while", "until", "select", "do", "done", "function"})
+
+
+def _push_scan_end(toks, quoted, word):
+    """Where the head-move scan stops for the push at `toks[word]`, and the git word it skips.
+
+    The scan stops at the push's own `git` word, unless a command written after the push may run
+    before it or beside it. It then covers the whole command. An operator outside
+    `_ORDERED_OPERATORS` may do that. It may be a pipe, a background `&`, a subshell, or a
+    separator fused with a redirection. So may a loop or a function, or a fork
+    `_forks_out_of_reach` names. The push's own `-u` matters only where the push runs again. That
+    takes a loop or a function, so only then is its git word scanned too. A word `quoted` marks
+    as quoted is not syntax, and with no mask every word is. `_forks_out_of_reach` reads quoted
+    words too.
+    """
+    syntax = [not (quoted and quoted[k]) for k in range(len(toks))]
+    reruns = any(
+        syntax[k] and (t in _OUT_OF_ORDER_WORDS or (_is_shell_op(t) and "(" in t))
+        for k, t in enumerate(toks)
+    )
+    if reruns:
+        return len(toks), None
+    if _forks_out_of_reach(toks) or any(
+        syntax[k] and _is_shell_op(t) and not _is_ordered_operator(t) for k, t in enumerate(toks)
+    ):
+        return len(toks), word
+    return word, None
+
+
+_ORDERED_OPERATORS = frozenset({">", ">>", "<", "<<", "<<<", "<>", ">&", "<&", "&>", "&>>", ">|"})
+
+
+def _is_ordered_operator(tok):
+    """True when an operator token is a redirection, or a run of `;`, `&&`, `||`, and newlines.
+
+    Neither runs a command beside another, or one written later first.
+    """
+    if tok in _ORDERED_OPERATORS:
+        return True
+    rest = tok.replace("&&", "").replace("||", "")
+    return set(rest) <= {";", "\n"}
+
+
+def _head_may_move(toks, end, skip=None):
+    """True when something before a push in these tokens may change what a bare push targets.
 
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
     subcommands leave the branch `HEAD` names and the push config as they found them, unless one
     sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
     rewrite the push config before the push runs, and the branch read before the command runs is
-    then not the one the push uses. The scan stops at the last push's own git word, since that
-    push's own `-u` changes nothing before it runs. An `eval`/`source` is `_opaque_cd`'s.
+    then not the one the push uses. The scan stops at `end` and passes over the git word at
+    `skip` (see `_push_scan_end`). An `eval`/`source` is `_opaque_cd`'s.
     """
-    pushes = [k for k, t in enumerate(toks) if t == "push"]
     n = len(toks)
-    end = pushes[-1] if pushes else 0
-    end = next(
-        (
-            k
-            for k in range(end - 1, -1, -1)
-            if _is_git_exe(toks[k]) and _git_subcommand_index(toks, k) == end
-        ),
-        end,
-    )
     for k in range(end):
         t = toks[k]
+        if k == skip:
+            continue
         if _is_gh_exe(t) or _is_shell_wrapper_exe(t):
             return True
         if _is_git_exe(t):
@@ -2131,7 +2183,8 @@ def _unreadable_push(cmd):
     - a quoted word handed to a git command that runs it, one of `_COMMAND_RUNNING_GIT_SUBS`
     - a `-c` config value, an inline alias expanding to a push among them
 
-    Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too. Config such
+    Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
+    `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
     as `push.default` or `remote.<name>.push` changes what a push updates, an explicit refspec
     included. A word is matched by `_GIT_PUSH`, which needs no word boundary before `git`. An
     unquoted `-c'git push'` reads as `-cgit push`, while `.github` still matches nothing.
@@ -2156,10 +2209,10 @@ def _unreadable_push(cmd):
                 continue
             j = _git_subcommand_index(toks, k)
             opts = toks[k + 1 : j]
-            values = [opts[x + 1] for x, o in enumerate(opts[:-1]) if o == "-c"]
+            values = _git_config_overrides(opts)
             if any(_GIT_PUSH.search(v) or _INLINE_PUSH_ALIAS.match(v) for v in values):
                 return "a push inside a git `-c` config value"
-            config = any(o in ("-c", "--config-env") or o.startswith("--config-env=") for o in opts)
+            config = bool(values)
             if j >= n:
                 continue
             if toks[j] == "push" and config:
@@ -2180,27 +2233,25 @@ def _push_invocations(cmd):
     in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
     A push inside a wrapper shell is always unreliable. The wrapper may run in another directory
     (`find -execdir`, `sudo -D`), or read startup files that change it. So is a push after a
-    command that may move `HEAD` (see `_head_may_move`).
+    command that may move `HEAD` (see `_head_may_move`). That scan runs for each push on its own.
+    A move written after a push leaves it alone unless it may run first (see `_push_scan_end`).
     """
     out = []
     for text in [cmd]:
         outer_cd = _leading_cd_dir(text)
         outer_toks = _shell_tokens(text)
         outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
-        outer_extra += (
-            1
-            if _opaque_cd(outer_toks)
-            or _git_off_command_position(outer_toks)
-            or _head_may_move(outer_toks)
-            else 0
-        )
+        outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
+        whole_moves = _head_may_move(outer_toks, len(outer_toks))
+        quoted = _quoted_mask(text, outer_toks)
         export_dirs = _leading_export_dirs(text)
         batches = [(text, outer_cd, outer_extra, False)]
         for inner in _embedded_wrapper_commands(text):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
-            for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
+            for word, inv in _git_invocations_at(body):
+                c_dirs, _work_tree, git_dir, _aliases, sub, args = inv
                 if sub == "push":
                     redirected = (
                         git_dir is not None
@@ -2208,7 +2259,13 @@ def _push_invocations(cmd):
                         or any(_leading_export_dirs(body))
                         or _attached_c(body)
                     )
-                    moved = extra > 0
+                    if body is text:
+                        head_moves = _head_may_move(
+                            outer_toks, *_push_scan_end(outer_toks, quoted, word)
+                        )
+                    else:
+                        head_moves = whole_moves
+                    moved = extra > 0 or head_moves
                     out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
             unmatched = [a for _c, _w, _l, _u, a in out[first:]]
             for _opts, args in _git_subcommand_invocations(body, "push"):
@@ -2249,12 +2306,12 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=Fa
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update.
 
-    A lone `:` refspec pushes every branch that exists on both sides, so it is read as every
-    protected default. It also sets the aggregate delete flag, so each other branch named beside it
-    is read as an update as well as a delete. A `HEAD`/`@` destination updates the branch `HEAD`
-    names, read the way a bare push's branch is. It is compared without case, since a
-    case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is also read as
-    the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
+    A lone `:` refspec pushes every branch that exists on both sides. So it is read as an update
+    of every protected default and of each other branch named beside it. It deletes nothing, so
+    it leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination
+    updates the branch `HEAD` names, read the way a bare push's branch is. It is compared without
+    case, since a case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is
+    also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
     branch it cannot read is an `unresolved` one.
     """
     results = []
@@ -2294,7 +2351,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 force = True
                 rs = rs[1:]
             matching = matching or rs == ":"
-            if rs.startswith(":"):
+            if rs.startswith(":") and rs != ":":
                 delete = True  # `:dst` empty-source refspec deletes dst
             dst = rs.split(":", 1)[1] if ":" in rs else rs
             if dst.upper() in ("HEAD", "@"):
@@ -4819,6 +4876,55 @@ _GIT_CASES = [
         {"main": set(), "master": set(), "develop": set(), "feature/y": _CODE_RULES},
         "deny",
         "a branch beside a matching refspec is read as an update, not only as a delete",
+    ),
+    (
+        "git push origin : feature/y",
+        "feature/x",
+        {"main": set(), "master": set(), "develop": set(), "feature/y": {"deletion"}},
+        "allow",
+        "a lone matching refspec deletes nothing, so a deletion-only rule beside it is not hit",
+    ),
+    (
+        "git push origin : :feature/y",
+        "feature/x",
+        {"main": set(), "master": set(), "develop": set(), "feature/y": {"deletion"}},
+        "deny",
+        "an empty-source refspec beside a lone matching one still deletes its branch",
+    ),
+    (
+        "git -cremote.origin.push=refs/heads/feature/x:refs/heads/develop push origin feature/x",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "an attached -c override on a push is read as an override",
+    ),
+    (
+        "git -calias.p='push origin develop' p",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an attached -c alias, a spelling git rejects, fails closed",
+    ),
+    (
+        "git -ccore.hooksPath=HOOKS push origin feature/x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an attached -c core.hooksPath override is a hook bypass",
+    ),
+    (
+        "git --attr-source HEAD push origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a separate --attr-source value is skipped to reach the push",
+    ),
+    (
+        "git --attr-source HEAD push origin feature/x",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "a separate --attr-source value before a feature push",
     ),
     (
         "git push origin head",
@@ -7934,6 +8040,79 @@ _PUSH_DIR_CASES = [
     ("@wt gh pr checkout 5 && git push", "deny", "a gh command before a bare push may move HEAD"),
     ("@wt git add f && git commit -m x && git push", "allow", "add and commit leave HEAD as is"),
     ("@wt git push && gh pr create --fill", "allow", "a gh command after the push moves nothing"),
+    (
+        "@wt git push && git checkout develop && git push origin feature/example",
+        "allow",
+        "a checkout after a bare push leaves that push alone",
+    ),
+    (
+        "@wt git push origin HEAD && git switch develop",
+        "allow",
+        "a switch after a HEAD refspec leaves that push alone",
+    ),
+    ("@wt git push; git checkout develop; git push", "deny", "a bare push after the checkout"),
+    (
+        "@wt git checkout develop && git push && git push origin feature/example",
+        "deny",
+        "a checkout before the first of two pushes",
+    ),
+    ("@wt git push 2>&1 | git checkout develop", "deny", "a pipeline runs its commands together"),
+    (
+        "@wt git push 2>&1 | tail -1 && git checkout develop",
+        "deny",
+        "a pipe anywhere has the scan read the whole command",
+    ),
+    (
+        "@wt git push |\ngit checkout develop && git push origin feature/example",
+        "deny",
+        "a pipeline continued on the next line",
+    ),
+    (
+        "@wt case x in x) git push ;; esac | git checkout develop; git push origin feature/example",
+        "deny",
+        "a compound command holding the push is piped into the checkout",
+    ),
+    (
+        "@wt git push &&\ngh pr create --fill",
+        "allow",
+        "an and-list continued on the next line runs in order",
+    ),
+    (
+        "@wt git push origin HEAD &</dev/null gh pr checkout 5 && git push origin feature/example",
+        "deny",
+        "a background job fused with a redirection runs beside the gh command",
+    ),
+    (
+        "@wt git push -u origin HEAD 2>&1 | tail -3",
+        "allow",
+        "a push's own -u in a pipeline changes nothing before it runs",
+    ),
+    (
+        "@wt f() ( git push -u origin HEAD ); f; f",
+        "deny",
+        "a push's own -u in a function called twice may move the next run's target",
+    ),
+    (
+        "@wt for n in 1 2; do git push; git checkout develop; done",
+        "deny",
+        "a loop runs the checkout before its second push",
+    ),
+    ("@wt git push & git checkout develop", "deny", "a background push runs beside the checkout"),
+    (
+        "@wt f() ( git push ); git checkout develop; f",
+        "deny",
+        "a function body runs where it is called",
+    ),
+    (
+        '@wt git push && gh pr create --title "Example (x)" --body "a | b & c"',
+        "allow",
+        "quoted operator characters after a push are not syntax",
+    ),
+    (
+        "@wt git -cremote.origin.push=refs/heads/feature/example:refs/heads/develop push origin feature/example",
+        "deny",
+        "an attached -c override remaps an explicit refspec too",
+    ),
     ("@wt git -c push.default=matching push", "deny", "a -c override on a bare push"),
     (
         "@wt git -c remote.origin.push=refs/heads/feature/example:refs/heads/develop push origin feature/example",
