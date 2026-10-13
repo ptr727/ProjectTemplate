@@ -123,7 +123,7 @@ REFUSES_A_LEADING_FLAG = {
 
 REFUSED_AS_OPTION = re.compile(
     r"((unknown|unrecogni[sz]ed) (option|argument|flag|parameter)"
-    r"|cannot be found that matches parameter name)[^\n]*bogus-flag",
+    r"|cannot be found that matches parameter name)[^\n]*(?<![\w-])-{0,2}bogus-flag(?![\w-])",
     re.IGNORECASE,
 )
 
@@ -571,6 +571,13 @@ class ControlCase(unittest.TestCase):
         )
         self.assertIsNotNone(REFUSED_AS_OPTION.search("getopt: unrecognized option '--bogus-flag'"))
         self.assertIsNotNone(REFUSED_AS_OPTION.search("unrecognized flag '--bogus-flag'"))
+        self.assertIsNotNone(
+            REFUSED_AS_OPTION.search(
+                "A parameter cannot be found that matches parameter name 'bogus-flag'."
+            )
+        )
+        self.assertIsNone(REFUSED_AS_OPTION.search("unknown option --bogus-flag-extra"))
+        self.assertIsNone(REFUSED_AS_OPTION.search("unrecognized flag --not-bogus-flag"))
 
     def test_help_must_open_on_a_usage_line_naming_the_script(self) -> None:
         self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))
