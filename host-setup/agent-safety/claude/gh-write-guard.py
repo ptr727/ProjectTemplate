@@ -1972,7 +1972,7 @@ def _push_invocations(cmd):
                         or any(_leading_export_dirs(body))
                         or _attached_c(body)
                     )
-                    moved = extra > 0 and (leading_cd is not None or bool(c_dirs))
+                    moved = extra > 0
                     out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
     return out
 
@@ -7331,6 +7331,36 @@ def _fixture_dir(key):
 
 _PUSH_DIR_CASES = [
     (
+        "@wt cd -P {base} && git push",
+        "deny",
+        "an option-bearing cd is not modeled, so the push is unresolved",
+    ),
+    (
+        "@wt cd -- {base} && git push",
+        "deny",
+        "a cd with a double dash is not modeled",
+    ),
+    (
+        "@wt cd -L {base}; git push",
+        "deny",
+        "a cd -L is not modeled",
+    ),
+    (
+        "@wt cd ; git push",
+        "deny",
+        "a cd with no argument goes home, which is not modeled",
+    ),
+    (
+        "@wt pushd {base} && git push",
+        "deny",
+        "a pushd is not modeled",
+    ),
+    (
+        "@wt git status; cd {base}; git push",
+        "deny",
+        "a cd that is not a leading cd makes a later push unresolved",
+    ),
+    (
         "cd {wt} && git -C t/.. push",
         "deny",
         "a -C dot-dot is resolved physically by git, so the guard does not read it",
@@ -7537,10 +7567,13 @@ def _push_dir_selftest(origin):
         os.symlink(os.path.join(base, "sub2"), os.path.join(wt, "t"))
         rules = lambda br: {"pull_request"} if br == "develop" else set()
         for template, want, label in _PUSH_DIR_CASES:
+            session = base
+            if template.startswith("@wt "):
+                template, session = template[4:], wt
             cmd = template.replace("{wt}", wt).replace("{base}", base).replace("{missing}", missing)
             got, _ = classify(
                 cmd,
-                cwd=base,
+                cwd=session,
                 origin=origin,
                 rules_lookup=rules,
                 environ={},
