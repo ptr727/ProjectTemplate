@@ -95,9 +95,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      partial coverage. A round stating full coverage is evidence for every file. So is the
      attestation `pr_review.py attest` published on that pull request, for each file the attested
      head's diff held. That head is held to the same rule, the head that last changed the file or a
-     later one. The attestation counts only where an owner, member, or collaborator posted it, with
-     the marker on its own line outside a fence. A local receipt does not count, since removing its
-     worktree deletes it.
+     later one. The attestation counts only from an owner, member, or collaborator, with the marker
+     on its own line outside any code span or fence. The attestation's base has to be the one the
+     pull request merged into. A local receipt does not count, since removing its worktree deletes
+     it.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code, since exit `45` returns before the
@@ -235,10 +236,11 @@ is never carried into a downstream repository.
 Run `local-strict-review` against the branch's current diff before every push this loop makes, the one that opens the pull request in step 1 and each one after it, whatever finding it answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about, so a re-push of a tree a recorded pass already covers needs no second pass, the receipt being keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps it only while the merge base holds: rebasing onto a target that has moved retires the receipt although no file changed, and that push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads, the hub's own `pre-push` hook being one and a repository having none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around, and that skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist. Once the push
-   lands, run `scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`. It
-   refuses unless the checkout is the pushed head and a recorded pass covers it. Attest after every
-   push a recorded pass covers, the opening push included. The comment `attest` posts is the record
-   Merge Gate item 2's promotion case reads, since the receipt goes when its worktree does.
+   lands, run `scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`.
+   `attest` refuses unless the checkout is the pushed head and a recorded pass covers that head.
+   Attest after every push a recorded pass covers, the opening push included. The comment `attest`
+   posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
+   worktree does.
 2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
 3. Request a Copilot round at the defined moments only: the pull request's first round, and the head
    of a pull request into the default branch, a promotion among them. Auto-trigger is unreliable, so
