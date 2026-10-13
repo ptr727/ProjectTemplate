@@ -1587,6 +1587,23 @@ def _has_dot_dot(value):
     return ".." in (_expand_dir(value) or "").replace("\\", "/").split("/")
 
 
+def _cd_dot_dot(cmd):
+    """The first `..`-holding argument of any `cd`/`pushd` in the command or its wrapper bodies.
+
+    Any such `cd` counts, leading or not, with options (`cd -P`) or without. Rule 6 reads only a
+    plain leading `cd`, and resolves every other invocation from the session's directory.
+    """
+    for text in [cmd, *_embedded_wrapper_commands(cmd)]:
+        toks = _shell_tokens(text)
+        for k, t in enumerate(toks):
+            if t.rsplit("/", 1)[-1] in _CD_BUILTINS:
+                args, _ = _collect_arglist(toks, k + 1)
+                found = next((a for a in args if _has_dot_dot(a)), None)
+                if found is not None:
+                    return found
+    return None
+
+
 _GIT_COMMAND_NAMES: list[set[str]] = []
 
 
@@ -1638,10 +1655,11 @@ def _check_primary_checkout_mutation(
     # Two independent caches, deliberately never merged into one: an identity-dimension key and a file-dimension key can coincide as the same literal string while needing different test methods (--git-dir=X directly versus ordinary -C X discovery), and a single shared cache keyed only by that string would silently reuse one method's answer for the other's lookup.
     identity_cache = {}
     file_cache = {}
+    cd_dotted = _cd_dot_dot(cmd)
     for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
         cmd
     ):
-        dotted = next(
+        dotted = cd_dotted or next(
             (v for v in (leading_cd, *c_dirs, work_tree, git_dir) if v and _has_dot_dot(v)), None
         )
         if dotted is not None:
@@ -1750,6 +1768,14 @@ def _is_shell_wrapper_exe(tok):
 
 
 _WRAPPER_NESTING_LIMIT = 4
+
+
+def _wrapper_unread_args(args):
+    """A wrapper shell's argv without the `-c` body it runs, which an attached `-c<body>` is not."""
+    ci = _wrapper_c_index(args)
+    if ci is not None and ci + 1 < len(args):
+        return args[: ci + 1] + args[ci + 2 :]
+    return args
 
 
 def _wrapper_c_index(args):
@@ -2048,8 +2074,9 @@ def _head_may_move(toks):
     """True when something before the last push in these tokens may change what a bare push targets.
 
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
-    subcommands leave the branch `HEAD` names and the push config as they found them. Anything else
-    may switch the branch or rewrite the push config before the push runs. The branch read before
+    subcommands leave the branch `HEAD` names and the push config as they found them, unless one
+    sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
+    rewrite the push config before the push runs. The branch read before
     the command runs is then not the one the push uses. An `eval`/`source` is `_opaque_cd`'s.
     """
     pushes = [k for k, t in enumerate(toks) if t == "push"]
@@ -2060,9 +2087,21 @@ def _head_may_move(toks):
             return True
         if _is_git_exe(t):
             j = _git_subcommand_index(toks, k)
-            if j < n and not _is_shell_op(toks[j]) and toks[j] not in _HEAD_KEEPING_SUBS:
+            if j >= n or _is_shell_op(toks[j]):
+                continue
+            if toks[j] not in _HEAD_KEEPING_SUBS:
+                return True
+            args, _ = _collect_arglist(toks, j + 1)
+            if any(a.startswith("--set-upstream") for a in args):
+                return True
+            if toks[j] == "push" and any(_is_short_u(a) for a in args):
                 return True
     return False
+
+
+def _is_short_u(arg):
+    """True when an argument is a short-option cluster holding push's `-u`, such as `-u` or `-fu`."""
+    return arg.startswith("-") and not arg.startswith("--") and "u" in arg[1:]
 
 
 _INLINE_PUSH_ALIAS = re.compile(r"alias\..*\bpush\b", re.DOTALL | re.IGNORECASE)
@@ -2097,9 +2136,8 @@ def _unreadable_push(cmd):
         for k, t in enumerate(toks):
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
-                ci = _wrapper_c_index(args) if _is_shell_wrapper_exe(t) else None
-                if ci is not None and ci + 1 < len(args):
-                    args = args[: ci + 1] + args[ci + 2 :]
+                if _is_shell_wrapper_exe(t):
+                    args = _wrapper_unread_args(args)
                 if any(_GIT_PUSH.search(a) for a in args):
                     return (
                         f"a push inside an argument of `{t}` the guard does not read as a command"
@@ -2202,9 +2240,10 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update.
 
     A lone `:` refspec pushes every branch that exists on both sides, so it is read as every
-    protected default. A `HEAD`/`@` destination updates the branch `HEAD` names, read the way a bare
+    protected default. It also sets the aggregate delete flag, so each other branch named beside it
+    is read as an update as well as a delete. A `HEAD`/`@` destination updates the branch `HEAD` names, read the way a bare
     push's branch is. It is compared without case, since a case-insensitive filesystem resolves
-    `head` to `HEAD`. A push the guard cannot read is an `unreadable` op, and a branch it cannot
+    `head` to `HEAD`, and a differently cased one is also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a branch it cannot
     read is an `unresolved` one.
     """
     results = []
@@ -2248,6 +2287,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 delete = True  # `:dst` empty-source refspec deletes dst
             dst = rs.split(":", 1)[1] if ":" in rs else rs
             if dst.upper() in ("HEAD", "@"):
+                if dst not in ("HEAD", "@"):
+                    branches.append(dst)
                 b = current_branch
                 if b is None:
                     b = _bare_push_branch(
@@ -2288,7 +2329,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         op = "delete" if delete else ("force" if force else "update")
         results.extend((op, br) for br in branches)
         if matching:
-            results.extend(("force" if force else "update", br) for br in _PROTECTED_DEFAULT_ORDER)
+            matched = [*_PROTECTED_DEFAULT_ORDER, *branches]
+            results.extend(("force" if force else "update", br) for br in matched)
     return results
 
 
@@ -2304,12 +2346,23 @@ def _check_bypass_flags(cmd):
     """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed.
 
     A flag inside a quoted argument is not a real flag. One inside a wrapper body or a here-string
-    fed to a wrapper is, and a body past the wrapper nesting cap is read whole.
+    fed to a wrapper is. A body past the wrapper nesting cap, and a wrapper argument other than its
+    `-c` body, are read whole. An option argument is also read from its first `c` on, so an
+    attached `-c<body>` is read as the body it holds.
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
+    unread = [
+        a
+        for t in texts
+        for toks in [_shell_tokens(t)]
+        for k, w in enumerate(toks)
+        if _is_shell_wrapper_exe(w)
+        for word in _wrapper_unread_args(_collect_arglist(toks, k + 1)[0])
+        for a in (word, word.partition("c")[2] if word[:1] == "-" else "")
+    ]
     if any(_GH_ADMIN_MERGE.search(_QUOTED_SPAN.sub("", t)) for t in texts) or any(
-        _GH_ADMIN_MERGE.search(t) for t in overflow
+        _GH_ADMIN_MERGE.search(t) for t in overflow + unread
     ):
         return "deny", (
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
@@ -4750,6 +4803,27 @@ _GIT_CASES = [
         "a forced matching refspec force-updates main",
     ),
     (
+        "git push origin : feature/y",
+        "feature/x",
+        {"main": set(), "master": set(), "develop": set(), "feature/y": _CODE_RULES},
+        "deny",
+        "a branch beside a matching refspec is read as an update, not only as a delete",
+    ),
+    (
+        "git push origin head",
+        "feature/x",
+        {"head": _CODE_RULES, "feature/x": set()},
+        "deny",
+        "a lowercase head names its own branch on a case-sensitive filesystem as well",
+    ),
+    (
+        "bash -c'gh pr merge 5 --admin'",
+        None,
+        {},
+        "deny",
+        "gh pr merge --admin in an attached -c body is still caught",
+    ),
+    (
         "git commit -m 'mention --no-verify in the message'",
         None,
         {},
@@ -5647,6 +5721,30 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "allow",
         "an exempt worktree add under a dot-dot is allowed",
+    ),
+    (
+        "cd -P /repos/primary/link/.. && git reset --hard",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "an option-bearing cd with a dot-dot is unresolved too",
+    ),
+    (
+        "git status; cd ../primary; git commit -m x",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a cd with a dot-dot that is not leading is unresolved too",
+    ),
+    (
+        "cd .. && git status",
+        "/repos/task",
+        {"/repos/task": False, "/repos": True},
+        None,
+        "allow",
+        "a read-only builtin after a dot-dot cd is allowed",
     ),
     (
         "git -C /repos/task worktree remove ../y",
@@ -7879,6 +7977,17 @@ _PUSH_DIR_CASES = [
         "pull, reset, and commit leave the branch HEAD names as is",
     ),
     ("@wt git -c alias.p=push p origin develop", "deny", "an inline alias expanding to push"),
+    (
+        "@wt git push -u origin feature/example:refs/heads/release && git push",
+        "deny",
+        "a push -u before a bare push changes its upstream",
+    ),
+    (
+        "@wt git fetch --set-upstream origin develop && git push",
+        "deny",
+        "a --set-upstream before a bare push changes its upstream",
+    ),
+    ("@wt git add -u && git commit -m x && git push", "allow", "add -u sets no upstream"),
     ("@wt bash -cgit\\ push\\ origin\\ develop", "deny", "an unquoted attached -c body"),
     (
         "@wt bash scripts/lint.sh .github/workflows/push.yml",
