@@ -10,7 +10,10 @@ Prints the declared description to stdout and exits 0 when the repo has no decla
 configure.sh should fail loud on: a malformed registry, more than one entry named NAME, or a
 declared description that description_errors() rejects.
 
-Usage: resolve_description.py REGISTRY_PATH NAME
+Usage: resolve_description.py [--] REGISTRY_PATH NAME
+
+A caller passes `--` before the positionals whenever NAME can start with a dash, as configure.sh
+does, since argparse otherwise reads such a NAME as an option.
 """
 
 from __future__ import annotations
