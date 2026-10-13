@@ -66,10 +66,10 @@ text says, because the harm it covers was never in the text.
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
    passes this requirement instead, since there is nothing yet on record to bypass. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
-   That covers a push in text the hook does not parse, a push carrying a `-c`/`--config-env`
-   override, and a git command under an `include.path`/`includeIf` override whose subcommand git
-   does not list, since the included file may define it as a push alias. It also covers a bare
-   push or a `HEAD`/`@` refspec whose directory or branch may change before it runs. The
+   That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
+   override. It covers a git command under an `include.path`/`includeIf` override too, where git
+   lists no such subcommand, since the included file may define it as a push alias. It also covers
+   a bare push or a `HEAD`/`@` refspec whose directory or branch may change before it runs. The
    workaround is an explicit refspec run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks

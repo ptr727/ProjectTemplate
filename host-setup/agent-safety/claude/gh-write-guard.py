@@ -880,29 +880,30 @@ def _is_gh_exe(tok):
     return base in ("gh", "gh.exe")
 
 
-def _collect_arglist(toks, start):
+def _collect_arglist(toks, start, quoted=None):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
     `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
     The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`.
     Such a token ends the invocation at its separator, so the next command's words are not read as this one's.
+    It does so only where `quoted`, a `_quoted_mask`, marks it unquoted, since a quoted `';<'` is an ordinary word.
+    With no mask, it is read as a redirection, as before.
 
     Returns (args, index_after_this_invocation).
     """
     n = len(toks)
     k = start
     args = []
+
+    def fused(i):
+        return quoted is not None and not quoted[i] and _opens_with_separator(toks[i])
+
     while k < n:
         t = toks[k]
-        if _is_separator(t) or _opens_with_separator(t):
+        if _is_separator(t) or fused(k):
             break  # a command separator ends this invocation
-        if (
-            t.isdigit()
-            and k + 1 < n
-            and _is_redir_op(toks[k + 1])
-            and not _opens_with_separator(toks[k + 1])
-        ):
+        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]) and not fused(k + 1):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
@@ -937,6 +938,7 @@ def _git_subcommand_index(toks, k):
 def _git_subcommand_invocations(cmd, sub):
     """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
+    quoted = _quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -946,7 +948,7 @@ def _git_subcommand_invocations(cmd, sub):
             continue
         j = _git_subcommand_index(toks, i)
         if j < n and toks[j] == sub:
-            args, k = _collect_arglist(toks, j + 1)
+            args, k = _collect_arglist(toks, j + 1, quoted)
             out.append((toks[i + 1 : j], args))
             i = k
         else:
@@ -971,11 +973,14 @@ def _git_config_overrides(global_opts):
     return values
 
 
+def _config_key(value):
+    """The key a `-c`/`--config-env` value sets, lowercased, since git matches a key without case."""
+    return value.split("=", 1)[0].lower()
+
+
 def _overrides_hooks_path(global_opts):
     """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
-    return any(
-        v.split("=", 1)[0].lower() == "core.hookspath" for v in _git_config_overrides(global_opts)
-    )
+    return any(_config_key(v) == "core.hookspath" for v in _git_config_overrides(global_opts))
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1043,6 +1048,7 @@ def _git_invocations_at(cmd):
     """
     # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
+    quoted = _quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -1100,7 +1106,7 @@ def _git_invocations_at(cmd):
             git_dir = env_git_dir
         if j < n and not _is_shell_op(toks[j]):
             sub = toks[j]
-            args, k = _collect_arglist(toks, j + 1)
+            args, k = _collect_arglist(toks, j + 1, quoted)
             out.append((i, (c_dirs, work_tree, git_dir, inline_aliases, sub, args)))
             i = k
         else:
@@ -2183,7 +2189,7 @@ def _includes_config_file(value):
     Either one reads a config file the guard never reads, which may define an alias. `_GIT_INCLUDE`
     is the cheap pre-filter that sends a command holding one to the push check.
     """
-    key = value.split("=", 1)[0].lower()
+    key = _config_key(value)
     return key == "include.path" or key.startswith("includeif.")
 
 
@@ -2204,6 +2210,8 @@ def _unreadable_push(cmd):
     - a `-c` config value, an inline alias expanding to a push among them
     - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
       overrides names no command git lists, so it may be an alias that file defines
+    - a separator fused with a redirection where the quoting does not parse, which leaves no
+      way to tell an ending `;<` from a quoted word (see `_collect_arglist`)
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2218,6 +2226,12 @@ def _unreadable_push(cmd):
     for text in texts:
         toks = _shell_tokens(text)
         n = len(toks)
+        if (
+            _GIT_PUSH.search(text)
+            and any(_is_redir_op(t) and _opens_with_separator(t) for t in toks)
+            and _quoted_mask(text, toks) is None
+        ):
+            return "a separator fused with a redirection in a command whose quoting the guard cannot read"
         for k, t in enumerate(toks):
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
@@ -4087,7 +4101,7 @@ def classify(
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
     if _GIT_PUSH.search(cmd) or _GIT_INCLUDE.search(cmd):
-        if split_word:
+        if split_word and _GIT_PUSH.search(cmd):
             return "deny", (
                 "This push sits in a command with a word split by a backslash-newline, which the shell joins "
                 "into one word the guard cannot read, so a hidden cd could redirect the push. Write each "
@@ -5327,6 +5341,27 @@ _GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "an include override inside a wrapper body is read too",
+    ),
+    (
+        "git push origin >';<' feature/x develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted operator word is a redirection target, not a separator, so develop is still read",
+    ),
+    (
+        "git push origin <<<';<' feature/y develop",
+        "feature/x",
+        {"feature/y": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted operator word as a here-string is not a separator either",
+    ),
+    (
+        "git push ;</dev/null origin feature/x # it's",
+        "develop",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a fused separator in a command whose quoting the guard cannot read is not trusted as a word",
     ),
     (
         "git -c include.path=/example/config status",
