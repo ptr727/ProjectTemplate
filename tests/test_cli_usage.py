@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Hold every tracked command-line entry point to CODESTYLE.md's argument rule by running it.
 
+The checks below read that rule strictly, so a script can meet its words and still fail here.
+
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
 the real commands on PATH record a call to gh, git, or another command in RECORDED. The variables
 in WITHHELD, the GitHub tokens and step files, are removed. Each home and config-home variable in
@@ -76,7 +78,7 @@ BEFORE_FLAG = {
 }
 
 REFUSED_AS_OPTION = re.compile(
-    r"(unrecogni[sz]ed argument|unknown (option|argument|flag|parameter)"
+    r"(unrecogni[sz]ed (argument|option)|unknown (option|argument|flag|parameter)"
     r"|cannot be found that matches parameter name)[^\n]*bogus-flag",
     re.IGNORECASE,
 )
@@ -513,6 +515,7 @@ class ControlCase(unittest.TestCase):
         self.assertIsNotNone(
             REFUSED_AS_OPTION.search("error: unrecognized arguments: --bogus-flag")
         )
+        self.assertIsNotNone(REFUSED_AS_OPTION.search("getopt: unrecognized option '--bogus-flag'"))
 
     def test_help_must_open_on_a_usage_line_naming_the_script(self) -> None:
         self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))
