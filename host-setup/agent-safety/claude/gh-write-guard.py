@@ -1987,10 +1987,10 @@ def _runs_stored_script(cmd):
     for k, t in enumerate(toks):
         if _is_shell_wrapper_exe(t) or t in ("eval", "source", "exec"):
             return True
-        if t == ".":
+        if t == "." or t == "chmod" or "hooks/" in t:
             return True
         plain = t.replace("$?", "")
-        if "$" in plain or "`" in plain:
+        if any(c in plain for c in "$`{[*?"):
             return True
     return "<(" in cmd or ">(" in cmd
 
@@ -2185,8 +2185,9 @@ def _check_bypass_flags(cmd):
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
     # The `-n` form is --no-verify only for commit, since `git push -n` is --dry-run.
-    commit_lists = _git_subcommand_arglists(cmd, "commit")
-    push_lists = _push_arg_lists(cmd)
+    texts = [cmd, *_embedded_wrapper_commands(cmd)]
+    commit_lists = [a for t in texts for a in _git_subcommand_arglists(t, "commit")]
+    push_lists = [a for t in texts for a in _push_arg_lists(t)]
     commit_bypass = any(("--no-verify" in a) or ("-n" in a) for a in commit_lists)
     push_bypass = any("--no-verify" in a for a in push_lists)
     if commit_bypass or push_bypass:
@@ -2197,7 +2198,8 @@ def _check_bypass_flags(cmd):
     if any(
         _overrides_hooks_path(opts)
         for sub in ("commit", "push")
-        for opts, _ in _git_subcommand_invocations(cmd, sub)
+        for t in texts
+        for opts, _ in _git_subcommand_invocations(t, sub)
     ):
         return "deny", (
             "This overrides core.hooksPath for a commit or push, which runs whatever hooks that directory "
@@ -7626,6 +7628,26 @@ _PUSH_DIR_CASES = [
         "cd {base}; bash -c 'cd sub; git push'",
         "deny",
         "a wrapper's relative cd into a missing child of develop is denied",
+    ),
+    (
+        "bash -c 'git push --no-verify'",
+        "deny",
+        "a wrapped push is scanned for the bypass flags too",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\n/bin/ba* x.sh",
+        "deny",
+        "a glob can select the shell, so the body stays in view",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\n{ba,}sh x.sh",
+        "deny",
+        "a brace expansion can select the shell, so the body stays in view",
+    ),
+    (
+        "cat > .git/hooks/pre-commit <<'EOF'\ngit push\nEOF\ngit commit --allow-empty -m x",
+        "deny",
+        "a body written into a git hook stays in view",
     ),
     (
         "true # note\\\ngit push",
