@@ -171,23 +171,12 @@ def interpreter(root: Path, path: str) -> str | None:
         words = handle.readline()[2:].split()
     name = PurePosixPath(words[0]).name if words else ""
     if name == "env":
-        name = env_command(words[1:])
+        name = next((word for word in words[1:] if word[0] != "-" and "=" not in word), "")
     if name.startswith("python"):
         return "python"
     if name in ("bash", "sh"):
         return "bash"
     return "pwsh" if name == "pwsh" else None
-
-
-def env_command(words: list[str]) -> str:
-    """The command an `env` shebang runs, past env's flags, their operands, and assignments."""
-    operands = iter(words)
-    for word in operands:
-        if word in ("-u", "--unset", "-C", "--chdir"):
-            next(operands, None)
-        elif word[0] != "-" and "=" not in word:
-            return word
-    return ""
 
 
 def opens_on_usage(stdout: str, path: str) -> bool:
@@ -519,10 +508,21 @@ class ControlCase(unittest.TestCase):
         self.assertFalse(opens_on_usage("\nusage: example.py [-h]\n", "bin/example.py"))
         self.assertTrue(opens_on_usage("usage: example.py [-h]\n", "bin/example.py"))
 
-    def test_an_env_shebang_names_its_command_past_options(self) -> None:
-        self.assertEqual(env_command(["-S", "python3", "-u"]), "python3")
-        self.assertEqual(env_command(["-u", "EXAMPLE", "NAME=value", "bash"]), "bash")
-        self.assertEqual(env_command(["--chdir", "/repo", "pwsh"]), "pwsh")
+    def test_a_pwsh_run_sets_aside_only_its_startup_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            homes = {name: Path(tmp) / name for name in HOMES}
+            local = homes["USERPROFILE"] / "AppData" / "Local"
+            for made in (
+                local / "Microsoft" / "PowerShell" / "example",
+                homes["XDG_CACHE_HOME"] / "powershell" / "example",
+                local / "Example",
+                homes["XDG_CONFIG_HOME"] / "powershell",
+            ):
+                made.mkdir(parents=True)
+            self.assertEqual(
+                home_writes(homes, pwsh=True),
+                "wrote $USERPROFILE/AppData/Local/Example\nwrote $XDG_CONFIG_HOME/powershell\n",
+            )
 
     def test_a_write_into_a_scratch_home_is_seen(self) -> None:
         """A file, an empty directory, and a non-pwsh write where pwsh caches each count."""
