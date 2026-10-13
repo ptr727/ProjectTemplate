@@ -57,7 +57,7 @@ text says, because the harm it covers was never in the text.
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
-   Each refspec's operation is judged on its own, so a `+` or a `:` on one refspec forces or
+   Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,

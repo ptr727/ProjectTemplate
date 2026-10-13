@@ -2283,6 +2283,7 @@ def _push_invocations(cmd):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
+            splits = []
             body_toks = outer_toks if body is text else _shell_tokens(body)
             for word, inv in _git_invocations_at(body):
                 c_dirs, _work_tree, git_dir, _aliases, sub, args = inv
@@ -2305,13 +2306,14 @@ def _push_invocations(cmd):
                     j = _git_subcommand_index(body_toks, word)
                     split, _ = _collect_arglist(body_toks, j + 1, split_fused=True)
                     if split != args:
-                        out.append((c_dirs, None, leading_cd, unreliable, split))
+                        splits.append((c_dirs, None, leading_cd, unreliable, split))
             unmatched = [a for _c, _w, _l, _u, a in out[first:]]
             for _opts, args in _git_subcommand_invocations(body, "push"):
                 if args in unmatched:
                     unmatched.remove(args)
                 else:
                     out.append(([], None, leading_cd, True, args))
+            out.extend(splits)
     return out
 
 
@@ -8606,6 +8608,11 @@ _PUSH_DIR_CASES = [
         "@wt git push ;</dev/null gh pr checkout 5 && git push origin feature/example",
         "deny",
         "the later command's words are not the bare push's refspecs, so its HEAD is read",
+    ),
+    (
+        "@wt git push ;</dev/null origin feature/example ; git status ;</dev/null X=y git -C {base} push",
+        "deny",
+        "a split reading does not stand in for a push only the whole-command scan finds",
     ),
     (
         "@wt git push ;</dev/null origin develop",
