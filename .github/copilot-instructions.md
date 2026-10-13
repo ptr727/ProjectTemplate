@@ -46,8 +46,8 @@ Review effort is user-controlled. The automation observes `Lite`, `Balanced`, or
   - **Disproved by** - reading the sentence against the snippet it describes. The subject is the noun phrase "the agent check", meaning the check for the signing agent, and "branches" is its verb, which is what the `if [ ... = ssh ]; then ssh-add -L; else gpg --list-secret-keys; fi` line does. The proposed reading needs "branches" as a plural noun, and the paragraph is section 0, before a repository exists, where the alternatives it names are the SSH and GPG forms rather than refs.
   - **Proved against** - the paragraph following the agent snippet in `STANDUP.md` section 0 on `develop` at `676a2bd`, unchanged since `77be3a3`.
   - **Delete when** - the sentence is reworded for any reason, since the entry is about this phrasing rather than about the rule it states.
-- **Git accepts an attached `-c<name>=<value>` or `-C<dir>` global option.** Raised as a P1 in both review rounds of the pull request that made `host-setup/agent-safety/claude/gh-write-guard.py` read an attached `-c`.
-  - **Disproved by** - running `git -cfoo.bar=1 status` and `git -C. status` on git 2.47.3. Both print `unknown option` and the usage text for the separate `-c <name>=<value>` and `-C <path>` forms, and exit without running the subcommand, so an attached spelling never reaches a repository.
+- **Git accepts an attached `-c<name>=<value>` or `-C<dir>` global option.** Raised as a P1 in both review rounds of the change that made `host-setup/agent-safety/claude/gh-write-guard.py` read an attached `-c`.
+  - **Disproved by** - running `git -cfoo.bar=1 status` and `git -C. status` on git 2.47.3. Both print `unknown option` and the usage text for the separate `-c <name>=<value>` and `-C <path>` forms. Git exits without running the subcommand, so an attached spelling never reaches a repository.
   - **Proved against** - git 2.47.3 and `develop` at `ac78916f`.
   - **Delete when** - the guard stops reading an attached `-c` or `-C`, or a git release accepts either attached form.
 
