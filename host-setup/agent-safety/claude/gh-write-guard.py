@@ -880,30 +880,25 @@ def _is_gh_exe(tok):
     return base in ("gh", "gh.exe")
 
 
-def _collect_arglist(toks, start, quoted=None):
+def _collect_arglist(toks, start, split_fused=False):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
     `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
-    The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`.
-    Such a token ends the invocation at its separator, so the next command's words are not read as this one's.
-    It does so only where `quoted`, a `_modeled_quoted_mask`, marks it unquoted, since a quoted `';<'` is an ordinary word.
-    With no mask, it is read as a redirection, as before.
+    The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`, and drops
+    quoting, so such a token may also be a quoted word or text inside an expansion. It is read as a
+    redirection, and with `split_fused` as the end of the invocation at its separator instead.
 
     Returns (args, index_after_this_invocation).
     """
     n = len(toks)
     k = start
     args = []
-
-    def fused(i):
-        return quoted is not None and not quoted[i] and _opens_with_separator(toks[i])
-
     while k < n:
         t = toks[k]
-        if _is_separator(t) or fused(k):
+        if _is_separator(t) or (split_fused and _opens_with_separator(t)):
             break  # a command separator ends this invocation
-        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]) and not fused(k + 1):
+        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
@@ -938,7 +933,6 @@ def _git_subcommand_index(toks, k):
 def _git_subcommand_invocations(cmd, sub):
     """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
-    quoted = _modeled_quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -948,7 +942,7 @@ def _git_subcommand_invocations(cmd, sub):
             continue
         j = _git_subcommand_index(toks, i)
         if j < n and toks[j] == sub:
-            args, k = _collect_arglist(toks, j + 1, quoted)
+            args, k = _collect_arglist(toks, j + 1)
             out.append((toks[i + 1 : j], args))
             i = k
         else:
@@ -1048,7 +1042,6 @@ def _git_invocations_at(cmd):
     """
     # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
-    quoted = _modeled_quoted_mask(cmd, toks)
     n = len(toks)
     out = []
     i = 0
@@ -1106,7 +1099,7 @@ def _git_invocations_at(cmd):
             git_dir = env_git_dir
         if j < n and not _is_shell_op(toks[j]):
             sub = toks[j]
-            args, k = _collect_arglist(toks, j + 1, quoted)
+            args, k = _collect_arglist(toks, j + 1)
             out.append((i, (c_dirs, work_tree, git_dir, inline_aliases, sub, args)))
             i = k
         else:
@@ -2210,8 +2203,6 @@ def _unreadable_push(cmd):
     - a `-c` config value, an inline alias expanding to a push among them
     - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
       overrides names no command git lists, so it may be an alias that file defines
-    - a separator fused with a redirection where `_marked_lex` cannot model the quoting, which
-      leaves no way to tell an ending `;<` from a quoted word (see `_collect_arglist`)
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2226,12 +2217,6 @@ def _unreadable_push(cmd):
     for text in texts:
         toks = _shell_tokens(text)
         n = len(toks)
-        if (
-            _GIT_PUSH.search(text)
-            and any(_is_redir_op(t) and _opens_with_separator(t) for t in toks)
-            and _modeled_quoted_mask(text, toks) is None
-        ):
-            return "a separator fused with a redirection in a command whose quoting the guard cannot read"
         for k, t in enumerate(toks):
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
@@ -2280,6 +2265,9 @@ def _push_invocations(cmd):
     (`find -execdir`, `sudo -D`), or read startup files that change it. So is a push after a
     command that may move `HEAD` (see `_head_may_move`). That scan runs for each push on its own.
     A move written after a push leaves it alone unless it may run first (see `_push_scan_end`).
+    A push whose words hold a separator fused with a redirection is read twice. One reading ends
+    the push at that separator, and the other reads the token as a redirection, since the guard
+    cannot tell a fused separator from a quoted word or one inside an expansion.
     """
     out = []
     for text in [cmd]:
@@ -2295,6 +2283,7 @@ def _push_invocations(cmd):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
+            body_toks = outer_toks if body is text else _shell_tokens(body)
             for word, inv in _git_invocations_at(body):
                 c_dirs, _work_tree, git_dir, _aliases, sub, args = inv
                 if sub == "push":
@@ -2311,7 +2300,12 @@ def _push_invocations(cmd):
                     else:
                         head_moves = whole_moves
                     moved = extra > 0 or head_moves
-                    out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
+                    unreliable = moved or redirected or wrapped_cd
+                    out.append((c_dirs, None, leading_cd, unreliable, args))
+                    j = _git_subcommand_index(body_toks, word)
+                    split, _ = _collect_arglist(body_toks, j + 1, split_fused=True)
+                    if split != args:
+                        out.append((c_dirs, None, leading_cd, unreliable, split))
             unmatched = [a for _c, _w, _l, _u, a in out[first:]]
             for _opts, args in _git_subcommand_invocations(body, "push"):
                 if args in unmatched:
@@ -2792,21 +2786,6 @@ def _quoted_mask(cmd, toks):
         marked = _marked_lex(cmd)
     except _UnmodeledSyntax:
         return _quote_kept_mask(cmd, toks)
-    except ValueError:
-        return None
-    if [t for t, _ in marked] != toks:
-        return None
-    return [m for _, m in marked]
-
-
-def _modeled_quoted_mask(cmd, toks):
-    """`_quoted_mask` where `_marked_lex` models the whole command, else None.
-
-    The quote-keeping fallback cannot see a word inside a backtick substitution or a `$'...'`
-    quote, so a caller that ends an argument list on its say reads only this one.
-    """
-    try:
-        marked = _marked_lex(cmd)
     except ValueError:
         return None
     if [t for t, _ in marked] != toks:
@@ -5376,7 +5355,7 @@ _GIT_CASES = [
         "develop",
         {"feature/x": set(), "develop": _CODE_RULES},
         "deny",
-        "a fused separator in a command whose quoting the guard cannot read is not trusted as a word",
+        "a fused separator is read both ways, so the bare push of develop it may end is checked",
     ),
     (
         "git push origin `true;</dev/null` develop",
@@ -8630,8 +8609,8 @@ _PUSH_DIR_CASES = [
     ),
     (
         "@wt git push ;</dev/null origin develop",
-        "allow",
-        "control: the bare push on a feature checkout pushes the feature branch, and origin is another command",
+        "deny",
+        "the words after a fused separator are still read as the push's own, since they may be quoted",
     ),
 ]
 
