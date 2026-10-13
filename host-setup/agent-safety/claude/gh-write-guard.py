@@ -1939,7 +1939,7 @@ def _line_heredocs_are_data(line):
             if t == "|":
                 at_command = True
             elif at_command:
-                if t.rsplit("/", 1)[-1] not in _DATA_HEREDOC_OWNERS:
+                if t not in _DATA_HEREDOC_OWNERS:
                     return False
                 at_command = False
     return seen
@@ -1987,7 +1987,7 @@ def _runs_stored_script(cmd):
     for k, t in enumerate(toks):
         if _is_shell_wrapper_exe(t) or t in ("eval", "source", "exec"):
             return True
-        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
+        if t == ".":
             return True
         plain = t.replace("$?", "")
         if "$" in plain or "`" in plain:
@@ -7579,6 +7579,16 @@ _PUSH_DIR_CASES = [
         "cat > x.sh <<'EOF'\ngit push\nEOF\nc=bash; X=1 $c x.sh",
         "deny",
         "a stored script run after an assignment prefix stays in view",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\nVAR=1 . ./x.sh",
+        "deny",
+        "a stored script sourced after an assignment prefix stays in view",
+    ),
+    (
+        "./cat > x.md <<'EOF'\ngit push\nEOF",
+        "deny",
+        "a path-spelled cat may be any executable, so its body stays in view",
     ),
     (
         "true # note\\\ngit push",
