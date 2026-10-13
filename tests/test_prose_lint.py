@@ -21,6 +21,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from collections.abc import Iterator
@@ -5222,9 +5223,16 @@ def locale_patch_bites() -> bool:
     an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
     the several ways an interpreter arrives at a UTF-8 default.
 
+    On Windows the pipe decodes in a reader thread, whose UnicodeDecodeError never reaches this
+    thread, so the thread's own exception hook records it too.
+
     Measured once, since answering it spawns an interpreter.
     """
-    with locale_patched_as_cp1252():
+    raised: list[type[BaseException]] = []
+    with (
+        locale_patched_as_cp1252(),
+        mock.patch.object(threading, "excepthook", lambda args: raised.append(args.exc_type)),
+    ):
         try:
             # Naming no encoding is the whole of the probe, so a sweep must never fix this call.
             subprocess.run(
@@ -5235,7 +5243,7 @@ def locale_patch_bites() -> bool:
             )
         except UnicodeDecodeError:
             return True
-    return False
+    return any(issubclass(kind, UnicodeDecodeError) for kind in raised)
 
 
 class TestGitOutputDecodesAsUtf8(unittest.TestCase):

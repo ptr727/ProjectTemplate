@@ -254,8 +254,8 @@ Before pushing or opening a PR:
 
 A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
 
-- **Every command-line script answers `--help` and `-h`** by printing its usage and exiting 0, changing nothing. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted.
-- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. An unrecognized first argument is never taken as a default mode or as a target.
+- **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted.
+- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter. An unrecognized first argument is never taken as a default mode or as a target.
 
 <!-- /include -->
 
