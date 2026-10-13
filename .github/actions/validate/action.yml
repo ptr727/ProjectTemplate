@@ -40,9 +40,9 @@ runs:
       shell: bash
       run: python3 scripts/build_dist.py --check
 
-    # The burn-down goes to the run's job summary rather than into the tree, per scripts/README.md, on every event since it describes the commit rather than a comparison against a base.
+    # The burn-down goes to the run's job summary rather than into the tree, on every event since it describes the commit rather than a comparison against a base.
     # GOVERNANCE.md "Verification Discipline".
-    # The step still fails on the engine's boundary exit, meaning it could not read what it needs rather than having read it and found a unit uncovered, since a boundary is not a verdict about coverage.
+    # The step fails only on the engine's boundary exit, meaning it could not read what it needs rather than having read it and found a unit uncovered, since a boundary is not a verdict about coverage.
     # Read-only, and `!cancelled()` so it renders after an earlier step failed.
     - name: Render the canonical review burn-down step
       if: ${{ !cancelled() }}
