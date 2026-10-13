@@ -10,7 +10,9 @@ Discipline" for the rule this implements.
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
            `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
-           `wait` read, an attestation counting only against the base it names. It reads the receipt
+           `wait` read, an attestation counting only against the base it names. The comment outlives
+           the receipt, which removing the worktree deletes, so it is also the record a promotion's
+           Merge Gate reads for each pull request it carries. `attest` reads the receipt
            `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
            refuses unless the checkout (--checkout, default the current directory) is at the pull
            request's head with no change beyond it, its merge base with the base branch is the pull
@@ -4932,7 +4934,8 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
     The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
-    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt where it
+    GitHub can read it, and the review gate for a fix push needs to, as does a later promotion's
+    Merge Gate once removing the worktree has deleted the receipt. This reads the receipt where it
     lives and posts a comment the gate can read, and only after four checks, each of which would
     otherwise vouch for content the pull request does not carry: the checkout's HEAD is the pull
     request's head, the checkout holds no change beyond that commit, its merge base with the base

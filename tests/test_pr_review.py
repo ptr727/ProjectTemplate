@@ -8377,6 +8377,25 @@ class TestCli(GqlCase):
                     self.cli(["wait", "7", "--timeout", "0"])
                 self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
+    def test_an_attested_opening_head_still_owes_the_first_round(self) -> None:
+        """The review loop attests the push that opens the pull request, as the promotion's record.
+
+        That attestation never stands in for Copilot's first round, so `wait` still requests one
+        and `status` reads no local coverage.
+        """
+        pr = self.into(payload([]), attest=True)
+        self.assertTrue(pr_review.attested(pr))
+        self.assertFalse(pr_review.local_cover(pr))
+        self.answer(pr)
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("review_on_head=NO", out)
+        self.assertNotIn("coverage=local", out)
+        self.answer(pr)
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_an_attested_head_behind_a_stale_quota_refusal_is_covered(self) -> None:
         rounds = [
             review(oid="a" * 39 + "1", at=EARLY, rid="PRR_a"),
