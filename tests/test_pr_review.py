@@ -7790,7 +7790,7 @@ class TestCli(GqlCase):
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
     def test_an_attested_head_the_first_round_landed_on_stays_unstated(self) -> None:
-        """The first round's own head is no fix push after it, so its attestation covers nothing."""
+        """A first round's own head is no fix push, so its attestation gives `status` no cover."""
         self.answer(self.into(payload([review(body=OVERVIEW)], files=["a.md"]), attest=True))
         self.assertEqual(45, self.cli(["status", "7"]))
         out = self.out.getvalue()

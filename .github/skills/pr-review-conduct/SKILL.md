@@ -94,9 +94,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      where no Copilot round on that pull request, on any commit, states or appears to state
      partial coverage. A round stating full coverage is evidence for every file. So is the
      attestation `pr_review.py attest` published on that pull request, for each file the
-     attested head's diff held. That head is held to the same rule, the head that last changed
-     the file or a later one. A local receipt does not count, since removing its worktree
-     deletes it.
+     attested head's diff held. It counts only where `status` would read it, posted by an owner,
+     member, or collaborator. That head is held to the same rule, the head that last changed the
+     file or a later one. A local receipt does not count, since removing its worktree deletes it.
    - Every review thread on the promotion is resolved, and every check passes.
    - Exit `45` is the only reason `pr_review.py` does not report the promotion ready. Read this
      from the digest's lines rather than from the exit code, since exit `45` returns before the

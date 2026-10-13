@@ -5168,8 +5168,8 @@ def promotion(pr: dict) -> bool:
 def round_before_head(pr: dict) -> bool:
     """Whether Copilot reviewed an earlier head of this pull request, a refusal not counting.
 
-    The head the first round itself landed on is not a fix push after that round, so an
-    attestation there stands in for nothing. A round whose commit is not named counts as no
+    The head the first round itself landed on is not a fix push after that round, so `status` and
+    `wait` read no attestation there as coverage. A round whose commit is not named counts as no
     earlier round, so an unreadable field costs a Copilot request rather than passing a head.
     """
     head = pr.get("headRefOid") or ""
