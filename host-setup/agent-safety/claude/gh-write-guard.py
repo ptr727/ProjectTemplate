@@ -2046,10 +2046,13 @@ def _push_invocations(cmd):
         outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
         export_dirs = _leading_export_dirs(text)
         batches = [(text, outer_cd, outer_extra)]
-        for inner in _embedded_wrapper_commands(text):
+        inners = _embedded_wrapper_commands(text)
+        moves = [_count_cd(_shell_tokens(i)) for i in inners]
+        for n, inner in enumerate(inners):
             own_cd = _leading_cd_dir(inner)
             inner_toks = _shell_tokens(inner)
-            inner_extra = max(0, _count_cd(inner_toks) - (1 if own_cd else 0))
+            inner_extra = max(0, moves[n] - (1 if own_cd else 0))
+            inner_extra += sum(moves) - moves[n]
             inner_extra += (
                 1 if _opaque_cd(inner_toks) or _git_off_command_position(inner_toks) else 0
             )
@@ -7589,6 +7592,11 @@ _PUSH_DIR_CASES = [
         "./cat > x.md <<'EOF'\ngit push\nEOF",
         "deny",
         "a path-spelled cat may be any executable, so its body stays in view",
+    ),
+    (
+        "cd {wt}; bash -c \"cd {base}; bash -c 'git push'\"",
+        "deny",
+        "a nested wrapper inherits the middle wrapper's cd, not the leading one",
     ),
     (
         "true # note\\\ngit push",
