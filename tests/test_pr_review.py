@@ -10497,7 +10497,7 @@ class TestAttest(unittest.TestCase):
             mock.patch.object(pr_review, "_git", side_effect=git),
             mock.patch.object(pr_review, "gh_rest", return_value=merge_base),
             mock.patch.object(pr_review, "LOCAL_REVIEW", stub),
-            mock.patch.object(pr_review.time, "sleep", side_effect=self.slept.append),
+            mock.patch.object(pr_review, "_attest_sleep", side_effect=self.slept.append),
         ):
             return pr_review.attest("o", "r", 7, self.dir)
 
