@@ -766,8 +766,8 @@ def repo_slug(entry):
     gate.
 
     Anything else answers with UNRESOLVED_OWNER and the entry's name, so every read 404s and the message names the
-    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": hub_repo_name()}` as its own fallback
-    when the hub has no registry entry and calling this on it.
+    entry that caused it. spec/workflow_reuse.py reaches this by building `{"name": hub_repo_name()}` as its own
+    fallback when the hub has no registry entry and calling this on it.
 
     Each half of that sentinel answers a way a fallback slug has already addressed the wrong thing. It carries two
     segments because a one-segment value shifts every later path component up one: `repos/Fixture/git/trees/<sha>`
@@ -7521,7 +7521,8 @@ def main(argv=None):
 
     override = f" | branch override {a.branch}" if a.branch else ""
     print(f"audit run {run_utc} | hub {hub_sha}{override}")
-    if not hub_name()[1]:
+    _, from_remote = hub_name()
+    if not from_remote:
         print(
             f"warning: no git remote; the hub name falls back to the directory name '{hub_repo_name()}', so every check that depends on the hub's identity is unreliable in this run",
             file=sys.stderr,
