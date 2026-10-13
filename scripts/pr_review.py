@@ -5828,7 +5828,7 @@ def main(argv: list[str] | None = None) -> int:
     elif held:
         print(
             "note: this pull request merges into a branch other than the default and Copilot "
-            "has reviewed it already, so a fix push is covered by an attested local pass rather "
+            "has reviewed an earlier head, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
@@ -6011,7 +6011,7 @@ def main(argv: list[str] | None = None) -> int:
     if held and not refusal:
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            "since a fix push after the first round is covered by a local pass. Run the local "
+            "since a fix push after Copilot has reviewed an earlier head is covered by a local pass. Run the local "
             "strict review, record it, push, and run `pr_review.py attest` from the checkout, "
             "or pass --request to ask Copilot for a round instead"
         )
