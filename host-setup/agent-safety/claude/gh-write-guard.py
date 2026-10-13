@@ -124,7 +124,7 @@ _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
-_GIT_PUSH = re.compile(r"git.*?\bpush\b", re.DOTALL)
+_GIT_PUSH = re.compile(r"git\b.*?\bpush\b", re.DOTALL)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule.
@@ -918,6 +918,14 @@ def _git_subcommand_arglists(cmd, sub):
     return [args for _, args in _git_subcommand_invocations(cmd, sub)]
 
 
+def _git_subcommand_index(toks, k):
+    """The index of the subcommand of the git word at `toks[k]`, past its global options."""
+    j = k + 1
+    while j < len(toks) and toks[j].startswith("-"):
+        j += 2 if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j] else 1
+    return j
+
+
 def _git_subcommand_invocations(cmd, sub):
     """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
@@ -928,12 +936,7 @@ def _git_subcommand_invocations(cmd, sub):
         if not _is_git_exe(toks[i]):
             i += 1
             continue
-        j = i + 1
-        while j < n and toks[j].startswith("-"):
-            if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j]:
-                j += 2  # this global option consumes the next token as its value
-            else:
-                j += 1
+        j = _git_subcommand_index(toks, i)
         if j < n and toks[j] == sub:
             args, k = _collect_arglist(toks, j + 1)
             out.append((toks[i + 1 : j], args))
@@ -2041,14 +2044,6 @@ _HEAD_KEEPING_SUBS = frozenset(
 )
 
 
-def _git_subcommand_index(toks, k):
-    """The index of the subcommand of the git word at `toks[k]`, past its global options."""
-    j = k + 1
-    while j < len(toks) and toks[j].startswith("-"):
-        j += 2 if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j] else 1
-    return j
-
-
 def _head_may_move(toks):
     """True when something before the last push in these tokens may change what a bare push targets.
 
@@ -2090,7 +2085,7 @@ def _unreadable_push(cmd):
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too. Config such
     as `push.default` or `remote.<name>.push` changes what a push updates, an explicit refspec
     included. A word is matched by `_GIT_PUSH`, which needs no word boundary before `git`. An
-    unquoted `-c'git push'` reads as `-cgit push`.
+    unquoted `-c'git push'` reads as `-cgit push`, while `.github` still matches nothing.
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
@@ -7885,6 +7880,11 @@ _PUSH_DIR_CASES = [
     ),
     ("@wt git -c alias.p=push p origin develop", "deny", "an inline alias expanding to push"),
     ("@wt bash -cgit\\ push\\ origin\\ develop", "deny", "an unquoted attached -c body"),
+    (
+        "@wt bash scripts/lint.sh .github/workflows/push.yml",
+        "allow",
+        "a .github path naming push is not a push",
+    ),
     ("cd {wt}; bash -c 'cd {base}; git push'", "deny", "a wrapped cd overrides the leading one"),
     ("bash -c 'git push'", "deny", "a push after bash -c in a checkout on develop is denied"),
     ("echo $(git push)", "deny", "a push inside a substitution in a checkout on develop is denied"),

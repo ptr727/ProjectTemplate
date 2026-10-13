@@ -61,11 +61,11 @@ text says, because the harm it covers was never in the text.
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
    unresolvable), deny rather than allow, because the harm is a silent success under the
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
-   passes this requirement instead, since there is nothing yet on record to bypass. A push whose
-   target the hook cannot read at all is denied whatever branch it names. That covers a push in
-   text the hook does not parse and a push carrying a `-c` config override. It also covers a bare
-   push whose directory or branch may change before it runs. The workaround is an explicit refspec
-   run as its own command. Every other
+   passes this requirement instead, since there is nothing yet on record to bypass. Apart from
+   that case, a push whose target the hook cannot read at all is denied whatever branch it names.
+   That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
+   override. It also covers a bare push or a `HEAD`/`@` refspec whose directory or branch may
+   change before it runs. The workaround is an explicit refspec run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
