@@ -2352,7 +2352,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     refspec both forced and deleted yields both ops. A lone `:` refspec pushes every branch that
     exists on both sides, and a branch pattern such as `refs/heads/*` may match any of them. So
     each is read as writing every protected default and each other branch named beside it, with
-    its own ops. A `HEAD`/`@` destination
+    its own ops. A pattern is also read as the branch its destination literally names, which a
+    ruleset pattern such as `release/*` matches. A `HEAD`/`@` destination
     updates the branch `HEAD` names, read the way a bare push's branch is. It is compared without
     case, since a case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is
     also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
@@ -2406,10 +2407,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 ops.add("delete")  # `:dst` empty-source refspec deletes dst
             ops = ops or {"update"}
             dst = rs.split(":", 1)[1] if ":" in rs else rs
-            if "*" in dst:
-                if not dst.startswith("refs/") or dst.startswith("refs/heads/"):
-                    matched_ops |= ops
-                continue
+            if "*" in dst and (not dst.startswith("refs/") or dst.startswith("refs/heads/")):
+                matched_ops |= ops
             if dst.upper() in ("HEAD", "@"):
                 if dst not in ("HEAD", "@"):
                     targets.append((ops, dst))
@@ -5314,6 +5313,13 @@ _GIT_CASES = [
         {"main": set(), "master": set(), "develop": {"pull_request"}},
         "deny",
         "a branch pattern updates the protected branches it matches",
+    ),
+    (
+        "git push origin '+refs/heads/release/*:refs/heads/release/*'",
+        None,
+        {"main": set(), "master": set(), "develop": set(), "release/*": {"non_fast_forward"}},
+        "deny",
+        "a branch pattern is still checked against the rules for the name it spells",
     ),
     (
         "git push origin 'refs/tags/*:refs/tags/*'",
