@@ -10647,6 +10647,11 @@ class TestAttestationReadings(unittest.TestCase):
         unnamed = review(oid=OLD)
         unnamed["commit"] = None
         self.assertFalse(pr_review.round_before_head(payload([unnamed])))
+        for head in (None, ""):
+            with self.subTest(head=head):
+                unreadable = payload([review(oid=OLD)])
+                unreadable["headRefOid"] = head
+                self.assertFalse(pr_review.round_before_head(unreadable))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
