@@ -5173,7 +5173,7 @@ def round_before_head(pr: dict) -> bool:
     an unreadable field costs a Copilot request rather than passing a head.
     """
     head = pr.get("headRefOid") or ""
-    return any(
+    return bool(head) and any(
         not refusal_of(n) and ((n.get("commit") or {}).get("oid") or head) != head
         for n in reviewer_nodes(pr, "reviews")
     )
