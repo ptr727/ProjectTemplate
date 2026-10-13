@@ -3,9 +3,9 @@
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
 the real commands on PATH record a call to gh, git, or another command in RECORDED. The variables
-in WITHHELD, the GitHub tokens and step files, are removed. Each home and config-home variable in HOMES points into an empty scratch directory. An
-entry a run leaves in one is an effect, aside from a pwsh run's startup cache. The proxy is a local
-listener that records every connection made to it.
+in WITHHELD, the GitHub tokens and step files, are removed. Each home and config-home variable in
+HOMES points into an empty scratch directory. An entry a run leaves in one is an effect, aside from
+a pwsh run's startup cache. The proxy is a local listener that records every connection made to it.
 
 Help exits 0 and prints the same text for both spellings. That text opens on a usage line naming
 the script, so a default mode whose report merely mentions usage fails. The unknown flag exits
@@ -236,7 +236,10 @@ def tree_changes(before: dict[str, tuple[str, int, int]]) -> str:
 
 
 def tagged_processes(token: str) -> list[int]:
-    """Every live process whose inherited environment carries this run's token, where /proc exists."""
+    """Every live process whose inherited environment carries this run's token.
+
+    It reads /proc, so it finds nothing on a host without one.
+    """
     proc = Path("/proc")
     if not proc.is_dir():
         return []
@@ -337,7 +340,7 @@ def home_writes(homes: dict[str, Path], pwsh: bool) -> str:
 
 
 def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str], str]:
-    """The run's result and its effects, one line per stub call, connection, survivor, or changed path.
+    """The run's result and its effects, one line per stub call, connection, survivor, or change.
 
     Output goes to files rather than pipes, so a survivor holding an inherited stream cannot keep
     the run waiting. A run that times out is an effect too.
@@ -449,7 +452,10 @@ class EntryPointCase(unittest.TestCase):
                         self.assertRegex(output, REFUSED_AS_OPTION)
 
     def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
-        """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect, either of which fails the case."""
+        """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect.
+
+        Either one fails the flagged run, so a script that carries on past the flag cannot pass.
+        """
         for path, before in BEFORE_FLAG.items():
             with self.subTest(path=path):
                 result, effects = self.run_entry(path, *before)
@@ -475,7 +481,7 @@ class EntryPointCase(unittest.TestCase):
                 )
 
     def test_discovery_finds_an_extensionless_shebang_script(self) -> None:
-        """The hub tracks no such script yet, so a constructed tree stands in for the one that arrives."""
+        """The hub tracks no such script yet, so a constructed tree stands in for one."""
         files = {
             "bin/example": "#!/usr/bin/env -S python3 -u\n",
             "bin/example-notes": "Example notes, not a script.\n",
@@ -543,7 +549,7 @@ class ControlCase(unittest.TestCase):
         self.assertIn("wrote $XDG_CACHE_HOME/powershell", effects)
 
     def test_powershell_finds_the_stub_ahead_of_the_real_command(self) -> None:
-        """On Windows this is the `.cmd` stub, the one shadowing the PowerShell entry points rely on."""
+        """On Windows this is the `.cmd` stub the PowerShell entry points rely on."""
         pwsh = shutil.which("pwsh")
         if pwsh is None:
             self.skipTest("no pwsh on PATH")
@@ -586,7 +592,7 @@ class ControlCase(unittest.TestCase):
 
 
 class DashLeadingNameCase(unittest.TestCase):
-    """configure.sh hands resolve_description.py its arguments after `--`, so a leading dash stays a name."""
+    """configure.sh passes `--` to resolve_description.py, so a leading dash stays a name."""
 
     def test_a_dash_leading_name_resolves_its_description(self) -> None:
         resolution = lift(r'^    if ! description="\$\(.*?^    fi\n')
