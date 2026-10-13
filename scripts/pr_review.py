@@ -10,7 +10,9 @@ Discipline" for the rule this implements.
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
            `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
-           `wait` read, an attestation counting only against the base it names. It reads the receipt
+           `wait` read, an attestation counting only against the base it names. The comment outlives
+           the receipt, which removing the worktree deletes. A promotion reads the comment only in
+           its Merge Gate's per-file fallback, per pr-review-conduct. `attest` reads the receipt
            `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
            refuses unless the checkout (--checkout, default the current directory) is at the pull
            request's head with no change beyond it, its merge base with the base branch is the pull
@@ -49,7 +51,8 @@ Subcommands
            for it and no round on record states or appears to state partial coverage, with
            `coverage=local` beside it. Under the same conditions the attestation also covers a
            head whose Copilot round states no coverage, has none carried to it, and carries no file
-           table, which reads `review_on_head=yes coverage=local`.
+           table, which reads `review_on_head=yes coverage=local`. Neither reading applies to the
+           head the first round itself landed on, since that head is no fix push after it.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -230,9 +233,9 @@ Subcommands
            again on the same PR never double-requests. It is also skipped under 46's and 47's quota
            readings below, since a request into a reached limit spends quota and returns the same
            refusal. It is skipped too on a pull request into a branch other than the default once
-           Copilot has reviewed it at all, since a fix push there is covered by an attested local
-           pass: an attested head is covered at once, so the wait polls its checks instead only
-           while they can still move its merge, as 30 below lists, and one with no attestation exits
+           Copilot has reviewed an earlier head. A fix push there is covered by an attested local
+           pass. An attested head is covered at once. The wait then polls its checks instead, only
+           while they can still move its merge, as 30 below lists. One with no attestation exits
            49 naming the `attest` step.
            --request asks for a round anyway. A pull request into the default branch, a promotion
            among them, a pull request Copilot has not reviewed yet, and one with a partial on record
@@ -310,10 +313,10 @@ Subcommands
            request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
            `status` cannot report it, since a request that recorded nothing leaves nothing for a
            later read to find.
-           49 = no Copilot round covers this head and none was requested, the pull request merging
-           into a branch other than the default after Copilot's first round, and no attestation
-           vouches for the head. Run the local strict review, record it, push, and run `attest`, or
-           pass --request.
+           49 = no Copilot round covers this head and none was requested. The pull request merges
+           into a branch other than the default, Copilot has reviewed an earlier head, and no
+           attestation vouches for the head. Run the local strict review, record it, push, and run
+           `attest`, or pass --request.
            64 = the write scope could not be established or excludes the target, checked before
            the auto-request or any poll, so a cross-owner target reads and writes nothing here.
 
@@ -4932,13 +4935,15 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
     The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
-    GitHub can read it, and the review gate for a fix push needs to. This reads the receipt where it
-    lives and posts a comment the gate can read, and only after four checks, each of which would
-    otherwise vouch for content the pull request does not carry: the checkout's HEAD is the pull
-    request's head, the checkout holds no change beyond that commit, its merge base with the base
-    branch is the pull request's own, and `local_review.py status` reports a current pass against
-    the pull request's base, one read answering the coverage and the findings count alike. The first
-    two are read again once the check returns, since the checkout can move while it runs.
+    GitHub can read it, and the review gate for a fix push needs to. A promotion's per-file fallback
+    in the Merge Gate reads the comment too, since removing the worktree deletes the receipt. This
+    reads the receipt where it lives and posts a comment the gate can read, and only after four
+    checks, each of which would otherwise vouch for content the pull request does not carry: the
+    checkout's HEAD is the pull request's head, the checkout holds no change beyond that commit, its
+    merge base with the base branch is the pull request's own, and `local_review.py status` reports
+    a current pass against the pull request's base, one read answering the coverage and the findings
+    count alike. The first two are read again once the check returns, since the checkout can move
+    while it runs.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -5160,9 +5165,19 @@ def promotion(pr: dict) -> bool:
     return not default or pr.get("baseRefName") == default
 
 
-def first_round_done(pr: dict) -> bool:
-    """Whether Copilot has reviewed this pull request at all, on any head, a refusal not counting."""
-    return any(not refusal_of(n) for n in reviewer_nodes(pr, "reviews"))
+def round_before_head(pr: dict) -> bool:
+    """Whether Copilot reviewed an earlier head of this pull request, a refusal not counting.
+
+    The first round's own head is no fix push after that round, so `status` and `wait` read no
+    attestation there as coverage. A round whose commit is not named counts as no earlier round, so
+    an unreadable field costs a Copilot request rather than passing a head.
+    A pull request whose own head cannot be read counts as having no earlier round for the same reason.
+    """
+    head = pr.get("headRefOid") or ""
+    return bool(head) and any(
+        not refusal_of(n) and ((n.get("commit") or {}).get("oid") or head) != head
+        for n in reviewer_nodes(pr, "reviews")
+    )
 
 
 def holds(pr: dict) -> bool:
@@ -5173,7 +5188,7 @@ def holds(pr: dict) -> bool:
     """
     return (
         not promotion(pr)
-        and first_round_done(pr)
+        and round_before_head(pr)
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
         and not reviewer_requested(pr)
@@ -5183,17 +5198,18 @@ def holds(pr: dict) -> bool:
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
-    Only on a pull request into a branch other than the default, after Copilot's first round, on
-    a head its writer attests, and only where nothing on record says any round read part of a
-    diff and the whole review history is in view, the bound a file table stands in under. A fix
-    push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
-    overrules, and only a later round of Copilot's own on the head spends it.
+    Only on a pull request into a branch other than the default, after Copilot's first round, on a
+    head its writer attests, and only where nothing on record says any round read part of a diff and
+    the whole review history is in view, the bound a file table stands in under. A fix push after
+    the first round is covered by the local pass, and a promotion keeps its own Copilot round. The
+    first round has to be on an earlier head, since the head it landed on is no fix push after it. A
+    refusal on this head is Copilot's own word on it, which no attestation overrules, and only a
+    later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
         and not promotion(pr)
-        and first_round_done(pr)
+        and round_before_head(pr)
         and attested(pr)
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
@@ -5812,7 +5828,7 @@ def main(argv: list[str] | None = None) -> int:
     elif held:
         print(
             "note: this pull request merges into a branch other than the default and Copilot "
-            "has reviewed it already, so a fix push is covered by an attested local pass rather "
+            "has reviewed an earlier head, so a fix push is covered by an attested local pass rather "
             "than another Copilot round, and this wait requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
@@ -5995,7 +6011,7 @@ def main(argv: list[str] | None = None) -> int:
     if held and not refusal:
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            "since a fix push after the first round is covered by a local pass. Run the local "
+            "since a fix push after Copilot has reviewed an earlier head is covered by a local pass. Run the local "
             "strict review, record it, push, and run `pr_review.py attest` from the checkout, "
             "or pass --request to ask Copilot for a round instead"
         )

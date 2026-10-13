@@ -1151,6 +1151,15 @@ def _msys_drive_path(value):
     return f"{m.group(1).upper()}:{value[m.end() :] or '/'}"
 
 
+def _msys_rooted_without_drive(value):
+    """Whether a directory value is rooted but names no drive, such as `/primary`.
+
+    Git Bash resolves it under the Git install root while Windows Python joins it onto the session drive.
+    The two disagree on the directory, so the guard must not read either.
+    """
+    return bool(value) and value[0] in "/\\"
+
+
 def _join_relative(base, value):
     """Expand `~`/`$HOME` in `value`, then join it onto `base` when it is relative and `base` is
     known, or return the expanded value as-is when it is already absolute or there is no base to
@@ -1900,10 +1909,119 @@ def _push_arg_lists(cmd):
     return _git_subcommand_arglists(cmd, "push")
 
 
+_CD_BUILTINS = ("cd", "pushd", "popd", "chdir")
+_UNRESOLVED = object()
+_SPLIT_WORD = re.compile(r"(?<=\S)\\\r?\n(?=\S)")
+
+
+def _opaque_cd(toks):
+    """True when something in the command may change the directory or the repository without a literal `cd`.
+
+    That is a run-time word, an `eval`/`source`/`env`/`trap`, or a git dir variable, anywhere in the command.
+    """
+    for k, t in enumerate(toks):
+        if t in ("eval", "source", "builtin", "command", "env", "trap"):
+            return True
+        if t == ".":
+            return True
+        plain = t.replace("$?", "")
+        if "$" in plain or "`" in plain or "GIT_" in plain:
+            return True
+        if any(c in plain for c in "{[*?"):
+            return True
+    return False
+
+
+def _attached_c(body):
+    """True when a word spells git's `-C<dir>` with the directory attached, which the option parser does not read."""
+    return any(t.startswith("-C") and len(t) > 2 for t in _shell_tokens(body))
+
+
+def _git_off_command_position(toks):
+    """True when a `git` word is an argument of another command, such as `find -execdir git push`, which may run elsewhere."""
+    for k, t in enumerate(toks):
+        if k and _is_git_exe(t):
+            prev = toks[k - 1]
+            if not (_is_separator(prev) or _ENV_ASSIGN_RE.match(prev)):
+                return True
+    return False
+
+
+def _count_cd(toks):
+    return sum(1 for t in toks if t.rsplit("/", 1)[-1] in _CD_BUILTINS)
+
+
+def _push_invocations(cmd):
+    """Every `git push` as (c_dirs, work_tree, leading_cd, cd_unreliable, args), wrappers included.
+
+    A leading `cd` is trusted only while it is the one directory change in the text its push runs
+    in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
+    """
+    out = []
+    for text in [cmd]:
+        outer_cd = _leading_cd_dir(text)
+        outer_toks = _shell_tokens(text)
+        outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
+        outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
+        export_dirs = _leading_export_dirs(text)
+        batches = [(text, outer_cd, outer_extra, False)]
+        inners = _embedded_wrapper_commands(text)
+        inner_toks = [_shell_tokens(i) for i in inners]
+        wrapper_moves = any(
+            _count_cd(t) or _opaque_cd(t) or _git_off_command_position(t) for t in inner_toks
+        )
+        for inner in inners:
+            batches.append((inner, outer_cd, outer_extra, wrapper_moves))
+        for body, leading_cd, extra, wrapped_cd in batches:
+            first = len(out)
+            for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
+                if sub == "push":
+                    redirected = (
+                        git_dir is not None
+                        or any(export_dirs)
+                        or any(_leading_export_dirs(body))
+                        or _attached_c(body)
+                    )
+                    moved = extra > 0
+                    out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
+            unmatched = [a for _c, _w, _l, _u, a in out[first:]]
+            for _opts, args in _git_subcommand_invocations(body, "push"):
+                if args in unmatched:
+                    unmatched.remove(args)
+                else:
+                    out.append(([], None, leading_cd, True, args))
+    return out
+
+
+def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
+    """The branch a bare push in the directory it runs in targets, or `_UNRESOLVED`.
+
+    A directory the command moves to is read, never the session's own, and one that does not
+    resolve to a directory, or that a later `cd` may have changed, is unresolved. The shell runs the
+    push after a failed `cd` joined by `;`, so that case must not read as the session's branch.
+    """
+    if cd_unreliable or any(".." in c.replace("\\", "/").split("/") for c in c_dirs):
+        return _UNRESOLVED
+    if leading_cd is None and not c_dirs:
+        return _current_push_branch(cwd)
+    if leading_cd is not None:
+        leading_cd = _expand_dir(leading_cd)
+        if ".." in leading_cd.replace("\\", "/").split("/"):
+            return _UNRESOLVED
+        leading_cd = os.path.normpath(leading_cd)
+    dirs = ([leading_cd] if leading_cd is not None else []) + [_expand_dir(c) for c in c_dirs]
+    if _MSYS_DRIVE_PATHS and any(_msys_rooted_without_drive(d) for d in dirs):
+        return _UNRESOLVED
+    target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
+    if not target or not os.path.isdir(target) or not os.access(target, os.R_OK | os.X_OK):
+        return _UNRESOLVED
+    return _current_push_branch(target)
+
+
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update."""
     results = []
-    for args in _push_arg_lists(cmd):
+    for c_dirs, work_tree, leading_cd, cd_unreliable, args in _push_invocations(cmd):
         force = delete = push_all = mirror = tags_only = False
         positionals = []
         i = 0
@@ -1957,7 +2075,12 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             elif tags_only:
                 branches = []  # tags only, no branch is updated
             else:
-                b = current_branch if current_branch is not None else _current_push_branch(cwd)
+                b = current_branch
+                if b is None:
+                    b = _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable)
+                if b is _UNRESOLVED:
+                    results.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                    continue
                 if b:
                     branches = [b]
         op = "delete" if delete else ("force" if force else "update")
@@ -1986,8 +2109,9 @@ def _check_bypass_flags(cmd):
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
     # The `-n` form is --no-verify only for commit, since `git push -n` is --dry-run.
-    commit_lists = _git_subcommand_arglists(cmd, "commit")
-    push_lists = _push_arg_lists(cmd)
+    texts = [cmd, *_embedded_wrapper_commands(cmd)]
+    commit_lists = [a for t in texts for a in _git_subcommand_arglists(t, "commit")]
+    push_lists = [a for t in texts for a in _push_arg_lists(t)]
     commit_bypass = any(("--no-verify" in a) or ("-n" in a) for a in commit_lists)
     push_bypass = any("--no-verify" in a for a in push_lists)
     if commit_bypass or push_bypass:
@@ -1998,7 +2122,8 @@ def _check_bypass_flags(cmd):
     if any(
         _overrides_hooks_path(opts)
         for sub in ("commit", "push")
-        for opts, _ in _git_subcommand_invocations(cmd, sub)
+        for t in texts
+        for opts, _ in _git_subcommand_invocations(t, sub)
     ):
         return "deny", (
             "This overrides core.hooksPath for a commit or push, which runs whatever hooks that directory "
@@ -2019,6 +2144,13 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
     for op, br in targets:
+        if op == "unresolved":
+            return "deny", (
+                "Could not tell which branch this bare push targets, because the directory it runs in "
+                "does not resolve to a checkout the guard can read. Failing closed rather than read "
+                "the session's own branch. Push with an explicit refspec (git push origin "
+                "<branch>:refs/heads/<branch>), or cd into a directory that exists." + _handoff(cmd)
+            )
         if rules_lookup is not None:
             rules = rules_lookup(br)
         elif origin is not None:
@@ -3544,6 +3676,7 @@ def classify(
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
+    split_word = bool(_SPLIT_WORD.search(cmd))
     cmd = re.sub(r"\\\r?\n", " ", cmd)
     cwd = _msys_drive_path(cwd)
     # Rule 4 covers a git operation that would only succeed by bypassing an active branch rule.
@@ -3554,6 +3687,12 @@ def classify(
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
     if _GIT_PUSH.search(cmd):
+        if split_word:
+            return "deny", (
+                "This push sits in a command with a word split by a backslash-newline, which the shell joins "
+                "into one word the guard cannot read, so a hidden cd could redirect the push. Write each "
+                "word whole." + _handoff(cmd)
+            )
         dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
@@ -7212,6 +7351,302 @@ def _fixture_dir(key):
     return key.replace("\\", "/") if key else key
 
 
+_PUSH_DIR_CASES = [
+    (
+        "@wt cd -P {base} && git push",
+        "deny",
+        "an option-bearing cd is not modeled, so the push is unresolved",
+    ),
+    (
+        "@wt cd -- {base} && git push",
+        "deny",
+        "a cd with a double dash is not modeled",
+    ),
+    (
+        "@wt cd -L {base}; git push",
+        "deny",
+        "a cd -L is not modeled",
+    ),
+    (
+        "@wt cd ; git push",
+        "deny",
+        "a cd with no argument goes home, which is not modeled",
+    ),
+    (
+        "@wt pushd {base} && git push",
+        "deny",
+        "a pushd is not modeled",
+    ),
+    (
+        "@wt git status; cd {base}; git push",
+        "deny",
+        "a cd that is not a leading cd makes a later push unresolved",
+    ),
+    (
+        "cd {wt} && git -C t/.. push",
+        "deny",
+        "a -C dot-dot is resolved physically by git, so the guard does not read it",
+    ),
+    (
+        "cd {wt}/sub/.. && git push",
+        "deny",
+        "a leading cd with a dot-dot component is resolved physically by the shell, so the guard does not read it",
+    ),
+    (
+        "cd {wt}/sub/../ && git push",
+        "deny",
+        "a trailing slash after the dot-dot component is still unresolved",
+    ),
+    (
+        "@wt cd ../wt ; git push",
+        "deny",
+        "a relative leading cd that climbs out and back is unresolved, not normalized to the same checkout",
+    ),
+    (
+        "cd {wt} && git push",
+        "allow",
+        "a bare push after a leading cd into a feature worktree reads that branch",
+    ),
+    (
+        "cd {wt}; git push",
+        "allow",
+        "a leading cd joined by a semicolon scopes the push the same way",
+    ),
+    (
+        "cd {wt} && python3 tool.py --target develop; echo done=$?; git push 2>&1 | tail -1",
+        "allow",
+        "a push in a later semicolon segment runs in the cd's directory",
+    ),
+    (
+        "cd {base} && git push",
+        "deny",
+        "a bare push after a cd into a checkout on develop is denied",
+    ),
+    ("cd {base}; git push", "deny", "a bare push after a semicolon cd into develop is denied"),
+    (
+        "cd {missing}; git push",
+        "deny",
+        "a push after a cd that names no directory is denied, since the shell pushes from the session cwd",
+    ),
+    ("cd {missing} && git push", "deny", "a push after an unresolvable cd is denied"),
+    ('cd "$UNSET_DIR"; git push', "deny", "a push after a cd the guard cannot expand is denied"),
+    (
+        "cd {wt}; cd {base}; git push",
+        "deny",
+        "a later cd takes the push out of the leading cd's directory",
+    ),
+    (
+        "cd {wt}; echo $(git push)",
+        "deny",
+        "a substitution after a cd is a run-time command word, so the cd is not trusted",
+    ),
+    ("cd {wt}; bash -c 'git push'", "allow", "a wrapped push inherits the leading cd"),
+    ("cd {wt}; bash -c 'cd {base}; git push'", "deny", "a wrapped cd overrides the leading one"),
+    ("bash -c 'git push'", "deny", "a push after bash -c in a checkout on develop is denied"),
+    ("echo $(git push)", "deny", "a push inside a substitution in a checkout on develop is denied"),
+    ("git -C {wt} push", "allow", "a bare push with -C reads the branch in that directory"),
+    ("git -C {base} push", "deny", "a bare push with -C into develop is denied"),
+    ("git push", "deny", "a bare push in a checkout on develop is denied"),
+    (
+        "true; eval 'cd {wt}'; git -C ../wt push",
+        "deny",
+        "a relative -C after a hidden cd is not trusted",
+    ),
+    (
+        "cd {wt}; export GIT_DIR={base}/.git; git push",
+        "deny",
+        "a git dir exported after the cd moves the repository",
+    ),
+    ("cd {wt} && env -C {base} git push", "deny", "env can change the directory"),
+    ("cd {wt}; trap 'cd {base}' DEBUG; git push", "deny", "a trap can run a cd"),
+    (
+        "cd {wt}; { $c {base}; }; git push",
+        "deny",
+        "a run-time command word inside a group may be a cd",
+    ),
+    ("cd {wt}; {cd,} {base}; git push", "deny", "a cd built by brace expansion is not trusted"),
+    (
+        "cd {wt}; export GIT_{DIR,X}={base}/.git; git push",
+        "deny",
+        "a git dir name built by expansion is not trusted",
+    ),
+    (
+        "cd {wt}; X=1 {cd,} {base}; git push",
+        "deny",
+        "a cd built by expansion after an assignment is not trusted",
+    ),
+    ("cd {wt}; c\\\nd {base}; git push", "deny", "a cd split by a line continuation is still a cd"),
+    (
+        "cd {wt}; find {base} -maxdepth 0 -execdir git push \\;",
+        "deny",
+        "a push run as another command's argument may run elsewhere",
+    ),
+    (
+        "cd {wt}; git -C{base} push",
+        "deny",
+        "an attached -C value is not read, so the push is unresolved",
+    ),
+    (
+        "cd {wt}; bash -c \"cd {base}; bash -c 'git push'\"",
+        "deny",
+        "a nested wrapper inherits the middle wrapper's cd, not the leading one",
+    ),
+    (
+        "cd {wt}; VAR=1 . ./x.sh; git push",
+        "deny",
+        "a prefixed dot command may change the directory",
+    ),
+    ("cd {base}/..; bash -c 'cd {wt}; git push'", "deny", "a wrapper's own cd is never trusted"),
+    (
+        "cd {wt}; bash -c 'cd sub/..; git push'",
+        "deny",
+        "a cd inside a wrapper is never trusted, even a harmless one",
+    ),
+    (
+        "cd {base}; bash -c 'cd sub; git push'",
+        "deny",
+        "a wrapper's relative cd into a missing child of develop is denied",
+    ),
+    (
+        "bash -c 'git push --no-verify'",
+        "deny",
+        "a wrapped push is scanned for the bypass flags too",
+    ),
+    (
+        "true # note\\\ngit push",
+        "deny",
+        "a comment ending in a backslash does not continue onto the push line",
+    ),
+    (
+        "git --work-tree={wt} push",
+        "deny",
+        "a work tree does not move HEAD, so the branch is the session's",
+    ),
+    ("GIT_WORK_TREE={wt} git push", "deny", "an env work tree does not move HEAD either"),
+    (
+        "git -C {wt} --git-dir={base}/.git push",
+        "deny",
+        "an explicit git dir makes the branch unresolved",
+    ),
+    (
+        "cd {wt} && GIT_DIR={base}/.git git push",
+        "deny",
+        "an env git dir after a cd makes the branch unresolved",
+    ),
+    (
+        "cd {wt}; eval 'cd {base}'; git push",
+        "deny",
+        "an eval may hide a cd, so the leading one is not trusted",
+    ),
+    ("cd {wt}; c=cd; $c {base}; git push", "deny", "a command word built at run time may be a cd"),
+    (
+        "cd {base}/s/..; git push",
+        "deny",
+        "a cd through a symlink with a dot-dot is unresolved, since the shell resolves it physically",
+    ),
+    (
+        "cd {wt}; bash -c \"cd sub; bash -c 'git push'\"",
+        "deny",
+        "a push nested two wrappers deep under a cd is unresolved",
+    ),
+    (
+        "bash -c 'cd {wt}; git push'",
+        "deny",
+        "a wrapper's cd is never trusted without an outer one either",
+    ),
+    (
+        "cd {wt}; bash -c '$c {base}; bash -c \"git push\"'",
+        "deny",
+        "an opaque word inside a wrapper makes a nested push unresolved",
+    ),
+    (
+        "@wt git bisect run git push origin develop",
+        "deny",
+        "a push run by another git command is checked against its explicit target",
+    ),
+    (
+        "@wt git bisect run git push --force origin main",
+        "deny",
+        "a forced push run by another git command is still denied",
+    ),
+    (
+        "@wt git submodule foreach git push --force origin HEAD:main",
+        "deny",
+        "a push run by submodule foreach is checked for its force and target",
+    ),
+    (
+        "@wt git bisect run git push",
+        "deny",
+        "a bare push run by another git command may run elsewhere, so it is unresolved",
+    ),
+]
+
+
+def _push_dir_selftest(origin):
+    """Run `_PUSH_DIR_CASES` against real temporary repositories, built from constructed names only."""
+    import shutil
+    import tempfile
+
+    if os.name == "nt" or os.path.sep != "/":
+        print("  skip [push ] directory-scoped push cases need POSIX paths")
+        return True
+    root = tempfile.mkdtemp(prefix="guard-push-")
+    ok = True
+    try:
+        base = os.path.join(root, "base")
+        wt = os.path.join(root, "wt")
+        missing = os.path.join(root, "missing")
+        git = [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Example",
+            "-c",
+            "user.email=example@example.com",
+        ]
+        steps = (
+            [*git, "init", "-q", "-b", "develop", base],
+            [*git, "-C", base, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
+            [*git, "-C", base, "worktree", "add", "-q", "-b", "feature/example", wt],
+        )
+        for step in steps:
+            try:
+                built = subprocess.run(step, capture_output=True, check=False).returncode == 0
+            except OSError:
+                built = False
+            if not built:
+                print("  skip [push ] could not build the temporary repositories")
+                return True
+        os.makedirs(os.path.join(wt, "sub"))
+        os.symlink(os.path.join(wt, "sub"), os.path.join(base, "s"))
+        os.makedirs(os.path.join(base, "sub2"))
+        os.symlink(os.path.join(base, "sub2"), os.path.join(wt, "t"))
+        rules = lambda br: (
+            {"pull_request", "non_fast_forward"} if br in ("develop", "main") else set()
+        )
+        for template, want, label in _PUSH_DIR_CASES:
+            session = base
+            if template.startswith("@wt "):
+                template, session = template[4:], wt
+            cmd = template.replace("{wt}", wt).replace("{base}", base).replace("{missing}", missing)
+            got, _ = classify(
+                cmd,
+                cwd=session,
+                origin=origin,
+                rules_lookup=rules,
+                environ={},
+                primary_checkout_lookup=lambda d: False,
+            )
+            mark = "ok  " if got == want else "FAIL"
+            if got != want:
+                ok = False
+            print(f"  {mark} [{got:5}] want={want:5} {label}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    return ok
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -7657,6 +8092,8 @@ def _selftest():
     if got is not True and got != "skip":
         ok = False
     print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
+    if not _push_dir_selftest(origin):
+        ok = False
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 

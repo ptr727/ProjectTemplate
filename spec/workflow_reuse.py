@@ -130,7 +130,7 @@ def measure(registry, canon, hub_slug, reader=fetch, lister=fetch_dir):
         slug = audit.repo_slug(entry)
         ref = audit.ground_branch_of(entry, defaults=registry.get("defaults", {}))
         files = [f for f in lister(slug, WORKFLOW_DIR, ref) if f.endswith((".yml", ".yaml"))]
-        if not files and name != audit.HUB_NAME:
+        if not files and name != audit.hub_repo_name():
             empty.append(name)
         for fname in files:
             text = reader(slug, f"{WORKFLOW_DIR}/{fname}", ref)
@@ -139,7 +139,7 @@ def measure(registry, canon, hub_slug, reader=fetch, lister=fetch_dir):
                 continue
             row = {
                 "repo": name,
-                "hub": name == audit.HUB_NAME,
+                "hub": name == audit.hub_repo_name(),
                 "file": fname,
                 "text": text,
                 "reach": hub_reach(text, hub_slug),
@@ -337,9 +337,9 @@ def _selftest():
         "defaults": {"groundTruthBranch": "release/9.9"},
         "repos": [
             {
-                "name": audit.HUB_NAME,
+                "name": audit.hub_repo_name(),
                 "status": "cataloged",
-                "url": f"https://x/acme/{audit.HUB_NAME}",
+                "url": f"https://x/acme/{audit.hub_repo_name()}",
             },
             {"name": "One", "status": "cataloged", "url": "https://x/acme/One"},
             {
@@ -354,12 +354,12 @@ def _selftest():
     }
     canon_map = {"a.yml": canon}
     trees = {
-        audit.HUB_NAME: ["a.yml"],
+        audit.hub_repo_name(): ["a.yml"],
         "One": ["a.yml", "local.yml", "notes.md"],
         "Two": ["a.yml", "big.yml"],
     }
     texts = {
-        (audit.HUB_NAME, "a.yml"): canon,
+        (audit.hub_repo_name(), "a.yml"): canon,
         ("One", "a.yml"): same_pin_bumped,
         ("One", "local.yml"): "name: L\n",
         ("Two", "a.yml"): caller,
@@ -412,8 +412,8 @@ def main(argv=()):
         return _selftest()
     registry = audit.load("registry/repos.json")
     hub_entry = next(
-        (r for r in registry["repos"] if r.get("name") == audit.HUB_NAME),
-        {"name": audit.HUB_NAME},
+        (r for r in registry["repos"] if r.get("name") == audit.hub_repo_name()),
+        {"name": audit.hub_repo_name()},
     )
     hub_slug = audit.repo_slug(hub_entry)
     rows, unreadable, empty = measure(registry, canonical_texts(), hub_slug)
