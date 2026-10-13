@@ -167,7 +167,7 @@ def manifest_gap_pass(spec):
     hub_only = audit.hub_only_paths(spec)
     gaps, unreadable = {}, []
     for entry in spec["registry"]["repos"]:
-        if entry.get("status") != "cataloged" or entry.get("name") == audit.HUB_NAME:
+        if entry.get("status") != "cataloged" or entry.get("name") == audit.hub_repo_name():
             continue
         slug = audit.repo_slug(entry)
         ground = audit.ground_branch_of(entry, defaults=spec["registry"].get("defaults", {}))

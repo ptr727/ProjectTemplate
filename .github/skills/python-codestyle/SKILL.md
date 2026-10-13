@@ -46,7 +46,7 @@ owes lint, format, a type check, a `tests/` suite, and coverage, and a repo decl
 directory in the hub validator's `python-directories` input.
 
 For the full profile specification and per-repo adaptation axes (type checker, dependency
-declaration, versioning, VS Code config), see `references/profiles.md`.
+declaration, versioning), see `references/profiles.md`.
 
 ## Toolchain
 
