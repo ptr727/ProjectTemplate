@@ -178,7 +178,8 @@ text says, because the harm it covers was never in the text.
    by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
    a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
    the hook process's own OS-level cwd happens to be. A value holding a `..` component is not
-   joined at all, and neither is any `cd`/`pushd` in the command naming one, leading or not. Git and a `cd -P` resolve it physically through any symlink before it, while a
+   joined at all, and neither is any `cd`/`pushd`/`popd`/`chdir` word in the command naming one,
+   leading or not. Git and a `cd -P` resolve it physically through any symlink before it, while a
    join folds it logically, so the two can name different checkouts. A mutating invocation naming
    one is denied wherever it points. So is a bare `checkout`/`switch` argument, which cannot then be
    told from a pathspec. So is a subcommand git neither ships nor finds on `PATH`, which may be an

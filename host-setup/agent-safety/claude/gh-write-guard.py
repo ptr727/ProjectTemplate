@@ -2076,12 +2076,22 @@ def _head_may_move(toks):
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
     subcommands leave the branch `HEAD` names and the push config as they found them, unless one
     sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
-    rewrite the push config before the push runs. The branch read before
-    the command runs is then not the one the push uses. An `eval`/`source` is `_opaque_cd`'s.
+    rewrite the push config before the push runs, and the branch read before the command runs is
+    then not the one the push uses. The scan stops at the last push's own git word, since that
+    push's own `-u` changes nothing before it runs. An `eval`/`source` is `_opaque_cd`'s.
     """
     pushes = [k for k, t in enumerate(toks) if t == "push"]
     n = len(toks)
-    for k in range(pushes[-1] if pushes else 0):
+    end = pushes[-1] if pushes else 0
+    end = next(
+        (
+            k
+            for k in range(end - 1, -1, -1)
+            if _is_git_exe(toks[k]) and _git_subcommand_index(toks, k) == end
+        ),
+        end,
+    )
+    for k in range(end):
         t = toks[k]
         if _is_gh_exe(t) or _is_shell_wrapper_exe(t):
             return True
@@ -2241,10 +2251,11 @@ def _push_targets(cmd, cwd=None, current_branch=None):
 
     A lone `:` refspec pushes every branch that exists on both sides, so it is read as every
     protected default. It also sets the aggregate delete flag, so each other branch named beside it
-    is read as an update as well as a delete. A `HEAD`/`@` destination updates the branch `HEAD` names, read the way a bare
-    push's branch is. It is compared without case, since a case-insensitive filesystem resolves
-    `head` to `HEAD`, and a differently cased one is also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a branch it cannot
-    read is an `unresolved` one.
+    is read as an update as well as a delete. A `HEAD`/`@` destination updates the branch `HEAD`
+    names, read the way a bare push's branch is. It is compared without case, since a
+    case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is also read as
+    the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
+    branch it cannot read is an `unresolved` one.
     """
     results = []
     unreadable = _unreadable_push(cmd)
@@ -7988,6 +7999,9 @@ _PUSH_DIR_CASES = [
         "a --set-upstream before a bare push changes its upstream",
     ),
     ("@wt git add -u && git commit -m x && git push", "allow", "add -u sets no upstream"),
+    ("@wt git push -u origin HEAD", "allow", "a push's own -u does not move its own target"),
+    ("@wt git push --set-upstream origin HEAD", "allow", "nor does its own --set-upstream"),
+    ("@wt git commit -m x && git push -fu", "allow", "nor its own clustered -u after a commit"),
     ("@wt bash -cgit\\ push\\ origin\\ develop", "deny", "an unquoted attached -c body"),
     (
         "@wt bash scripts/lint.sh .github/workflows/push.yml",
