@@ -791,6 +791,7 @@ FILES_UNREAD = "unread"
 COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
 ATTEST_HEAD_DELAYS = (3, 5, 10, 15, 15, 12)
+_attest_sleep = time.sleep
 # What a git ref may not hold before it is interpolated into a REST path.
 # Refused rather than allow-listed, git permitting more than a branch name usually carries.
 # An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
@@ -5064,7 +5065,7 @@ def await_registered_head(
         return head, True
     first = head
     for delay in ATTEST_HEAD_DELAYS:
-        time.sleep(delay)
+        _attest_sleep(delay)
         head = (gql(Q_ATTEST_TARGET, owner, repo, num) or {}).get("headRefOid") or head
         if head == local:
             return head, True
