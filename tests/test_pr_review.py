@@ -7789,6 +7789,23 @@ class TestCli(GqlCase):
         self.assertEqual(45, self.cli(["status", "7"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
+    def test_an_attested_head_the_first_round_landed_on_stays_unstated(self) -> None:
+        """A first round's own head is no fix push, so its attestation gives `status` no cover."""
+        self.answer(self.into(payload([review(body=OVERVIEW)], files=["a.md"]), attest=True))
+        self.assertEqual(45, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("coverage=unstated", out)
+        self.assertIn("status=COVERAGE_IS_UNSTATED", out)
+        self.assertNotIn("coverage=local", out)
+
+    def test_an_attested_head_the_first_round_landed_on_is_not_held(self) -> None:
+        """Waiting for a second round on that head requests one rather than holding for a pass."""
+        self.answer(self.into(payload([review(body=OVERVIEW)], files=["a.md"]), attest=True))
+        calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.cli(["wait", "7", "--timeout", "0", "--min-rounds", "2"])
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_not_covered(self) -> None:
         """A table naming fewer files than the diff is the round's own word that it skipped one."""
         table = overview_v2(
@@ -8364,11 +8381,12 @@ class TestCli(GqlCase):
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
     def test_a_promotion_and_a_first_round_are_still_requested(self) -> None:
-        for pr in (
-            self.into(payload([review(oid=OLD)]), base="main", attest=True),
-            self.into(payload([])),
+        for name, pr in (
+            ("promotion", self.into(payload([review(oid=OLD)]), base="main", attest=True)),
+            ("first round", self.into(payload([]))),
+            ("attested first round", self.into(payload([]), attest=True)),
         ):
-            with self.subTest(base=pr["baseRefName"]):
+            with self.subTest(case=name):
                 self.out.seek(0)
                 self.out.truncate()
                 self.answer(pr)
@@ -10621,10 +10639,14 @@ class TestAttestationReadings(unittest.TestCase):
                 }
                 self.assertIs(expected, pr_review.promotion(pr))
 
-    def test_a_refusal_is_not_a_first_round(self) -> None:
-        self.assertFalse(pr_review.first_round_done(payload([review(body=REFUSED)])))
-        self.assertTrue(pr_review.first_round_done(payload([review(oid=OLD)])))
-        self.assertFalse(pr_review.first_round_done(payload([])))
+    def test_only_a_genuine_round_on_an_earlier_head_comes_before_it(self) -> None:
+        self.assertFalse(pr_review.round_before_head(payload([review(oid=OLD, body=REFUSED)])))
+        self.assertTrue(pr_review.round_before_head(payload([review(oid=OLD)])))
+        self.assertFalse(pr_review.round_before_head(payload([review()])))
+        self.assertFalse(pr_review.round_before_head(payload([])))
+        unnamed = review(oid=OLD)
+        unnamed["commit"] = None
+        self.assertFalse(pr_review.round_before_head(payload([unnamed])))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
