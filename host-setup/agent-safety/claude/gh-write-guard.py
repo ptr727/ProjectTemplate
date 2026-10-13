@@ -2091,44 +2091,60 @@ _OUT_OF_ORDER_WORDS = frozenset({"for", "while", "until", "select", "do", "done"
 
 
 def _push_scan_end(toks, quoted, word):
-    """Where the head-move scan stops for the push whose `git` word is `toks[word]`.
+    """Where the head-move scan stops for the push at `toks[word]`, and the git word it skips.
 
-    That is the push's own `git` word, unless a command written after the push may run before it
-    or beside it. A loop runs its body again, and a function body runs where it is called. A
-    background job, a pipeline, a subshell, and a process substitution each run beside their
-    neighbours. For any of those the scan covers the whole command, the push's own `-u` included.
-    A word `quoted` marks as quoted is not syntax, and with no mask every word is.
+    The scan stops at the push's own `git` word, unless a command written after the push may run
+    before it or beside it. It then covers the whole command. An operator outside
+    `_ORDERED_OPERATORS` may do that. It may be a pipe, a background `&`, a subshell, or a
+    separator fused with a redirection. So may a loop or a function, or a fork
+    `_forks_out_of_reach` names. The push's own `-u` matters only where the push runs again. That
+    takes a loop or a function, so only then is its git word scanned too. A word `quoted` marks
+    as quoted is not syntax, and with no mask every word is. `_forks_out_of_reach` reads quoted
+    words too.
     """
-
-    def syntax(k):
-        return not (quoted and quoted[k])
-
-    if _forks_out_of_reach(toks):
-        return len(toks)
-    for k, t in enumerate(toks):
-        if not syntax(k):
-            continue
-        if t in _OUT_OF_ORDER_WORDS:
-            return len(toks)
-        if _is_shell_op(t) and ("(" in t or "|" in t.replace("||", "")):
-            return len(toks)
-    return word
+    syntax = [not (quoted and quoted[k]) for k in range(len(toks))]
+    reruns = any(
+        syntax[k] and (t in _OUT_OF_ORDER_WORDS or (_is_shell_op(t) and "(" in t))
+        for k, t in enumerate(toks)
+    )
+    if reruns:
+        return len(toks), None
+    if _forks_out_of_reach(toks) or any(
+        syntax[k] and _is_shell_op(t) and not _is_ordered_operator(t) for k, t in enumerate(toks)
+    ):
+        return len(toks), word
+    return word, None
 
 
-def _head_may_move(toks, end):
+_ORDERED_OPERATORS = frozenset({">", ">>", "<", "<<", "<<<", "<>", ">&", "<&", "&>", "&>>", ">|"})
+
+
+def _is_ordered_operator(tok):
+    """True when an operator token is a redirection, or a run of `;`, `&&`, `||`, and newlines.
+
+    Neither runs a command beside another, or one written later first.
+    """
+    if tok in _ORDERED_OPERATORS:
+        return True
+    rest = tok.replace("&&", "").replace("||", "")
+    return set(rest) <= {";", "\n"}
+
+
+def _head_may_move(toks, end, skip=None):
     """True when something before a push in these tokens may change what a bare push targets.
 
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
     subcommands leave the branch `HEAD` names and the push config as they found them, unless one
     sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
     rewrite the push config before the push runs, and the branch read before the command runs is
-    then not the one the push uses. The scan stops at `end` (see `_push_scan_end`), normally the
-    push's own git word. Its own `-u` changes nothing before it runs. An `eval`/`source` is
-    `_opaque_cd`'s.
+    then not the one the push uses. The scan stops at `end` and passes over the git word at
+    `skip` (see `_push_scan_end`). An `eval`/`source` is `_opaque_cd`'s.
     """
     n = len(toks)
     for k in range(end):
         t = toks[k]
+        if k == skip:
+            continue
         if _is_gh_exe(t) or _is_shell_wrapper_exe(t):
             return True
         if _is_git_exe(t):
@@ -2245,7 +2261,7 @@ def _push_invocations(cmd):
                     )
                     if body is text:
                         head_moves = _head_may_move(
-                            outer_toks, _push_scan_end(outer_toks, quoted, word)
+                            outer_toks, *_push_scan_end(outer_toks, quoted, word)
                         )
                     else:
                         head_moves = whole_moves
@@ -2292,10 +2308,10 @@ def _push_targets(cmd, cwd=None, current_branch=None):
 
     A lone `:` refspec pushes every branch that exists on both sides. So it is read as an update
     of every protected default and of each other branch named beside it. It deletes nothing, so
-    it leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination updates the branch `HEAD`
-    names, read the way a bare push's branch is. It is compared without case, since a
-    case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is also read as
-    the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
+    it leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination
+    updates the branch `HEAD` names, read the way a bare push's branch is. It is compared without
+    case, since a case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is
+    also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
     branch it cannot read is an `unresolved` one.
     """
     results = []
@@ -8060,6 +8076,21 @@ _PUSH_DIR_CASES = [
         "@wt git push &&\ngh pr create --fill",
         "allow",
         "an and-list continued on the next line runs in order",
+    ),
+    (
+        "@wt git push origin HEAD &</dev/null gh pr checkout 5 && git push origin feature/example",
+        "deny",
+        "a background job fused with a redirection runs beside the gh command",
+    ),
+    (
+        "@wt git push -u origin HEAD 2>&1 | tail -3",
+        "allow",
+        "a push's own -u in a pipeline changes nothing before it runs",
+    ),
+    (
+        "@wt f() ( git push -u origin HEAD ); f; f",
+        "deny",
+        "a push's own -u in a function called twice may move the next run's target",
     ),
     (
         "@wt for n in 1 2; do git push; git checkout develop; done",
