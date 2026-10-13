@@ -12,8 +12,8 @@ declared description that description_errors() rejects.
 
 Usage: resolve_description.py [--] REGISTRY_PATH NAME
 
-A caller passes `--` before the positionals whenever NAME can start with a dash, as configure.sh
-does, since argparse otherwise reads such a NAME as an option.
+Argparse reads a NAME starting with a dash as an option, so a caller passes `--` before the
+positionals, as configure.sh does.
 """
 
 from __future__ import annotations

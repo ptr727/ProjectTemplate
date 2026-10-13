@@ -2,27 +2,29 @@
 """Hold every tracked command-line entry point to CODESTYLE.md's argument rule by running it.
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
-the real commands on PATH record any call to gh, git, or another network or host-changing command,
-no credential is passed, every home and config-home variable points into a scratch directory, and
-the proxy is a local listener that records every connection made to it. Help exits 0 and prints the
-same text for both spellings, opening on a usage line that names the script, so a default mode
-whose report merely mentions usage does not pass. The unknown flag exits non-zero without a crash,
-with a refusal naming it as an unknown option. A script needing a subcommand or a positional
-refuses on the missing argument before it reaches the flag, so BEFORE_FLAG gives it arguments that
-satisfy its parser, and the run with them is the one that must name the flag. No run reaches a stub
-or the listener, leaves a process running, or changes the working tree, ignored paths included.
+the real commands on PATH record a call to gh, git, or another command in RECORDED. No credential
+is passed. Every home and config-home variable points into a scratch directory. The proxy is a
+local listener that records every connection made to it.
+
+Help exits 0 and prints the same text for both spellings. That text opens on a usage line naming
+the script, so a default mode whose report merely mentions usage fails. The unknown flag exits
+non-zero without a crash, with a refusal naming it as an unknown option. A script needing a
+subcommand or a positional refuses on the missing argument before it reaches the flag. So
+BEFORE_FLAG gives it arguments that satisfy its parser, and the run with them must name the flag.
+Those arguments alone exit 0 or reach a stub, so a script that warns and carries on still fails.
+
+No run reaches a stub or the listener, leaves a process running, or changes the working tree. The
+tree check covers ignored paths and a directory created or emptied anywhere in the tree.
 
 The set is discovered from the tree rather than listed, so a new script is held to the rule the
-moment it is tracked, an extensionless file opening on a shebang included. A hook its own host runs
-is not a command-line entry point and is listed in NOT_COMMAND_LINE. A Windows script builds paths
-from APPDATA and LOCALAPPDATA as it loads, so the sandbox sets both to keep a run off Windows from
-failing before the script's own argument handling.
+moment it is tracked. An extensionless file opening on a shebang counts. A hook its own host runs
+is not a command-line entry point and is listed in NOT_COMMAND_LINE.
 
-A process the run leaves behind is found by a token in the environment it inherited, read from
-/proc, so that check runs only on a host that has /proc. On Windows only the PowerShell entry points
-run. PowerShell's own command lookup finds a `.cmd` stub first on PATH, while a process Python
-starts there is found by its `.exe` name, which a stub does not shadow. So a PowerShell wrapper that
-hands its arguments to Python is held there only as far as PowerShell's own calls.
+A process the run leaves behind is found by a token in the environment it inherited. That token is
+read from /proc, so the check runs only on a host that has /proc. On Windows only the PowerShell
+entry points run, behind `.cmd` stubs that PowerShell's lookup finds first on PATH. A call naming
+its `.exe` explicitly is not shadowed there. Neither is a process Python starts, since that lookup
+finds only an `.exe`.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from host_capability import bash_or_skip
+from test_configure_archived import lift, run_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,11 +65,11 @@ NOT_COMMAND_LINE = {
 BEFORE_FLAG = {
     "repo-config/configure.sh": ("check",),
     "scripts/canonical_review.py": ("list",),
-    "scripts/carry.py": ("check", "Example", "--target", "Example-target"),
+    "scripts/carry.py": ("check", "Example", "--target", "."),
     "scripts/handoff.py": ("current", "--repo", "Example/Example"),
     "scripts/local_review.py": ("status",),
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
-    "spec/resolve_description.py": ("Example-registry.json", "Example"),
+    "spec/resolve_description.py": ("registry/repos.json", "Example"),
 }
 
 REFUSED_AS_OPTION = re.compile(
@@ -75,7 +78,21 @@ REFUSED_AS_OPTION = re.compile(
     re.IGNORECASE,
 )
 
-RECORDED = ("git", "gh", "curl", "wget", "ssh", "sudo", "apt-get", "winget", "docker", "uv", "uvx")
+RECORDED = (
+    "git",
+    "gh",
+    "curl",
+    "wget",
+    "ssh",
+    "sudo",
+    "apt-get",
+    "winget",
+    "docker",
+    "uv",
+    "uvx",
+    "wsl",
+    "fsutil",
+)
 
 HOMES = (
     "HOME",
@@ -114,8 +131,8 @@ def has_shebang(path: Path) -> bool:
 def entry_points(root: Path = ROOT) -> list[str]:
     """Every tracked script run by name, tests and hooks aside.
 
-    A script is a `.sh` or `.ps1` file, a `.py` file that is executable or guards a main, or a file
-    with no extension that opens on a shebang.
+    A script is a `.sh` or `.ps1` file, or a `.py` file that is executable or guards a main. A file
+    with no extension that opens on a shebang is one too.
     """
     listed = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-s", "-z"],
@@ -141,7 +158,10 @@ def entry_points(root: Path = ROOT) -> list[str]:
 
 
 def interpreter(root: Path, path: str) -> str | None:
-    """The runtime an entry point needs, from its extension or else its shebang, or None if neither names one."""
+    """The runtime an entry point needs, from its extension or else its shebang, or None.
+
+    An `env` shebang is read past its own flags and `NAME=VALUE` assignments to the command.
+    """
     by_suffix = {".py": "python", ".sh": "bash", ".ps1": "pwsh"}
     suffix = PurePosixPath(path).suffix
     if suffix:
@@ -149,8 +169,8 @@ def interpreter(root: Path, path: str) -> str | None:
     with (root / path).open(encoding="utf-8", errors="replace") as handle:
         words = handle.readline()[2:].split()
     name = PurePosixPath(words[0]).name if words else ""
-    if name == "env" and len(words) > 1:
-        name = words[1]
+    if name == "env":
+        name = next((word for word in words[1:] if word[0] != "-" and "=" not in word), "")
     if name.startswith("python"):
         return "python"
     if name in ("bash", "sh"):
@@ -158,11 +178,18 @@ def interpreter(root: Path, path: str) -> str | None:
     return "pwsh" if name == "pwsh" else None
 
 
+def opens_on_usage(stdout: str, path: str) -> bool:
+    """Whether the output's first line is a usage line naming the script."""
+    first = (stdout.strip().splitlines() or [""])[0].lower()
+    return first.startswith("usage:") and PurePosixPath(path).stem.lower() in first
+
+
 def tree_state() -> dict[str, tuple[str, int, int]]:
-    """Every changed, untracked, or ignored path, with its size and modification time.
+    """Every changed, untracked, or ignored path, and every directory, with its size and time.
 
     The size and time catch a second write to a path that was already listed, which its status line
-    alone would not show.
+    alone would not show. A directory's time moves when an entry in it is created or removed, which
+    is what catches an empty directory, since git lists none.
     """
     listed = subprocess.run(
         ["git", "-C", str(ROOT), "status", "--porcelain=v1", "-z", "-uall", "--ignored"],
@@ -186,6 +213,11 @@ def tree_state() -> dict[str, tuple[str, int, int]]:
             state[path] = (status, -1, -1)
         else:
             state[path] = (status, stat.st_size, stat.st_mtime_ns)
+    for directory, subdirectories, _ in os.walk(ROOT):
+        if directory == str(ROOT) and ".git" in subdirectories:
+            subdirectories.remove(".git")
+        stat = os.lstat(directory)
+        state[os.path.relpath(directory, ROOT) + "/"] = ("dir", 0, stat.st_mtime_ns)
     return state
 
 
@@ -217,20 +249,24 @@ def tagged_processes(token: str) -> list[int]:
 
 
 def stop_survivors(token: str) -> str:
-    """Kill every process the run left behind and name each one, waiting a bounded time for them to go."""
-    survivors = tagged_processes(token)
-    named = []
-    for pid in survivors:
-        try:
-            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
-            os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            continue
-        named.append(f"left running: {command.strip()}\n")
+    """Kill every process the run left behind and name each one, until a scan finds none.
+
+    Scanning again after each kill catches a child a survivor forked before it died. The loop is
+    bounded, and a process still found when it ends is named as one that would not stop.
+    """
+    named: dict[int, str] = {}
     deadline = time.monotonic() + 10
-    while survivors and tagged_processes(token) and time.monotonic() < deadline:
+    while (survivors := tagged_processes(token)) and time.monotonic() < deadline:
+        for pid in survivors:
+            try:
+                command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                continue
+            named.setdefault(pid, f"left running: {command.strip()}\n")
         time.sleep(0.05)
-    return "".join(named)
+    stuck = "".join(f"would not stop: {pid}\n" for pid in tagged_processes(token))
+    return "".join(named.values()) + stuck
 
 
 def write_stubs(stubs: Path, calls: Path) -> None:
@@ -273,6 +309,63 @@ def recording_proxy() -> Iterator[tuple[str, list[int]]]:
             worker.join()
 
 
+def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str], str]:
+    """The run's result and its effects, one line per stub call, connection, survivor, or changed path.
+
+    Output goes to files rather than pipes, so a survivor holding an inherited stream cannot keep
+    the run waiting. A run that times out is an effect too.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp)
+        calls = scratch / "calls"
+        write_stubs(scratch / "bin", calls)
+        homes = {name: scratch / name for name in HOMES}
+        for home in homes.values():
+            home.mkdir()
+        token = secrets.token_hex(16)
+        env = {key: value for key, value in os.environ.items() if key not in WITHHELD}
+        env.update({name: str(home) for name, home in homes.items()})
+        env.update(
+            PATH=f"{scratch / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+            GIT_CONFIG_GLOBAL=str(scratch / "gitconfig"),
+            PYTHONDONTWRITEBYTECODE="1",
+            NO_PROXY="",
+            no_proxy="",
+        )
+        env[RUN_TOKEN] = token
+        out, err = scratch / "stdout", scratch / "stderr"
+        effects = ""
+        returncode = None
+        before = tree_state()
+        with recording_proxy() as (proxy, connections):
+            env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, http_proxy=proxy, https_proxy=proxy)
+            with out.open("wb") as stdout, err.open("wb") as stderr:
+                try:
+                    returncode = subprocess.run(
+                        command,
+                        stdout=stdout,
+                        stderr=stderr,
+                        stdin=subprocess.DEVNULL,
+                        timeout=120,
+                        check=False,
+                        env=env,
+                        cwd=ROOT,
+                    ).returncode
+                except subprocess.TimeoutExpired:
+                    effects += "timed out\n"
+                finally:
+                    effects += stop_survivors(token)
+        result = subprocess.CompletedProcess(
+            command,
+            -1 if returncode is None else returncode,
+            out.read_text(encoding="utf-8", errors="replace"),
+            err.read_text(encoding="utf-8", errors="replace"),
+        )
+        recorded = calls.read_text(encoding="utf-8") if calls.exists() else ""
+        effects = recorded + "proxy connection\n" * len(connections) + effects
+    return result, effects + tree_changes(before)
+
+
 class EntryPointCase(unittest.TestCase):
     """Help answers with usage and exit 0, and `--bogus-flag` is refused, each touching nothing."""
 
@@ -294,47 +387,7 @@ class EntryPointCase(unittest.TestCase):
         return [pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / path)]
 
     def run_entry(self, path: str, *args: str) -> tuple[subprocess.CompletedProcess[str], str]:
-        """The run's result and its effects, one line per stub call, connection, survivor, or changed path."""
-        command = self.command(path)
-        with tempfile.TemporaryDirectory() as tmp:
-            scratch = Path(tmp)
-            calls = scratch / "calls"
-            write_stubs(scratch / "bin", calls)
-            homes = {name: scratch / name for name in HOMES}
-            for home in homes.values():
-                home.mkdir()
-            token = secrets.token_hex(16)
-            env = {key: value for key, value in os.environ.items() if key not in WITHHELD}
-            env.update({name: str(home) for name, home in homes.items()})
-            env.update(
-                PATH=f"{scratch / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
-                GIT_CONFIG_GLOBAL=str(scratch / "gitconfig"),
-                PYTHONDONTWRITEBYTECODE="1",
-                NO_PROXY="",
-                no_proxy="",
-            )
-            env[RUN_TOKEN] = token
-            before = tree_state()
-            with recording_proxy() as (proxy, connections):
-                env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, http_proxy=proxy, https_proxy=proxy)
-                try:
-                    result = subprocess.run(
-                        [*command, *args],
-                        capture_output=True,
-                        stdin=subprocess.DEVNULL,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=120,
-                        check=False,
-                        env=env,
-                        cwd=ROOT,
-                    )
-                finally:
-                    survivors = stop_survivors(token)
-            effects = calls.read_text(encoding="utf-8") if calls.exists() else ""
-            effects += "proxy connection\n" * len(connections) + survivors
-        return result, effects + tree_changes(before)
+        return run_sandboxed([*self.command(path), *args])
 
     def test_help_prints_usage_and_exits_zero(self) -> None:
         for path in entry_points():
@@ -343,9 +396,7 @@ class EntryPointCase(unittest.TestCase):
                 with self.subTest(path=path, flag=flag):
                     result, effects = self.run_entry(path, flag)
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    first = (result.stdout.strip().splitlines() or [""])[0].lower()
-                    self.assertTrue(first.startswith("usage:"), result.stdout)
-                    self.assertIn(PurePosixPath(path).stem.lower(), first)
+                    self.assertTrue(opens_on_usage(result.stdout, path), result.stdout)
                     self.assertEqual(effects, "")
                     outputs[flag] = result.stdout
             if len(outputs) == 2:
@@ -364,6 +415,13 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(effects, "")
                     if before == before_flag:
                         self.assertRegex(output, REFUSED_AS_OPTION)
+
+    def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
+        """The control: each BEFORE_FLAG set alone exits 0 or reaches a stub, either of which fails the case."""
+        for path, before in BEFORE_FLAG.items():
+            with self.subTest(path=path):
+                result, effects = self.run_entry(path, *before)
+                self.assertTrue(result.returncode == 0 or effects, result.stdout + result.stderr)
 
     def test_discovery_finds_each_kind(self) -> None:
         """The control: a discovery that matched nothing would pass both cases above vacuously."""
@@ -387,7 +445,7 @@ class EntryPointCase(unittest.TestCase):
     def test_discovery_finds_an_extensionless_shebang_script(self) -> None:
         """The hub tracks no such script yet, so a constructed tree stands in for the one that arrives."""
         files = {
-            "bin/example": "#!/usr/bin/env python3\n",
+            "bin/example": "#!/usr/bin/env -S python3 -u\n",
             "bin/example-notes": "Example notes, not a script.\n",
             "tests/example": "#!/bin/sh\n",
         }
@@ -402,32 +460,60 @@ class EntryPointCase(unittest.TestCase):
             self.assertEqual(interpreter(root, "bin/example"), "python")
 
 
-class SurvivorCase(unittest.TestCase):
-    """The control for the survivor check: a detached grandchild is found and stopped."""
+class ControlCase(unittest.TestCase):
+    """The controls for the hardened checks: each catches the shape it exists for."""
+
+    def test_a_refusal_must_name_the_flag_as_an_option(self) -> None:
+        self.assertIsNone(REFUSED_AS_OPTION.search("cannot read --bogus-flag"))
+        self.assertIsNotNone(
+            REFUSED_AS_OPTION.search("error: unrecognized arguments: --bogus-flag")
+        )
+
+    def test_help_must_open_on_a_usage_line_naming_the_script(self) -> None:
+        self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))
+        self.assertFalse(opens_on_usage("usage: other.py [-h]\n", "bin/example.py"))
+        self.assertTrue(opens_on_usage("usage: example.py [-h]\n", "bin/example.py"))
 
     @unittest.skipUnless(Path("/proc").is_dir(), "the survivor check reads /proc")
-    def test_a_detached_grandchild_is_found_and_stopped(self) -> None:
-        token = secrets.token_hex(16)
-        env = dict(os.environ, **{RUN_TOKEN: token})
+    def test_a_detached_grandchild_holding_the_output_is_named(self) -> None:
         detach = (
             "import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
-            "'import time; time.sleep(60)'], start_new_session=True, "
-            "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+            "'import time; time.sleep(60)'], start_new_session=True)"
         )
-        subprocess.run([sys.executable, "-c", detach], env=env, timeout=30, check=True)
-        self.assertIn("left running:", stop_survivors(token))
-        self.assertEqual(tagged_processes(token), [])
+        started = time.monotonic()
+        _, effects = run_sandboxed([sys.executable, "-c", detach])
+        self.assertIn("left running:", effects)
+        self.assertLess(time.monotonic() - started, 60)
+
+    def test_a_write_into_an_ignored_path_is_seen(self) -> None:
+        """A new empty directory and a rewrite of an ignored file each count as a change."""
+        cache = ROOT / ".ruff_cache"
+        made = not cache.exists()
+        target = cache / f"cli-usage-{secrets.token_hex(8)}"
+
+        def remove() -> None:
+            shutil.rmtree(target, ignore_errors=True)
+            if made:
+                cache.rmdir()
+
+        self.addCleanup(remove)
+        _, effects = run_sandboxed(
+            [sys.executable, "-c", f"import os; os.makedirs({str(target)!r})"]
+        )
+        self.assertIn("changed", effects)
+        ignored = target / "example"
+        ignored.write_text("before\n", encoding="utf-8")
+        _, effects = run_sandboxed(
+            [sys.executable, "-c", f"open({str(ignored)!r}, 'a').write('after')"]
+        )
+        self.assertIn(f"changed {ignored.relative_to(ROOT).as_posix()}", effects)
 
 
 class DashLeadingNameCase(unittest.TestCase):
     """configure.sh hands resolve_description.py its arguments after `--`, so a leading dash stays a name."""
 
     def test_a_dash_leading_name_resolves_its_description(self) -> None:
-        text = (ROOT / "repo-config" / "configure.sh").read_text(encoding="utf-8")
-        found = re.findall(
-            r'^    if ! description="\$\(.*?^    fi\n', text, re.MULTILINE | re.DOTALL
-        )
-        self.assertEqual(len(found), 1, "configure.sh no longer has one description resolution")
+        resolution = lift(r'^    if ! description="\$\(.*?^    fi\n')
         with tempfile.TemporaryDirectory() as tmp:
             registry = Path(tmp) / "repos.json"
             registry.write_text(
@@ -440,18 +526,11 @@ class DashLeadingNameCase(unittest.TestCase):
                     f"script_dir={shlex.quote((ROOT / 'repo-config').as_posix())}",
                     f"registry={shlex.quote(registry.as_posix())}",
                     "name=-Example",
-                    found[0],
+                    resolution,
                     'printf "%s" "$description"',
                 )
             )
-            result = subprocess.run(
-                [bash_or_skip(), "-c", script],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                check=False,
-            )
+            result = run_bash(script)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "A short tagline.")
 
