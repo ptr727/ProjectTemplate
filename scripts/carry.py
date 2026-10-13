@@ -227,32 +227,39 @@ def git_is_ancestor(root: pathlib.Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
-def git_status_paths(root: pathlib.Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
+def git_status_records(root: pathlib.Path, *, ignored: bool = False) -> list[tuple[str, str]]:
+    """Each changed or untracked path, and each ignored one when asked, with its status code.
+
+    A rename or copy yields its destination and then its source, each with the record's status.
+    """
+    command = ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+    if ignored:
+        command.append("--ignored")
+    result = subprocess.run(command, cwd=root, capture_output=True, check=False)
     if result.returncode != 0:
         raise CarryError(os.fsdecode(result.stderr).strip() or "git status failed")
     fields = result.stdout.split(b"\0")
     if fields and not fields[-1]:
         fields.pop()
-    paths: list[str] = []
+    records: list[tuple[str, str]] = []
     index = 0
     while index < len(fields):
         entry = fields[index]
         if len(entry) < 4 or entry[2:3] != b" ":
             raise CarryError("git status returned malformed porcelain output")
-        paths.append(os.fsdecode(entry[3:]))
-        if b"R" in entry[:2] or b"C" in entry[:2]:
+        status = os.fsdecode(entry[:2])
+        records.append((status, os.fsdecode(entry[3:])))
+        if "R" in status or "C" in status:
             index += 1
             if index >= len(fields):
                 raise CarryError("git status returned an incomplete rename or copy")
-            paths.append(os.fsdecode(fields[index]))
+            records.append((status, os.fsdecode(fields[index])))
         index += 1
-    return paths
+    return records
+
+
+def git_status_paths(root: pathlib.Path) -> list[str]:
+    return [path for _, path in git_status_records(root)]
 
 
 def normalized_origin(value: str) -> str:
