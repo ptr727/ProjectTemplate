@@ -951,7 +951,7 @@ def _git_config_overrides(global_opts):
     """Every `-c`/`--config-env` value in a git invocation's global options, in each spelling.
 
     That is `-c <v>`, `--config-env <v>`, and `--config-env=<v>`. An attached `-c<v>` is read as
-    an override too, so the guard fails closed on it.
+    an override too. Git rejects that spelling, so this only fails closed on it.
     """
     values = []
     for i, t in enumerate(global_opts):
@@ -1012,6 +1012,11 @@ _INLINE_ALIAS_RE = re.compile(r"^alias\.(\S+)=(.*)$")
 
 
 def _git_invocations(cmd):
+    """`_git_invocations_at` without the index of each invocation's `git` word."""
+    return [inv for _word, inv in _git_invocations_at(cmd)]
+
+
+def _git_invocations_at(cmd):
     """Every `git [global-options] <sub> [args...]` invocation in the command, as
     `(c_dirs, work_tree, git_dir, inline_aliases, sub, args)` tuples. `c_dirs` is the list of
     `-C <dir>` values on this specific invocation, in argv order, since real git composes multiple
@@ -1026,7 +1031,8 @@ def _git_invocations(cmd):
     expansion` dict of every `-c alias.<name>=<value>` override on this invocation, in argv order
     (a later `-c` for the same name wins, matching real git's own repeated `-c` semantics), read
     here since an inline alias is exactly as effective at hiding a mutating command behind an
-    unrecognized name as a persisted one, per requirement 6's alias-resolution rule.
+    unrecognized name as a persisted one, per requirement 6's alias-resolution rule. Each tuple
+    comes paired with the index of its `git` word in the command's shell tokens.
     """
     # Shares its tokenizing and global-option skipping with `_git_subcommand_arglists`, generalized to read every subcommand rather than one named subcommand, and to capture the directory-naming and alias-defining options along the way.
     toks = _shell_tokens(cmd)
@@ -1088,7 +1094,7 @@ def _git_invocations(cmd):
         if j < n and not _is_shell_op(toks[j]):
             sub = toks[j]
             args, k = _collect_arglist(toks, j + 1)
-            out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args))
+            out.append((i, (c_dirs, work_tree, git_dir, inline_aliases, sub, args)))
             i = k
         else:
             i = j if j > i else i + 1  # a bare `git` with no subcommand at all; keep scanning
@@ -2081,85 +2087,48 @@ _HEAD_KEEPING_SUBS = frozenset(
 )
 
 
-_OUT_OF_ORDER_WORDS = frozenset(
-    {"for", "while", "until", "select", "do", "done", "function", "coproc"}
-)
-_SEQUENTIAL_AMPERSANDS = frozenset({"&&", ">&", "<&", "&>", "&>>"})
-_PIPES = ("|", "|&")
+_OUT_OF_ORDER_WORDS = frozenset({"for", "while", "until", "select", "do", "done", "function"})
 
 
 def _push_scan_end(toks, quoted, word):
-    """Where the head-move scan for the push whose `git` word is `toks[word]` stops, and whether it skips that word.
+    """Where the head-move scan stops for the push whose `git` word is `toks[word]`.
 
-    A command written after the push may still run before it or alongside it. A loop runs its body
-    again after its later words, a function body runs where it is called, and a background job, a
-    subshell, or a process substitution runs alongside its neighbours, so for any of those the scan
-    covers the whole command, the push's own `-u` included. A pipeline runs its commands together,
-    so the scan covers the rest of the push's own pipeline and skips the push itself. Otherwise it
-    stops at the push. A word `quoted` marks as quoted is not syntax, and with no mask every word is.
+    That is the push's own `git` word, unless a command written after the push may run before it
+    or beside it. A loop runs its body again, and a function body runs where it is called. A
+    background job, a pipeline, a subshell, and a process substitution each run beside their
+    neighbours. For any of those the scan covers the whole command, the push's own `-u` included.
+    A word `quoted` marks as quoted is not syntax, and with no mask every word is.
     """
-    n = len(toks)
 
     def syntax(k):
         return not (quoted and quoted[k])
 
+    if _forks_out_of_reach(toks):
+        return len(toks)
     for k, t in enumerate(toks):
         if not syntax(k):
             continue
-        if (
-            t in _OUT_OF_ORDER_WORDS
-            or "(" in t
-            or ("&" in t and t not in _SEQUENTIAL_AMPERSANDS and t not in _PIPES)
-        ):
-            return n, None
-    end = next(
-        (
-            k
-            for k in range(word + 1, n)
-            if syntax(k) and _is_separator(toks[k]) and toks[k] not in _PIPES
-        ),
-        n,
-    )
-    if any(syntax(k) and toks[k] in _PIPES for k in range(word + 1, end)):
-        return end, word
-    return word, None
+        if t in _OUT_OF_ORDER_WORDS:
+            return len(toks)
+        if _is_shell_op(t) and ("(" in t or "|" in t.replace("||", "")):
+            return len(toks)
+    return word
 
 
-def _push_git_words(toks):
-    """The index of each push's `git` word in these tokens, in the order `_git_invocations` lists them."""
-    n = len(toks)
-    out = []
-    i = 0
-    while i < n:
-        if not _is_git_exe(toks[i]):
-            i += 1
-            continue
-        j = _git_subcommand_index(toks, i)
-        if j < n and not _is_shell_op(toks[j]):
-            if toks[j] == "push":
-                out.append(i)
-            i = _collect_arglist(toks, j + 1)[1]
-        else:
-            i = j if j > i else i + 1
-    return out
-
-
-def _head_may_move(toks, end, skip=None):
+def _head_may_move(toks, end):
     """True when something before a push in these tokens may change what a bare push targets.
 
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
     subcommands leave the branch `HEAD` names and the push config as they found them, unless one
     sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
     rewrite the push config before the push runs, and the branch read before the command runs is
-    then not the one the push uses. The scan stops at `end`, normally the push's own git word, since
-    that push's own `-u` changes nothing before it runs, and it passes over the git command at
-    `skip` (see `_push_scan_end`). An `eval`/`source` is `_opaque_cd`'s.
+    then not the one the push uses. The scan stops at `end` (see `_push_scan_end`), normally the
+    push's own git word. Its own `-u` changes nothing before it runs. An `eval`/`source` is
+    `_opaque_cd`'s.
     """
     n = len(toks)
     for k in range(end):
         t = toks[k]
-        if k == skip:
-            continue
         if _is_gh_exe(t) or _is_shell_wrapper_exe(t):
             return True
         if _is_git_exe(t):
@@ -2196,10 +2165,10 @@ def _unreadable_push(cmd):
     - a wrapper shell argument other than the `-c` body, an attached `-c<body>` among them
     - a wrapper nested past the reading cap
     - a quoted word handed to a git command that runs it, one of `_COMMAND_RUNNING_GIT_SUBS`
-    - a `-c`/`--config-env` value, an inline alias expanding to a push among them
+    - a `-c` config value, an inline alias expanding to a push among them
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
-    `-c<value>` among them (see `_git_config_overrides`). Config such
+    `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
     as `push.default` or `remote.<name>.push` changes what a push updates, an explicit refspec
     included. A word is matched by `_GIT_PUSH`, which needs no word boundary before `git`. An
     unquoted `-c'git push'` reads as `-cgit push`, while `.github` still matches nothing.
@@ -2248,8 +2217,8 @@ def _push_invocations(cmd):
     in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
     A push inside a wrapper shell is always unreliable. The wrapper may run in another directory
     (`find -execdir`, `sudo -D`), or read startup files that change it. So is a push after a
-    command that may move `HEAD` (see `_head_may_move`). That scan runs for each push on its own,
-    so a move written after a push leaves it alone unless it may run first (see `_push_scan_end`).
+    command that may move `HEAD` (see `_head_may_move`). That scan runs for each push on its own.
+    A move written after a push leaves it alone unless it may run first (see `_push_scan_end`).
     """
     out = []
     for text in [cmd]:
@@ -2258,7 +2227,6 @@ def _push_invocations(cmd):
         outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
         outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
         whole_moves = _head_may_move(outer_toks, len(outer_toks))
-        push_words = _push_git_words(outer_toks)
         quoted = _quoted_mask(text, outer_toks)
         export_dirs = _leading_export_dirs(text)
         batches = [(text, outer_cd, outer_extra, False)]
@@ -2266,10 +2234,8 @@ def _push_invocations(cmd):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
-            invocations = _git_invocations(body)
-            pushes = [inv for inv in invocations if inv[4] == "push"]
-            own_words = push_words if body is text and len(push_words) == len(pushes) else None
-            for c_dirs, _work_tree, git_dir, _aliases, sub, args in invocations:
+            for word, inv in _git_invocations_at(body):
+                c_dirs, _work_tree, git_dir, _aliases, sub, args = inv
                 if sub == "push":
                     redirected = (
                         git_dir is not None
@@ -2277,11 +2243,12 @@ def _push_invocations(cmd):
                         or any(_leading_export_dirs(body))
                         or _attached_c(body)
                     )
-                    if own_words is None:
-                        head_moves = whole_moves
+                    if body is text:
+                        head_moves = _head_may_move(
+                            outer_toks, _push_scan_end(outer_toks, quoted, word)
+                        )
                     else:
-                        end, skip = _push_scan_end(outer_toks, quoted, own_words[len(out) - first])
-                        head_moves = _head_may_move(outer_toks, end, skip)
+                        head_moves = whole_moves
                     moved = extra > 0 or head_moves
                     out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
             unmatched = [a for _c, _w, _l, _u, a in out[first:]]
@@ -2323,9 +2290,9 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=Fa
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update.
 
-    A lone `:` refspec pushes every branch that exists on both sides, so it is read as an update of
-    every protected default and of each other branch named beside it. It deletes nothing, so it
-    leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination updates the branch `HEAD`
+    A lone `:` refspec pushes every branch that exists on both sides. So it is read as an update
+    of every protected default and of each other branch named beside it. It deletes nothing, so
+    it leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination updates the branch `HEAD`
     names, read the way a bare push's branch is. It is compared without case, since a
     case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is also read as
     the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
@@ -4920,7 +4887,7 @@ _GIT_CASES = [
         "feature/x",
         {"develop": _CODE_RULES},
         "deny",
-        "an attached -c alias expanding to a push is read as one",
+        "an attached -c alias, a spelling git rejects, fails closed",
     ),
     (
         "git -ccore.hooksPath=HOOKS push origin feature/x",
@@ -8076,8 +8043,23 @@ _PUSH_DIR_CASES = [
     ("@wt git push 2>&1 | git checkout develop", "deny", "a pipeline runs its commands together"),
     (
         "@wt git push 2>&1 | tail -1 && git checkout develop",
+        "deny",
+        "a pipe anywhere has the scan read the whole command",
+    ),
+    (
+        "@wt git push |\ngit checkout develop && git push origin feature/example",
+        "deny",
+        "a pipeline continued on the next line",
+    ),
+    (
+        "@wt case x in x) git push ;; esac | git checkout develop; git push origin feature/example",
+        "deny",
+        "a compound command holding the push is piped into the checkout",
+    ),
+    (
+        "@wt git push &&\ngh pr create --fill",
         "allow",
-        "a checkout after the push's own pipeline",
+        "an and-list continued on the next line runs in order",
     ),
     (
         "@wt for n in 1 2; do git push; git checkout develop; done",
