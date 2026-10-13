@@ -139,9 +139,10 @@ text says, because the harm it covers was never in the text.
    same `wipe` alias persisted in the checkout's own config) is denied exactly as the builtin itself
    would be. A `!`-prefixed alias hands git an arbitrary shell string rather than naming another git
    subcommand, and this requirement does not and cannot safely interpret one, so it denies that
-   shape outright against a primary checkout, the one place this requirement departs from its own
-   fail-open stance, because the alias definition itself is concrete evidence of an attempt to run
-   something via git in exactly the directory this requirement protects.
+   shape outright against a primary checkout, one of two places this requirement departs from its
+   own fail-open stance, because the alias definition itself is concrete evidence of an attempt to
+   run something via git in exactly the directory this requirement protects. The other is a
+   directory value holding a `..` component, below.
 
    Resolve the target directory the way real git itself does, not by a last-option-wins scan across
    every directory-naming option: any `-C <dir>` options on the invocation compose sequentially (an
@@ -172,7 +173,12 @@ text says, because the harm it covers was never in the text.
    itself does. `~`/`$HOME` is expanded throughout (a bare `$HOME` only when not immediately followed
    by another identifier character, so `$HOMEPATH`/`$HOMEDRIVE` are left alone rather than misread as
    a `$HOME` prefix), and a relative value is joined against the running result rather than wherever
-   the hook process's own OS-level cwd happens to be. On Windows, a Git Bash drive spelling such as
+   the hook process's own OS-level cwd happens to be. A value holding a `..` component is not
+   joined at all, since git and a `cd -P` resolve it physically through any symlink before it while
+   a join folds it logically, so the two can name different checkouts. A mutating invocation naming
+   one is denied wherever it points. So is a bare `checkout`/`switch` argument, which cannot then be
+   told from a pathspec, and a subcommand git does not ship, which may be an alias defined there.
+   An absolute path with no `..` is the workaround. On Windows, a Git Bash drive spelling such as
    `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
    the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
    maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
