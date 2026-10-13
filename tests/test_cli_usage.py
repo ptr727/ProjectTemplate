@@ -2,8 +2,8 @@
 """Hold every tracked command-line entry point to CODESTYLE.md's argument rule by running it.
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
-the real commands on PATH record a call to gh, git, or another command in RECORDED. No credential
-is passed. Each home and config-home variable in HOMES points into an empty scratch directory. An
+the real commands on PATH record a call to gh, git, or another command in RECORDED. The variables
+in WITHHELD, the GitHub tokens and step files, are removed. Each home and config-home variable in HOMES points into an empty scratch directory. An
 entry a run leaves in one is an effect, aside from a pwsh run's startup cache. The proxy is a local
 listener that records every connection made to it.
 
@@ -516,12 +516,17 @@ class ControlCase(unittest.TestCase):
                 local / "Microsoft" / "PowerShell" / "example",
                 homes["XDG_CACHE_HOME"] / "powershell" / "example",
                 local / "Example",
+                local / "Microsoft" / "Example",
+                homes["XDG_CACHE_HOME"] / "example",
                 homes["XDG_CONFIG_HOME"] / "powershell",
             ):
                 made.mkdir(parents=True)
             self.assertEqual(
                 home_writes(homes, pwsh=True),
-                "wrote $USERPROFILE/AppData/Local/Example\nwrote $XDG_CONFIG_HOME/powershell\n",
+                "wrote $USERPROFILE/AppData/Local/Example\n"
+                "wrote $USERPROFILE/AppData/Local/Microsoft/Example\n"
+                "wrote $XDG_CONFIG_HOME/powershell\n"
+                "wrote $XDG_CACHE_HOME/example\n",
             )
 
     def test_a_write_into_a_scratch_home_is_seen(self) -> None:
