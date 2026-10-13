@@ -171,7 +171,7 @@ def interpreter(root: Path, path: str) -> str | None:
         words = handle.readline()[2:].split()
     name = PurePosixPath(words[0]).name if words else ""
     if name == "env":
-        name = next((word for word in words[1:] if word[0] != "-" and "=" not in word), "")
+        name = env_command(words[1:])
     if name.startswith("python"):
         return "python"
     if name in ("bash", "sh"):
@@ -179,10 +179,26 @@ def interpreter(root: Path, path: str) -> str | None:
     return "pwsh" if name == "pwsh" else None
 
 
+def env_command(words: list[str]) -> str:
+    """The command an `env` shebang runs, past env's flags, their operands, and assignments."""
+    operands = iter(words)
+    for word in operands:
+        if word in ("-u", "--unset", "-C", "--chdir"):
+            next(operands, None)
+        elif word[0] != "-" and "=" not in word:
+            return word
+    return ""
+
+
 def opens_on_usage(stdout: str, path: str) -> bool:
-    """Whether the output's first line is a usage line naming the script."""
-    first = (stdout.strip().splitlines() or [""])[0].lower()
-    return first.startswith("usage:") and PurePosixPath(path).stem.lower() in first
+    """Whether the output's very first line is a usage line with the script's name as a word."""
+    words = (stdout.splitlines() or [""])[0].split()
+    stem = PurePosixPath(path).stem.lower()
+    return (
+        bool(words)
+        and words[0].lower() == "usage:"
+        and any(PurePosixPath(word.lower()).stem == stem for word in words[1:])
+    )
 
 
 def tree_state() -> dict[str, tuple[str, int, int]]:
@@ -313,13 +329,20 @@ def recording_proxy() -> Iterator[tuple[str, list[int]]]:
 def home_writes(homes: dict[str, Path], pwsh: bool) -> str:
     """Every entry a run left in a scratch home, each home starting empty.
 
-    A pwsh run's startup cache, the `powershell` directory under XDG_CACHE_HOME, is set aside.
+    A pwsh run's startup cache is set aside, with the directories leading to it. Off Windows it is
+    the `powershell` directory under XDG_CACHE_HOME, and on Windows it sits under USERPROFILE.
     """
-    cache = homes["XDG_CACHE_HOME"] / "powershell"
+    caches = (
+        homes["XDG_CACHE_HOME"] / "powershell",
+        homes["USERPROFILE"] / "AppData" / "Local" / "Microsoft" / "PowerShell",
+    )
     written = []
     for name, home in homes.items():
         for path in sorted(home.rglob("*")):
-            if not (pwsh and (path == cache or cache in path.parents)):
+            related = (
+                path == cache or cache in path.parents or path in cache.parents for cache in caches
+            )
+            if not (pwsh and any(related)):
                 written.append(f"wrote ${name}/{path.relative_to(home).as_posix()}\n")
     return "".join(written)
 
@@ -492,7 +515,14 @@ class ControlCase(unittest.TestCase):
     def test_help_must_open_on_a_usage_line_naming_the_script(self) -> None:
         self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))
         self.assertFalse(opens_on_usage("usage: other.py [-h]\n", "bin/example.py"))
+        self.assertFalse(opens_on_usage("usage: other-example.py [-h]\n", "bin/example.py"))
+        self.assertFalse(opens_on_usage("\nusage: example.py [-h]\n", "bin/example.py"))
         self.assertTrue(opens_on_usage("usage: example.py [-h]\n", "bin/example.py"))
+
+    def test_an_env_shebang_names_its_command_past_options(self) -> None:
+        self.assertEqual(env_command(["-S", "python3", "-u"]), "python3")
+        self.assertEqual(env_command(["-u", "EXAMPLE", "NAME=value", "bash"]), "bash")
+        self.assertEqual(env_command(["--chdir", "/repo", "pwsh"]), "pwsh")
 
     def test_a_write_into_a_scratch_home_is_seen(self) -> None:
         """A file, an empty directory, and a non-pwsh write where pwsh caches each count."""
