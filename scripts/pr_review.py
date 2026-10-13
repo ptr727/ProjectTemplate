@@ -5171,9 +5171,10 @@ def round_before_head(pr: dict) -> bool:
     The first round's own head is no fix push after that round, so `status` and `wait` read no
     attestation there as coverage. A round whose commit is not named counts as no earlier round, so
     an unreadable field costs a Copilot request rather than passing a head.
+    A pull request whose own head cannot be read counts as having no earlier round for the same reason.
     """
     head = pr.get("headRefOid") or ""
-    return any(
+    return bool(head) and any(
         not refusal_of(n) and ((n.get("commit") or {}).get("oid") or head) != head
         for n in reviewer_nodes(pr, "reviews")
     )

@@ -17,6 +17,7 @@ import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
+import audit
 import validate
 
 
@@ -1594,10 +1595,6 @@ class AuditRepoSlugCase(unittest.TestCase):
     """spec/audit.py's repo_slug() is the consumer the url grammar exists for."""
 
     def setUp(self) -> None:
-        # Imported here rather than at module scope, because spec/audit.py runs `git config --get remote.origin.url` while importing.
-        # A module-level import would fail this whole file's cases on a host with no git on PATH, including every case that never touches audit.
-        import audit
-
         self.audit = audit
 
     def test_a_git_suffixed_url_addresses_the_clean_slug(self) -> None:
