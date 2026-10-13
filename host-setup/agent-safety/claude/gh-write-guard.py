@@ -2050,6 +2050,8 @@ def _push_invocations(cmd):
         moves = [_count_cd(_shell_tokens(i)) for i in inners]
         for n, inner in enumerate(inners):
             own_cd = _leading_cd_dir(inner)
+            if own_cd and outer_cd and not os.path.isabs(_expand_dir(own_cd)):
+                own_cd = os.path.join(_expand_dir(outer_cd), _expand_dir(own_cd))
             inner_toks = _shell_tokens(inner)
             inner_extra = max(0, moves[n] - (1 if own_cd else 0))
             inner_extra += sum(moves) - moves[n]
@@ -7609,6 +7611,21 @@ _PUSH_DIR_CASES = [
         "cat > f.md <<'EOF'\nrun git push on a spl\\\nit word\nEOF\necho done",
         "allow",
         "a split word inside a document body is data",
+    ),
+    (
+        "cd {base}/..; bash -c 'cd {wt}; git push'",
+        "allow",
+        "a wrapper's absolute cd replaces the outer one",
+    ),
+    (
+        "cd {wt}; bash -c 'cd sub/..; git push'",
+        "allow",
+        "a wrapper's relative cd resolves against the outer directory",
+    ),
+    (
+        "cd {base}; bash -c 'cd sub; git push'",
+        "deny",
+        "a wrapper's relative cd into a missing child of develop is denied",
     ),
     (
         "true # note\\\ngit push",
