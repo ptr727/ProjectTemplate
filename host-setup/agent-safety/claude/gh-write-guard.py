@@ -2003,7 +2003,7 @@ def _opaque_cd(toks):
     for k, t in enumerate(toks):
         if t in ("eval", "source", "builtin", "command", "env", "trap"):
             return True
-        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
+        if t == ".":
             return True
         plain = t.replace("$?", "")
         if "$" in plain or "`" in plain or "GIT_" in plain:
@@ -7597,6 +7597,11 @@ _PUSH_DIR_CASES = [
         "cd {wt}; bash -c \"cd {base}; bash -c 'git push'\"",
         "deny",
         "a nested wrapper inherits the middle wrapper's cd, not the leading one",
+    ),
+    (
+        "cd {wt}; VAR=1 . ./x.sh; git push",
+        "deny",
+        "a prefixed dot command may change the directory",
     ),
     (
         "true # note\\\ngit push",
