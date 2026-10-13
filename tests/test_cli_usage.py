@@ -326,19 +326,18 @@ def home_writes(homes: dict[str, Path], pwsh: bool) -> str:
     """Every entry a run left in a scratch home, each home starting empty.
 
     A pwsh run's startup cache is set aside, with the directories leading to it. Off Windows it is
-    the `powershell` directory under XDG_CACHE_HOME, and on Windows it sits under USERPROFILE.
+    the `powershell` directory under XDG_CACHE_HOME, and on Windows it sits under USERPROFILE. Only
+    this host's own cache is set aside, so a write into the other host's tree is still an entry.
     """
-    caches = (
-        homes["XDG_CACHE_HOME"] / "powershell",
-        homes["USERPROFILE"] / "AppData" / "Local" / "Microsoft" / "PowerShell",
-    )
+    if os.name == "nt":
+        cache = homes["USERPROFILE"] / "AppData" / "Local" / "Microsoft" / "PowerShell"
+    else:
+        cache = homes["XDG_CACHE_HOME"] / "powershell"
     written = []
     for name, home in homes.items():
         for path in sorted(home.rglob("*")):
-            related = (
-                path == cache or cache in path.parents or path in cache.parents for cache in caches
-            )
-            if not (pwsh and any(related)):
+            related = path == cache or cache in path.parents or path in cache.parents
+            if not (pwsh and related):
                 written.append(f"wrote ${name}/{path.relative_to(home).as_posix()}\n")
     return "".join(written)
 
@@ -537,13 +536,28 @@ class ControlCase(unittest.TestCase):
                 homes["XDG_CONFIG_HOME"] / "powershell",
             ):
                 made.mkdir(parents=True)
-            self.assertEqual(
-                home_writes(homes, pwsh=True),
-                "wrote $USERPROFILE/AppData/Local/Example\n"
-                "wrote $USERPROFILE/AppData/Local/Microsoft/Example\n"
-                "wrote $XDG_CONFIG_HOME/powershell\n"
-                "wrote $XDG_CACHE_HOME/example\n",
-            )
+            if os.name == "nt":
+                expected = (
+                    "wrote $USERPROFILE/AppData/Local/Example\n"
+                    "wrote $USERPROFILE/AppData/Local/Microsoft/Example\n"
+                    "wrote $XDG_CONFIG_HOME/powershell\n"
+                    "wrote $XDG_CACHE_HOME/example\n"
+                    "wrote $XDG_CACHE_HOME/powershell\n"
+                    "wrote $XDG_CACHE_HOME/powershell/example\n"
+                )
+            else:
+                expected = (
+                    "wrote $USERPROFILE/AppData\n"
+                    "wrote $USERPROFILE/AppData/Local\n"
+                    "wrote $USERPROFILE/AppData/Local/Example\n"
+                    "wrote $USERPROFILE/AppData/Local/Microsoft\n"
+                    "wrote $USERPROFILE/AppData/Local/Microsoft/Example\n"
+                    "wrote $USERPROFILE/AppData/Local/Microsoft/PowerShell\n"
+                    "wrote $USERPROFILE/AppData/Local/Microsoft/PowerShell/example\n"
+                    "wrote $XDG_CONFIG_HOME/powershell\n"
+                    "wrote $XDG_CACHE_HOME/example\n"
+                )
+            self.assertEqual(home_writes(homes, pwsh=True), expected)
 
     def test_a_write_into_a_scratch_home_is_seen(self) -> None:
         """A file, an empty directory, and a non-pwsh write where pwsh caches each count."""
