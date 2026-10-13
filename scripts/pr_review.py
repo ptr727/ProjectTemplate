@@ -11,8 +11,8 @@ Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
            `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
            `wait` read, an attestation counting only against the base it names. The comment outlives
-           the receipt, which removing the worktree deletes, so it is also the record a promotion's
-           Merge Gate reads for each pull request it carries. `attest` reads the receipt
+           the receipt, which removing the worktree deletes. A promotion reads it only where its
+           Merge Gate falls back to per-file evidence, per pr-review-conduct. It reads the receipt
            `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
            refuses unless the checkout (--checkout, default the current directory) is at the pull
            request's head with no change beyond it, its merge base with the base branch is the pull
@@ -51,7 +51,8 @@ Subcommands
            for it and no round on record states or appears to state partial coverage, with
            `coverage=local` beside it. Under the same conditions the attestation also covers a
            head whose Copilot round states no coverage, has none carried to it, and carries no file
-           table, which reads `review_on_head=yes coverage=local`.
+           table, which reads `review_on_head=yes coverage=local`. Neither reading applies to the
+           head the first round itself landed on, since that head is no fix push after it.
            Use `wait` when review presence is the condition, since `status` reports an absent
            review without treating it as a failure.
            42 = a round read fewer files than the pull request changed, so part of the diff
@@ -4934,14 +4935,15 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
     The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
-    GitHub can read it, and the review gate for a fix push needs to, as does a later promotion's
-    Merge Gate once removing the worktree has deleted the receipt. This reads the receipt where it
-    lives and posts a comment the gate can read, and only after four checks, each of which would
-    otherwise vouch for content the pull request does not carry: the checkout's HEAD is the pull
-    request's head, the checkout holds no change beyond that commit, its merge base with the base
-    branch is the pull request's own, and `local_review.py status` reports a current pass against
-    the pull request's base, one read answering the coverage and the findings count alike. The first
-    two are read again once the check returns, since the checkout can move while it runs.
+    GitHub can read it, and the review gate for a fix push needs to. A promotion's per-file fallback
+    in the Merge Gate reads the comment too, once removing the worktree has deleted the receipt.
+    This reads the receipt where it lives and posts a comment the gate can read, and only after four
+    checks, each of which would otherwise vouch for content the pull request does not carry: the
+    checkout's HEAD is the pull request's head, the checkout holds no change beyond that commit, its
+    merge base with the base branch is the pull request's own, and `local_review.py status` reports
+    a current pass against the pull request's base, one read answering the coverage and the findings
+    count alike. The first two are read again once the check returns, since the checkout can move
+    while it runs.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -5163,9 +5165,18 @@ def promotion(pr: dict) -> bool:
     return not default or pr.get("baseRefName") == default
 
 
-def first_round_done(pr: dict) -> bool:
-    """Whether Copilot has reviewed this pull request at all, on any head, a refusal not counting."""
-    return any(not refusal_of(n) for n in reviewer_nodes(pr, "reviews"))
+def round_before_head(pr: dict) -> bool:
+    """Whether Copilot reviewed an earlier head of this pull request, a refusal not counting.
+
+    The head the first round itself landed on is not a fix push after that round, so an
+    attestation there stands in for nothing. A round whose commit is not named counts as no
+    earlier round, so an unreadable field costs a Copilot request rather than passing a head.
+    """
+    head = pr.get("headRefOid") or ""
+    return any(
+        not refusal_of(n) and ((n.get("commit") or {}).get("oid") or head) != head
+        for n in reviewer_nodes(pr, "reviews")
+    )
 
 
 def holds(pr: dict) -> bool:
@@ -5176,7 +5187,7 @@ def holds(pr: dict) -> bool:
     """
     return (
         not promotion(pr)
-        and first_round_done(pr)
+        and round_before_head(pr)
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
         and not reviewer_requested(pr)
@@ -5186,17 +5197,18 @@ def holds(pr: dict) -> bool:
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
-    Only on a pull request into a branch other than the default, after Copilot's first round, on
-    a head its writer attests, and only where nothing on record says any round read part of a
-    diff and the whole review history is in view, the bound a file table stands in under. A fix
-    push after the first round is covered by the local pass, and a promotion keeps its own
-    Copilot round. A refusal on this head is Copilot's own word on it, which no attestation
-    overrules, and only a later round of Copilot's own on the head spends it.
+    Only on a pull request into a branch other than the default, after Copilot's first round, on a
+    head its writer attests, and only where nothing on record says any round read part of a diff and
+    the whole review history is in view, the bound a file table stands in under. A fix push after
+    the first round is covered by the local pass, and a promotion keeps its own Copilot round. The
+    first round has to be on an earlier head, since the head it landed on is no fix push after it. A
+    refusal on this head is Copilot's own word on it, which no attestation overrules, and only a
+    later round of Copilot's own on the head spends it.
     """
     return (
         not refusing_review(pr)
         and not promotion(pr)
-        and first_round_done(pr)
+        and round_before_head(pr)
         and attested(pr)
         and not reviews_truncated(pr)
         and not partial_shaped(pr)
