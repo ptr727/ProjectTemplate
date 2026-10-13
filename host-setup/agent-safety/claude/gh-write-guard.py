@@ -1900,10 +1900,184 @@ def _push_arg_lists(cmd):
     return _git_subcommand_arglists(cmd, "push")
 
 
+_DATA_HEREDOC_OWNERS = ("cat", "tee")
+_HEREDOC_DELIMITER = re.compile(r"<<(?!<)-?[ \t]*(.?)")
+_CD_BUILTINS = ("cd", "pushd", "popd", "chdir")
+_UNRESOLVED = object()
+_SPLIT_WORD = re.compile(r"(?<=\S)\\\r?\n(?=\S)")
+
+
+def _line_heredocs_are_data(line):
+    """True when every heredoc a line opens is a document `cat`/`tee` writes and no shell expands.
+
+    The delimiter must be quoted, since an unquoted body still runs `$(...)` and backticks. Every
+    command of the heredoc's pipeline must be `cat` or `tee`, since `cat <<EOF | bash` hands the
+    body to a shell and an interpreter owning it reads it as a script. Anything less certain is not
+    data, and its body stays in view.
+    """
+    delims = _HEREDOC_DELIMITER.findall(line)
+    if not delims or any(d not in ("'", '"', "\\") for d in delims):
+        return False
+    toks = _operator_tokens(line)
+    if "|&" in toks or (toks and toks[-1] in ("|", "&&", "||", "&")):
+        return False
+    seen = False
+    for k, tok in enumerate(toks):
+        if tok != "<<":
+            continue
+        seen = True
+        start = k
+        while start > 0 and not _ends_pipeline(toks[start - 1]):
+            start -= 1
+        end = k
+        while end < len(toks) and not _ends_pipeline(toks[end]):
+            end += 1
+        at_command = True
+        for t in toks[start:end]:
+            if t == "|":
+                at_command = True
+            elif at_command:
+                if t.rsplit("/", 1)[-1] not in _DATA_HEREDOC_OWNERS:
+                    return False
+                at_command = False
+    return seen
+
+
+def _data_heredoc_openers(line):
+    """`_heredoc_openers` with every body that is not plainly a document marked as fed to a shell."""
+    opened, shift = _heredoc_openers(line)
+    if opened and not _line_heredocs_are_data(line):
+        opened = [(tag, dash, True) for tag, dash, _ in opened]
+    return opened, shift
+
+
+def _has_unclosed_heredoc(cmd):
+    """True when a heredoc the command opens has no line closing its body."""
+    lines = cmd.split("\n")
+    i = 0
+    while i < len(lines):
+        opened, _ = _data_heredoc_openers(lines[i])
+        i += 1
+        for tag, dash, _ in opened:
+            end, term = _heredoc_body_end(lines, i, (tag, dash))
+            if not term:
+                return True
+            i = end
+    return False
+
+
+def _push_scan_texts(cmd):
+    """Every text of the command to scan for a push, with the bodies of plain document heredocs removed.
+
+    A body no line closes, or more readings than the limit, scans the command whole.
+    """
+    readings = _heredoc_readings(cmd, _data_heredoc_openers)
+    if readings is None or _has_unclosed_heredoc(cmd) or _runs_stored_script(cmd):
+        return [cmd]
+    return readings
+
+
+def _runs_stored_script(cmd):
+    """True when the command also runs a shell, `eval`, or `source`, which may run a body written to a file."""
+    toks = _shell_tokens(cmd)
+    for k, t in enumerate(toks):
+        if _is_shell_wrapper_exe(t) or t in ("eval", "source", "exec"):
+            return True
+        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
+            return True
+    return False
+
+
+def _opaque_cd(toks):
+    """True when something in the command may change the directory or the repository without a literal `cd`.
+
+    That is a run-time word, an `eval`/`source`/`env`/`trap`, or a git dir variable, anywhere in the command.
+    """
+    for k, t in enumerate(toks):
+        if t in ("eval", "source", "builtin", "command", "env", "trap"):
+            return True
+        if t == "." and (k == 0 or _is_separator(toks[k - 1])):
+            return True
+        plain = t.replace("$?", "")
+        if "$" in plain or "`" in plain or "GIT_" in plain:
+            return True
+        if any(c in plain for c in "{[*?"):
+            return True
+    return False
+
+
+def _git_off_command_position(toks):
+    """True when a `git` word is an argument of another command, such as `find -execdir git push`, which may run elsewhere."""
+    for k, t in enumerate(toks):
+        if k and _is_git_exe(t):
+            prev = toks[k - 1]
+            if not (_is_separator(prev) or _ENV_ASSIGN_RE.match(prev)):
+                return True
+    return False
+
+
+def _count_cd(toks):
+    return sum(1 for t in toks if t.rsplit("/", 1)[-1] in _CD_BUILTINS)
+
+
+def _push_invocations(cmd):
+    """Every `git push` as (c_dirs, work_tree, leading_cd, cd_unreliable, args), wrappers included.
+
+    A leading `cd` is trusted only while it is the one directory change in the text its push runs
+    in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
+    """
+    out = []
+    for text in _push_scan_texts(cmd):
+        outer_cd = _leading_cd_dir(text)
+        outer_toks = _shell_tokens(text)
+        outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
+        outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
+        export_dirs = _leading_export_dirs(text)
+        batches = [(text, outer_cd, outer_extra)]
+        for inner in _embedded_wrapper_commands(text):
+            own_cd = _leading_cd_dir(inner)
+            inner_toks = _shell_tokens(inner)
+            inner_extra = max(0, _count_cd(inner_toks) - (1 if own_cd else 0))
+            inner_extra += (
+                1 if _opaque_cd(inner_toks) or _git_off_command_position(inner_toks) else 0
+            )
+            batches.append(
+                (inner, own_cd or outer_cd, inner_extra + (0 if own_cd else outer_extra))
+            )
+        for body, leading_cd, extra in batches:
+            for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
+                if sub == "push":
+                    redirected = (
+                        git_dir is not None or any(export_dirs) or any(_leading_export_dirs(body))
+                    )
+                    moved = extra > 0 and (leading_cd is not None or bool(c_dirs))
+                    out.append((c_dirs, None, leading_cd, moved or redirected, args))
+    return out
+
+
+def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
+    """The branch a bare push in the directory it runs in targets, or `_UNRESOLVED`.
+
+    A directory the command moves to is read, never the session's own, and one that does not
+    resolve to a directory, or that a later `cd` may have changed, is unresolved. The shell runs the
+    push after a failed `cd` joined by `;`, so that case must not read as the session's branch.
+    """
+    if cd_unreliable:
+        return _UNRESOLVED
+    if leading_cd is None and not c_dirs:
+        return _current_push_branch(cwd)
+    if leading_cd is not None:
+        leading_cd = os.path.normpath(_expand_dir(leading_cd))
+    target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
+    if not target or not os.path.isdir(target) or not os.access(target, os.X_OK):
+        return _UNRESOLVED
+    return _current_push_branch(target)
+
+
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update."""
     results = []
-    for args in _push_arg_lists(cmd):
+    for c_dirs, work_tree, leading_cd, cd_unreliable, args in _push_invocations(cmd):
         force = delete = push_all = mirror = tags_only = False
         positionals = []
         i = 0
@@ -1957,7 +2131,12 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             elif tags_only:
                 branches = []  # tags only, no branch is updated
             else:
-                b = current_branch if current_branch is not None else _current_push_branch(cwd)
+                b = current_branch
+                if b is None:
+                    b = _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable)
+                if b is _UNRESOLVED:
+                    results.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                    continue
                 if b:
                     branches = [b]
         op = "delete" if delete else ("force" if force else "update")
@@ -2019,6 +2198,13 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
     for op, br in targets:
+        if op == "unresolved":
+            return "deny", (
+                "Could not tell which branch this bare push targets, because the directory it runs in "
+                "does not resolve to a checkout the guard can read. Failing closed rather than read "
+                "the session's own branch. Push with an explicit refspec (git push origin "
+                "<branch>:refs/heads/<branch>), or cd into a directory that exists." + _handoff(cmd)
+            )
         if rules_lookup is not None:
             rules = rules_lookup(br)
         elif origin is not None:
@@ -3544,6 +3730,7 @@ def classify(
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
+    split_word = bool(_SPLIT_WORD.search(cmd))
     cmd = re.sub(r"\\\r?\n", " ", cmd)
     cwd = _msys_drive_path(cwd)
     # Rule 4 covers a git operation that would only succeed by bypassing an active branch rule.
@@ -3554,6 +3741,12 @@ def classify(
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
     if _GIT_PUSH.search(cmd):
+        if split_word:
+            return "deny", (
+                "This push sits in a command with a word split by a backslash-newline, which the shell joins "
+                "into one word the guard cannot read, so a hidden cd could redirect the push. Write each "
+                "word whole." + _handoff(cmd)
+            )
         dec, reason = _check_push_bypass(cmd, cwd, origin, current_branch, rules_lookup)
         if dec == "deny":
             return dec, reason
@@ -7212,6 +7405,254 @@ def _fixture_dir(key):
     return key.replace("\\", "/") if key else key
 
 
+_PUSH_DIR_CASES = [
+    (
+        "cd {wt} && git push",
+        "allow",
+        "a bare push after a leading cd into a feature worktree reads that branch",
+    ),
+    (
+        "cd {wt}; git push",
+        "allow",
+        "a leading cd joined by a semicolon scopes the push the same way",
+    ),
+    (
+        "cd {wt} && python3 tool.py --target develop; echo done=$?; git push 2>&1 | tail -1",
+        "allow",
+        "a push in a later semicolon segment runs in the cd's directory",
+    ),
+    (
+        "cd {base} && git push",
+        "deny",
+        "a bare push after a cd into a checkout on develop is denied",
+    ),
+    ("cd {base}; git push", "deny", "a bare push after a semicolon cd into develop is denied"),
+    (
+        "cd {missing}; git push",
+        "deny",
+        "a push after a cd that names no directory is denied, since the shell pushes from the session cwd",
+    ),
+    ("cd {missing} && git push", "deny", "a push after an unresolvable cd is denied"),
+    ('cd "$UNSET_DIR"; git push', "deny", "a push after a cd the guard cannot expand is denied"),
+    (
+        "cd {wt}; cd {base}; git push",
+        "deny",
+        "a later cd takes the push out of the leading cd's directory",
+    ),
+    (
+        "cd {wt}; echo $(git push)",
+        "deny",
+        "a substitution after a cd is a run-time command word, so the cd is not trusted",
+    ),
+    ("cd {wt}; bash -c 'git push'", "allow", "a wrapped push inherits the leading cd"),
+    (
+        "cd {wt}; bash -c 'cd {base}; git push'",
+        "deny",
+        "a wrapped cd overrides the leading one",
+    ),
+    ("bash -c 'git push'", "deny", "a push after bash -c in a checkout on develop is denied"),
+    ("echo $(git push)", "deny", "a push inside a substitution in a checkout on develop is denied"),
+    ("git -C {wt} push", "allow", "a bare push with -C reads the branch in that directory"),
+    ("git -C {base} push", "deny", "a bare push with -C into develop is denied"),
+    ("git push", "deny", "a bare push in a checkout on develop is denied"),
+    (
+        "cat > f.md <<'EOF'\nrun git push here\nEOF\necho done",
+        "allow",
+        "the words git push in a quoted heredoc body are data",
+    ),
+    (
+        "cat > f.md <<'EOF'\nrun git push here\nEOF\ngit push",
+        "deny",
+        "a real push after the heredoc terminator is denied",
+    ),
+    (
+        "cat > f.md <<'EOF'\nrun git push here\n",
+        "deny",
+        "a heredoc whose terminator never appears is scanned whole",
+    ),
+    (
+        "cat > f.md <<EOF\n$(git push)\nEOF",
+        "deny",
+        "an unquoted heredoc body runs a substitution, so it stays in view",
+    ),
+    (
+        "cat <<'EOF' | bash\ngit push\nEOF",
+        "deny",
+        "a heredoc body fed to a shell is a script",
+    ),
+    (
+        "bash <<'EOF'\ngit push\nEOF",
+        "deny",
+        "a heredoc body owned by a shell is a script",
+    ),
+    (
+        "true; eval 'cd {wt}'; git -C ../wt push",
+        "deny",
+        "a relative -C after a hidden cd is not trusted",
+    ),
+    (
+        "cd {wt}; export GIT_DIR={base}/.git; git push",
+        "deny",
+        "a git dir exported after the cd moves the repository",
+    ),
+    (
+        "cd {wt} && env -C {base} git push",
+        "deny",
+        "env can change the directory",
+    ),
+    (
+        "cd {wt}; trap 'cd {base}' DEBUG; git push",
+        "deny",
+        "a trap can run a cd",
+    ),
+    (
+        "cd {wt}; { $c {base}; }; git push",
+        "deny",
+        "a run-time command word inside a group may be a cd",
+    ),
+    (
+        "cd {wt}; {cd,} {base}; git push",
+        "deny",
+        "a cd built by brace expansion is not trusted",
+    ),
+    (
+        "cd {wt}; export GIT_{DIR,X}={base}/.git; git push",
+        "deny",
+        "a git dir name built by expansion is not trusted",
+    ),
+    (
+        "cd {wt}; X=1 {cd,} {base}; git push",
+        "deny",
+        "a cd built by expansion after an assignment is not trusted",
+    ),
+    (
+        "cd {wt}; c\\\nd {base}; git push",
+        "deny",
+        "a cd split by a line continuation is still a cd",
+    ),
+    (
+        "cd {wt}; find {base} -maxdepth 0 -execdir git push \\;",
+        "deny",
+        "a push run as another command's argument may run elsewhere",
+    ),
+    (
+        "true # note\\\ngit push",
+        "deny",
+        "a comment ending in a backslash does not continue onto the push line",
+    ),
+    (
+        "python3 - <<'EOF'\ngit push\nEOF",
+        "deny",
+        "a heredoc body owned by an interpreter is not a plain document",
+    ),
+    (
+        "cat <<'EOF' > f.md && git push\ntext\nEOF",
+        "deny",
+        "a push on the heredoc's opener line is still a command",
+    ),
+    (
+        "git --work-tree={wt} push",
+        "deny",
+        "a work tree does not move HEAD, so the branch is the session's",
+    ),
+    ("GIT_WORK_TREE={wt} git push", "deny", "an env work tree does not move HEAD either"),
+    (
+        "git -C {wt} --git-dir={base}/.git push",
+        "deny",
+        "an explicit git dir makes the branch unresolved",
+    ),
+    (
+        "cd {wt} && GIT_DIR={base}/.git git push",
+        "deny",
+        "an env git dir after a cd makes the branch unresolved",
+    ),
+    (
+        "cd {wt}; eval 'cd {base}'; git push",
+        "deny",
+        "an eval may hide a cd, so the leading one is not trusted",
+    ),
+    ("cd {wt}; c=cd; $c {base}; git push", "deny", "a command word built at run time may be a cd"),
+    (
+        "cd {base}/s/..; git push",
+        "deny",
+        "a cd resolves dot-dot logically, through a symlink, back into develop",
+    ),
+    (
+        "cat <<'EOF' |& bash\ngit push\nEOF",
+        "deny",
+        "a heredoc piped with |& to a shell is a script",
+    ),
+    (
+        "cat <<'EOF' |\ngit push\nEOF\nbash",
+        "deny",
+        "a pipeline continued past the body may reach a shell",
+    ),
+    (
+        "cat > x.sh <<'EOF'\ngit push\nEOF\nbash x.sh",
+        "deny",
+        "a body written to a file and then run by a shell stays in view",
+    ),
+]
+
+
+def _push_dir_selftest(origin):
+    """Run `_PUSH_DIR_CASES` against real temporary repositories, built from constructed names only."""
+    import shutil
+    import tempfile
+
+    if os.name == "nt" or os.path.sep != "/":
+        print("  skip [push ] directory-scoped push cases need POSIX paths")
+        return True
+    root = tempfile.mkdtemp(prefix="guard-push-")
+    ok = True
+    try:
+        base = os.path.join(root, "base")
+        wt = os.path.join(root, "wt")
+        missing = os.path.join(root, "missing")
+        git = [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Example",
+            "-c",
+            "user.email=example@example.com",
+        ]
+        steps = (
+            [*git, "init", "-q", "-b", "develop", base],
+            [*git, "-C", base, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
+            [*git, "-C", base, "worktree", "add", "-q", "-b", "feature/example", wt],
+        )
+        for step in steps:
+            try:
+                built = subprocess.run(step, capture_output=True, check=False).returncode == 0
+            except OSError:
+                built = False
+            if not built:
+                print("  skip [push ] could not build the temporary repositories")
+                return True
+        os.makedirs(os.path.join(wt, "sub"))
+        os.symlink(os.path.join(wt, "sub"), os.path.join(base, "s"))
+        rules = lambda br: {"pull_request"} if br == "develop" else set()
+        for template, want, label in _PUSH_DIR_CASES:
+            cmd = template.replace("{wt}", wt).replace("{base}", base).replace("{missing}", missing)
+            got, _ = classify(
+                cmd,
+                cwd=base,
+                origin=origin,
+                rules_lookup=rules,
+                environ={},
+                primary_checkout_lookup=lambda d: False,
+            )
+            mark = "ok  " if got == want else "FAIL"
+            if got != want:
+                ok = False
+            print(f"  {mark} [{got:5}] want={want:5} {label}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    return ok
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -7657,6 +8098,8 @@ def _selftest():
     if got is not True and got != "skip":
         ok = False
     print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
+    if not _push_dir_selftest(origin):
+        ok = False
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
 
