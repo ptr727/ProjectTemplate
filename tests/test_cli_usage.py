@@ -3,8 +3,9 @@
 
 Each entry point runs with `--help`, with `-h`, and with an unknown `--bogus-flag`. Stubs ahead of
 the real commands on PATH record a call to gh, git, or another command in RECORDED. No credential
-is passed. Every home and config-home variable points into a scratch directory. The proxy is a
-local listener that records every connection made to it.
+is passed. Each home and config-home variable in HOMES points into an empty scratch directory. A
+file a run leaves in one is an effect, PowerShell's own cache aside. The proxy is a local listener
+that records every connection made to it.
 
 Help exits 0 and prints the same text for both spellings. That text opens on a usage line naming
 the script, so a default mode whose report merely mentions usage fails. The unknown flag exits
@@ -309,6 +310,17 @@ def recording_proxy() -> Iterator[tuple[str, list[int]]]:
             worker.join()
 
 
+def home_writes(homes: dict[str, Path]) -> str:
+    """Every file a run left in a scratch home, aside from what PowerShell caches as it starts."""
+    written = []
+    for name, home in homes.items():
+        for path in sorted(home.rglob("*")):
+            relative = path.relative_to(home)
+            if path.is_file() and "powershell" not in (part.lower() for part in relative.parts):
+                written.append(f"wrote ${name}/{relative.as_posix()}\n")
+    return "".join(written)
+
+
 def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str], str]:
     """The run's result and its effects, one line per stub call, connection, survivor, or changed path.
 
@@ -362,7 +374,7 @@ def run_sandboxed(command: list[str]) -> tuple[subprocess.CompletedProcess[str],
             err.read_text(encoding="utf-8", errors="replace"),
         )
         recorded = calls.read_text(encoding="utf-8") if calls.exists() else ""
-        effects = recorded + "proxy connection\n" * len(connections) + effects
+        effects = recorded + "proxy connection\n" * len(connections) + effects + home_writes(homes)
     return result, effects + tree_changes(before)
 
 
@@ -473,6 +485,19 @@ class ControlCase(unittest.TestCase):
         self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))
         self.assertFalse(opens_on_usage("usage: other.py [-h]\n", "bin/example.py"))
         self.assertTrue(opens_on_usage("usage: example.py [-h]\n", "bin/example.py"))
+
+    def test_a_write_into_a_scratch_home_is_seen(self) -> None:
+        write = "import os; open(os.path.join(os.environ['XDG_CONFIG_HOME'], 'example'), 'w')"
+        _, effects = run_sandboxed([sys.executable, "-c", write])
+        self.assertIn("wrote $XDG_CONFIG_HOME/example", effects)
+
+    def test_powershell_finds_the_stub_ahead_of_the_real_command(self) -> None:
+        """On Windows this is the `.cmd` stub, the one shadowing the PowerShell entry points rely on."""
+        pwsh = shutil.which("pwsh")
+        if pwsh is None:
+            self.skipTest("no pwsh on PATH")
+        _, effects = run_sandboxed([pwsh, "-NoProfile", "-NonInteractive", "-Command", "git probe"])
+        self.assertIn("git probe", effects)
 
     @unittest.skipUnless(Path("/proc").is_dir(), "the survivor check reads /proc")
     def test_a_detached_grandchild_holding_the_output_is_named(self) -> None:
