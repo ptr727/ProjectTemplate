@@ -57,15 +57,20 @@ text says, because the harm it covers was never in the text.
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
+   Each refspec's operation is judged on its own, so a `+` or a `:` on one refspec forces or
+   deletes only its own branch. A force-push and a delete each write the branch too, so a branch
+   whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
    unresolvable), deny rather than allow, because the harm is a silent success under the
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
    passes this requirement instead, since there is nothing yet on record to bypass. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
-   That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
-   override. It also covers a bare push or a `HEAD`/`@` refspec whose directory or branch may
-   change before it runs. The workaround is an explicit refspec run as its own command. Every other
+   That covers a push in text the hook does not parse, a push carrying a `-c`/`--config-env`
+   override, and a git command under an `include.path`/`includeIf` override whose subcommand git
+   does not list, since the included file may define it as a push alias. It also covers a bare
+   push or a `HEAD`/`@` refspec whose directory or branch may change before it runs. The
+   workaround is an explicit refspec run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
