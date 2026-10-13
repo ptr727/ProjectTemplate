@@ -124,7 +124,7 @@ _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
-_GIT_PUSH = re.compile(r"\bgit\b.*?\bpush\b", re.DOTALL)
+_GIT_PUSH = re.compile(r"git\b.*?\bpush\b", re.DOTALL)
 
 # --- Bypass-of-branch-rule detectors (Rule 4) --------------------------------------------------------
 # A git operation is denied when it would only succeed by bypassing an active branch rule.
@@ -315,10 +315,23 @@ def _live_branch_rules(owner, repo, branch):
 
 def _current_push_branch(cwd):
     """Resolve the destination branch of a bare `git push` from the branch's configured push target."""
-    for args in (
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
-        ["rev-parse", "--abbrev-ref", "HEAD"],
-    ):
+    return _read_branch(
+        cwd,
+        (
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
+            ["rev-parse", "--abbrev-ref", "HEAD"],
+        ),
+    )
+
+
+def _head_branch(cwd):
+    """Resolve the branch `HEAD` names, which a `git push <remote> HEAD` updates under the same name."""
+    return _read_branch(cwd, (["rev-parse", "--abbrev-ref", "HEAD"],))
+
+
+def _read_branch(cwd, reads):
+    """The branch the first of `reads` that succeeds in `cwd` names, or None."""
+    for args in reads:
         try:
             r = subprocess.run(
                 ["git", "-C", cwd or ".", *args],
@@ -905,6 +918,14 @@ def _git_subcommand_arglists(cmd, sub):
     return [args for _, args in _git_subcommand_invocations(cmd, sub)]
 
 
+def _git_subcommand_index(toks, k):
+    """The index of the subcommand of the git word at `toks[k]`, past its global options."""
+    j = k + 1
+    while j < len(toks) and toks[j].startswith("-"):
+        j += 2 if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j] else 1
+    return j
+
+
 def _git_subcommand_invocations(cmd, sub):
     """Every `git [global-options] <sub>` in the command, as (global-option tokens, argv after <sub>)."""
     toks = _shell_tokens(cmd)
@@ -915,12 +936,7 @@ def _git_subcommand_invocations(cmd, sub):
         if not _is_git_exe(toks[i]):
             i += 1
             continue
-        j = i + 1
-        while j < n and toks[j].startswith("-"):
-            if toks[j] in _GIT_GLOBAL_VALUE_OPTS and "=" not in toks[j]:
-                j += 2  # this global option consumes the next token as its value
-            else:
-                j += 1
+        j = _git_subcommand_index(toks, i)
         if j < n and toks[j] == sub:
             args, k = _collect_arglist(toks, j + 1)
             out.append((toks[i + 1 : j], args))
@@ -1470,10 +1486,10 @@ def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None):
     is `True` the moment any alias in the chain is a `!`-prefixed shell command rather than a git
     subcommand alias, since that shape hands git an arbitrary shell string this function does not
     and must not execute to interpret -- the caller denies that shape outright against a primary
-    checkout rather than either running it or letting it fall through to an ordinary allow, the
-    one place this rule departs from its usual fail-open stance, because the alias definition
-    itself is concrete, positive evidence of an attempt to run something via git in exactly the
-    directory this rule exists to protect.
+    checkout rather than either running it or letting it fall through to an ordinary allow, one
+    of two places this rule departs from its usual fail-open stance (the other is a `..` component
+    in a directory value), because the alias definition itself is concrete, positive evidence of
+    an attempt to run something via git in exactly the directory this rule exists to protect.
     """
     seen = set()
     depth = 0
@@ -1560,6 +1576,62 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
 _FALSY_ENV_VALUES = {"", "0", "false", "no", "off"}
 
 
+def _has_dot_dot(value):
+    """True when a directory value, once `~`/`$HOME` are expanded, holds a `..` component.
+
+    Git and a `cd -P` resolve a `..` physically, through any symlink before it. `_join_relative`
+    folds it logically, so the two can name different checkouts. Rule 6 then reads the verdict
+    without the directory. A bare checkout/switch argument reads as a pathspec there, and a name
+    git does not list may be an alias defined in that directory.
+    """
+    return ".." in (_expand_dir(value) or "").replace("\\", "/").split("/")
+
+
+def _cd_dot_dot(cmd):
+    """The first `..`-holding argument of any `cd`/`pushd` in the command or its wrapper bodies.
+
+    Any such `cd` counts, leading or not, with options (`cd -P`) or without. Rule 6 reads only a
+    plain leading `cd`, and resolves every other invocation from the session's directory.
+    """
+    for text in [cmd, *_embedded_wrapper_commands(cmd)]:
+        toks = _shell_tokens(text)
+        for k, t in enumerate(toks):
+            if t.rsplit("/", 1)[-1] in _CD_BUILTINS:
+                args, _ = _collect_arglist(toks, k + 1)
+                found = next((a for a in args if _has_dot_dot(a)), None)
+                if found is not None:
+                    return found
+    return None
+
+
+_GIT_COMMAND_NAMES: list[set[str]] = []
+
+
+def _git_command_names():
+    """The commands git ships or finds on PATH, which an alias cannot shadow, read once per run.
+
+    Any failure to list them gives an empty set rather than a crash. Every name then reads as a
+    possible alias, and the caller fails closed. The self-test pins the set, so its cases do not
+    depend on the git that runs them.
+    """
+    if not _GIT_COMMAND_NAMES:
+        try:
+            r = subprocess.run(
+                ["git", "--list-cmds=builtins,main,others"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="surrogateescape",
+                timeout=5,
+                check=False,
+            )
+            names = set(r.stdout.split()) if r.returncode == 0 else set()
+        except Exception:  # noqa: BLE001
+            names = set()
+        _GIT_COMMAND_NAMES.append(names)
+    return _GIT_COMMAND_NAMES[0]
+
+
 def _check_primary_checkout_mutation(
     cmd, cwd, environ=None, primary_checkout_lookup=None, ref_resolver=None, config_lookup=None
 ):
@@ -1583,9 +1655,25 @@ def _check_primary_checkout_mutation(
     # Two independent caches, deliberately never merged into one: an identity-dimension key and a file-dimension key can coincide as the same literal string while needing different test methods (--git-dir=X directly versus ordinary -C X discovery), and a single shared cache keyed only by that string would silently reuse one method's answer for the other's lookup.
     identity_cache = {}
     file_cache = {}
+    cd_dotted = _cd_dot_dot(cmd)
     for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
         cmd
     ):
+        dotted = cd_dotted or next(
+            (v for v in (leading_cd, *c_dirs, work_tree, git_dir) if v and _has_dot_dot(v)), None
+        )
+        if dotted is not None:
+            verdict = _primary_checkout_verdict(sub, args, None, lambda _d, _r: False)
+            if verdict is None and sub not in _git_command_names():
+                verdict = True
+            if not verdict:
+                continue
+            return "deny", (
+                f"This `git {sub}` names its directory with a `..` component ({dotted}), which git "
+                "and the shell resolve physically through any symlink, so the guard cannot tell "
+                "whether it runs against a primary checkout. Failing closed. Spell the directory "
+                "without a `..` component, as an absolute path."
+            )
         resolved = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
         repo_git_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
         # This rule tests two independent dimensions of "does this touch a primary checkout", since git's own --work-tree/--git-dir split lets a single invocation mutate one repository's index/refs/HEAD while writing working-tree files into an entirely different directory.
@@ -1679,14 +1767,41 @@ def _is_shell_wrapper_exe(tok):
     return base in _SHELL_WRAPPER_EXE
 
 
-def _embedded_wrapper_commands(cmd, _depth=0):
+_WRAPPER_NESTING_LIMIT = 4
+
+
+def _wrapper_unread_args(args):
+    """A wrapper shell's argv without the `-c` body it runs, which an attached `-c<body>` is not."""
+    ci = _wrapper_c_index(args)
+    if ci is not None and ci + 1 < len(args):
+        return args[: ci + 1] + args[ci + 2 :]
+    return args
+
+
+def _wrapper_c_index(args):
+    """The index of a wrapper shell's `-c` option, alone or clustered (`-lc`), in its argv, or None."""
+    return next(
+        (
+            x
+            for x, a in enumerate(args)
+            if a.startswith("-") and not a.startswith("--") and a.endswith("c")
+        ),
+        None,
+    )
+
+
+def _embedded_wrapper_commands(cmd, _depth=0, overflow=None):
     """Every command string embedded in a `sh -c '...'`/`bash -c "..."`-style wrapper invocation in
     `cmd`, recursively, capped at a few levels of nesting. A `gh`/`git` call wrapped this way forms no
     standalone `gh`/`git` token of its own, so `_gh_arg_lists` and `_git_subcommand_arglists` would
     otherwise miss it entirely, the same bypass `sh -c 'gh issue comment --repo <foreign>/<repo> ...'`
-    exercises against a plain token scan.
+    exercises against a plain token scan. A here-string fed to the wrapper (`bash <<< '...'`) is
+    the script it runs, so it is read the same way. A body at the cap can hold a wrapper of its own
+    that goes unread. Such a body is appended to `overflow`, when given, so a caller can fail closed.
     """
-    if _depth > 4:
+    if _depth > _WRAPPER_NESTING_LIMIT:
+        if overflow is not None and any(_is_shell_wrapper_exe(t) for t in _shell_tokens(cmd)):
+            overflow.append(cmd)
         return []
     out = []
     toks = _shell_tokens(cmd)
@@ -1697,18 +1812,16 @@ def _embedded_wrapper_commands(cmd, _depth=0):
             args, k = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`, `sh -ec`), the command string still the next argv token.
             # A form left out here is a silent bypass of every rule below, the same shape a bare `-c` closes.
-            ci = next(
-                (
-                    x
-                    for x, a in enumerate(args)
-                    if a.startswith("-") and not a.startswith("--") and a.endswith("c")
-                ),
-                None,
-            )
-            if ci is not None and ci + 1 < len(args):
-                inner = args[ci + 1]
+            ci = _wrapper_c_index(args)
+            bodies = [args[ci + 1]] if ci is not None and ci + 1 < len(args) else []
+            bodies += [
+                toks[x + 1]
+                for x in range(i + 1, k - 1)
+                if toks[x] == "<<<" and not _is_shell_op(toks[x + 1])
+            ]
+            for inner in bodies:
                 out.append(inner)
-                out.extend(_embedded_wrapper_commands(inner, _depth + 1))
+                out.extend(_embedded_wrapper_commands(inner, _depth + 1, overflow))
             i = k
         else:
             i += 1
@@ -1951,27 +2064,140 @@ def _count_cd(toks):
     return sum(1 for t in toks if t.rsplit("/", 1)[-1] in _CD_BUILTINS)
 
 
+_HEAD_KEEPING_SUBS = frozenset(
+    {"add", "am", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "mv", "pull", "push"}
+    | {"reset", "restore", "rev-parse", "revert", "rm", "show", "status", "tag"}
+)
+
+
+def _head_may_move(toks):
+    """True when something before the last push in these tokens may change what a bare push targets.
+
+    That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
+    subcommands leave the branch `HEAD` names and the push config as they found them, unless one
+    sets an upstream (`--set-upstream`, or a push's `-u`). Anything else may switch the branch or
+    rewrite the push config before the push runs, and the branch read before the command runs is
+    then not the one the push uses. The scan stops at the last push's own git word, since that
+    push's own `-u` changes nothing before it runs. An `eval`/`source` is `_opaque_cd`'s.
+    """
+    pushes = [k for k, t in enumerate(toks) if t == "push"]
+    n = len(toks)
+    end = pushes[-1] if pushes else 0
+    end = next(
+        (
+            k
+            for k in range(end - 1, -1, -1)
+            if _is_git_exe(toks[k]) and _git_subcommand_index(toks, k) == end
+        ),
+        end,
+    )
+    for k in range(end):
+        t = toks[k]
+        if _is_gh_exe(t) or _is_shell_wrapper_exe(t):
+            return True
+        if _is_git_exe(t):
+            j = _git_subcommand_index(toks, k)
+            if j >= n or _is_shell_op(toks[j]):
+                continue
+            if toks[j] not in _HEAD_KEEPING_SUBS:
+                return True
+            args, _ = _collect_arglist(toks, j + 1)
+            if any(a.startswith("--set-upstream") for a in args):
+                return True
+            if toks[j] == "push" and any(_is_short_u(a) for a in args):
+                return True
+    return False
+
+
+def _is_short_u(arg):
+    """True when an argument is a short-option cluster holding push's `-u`, such as `-u` or `-fu`."""
+    return arg.startswith("-") and not arg.startswith("--") and "u" in arg[1:]
+
+
+_INLINE_PUSH_ALIAS = re.compile(r"alias\..*\bpush\b", re.DOTALL | re.IGNORECASE)
+_COMMAND_RUNNING_GIT_SUBS = frozenset(
+    {"bisect", "submodule", "rebase", "filter-branch", "difftool", "mergetool"}
+)
+
+
+def _unreadable_push(cmd):
+    """Name the form when the command runs a push from text the guard does not read, else None.
+
+    The unread text is one of these:
+
+    - an `eval`/`source` argument
+    - a wrapper shell argument other than the `-c` body, an attached `-c<body>` among them
+    - a wrapper nested past the reading cap
+    - a quoted word handed to a git command that runs it, one of `_COMMAND_RUNNING_GIT_SUBS`
+    - a `-c` config value, an inline alias expanding to a push among them
+
+    Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too. Config such
+    as `push.default` or `remote.<name>.push` changes what a push updates, an explicit refspec
+    included. A word is matched by `_GIT_PUSH`, which needs no word boundary before `git`. An
+    unquoted `-c'git push'` reads as `-cgit push`, while `.github` still matches nothing.
+    """
+    overflow = []
+    texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
+    if any(_GIT_PUSH.search(t) for t in overflow):
+        return "wrapper shells nested deeper than the guard reads"
+    for text in texts:
+        toks = _shell_tokens(text)
+        n = len(toks)
+        for k, t in enumerate(toks):
+            if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
+                args, _ = _collect_arglist(toks, k + 1)
+                if _is_shell_wrapper_exe(t):
+                    args = _wrapper_unread_args(args)
+                if any(_GIT_PUSH.search(a) for a in args):
+                    return (
+                        f"a push inside an argument of `{t}` the guard does not read as a command"
+                    )
+            if not _is_git_exe(t):
+                continue
+            j = _git_subcommand_index(toks, k)
+            opts = toks[k + 1 : j]
+            values = [opts[x + 1] for x, o in enumerate(opts[:-1]) if o == "-c"]
+            if any(_GIT_PUSH.search(v) or _INLINE_PUSH_ALIAS.match(v) for v in values):
+                return "a push inside a git `-c` config value"
+            config = any(o in ("-c", "--config-env") or o.startswith("--config-env=") for o in opts)
+            if j >= n:
+                continue
+            if toks[j] == "push" and config:
+                return "a push carrying a `-c`/`--config-env` override, which can change what it updates"
+            if toks[j] in _COMMAND_RUNNING_GIT_SUBS:
+                args, _ = _collect_arglist(toks, j + 1)
+                if config and any(a == "push" or _GIT_PUSH.search(a) for a in args):
+                    return f"a push run by `git {toks[j]}` under a `-c`/`--config-env` override"
+                if any(_GIT_PUSH.search(a) for a in args):
+                    return f"a push inside one quoted argument of `git {toks[j]}`"
+    return None
+
+
 def _push_invocations(cmd):
     """Every `git push` as (c_dirs, work_tree, leading_cd, cd_unreliable, args), wrappers included.
 
     A leading `cd` is trusted only while it is the one directory change in the text its push runs
     in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
+    A push inside a wrapper shell is always unreliable. The wrapper may run in another directory
+    (`find -execdir`, `sudo -D`), or read startup files that change it. So is a push after a
+    command that may move `HEAD` (see `_head_may_move`).
     """
     out = []
     for text in [cmd]:
         outer_cd = _leading_cd_dir(text)
         outer_toks = _shell_tokens(text)
         outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
-        outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
+        outer_extra += (
+            1
+            if _opaque_cd(outer_toks)
+            or _git_off_command_position(outer_toks)
+            or _head_may_move(outer_toks)
+            else 0
+        )
         export_dirs = _leading_export_dirs(text)
         batches = [(text, outer_cd, outer_extra, False)]
-        inners = _embedded_wrapper_commands(text)
-        inner_toks = [_shell_tokens(i) for i in inners]
-        wrapper_moves = any(
-            _count_cd(t) or _opaque_cd(t) or _git_off_command_position(t) for t in inner_toks
-        )
-        for inner in inners:
-            batches.append((inner, outer_cd, outer_extra, wrapper_moves))
+        for inner in _embedded_wrapper_commands(text):
+            batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
             for c_dirs, _work_tree, git_dir, _aliases, sub, args in _git_invocations(body):
@@ -1993,20 +2219,22 @@ def _push_invocations(cmd):
     return out
 
 
-def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
+def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=False):
     """The branch a bare push in the directory it runs in targets, or `_UNRESOLVED`.
 
     A directory the command moves to is read, never the session's own, and one that does not
     resolve to a directory, or that a later `cd` may have changed, is unresolved. The shell runs the
     push after a failed `cd` joined by `;`, so that case must not read as the session's branch.
+    With `head`, the branch `HEAD` names is read instead of the push target, for a `HEAD`/`@` refspec.
     """
-    if cd_unreliable or any(".." in c.replace("\\", "/").split("/") for c in c_dirs):
+    read = _head_branch if head else _current_push_branch
+    if cd_unreliable or any(_has_dot_dot(c) for c in c_dirs):
         return _UNRESOLVED
     if leading_cd is None and not c_dirs:
-        return _current_push_branch(cwd)
+        return read(cwd)
     if leading_cd is not None:
         leading_cd = _expand_dir(leading_cd)
-        if ".." in leading_cd.replace("\\", "/").split("/"):
+        if _has_dot_dot(leading_cd):
             return _UNRESOLVED
         leading_cd = os.path.normpath(leading_cd)
     dirs = ([leading_cd] if leading_cd is not None else []) + [_expand_dir(c) for c in c_dirs]
@@ -2015,14 +2243,26 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable):
     target = _resolve_target_dir(c_dirs, None, leading_cd, cwd)
     if not target or not os.path.isdir(target) or not os.access(target, os.R_OK | os.X_OK):
         return _UNRESOLVED
-    return _current_push_branch(target)
+    return read(target)
 
 
 def _push_targets(cmd, cwd=None, current_branch=None):
-    """Parse every push in the command into a list of (op, branch); op is delete | force | update."""
+    """Parse every push in the command into a list of (op, branch); op is delete | force | update.
+
+    A lone `:` refspec pushes every branch that exists on both sides, so it is read as every
+    protected default. It also sets the aggregate delete flag, so each other branch named beside it
+    is read as an update as well as a delete. A `HEAD`/`@` destination updates the branch `HEAD`
+    names, read the way a bare push's branch is. It is compared without case, since a
+    case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is also read as
+    the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
+    branch it cannot read is an `unresolved` one.
+    """
     results = []
+    unreadable = _unreadable_push(cmd)
+    if unreadable:
+        results.append(("unreadable", unreadable))
     for c_dirs, work_tree, leading_cd, cd_unreliable, args in _push_invocations(cmd):
-        force = delete = push_all = mirror = tags_only = False
+        force = delete = push_all = mirror = tags_only = matching = False
         positionals = []
         i = 0
         while i < len(args):
@@ -2053,9 +2293,23 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             if rs.startswith("+"):
                 force = True
                 rs = rs[1:]
+            matching = matching or rs == ":"
             if rs.startswith(":"):
                 delete = True  # `:dst` empty-source refspec deletes dst
             dst = rs.split(":", 1)[1] if ":" in rs else rs
+            if dst.upper() in ("HEAD", "@"):
+                if dst not in ("HEAD", "@"):
+                    branches.append(dst)
+                b = current_branch
+                if b is None:
+                    b = _bare_push_branch(
+                        cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=True
+                    )
+                if b is _UNRESOLVED:
+                    results.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                elif b:
+                    branches.append(b)
+                continue
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/") :]
             elif dst.startswith("refs/"):
@@ -2085,6 +2339,9 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                     branches = [b]
         op = "delete" if delete else ("force" if force else "update")
         results.extend((op, br) for br in branches)
+        if matching:
+            matched = [*_PROTECTED_DEFAULT_ORDER, *branches]
+            results.extend(("force" if force else "update", br) for br in matched)
     return results
 
 
@@ -2097,10 +2354,27 @@ def _handoff(cmd):
 
 
 def _check_bypass_flags(cmd):
-    """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed."""
-    if _GH_ADMIN_MERGE.search(
-        _QUOTED_SPAN.sub("", cmd)
-    ):  # a flag inside a quoted body is not a real flag
+    """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed.
+
+    A flag inside a quoted argument is not a real flag. One inside a wrapper body or a here-string
+    fed to a wrapper is. A body past the wrapper nesting cap, and a wrapper argument other than its
+    `-c` body, are read whole. An option argument is also read from its first `c` on, so an
+    attached `-c<body>` is read as the body it holds.
+    """
+    overflow = []
+    texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
+    unread = [
+        a
+        for t in texts
+        for toks in [_shell_tokens(t)]
+        for k, w in enumerate(toks)
+        if _is_shell_wrapper_exe(w)
+        for word in _wrapper_unread_args(_collect_arglist(toks, k + 1)[0])
+        for a in (word, word.partition("c")[2] if word[:1] == "-" else "")
+    ]
+    if any(_GH_ADMIN_MERGE.search(_QUOTED_SPAN.sub("", t)) for t in texts) or any(
+        _GH_ADMIN_MERGE.search(t) for t in overflow + unread
+    ):
         return "deny", (
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
             "admin power - a bypass of the merge gate. Merge only when the gate is satisfied."
@@ -2109,7 +2383,6 @@ def _check_bypass_flags(cmd):
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
     # The `-n` form is --no-verify only for commit, since `git push -n` is --dry-run.
-    texts = [cmd, *_embedded_wrapper_commands(cmd)]
     commit_lists = [a for t in texts for a in _git_subcommand_arglists(t, "commit")]
     push_lists = [a for t in texts for a in _push_arg_lists(t)]
     commit_bypass = any(("--no-verify" in a) or ("-n" in a) for a in commit_lists)
@@ -2144,12 +2417,21 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
     if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
     for op, br in targets:
+        if op == "unreadable":
+            return "deny", (
+                f"This command runs a push the guard cannot read ({br}), so it cannot tell which "
+                "branch the push updates. Failing closed. Run the push as its own command with an "
+                "explicit refspec and no config override (git push origin "
+                "<branch>:refs/heads/<branch>)." + _handoff(cmd)
+            )
         if op == "unresolved":
             return "deny", (
-                "Could not tell which branch this bare push targets, because the directory it runs in "
-                "does not resolve to a checkout the guard can read. Failing closed rather than read "
-                "the session's own branch. Push with an explicit refspec (git push origin "
-                "<branch>:refs/heads/<branch>), or cd into a directory that exists." + _handoff(cmd)
+                "Could not tell which branch this push targets, because the directory it runs in "
+                "does not resolve to a checkout the guard can read, or something earlier in the "
+                "command (a cd, a wrapper shell, a command that may switch the branch) may change it "
+                "before the push runs. Failing closed rather than read the session's own branch. Push "
+                "with an explicit refspec (git push origin <branch>:refs/heads/<branch>) as its own "
+                "command, or cd into a directory that exists." + _handoff(cmd)
             )
         if rules_lookup is not None:
             rules = rules_lookup(br)
@@ -4476,6 +4758,83 @@ _GIT_CASES = [
         "gh.exe pr merge --admin still caught (CodeRabbit)",
     ),
     (
+        "bash -c 'gh pr merge 5 --admin --squash'",
+        None,
+        {},
+        "deny",
+        "gh pr merge --admin inside a wrapper body is still caught",
+    ),
+    (
+        "bash <<< 'gh pr merge 5 --admin --squash'",
+        None,
+        {},
+        "deny",
+        "gh pr merge --admin in a here-string fed to a wrapper is still caught",
+    ),
+    (
+        "bash -c 'gh pr comment 5 --body \"never gh pr merge --admin\"'",
+        None,
+        {},
+        "allow",
+        "--admin quoted inside a wrapper body's own argument is not a flag",
+    ),
+    (
+        "git push origin HEAD",
+        "develop",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a HEAD refspec on develop updates develop",
+    ),
+    (
+        "git push origin @",
+        "develop",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an @ refspec on develop updates develop",
+    ),
+    (
+        "git push -u origin HEAD",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "a HEAD refspec on a feature branch updates only that branch",
+    ),
+    (
+        "git push origin :",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a matching refspec updates every branch on both sides, develop included",
+    ),
+    (
+        "git push origin +:",
+        "feature/x",
+        {"main": {"non_fast_forward"}},
+        "deny",
+        "a forced matching refspec force-updates main",
+    ),
+    (
+        "git push origin : feature/y",
+        "feature/x",
+        {"main": set(), "master": set(), "develop": set(), "feature/y": _CODE_RULES},
+        "deny",
+        "a branch beside a matching refspec is read as an update, not only as a delete",
+    ),
+    (
+        "git push origin head",
+        "feature/x",
+        {"head": _CODE_RULES, "feature/x": set()},
+        "deny",
+        "a lowercase head names its own branch on a case-sensitive filesystem as well",
+    ),
+    (
+        "bash -c'gh pr merge 5 --admin'",
+        None,
+        {},
+        "deny",
+        "gh pr merge --admin in an attached -c body is still caught",
+    ),
+    (
         "git commit -m 'mention --no-verify in the message'",
         None,
         {},
@@ -5301,6 +5660,110 @@ _PRIMARY_CHECKOUT_CASES = [
             "the other checkout -- the identity dimension (effective cwd) catches this even "
             "though the file dimension (the resolved --work-tree value) alone would not"
         ),
+    ),
+    (
+        "git -C /repos/primary/alias/../task commit -m x",
+        "/repos",
+        {"/repos/task": False, "/repos/primary": True},
+        None,
+        "deny",
+        "a -C with a dot-dot that folds to a linked worktree may resolve physically to a primary checkout",
+    ),
+    (
+        "cd /repos/primary/alias/.. && git reset --hard",
+        "/repos/task",
+        {"/repos/task": False, "/repos/primary": False, "/repos": False},
+        None,
+        "deny",
+        "a leading cd with a dot-dot is unresolved for a mutating command",
+    ),
+    (
+        "git --work-tree=/repos/x/../task reset --hard",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a --work-tree with a dot-dot is unresolved",
+    ),
+    (
+        "git --git-dir=/repos/x/../task/.git commit -m x",
+        "/repos/task",
+        {"/repos/task": False, "/repos/task/.git": False},
+        None,
+        "deny",
+        "a --git-dir with a dot-dot is unresolved",
+    ),
+    (
+        "GIT_DIR=/repos/x/../task/.git git commit -m x",
+        "/repos/task",
+        {"/repos/task": False, "/repos/task/.git": False},
+        None,
+        "deny",
+        "a GIT_DIR= prefix with a dot-dot is unresolved",
+    ),
+    (
+        "git -C /repos/x/../task checkout develop",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a ref switch under a dot-dot cannot be told from a pathspec restore, so it is denied",
+    ),
+    (
+        "git -C /repos/x/../task example-unknown-alias",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a name git does not ship may be an alias defined in the unresolved directory",
+    ),
+    (
+        "git -C /repos/x/../task status",
+        "/repos/task",
+        {"/repos/task": True},
+        None,
+        "allow",
+        "a read-only builtin under a dot-dot is allowed, since an alias cannot shadow it",
+    ),
+    (
+        "git -C /repos/x/../task worktree add /repos/y",
+        "/repos/task",
+        {"/repos/task": True},
+        None,
+        "allow",
+        "an exempt worktree add under a dot-dot is allowed",
+    ),
+    (
+        "cd -P /repos/primary/link/.. && git reset --hard",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "an option-bearing cd with a dot-dot is unresolved too",
+    ),
+    (
+        "git status; cd ../primary; git commit -m x",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a cd with a dot-dot that is not leading is unresolved too",
+    ),
+    (
+        "cd .. && git status",
+        "/repos/task",
+        {"/repos/task": False, "/repos": True},
+        None,
+        "allow",
+        "a read-only builtin after a dot-dot cd is allowed",
+    ),
+    (
+        "git -C /repos/task worktree remove ../y",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "allow",
+        "a dot-dot in a subcommand argument, not a directory option, is not read",
     ),
 ]
 
@@ -7351,6 +7814,13 @@ def _fixture_dir(key):
     return key.replace("\\", "/") if key else key
 
 
+def _nested_wrapper(body, depth):
+    """`body` wrapped in `depth` levels of `bash -c`, each quoted for the level outside it."""
+    for _ in range(depth):
+        body = "bash -c " + shlex.quote(body)
+    return body
+
+
 _PUSH_DIR_CASES = [
     (
         "@wt cd -P {base} && git push",
@@ -7440,7 +7910,104 @@ _PUSH_DIR_CASES = [
         "deny",
         "a substitution after a cd is a run-time command word, so the cd is not trusted",
     ),
-    ("cd {wt}; bash -c 'git push'", "allow", "a wrapped push inherits the leading cd"),
+    (
+        "cd {wt}; bash -c 'git push'",
+        "deny",
+        "a wrapped bare push is unresolved, since the wrapper may read startup files that move it",
+    ),
+    ("@wt git push origin HEAD", "allow", "a HEAD refspec on a feature branch reads that branch"),
+    ("git push origin HEAD", "deny", "a HEAD refspec on develop reads develop"),
+    ("git push origin @", "deny", "an @ refspec on develop reads develop"),
+    ("@wt cd {base} && git push origin HEAD", "deny", "a HEAD refspec reads the cd directory"),
+    ("@wt git push origin :", "deny", "a matching refspec reaches develop"),
+    ("@wt git switch develop && git push", "deny", "a switch before a bare push moves HEAD"),
+    (
+        "@wt git symbolic-ref HEAD refs/heads/develop; git push origin HEAD",
+        "deny",
+        "a symbolic-ref before a HEAD refspec moves HEAD",
+    ),
+    (
+        "@wt bash -c 'git checkout develop' && git push",
+        "deny",
+        "a wrapper before a bare push may move HEAD",
+    ),
+    ("@wt gh pr checkout 5 && git push", "deny", "a gh command before a bare push may move HEAD"),
+    ("@wt git add f && git commit -m x && git push", "allow", "add and commit leave HEAD as is"),
+    ("@wt git push && gh pr create --fill", "allow", "a gh command after the push moves nothing"),
+    ("@wt git -c push.default=matching push", "deny", "a -c override on a bare push"),
+    (
+        "@wt git -c remote.origin.push=refs/heads/feature/example:refs/heads/develop push origin feature/example",
+        "deny",
+        "a -c override remaps even an explicit refspec",
+    ),
+    ("@wt git --config-env=push.default=EXAMPLE push", "deny", "a --config-env override"),
+    ('@wt git bisect run "git push origin develop"', "deny", "a quoted push run by bisect"),
+    ("@wt git submodule foreach 'git push'", "deny", "a quoted push run by submodule foreach"),
+    ("@wt git rebase -x 'git push origin develop' develop", "deny", "a quoted push run by rebase"),
+    (
+        "@wt git -c core.editor='git push origin develop' commit",
+        "deny",
+        "a push inside a -c config value",
+    ),
+    ("@wt bash -c'git push origin develop'", "deny", "an attached -c body is not read"),
+    ("@wt bash -c -- 'git push origin develop'", "deny", "a body after -c -- is not read"),
+    ('@wt eval "$(echo git push origin develop)"', "deny", "a push inside an eval argument"),
+    ("@wt eval 'git push'", "deny", "a bare push inside an eval argument"),
+    ("@wt bash <<< 'git push origin develop'", "deny", "a here-string fed to a wrapper is read"),
+    ("@wt bash <<< 'git push'", "deny", "a bare push in a here-string is unresolved"),
+    (
+        "@wt find . -maxdepth 0 -execdir sh -c 'git push' \\;",
+        "deny",
+        "a wrapper run by find -execdir runs in another directory",
+    ),
+    ("@wt sudo -D {base} bash -c 'git push'", "deny", "a wrapper run by sudo -D runs elsewhere"),
+    (
+        "@wt " + _nested_wrapper("git push origin develop", 7),
+        "deny",
+        "a push nested past the wrapper reading cap",
+    ),
+    (
+        "@wt " + _nested_wrapper("git push origin feature/example", 7),
+        "deny",
+        "any push nested past the wrapper reading cap is unreadable",
+    ),
+    ("@wt git push origin feature/example", "allow", "an explicit feature refspec still passes"),
+    (
+        "@wt " + _nested_wrapper("git push origin feature/example", 5),
+        "allow",
+        "an explicit feature refspec at the wrapper reading cap still passes",
+    ),
+    (
+        "@wt " + _nested_wrapper("git push origin feature/example", 6),
+        "deny",
+        "a push one wrapper past the reading cap is unreadable",
+    ),
+    (
+        "@wt git pull --rebase && git reset --soft HEAD~1 && git commit -m x && git push",
+        "allow",
+        "pull, reset, and commit leave the branch HEAD names as is",
+    ),
+    ("@wt git -c alias.p=push p origin develop", "deny", "an inline alias expanding to push"),
+    (
+        "@wt git push -u origin feature/example:refs/heads/release && git push",
+        "deny",
+        "a push -u before a bare push changes its upstream",
+    ),
+    (
+        "@wt git fetch --set-upstream origin develop && git push",
+        "deny",
+        "a --set-upstream before a bare push changes its upstream",
+    ),
+    ("@wt git add -u && git commit -m x && git push", "allow", "add -u sets no upstream"),
+    ("@wt git push -u origin HEAD", "allow", "a push's own -u does not move its own target"),
+    ("@wt git push --set-upstream origin HEAD", "allow", "nor does its own --set-upstream"),
+    ("@wt git commit -m x && git push -fu", "allow", "nor its own clustered -u after a commit"),
+    ("@wt bash -cgit\\ push\\ origin\\ develop", "deny", "an unquoted attached -c body"),
+    (
+        "@wt bash scripts/lint.sh .github/workflows/push.yml",
+        "allow",
+        "a .github path naming push is not a push",
+    ),
     ("cd {wt}; bash -c 'cd {base}; git push'", "deny", "a wrapped cd overrides the leading one"),
     ("bash -c 'git push'", "deny", "a push after bash -c in a checkout on develop is denied"),
     ("echo $(git push)", "deny", "a push inside a substitution in a checkout on develop is denied"),
@@ -7719,6 +8286,8 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    saved_names = list(_GIT_COMMAND_NAMES)
+    _GIT_COMMAND_NAMES[:] = [{"checkout", "commit", "reset", "status", "worktree"}]
     for cmd, cwd, pmap, refmap, want, label in _PRIMARY_CHECKOUT_CASES:
         # A None refmap means every ref-check resolves True (an ordinary branch name).
         # A real map defaults a pair it does not name to True too, since only the pathspec-disambiguation cases care about a False answer.
@@ -7743,6 +8312,23 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    _GIT_COMMAND_NAMES[:] = [set()]
+    got, _ = classify(
+        "git -C /repos/x/../task status",
+        cwd="/repos/task",
+        origin=origin,
+        current_branch="feature/x",
+        rules_lookup=lambda br: set(),
+        environ={},
+        primary_checkout_lookup=lambda _d: False,
+    )
+    _GIT_COMMAND_NAMES[:] = saved_names
+    mark = "ok  " if got == "deny" else "FAIL"
+    if got != "deny":
+        ok = False
+    print(
+        f"  {mark} [{got:5}] want=deny  a dot-dot denies any name when git cannot list its commands"
+    )
     # Git-alias resolution (requirement 6, finding 11): (cmd, cwd, pmap, config_map, want, label).
     # `config_map` stands in for the target checkout's own persisted `alias.<name>` config; an inline `-c alias.<name>=...` on the command itself needs no seam, it is read straight from the command text.
     for cmd, cwd, pmap, config_map, want, label in (
