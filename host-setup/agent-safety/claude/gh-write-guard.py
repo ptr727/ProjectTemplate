@@ -406,10 +406,12 @@ def _skip_backticks(cmd, i):
     raise ValueError("unterminated backquote")
 
 
-def _skip_quote_body(cmd, i, closer):
+def _skip_quote_body(cmd, i, closer, out=None):
     """Index just past the `closer` ending a quoted span whose body starts at `i`, for a double-quoted
     or `$'...'` span. Both honor a backslash escape, and a double-quoted span also holds nested
     substitutions, each skipped whole, since a quote inside one does not end the outer span.
+    With `out`, the command each `$(...)` or backtick substitution in a double-quoted span runs is
+    appended to it.
     """
     while i < len(cmd):
         ch = cmd[i]
@@ -420,7 +422,12 @@ def _skip_quote_body(cmd, i, closer):
         elif closer == '"' and cmd.startswith("$$", i):
             i += 2
         elif closer == '"' and (ch == "`" or cmd.startswith(("$(", "${"), i)):
-            i = _skip_nested(cmd, i)
+            end = _skip_nested(cmd, i)
+            if out is not None and ch == "`":
+                out.append(_DQ_ESCAPE.sub(r"\1", cmd[i + 1 : end - 1]))
+            elif out is not None and cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+                out.append(cmd[i + 2 : end - 1])
+            i = end
         else:
             i += 1
     raise ValueError("unterminated quote")
@@ -1857,42 +1864,16 @@ def _wrapper_c_index(args):
 _BACKTICK_ESCAPE = re.compile(r"\\([$`\\])")
 
 
-def _scan_double_quoted(cmd, i, out):
-    """Index just past the `"` closing a double-quoted span whose body starts at `i`.
-
-    The body of each `$(...)` and backtick substitution the span holds is appended to `out`, since
-    the tokenizer keeps the whole span one word and so never reads the command each one runs.
-    """
-    while i < len(cmd):
-        ch = cmd[i]
-        if ch == "\\":
-            i += 2
-        elif ch == '"':
-            return i + 1
-        elif cmd.startswith(("$$", "$((", "${"), i):
-            i = _skip_nested(cmd, i)
-        elif cmd.startswith("$(", i):
-            end = _skip_group(cmd, i + 2, "(", ")", comments=True)
-            out.append(cmd[i + 2 : end - 1])
-            i = end
-        elif ch == "`":
-            end = _skip_backticks(cmd, i + 1)
-            out.append(_DQ_ESCAPE.sub(r"\1", cmd[i + 1 : end - 1]))
-            i = end
-        else:
-            i += 1
-    raise ValueError("unterminated quote")
-
-
 def _substitution_bodies(cmd):
     """The command each substitution the tokenizer keeps inside one word runs, as text to read.
 
-    That is a `$(...)` or a backtick substitution inside double quotes, and a backtick substitution
-    outside them, whose words the tokenizer gives as `` `git `` rather than as `git`. An unquoted
-    `$(...)` is left alone, since the tokenizer already splits it at its parenthesis, though a
-    quoted span inside it is still scanned. A heredoc body outside a substitution is skipped, since
-    it is data unless a shell reads it, and so is one inside a body, where the body is read. Text
-    whose quoting does not close is scanned up to that point, since the shell runs none of it.
+    That is a `$(...)` or a backtick substitution inside double quotes.
+    It is also a backtick substitution outside them, which the tokenizer gives as `` `git ``.
+    An unquoted `$(...)` is left alone, since the tokenizer already splits it at its parenthesis.
+    A quoted span inside one is still scanned.
+    A heredoc body is not scanned, whether or not its delimiter is quoted.
+    The same holds for a heredoc body inside a substitution's body.
+    Text whose quoting does not close is scanned up to that point, since the shell runs none of it.
     """
     out = []
     readings = _heredoc_readings(cmd) or [cmd]
@@ -1902,7 +1883,7 @@ def _substitution_bodies(cmd):
             while i < len(text):
                 ch = text[i]
                 if ch == '"' or text.startswith('$"', i):
-                    i = _scan_double_quoted(text, i + 1 + (ch == "$"), out)
+                    i = _skip_quote_body(text, i + 1 + (ch == "$"), '"', out)
                 elif ch == "`":
                     end = _skip_backticks(text, i + 1)
                     out.append(_BACKTICK_ESCAPE.sub(r"\1", text[i + 1 : end - 1]))
@@ -2622,13 +2603,15 @@ _QUOTE_DIR_FIX = (
 
 
 def _dir_value_split_free(x, k, toks, mask, raw, text):
-    """True when word splitting cannot split the directory value at `toks[x]` of the git word at `toks[k]`.
+    """True when word splitting cannot split the directory value `toks[x]` of the git `toks[k]`.
 
-    Where the quote-keeping tokens are unknown, the value is spelled from a `_marked_lex` of the
-    text, or else of the text its comments or its heredoc bodies leave, at every run of words from
-    the git word to the value. That lex follows a quoted span inside a word, as in `--format='%H %s'`, which the
-    quote-keeping lex splits. Every spelling found must be split-free. Where none is found,
-    `_split_free` reads the token without its quotes.
+    Where the quote-keeping tokens are unknown, the value is spelled from a `_marked_lex` reading.
+    That reading is of the text, or else of the text its comments or its heredoc bodies leave.
+    The value is spelled at every run of words from the git word to the value.
+    That lex follows a quoted span inside a word, as in `--format='%H %s'`.
+    The quote-keeping lex splits such a word, which is why it misaligns there.
+    Every spelling found must be split-free.
+    Where none is found, `_split_free` reads the token without its quotes.
     """
     if raw is None:
         window = toks[k : x + 1]
@@ -2650,30 +2633,65 @@ def _dir_value_split_free(x, k, toks, mask, raw, text):
     return _split_free(x, toks, mask, raw)
 
 
-def _run_time_command_sub(toks, k, mask):
-    """The `push` or `commit` a run-time word at `toks[k]` runs when read as git, else None.
+_LIST_OPENERS = frozenset({"for", "select", "case"})
 
-    The word is read as a command word where it runs as one, as `_runs_as_command` says, and no
-    `git` or `gh` word before it in its run takes it as an argument. Its subcommand word is the
-    first past git's global options, after a `$(...)` or backtick span holding a space is read
-    through. An assignment is no command word.
+
+def _run_time_command_sub(toks, k, mask):
+    """The index of the `push` or `commit` a run-time word `toks[k]` runs as git, else None.
+
+    The word is read as a command word right after an unquoted `(`, as in `<($G push)`.
+    Elsewhere it is one where `_runs_as_command` says it runs.
+    No `git` or `gh` word before it in its run may take it as an argument.
+    A `for`, `select`, or `case` run lists words rather than running one.
+    An assignment is no command word.
+    The subcommand word is the first past git's global options and any redirection.
+    A `$(...)` or backtick span holding a space is read through first.
     """
     t = toks[k]
     if "$" not in t and "`" not in t or _ENV_ASSIGN_RE.match(t):
         return None
-    if not _runs_as_command(toks, k, mask):
+    if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
+        start = k
+    elif _runs_as_command(toks, k, mask):
+        start = k
+        while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
+            start -= 1
+    else:
         return None
-    start = k
-    while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
-        start -= 1
-    if any(_is_git_exe(w) or _is_gh_exe(w) for w in toks[start:k]):
+    if toks[start] in _LIST_OPENERS or any(_is_git_exe(w) or _is_gh_exe(w) for w in toks[start:k]):
         return None
     end = _region_end(toks, k, mask)
-    last = _span_end(toks, k, end)
-    if last is None:
+    j = _span_end(toks, k, end)
+    if j is None:
         return None
-    j = _git_subcommand_index(toks, last - 1)
-    return toks[j] if j < end and toks[j] in ("push", "commit") else None
+    while j < end:
+        w = toks[j]
+        if _is_redir_op(w):
+            j += 2
+        elif w.isdigit() and j + 1 < end and _is_redir_op(toks[j + 1]):
+            j += 1
+        elif w.startswith("-"):
+            j += 2 if w in _GIT_GLOBAL_VALUE_OPTS and "=" not in w else 1
+        else:
+            break
+    return j if j < end and toks[j] in ("push", "commit") else None
+
+
+def _outside_heredoc_data(text, window):
+    """True when the run of words `window` sits in `text` outside every heredoc body that is data.
+
+    A text holding no heredoc counts as outside, and so does one past the readings
+    `_heredoc_readings` builds, which fails closed.
+    """
+    readings = _heredoc_readings(text)
+    if readings is None or readings == [text]:
+        return True
+    n = len(window)
+    for reading in readings:
+        words = _shell_tokens(reading)
+        if any(words[p : p + n] == window for p in range(len(words) - n + 1)):
+            return True
+    return False
 
 
 def _rewritten_git_words(cmd):
@@ -2728,11 +2746,11 @@ def _rewritten_git_words(cmd):
                 if not masked:
                     mask, raw = _quoted_mask(text, toks), _quote_kept_tokens(text, toks)
                     masked = True
-                hidden = _run_time_command_sub(toks, k, mask)
-                if hidden:
+                j = _run_time_command_sub(toks, k, mask)
+                if j is not None and _outside_heredoc_data(text, toks[k : j + 1]):
                     return (
                         f"a run-time command word, `{t}`, that may expand to `git` before "
-                        f"`{hidden}`"
+                        f"`{toks[j]}`"
                     )
             if not _is_git_exe(t):
                 continue
@@ -2778,7 +2796,9 @@ def _rewritten_git_words(cmd):
                         else _BRACE_EXPANSION.search(word)
                     ):
                         return f"a brace expansion, `{word}`, among the global options of `git`"
-                    if not _dir_value_split_free(x, k, toks, mask, raw, text):
+                    if not _dir_value_split_free(
+                        x, k, toks, mask, raw, text
+                    ) and _outside_heredoc_data(text, toks[k : x + 1]):
                         form = (
                             f"an unquoted directory value, `{word}`, among the global options of "
                             "`git` that word splitting may split into more options or a "
@@ -3309,9 +3329,9 @@ _HEREDOC_OPERATOR = re.compile(r"(?<!<)<<(?!<)")
 def _marked_lex(cmd, spelled=False):
     """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
 
-    With `spelled`, each pair also carries the token as `cmd` spells it, its quotes kept, and the
-    syntax below that bash reads and the POSIX lex does not is read as that lex reads it, raising
-    nothing, so the tokens are that lex's own.
+    With `spelled`, each pair also carries the token as `cmd` spells it, its quotes kept.
+    The syntax below that only bash reads is then read as that lex reads it, raising nothing.
+    The tokens are then that lex's own.
 
     It reads quotes and escapes as that POSIX lex does, so an escape cannot shift its tokens.
     Outside quotes a backslash takes the next character literally.
@@ -6661,6 +6681,41 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "every spelling of the same -C value must be quoted",
+    ),
+    (
+        "git commit -F - <<'EOF'\nSubject\n\ngit -C $W status now fails closed.\nEOF",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: an unquoted -C value in a heredoc body that is data is text",
+    ),
+    (
+        "cat > /example/notes.md <<'EOF'\n$GIT push origin develop\nEOF",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "allow",
+        "control: a run-time command word in a heredoc body that is data is text",
+    ),
+    (
+        'for f in $A push; do echo "$f"; done',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a for loop's word list runs no command",
+    ),
+    (
+        "cat <($G push origin develop)",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a run-time command word opening a process substitution runs",
+    ),
+    (
+        "$G 2>/dev/null push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a redirection before the subcommand does not hide it after a run-time command word",
     ),
     (
         "git -C /example/repo commit -m x",
