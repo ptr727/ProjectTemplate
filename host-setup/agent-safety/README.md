@@ -57,7 +57,8 @@ text says, because the harm it covers was never in the text.
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
-   `core.hooksPath` where the hook cannot read it. Judge branch-rule cases against that branch's *live* rules, so a
+   `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
+   parses, a wrapper shell's body among them, and not inside an `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
@@ -475,8 +476,8 @@ rule whose harm is a quality miss rather than a destruction, which the host laye
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
 The two layers meet at requirement 4, which denies `--no-verify`, a `-c core.hooksPath=`
-override, and an include override on a commit or push unconditionally. So a Claude Code session
-meets a committed hook it
+override, and an include override on a commit or push unconditionally, wherever it reads them. So
+a Claude Code session meets a committed hook it
 cannot wave through with any of them while a human keeps the escape hatch. They do not compose into a
 seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
