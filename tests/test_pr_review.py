@@ -5056,27 +5056,34 @@ def prose_threads(rid: str = "PRR_one") -> list[dict]:
     ]
 
 
-def with_table_findings(annotations: str, headline: str = "The change is narrow.") -> str:
-    """A second-format body whose file table row carries finding annotations, and its headline.
+def with_table_findings(rows: str, headline: str = "The change is narrow.") -> str:
+    """A second-format body whose file table carries `rows`, and its headline.
 
-    The two open entries are titled to match the first two annotations `TABLE_LISTED` carries.
-    Titles and paths are constructed, per GOVERNANCE.md "Representative Data in Agent-Authored
-    Text".
+    The two open entries link the two threads `prose_threads` opens, one on each file
+    `TABLE_LISTED` names. Paths and wording are constructed, per GOVERNANCE.md "Representative
+    Data in Agent-Authored Text".
     """
     body = overview_v2()
-    for i, title in ((1, "Retry loop ignores the limit"), (2, "Naming drifts from the style")):
-        body = body.replace(f"[Finding {i}]", f"[{title}]")
-    assert "Retry loop ignores the limit" in body
     row = "| a.py | Narrows the reader. |"
     assert row in body
     assert "The change is narrow." in body
-    return body.replace(row, f"| a.py | {annotations} |").replace("The change is narrow.", headline)
+    return body.replace(row, rows).replace("The change is narrow.", headline)
 
 
 TABLE_LISTED = (
-    "**Critical finding (2 votes):** retry loop ignores the limit. "
-    "**Moderate finding (1 vote):** naming drifts from the style."
+    "| `lib/reader.py` | Retries reads. **Critical finding (2 votes):** retry loop ignores "
+    "the limit. |\n"
+    "| `lib/writer.py` | Writes output. Nit (1 vote): naming drifts from the style. |"
 )
+
+
+def earlier_round(*cids: str, resolved: bool = True) -> tuple[dict, list[dict]]:
+    """A round on an older commit and the threads it opened on `lib/reader.py`, one per id."""
+    threads = [
+        thread(f"TE{cid}", resolved=resolved, rid="PRR_old", cid=cid, path="lib/reader.py")
+        for cid in cids
+    ]
+    return review(oid=OLD, rid="PRR_old"), threads
 
 
 class TestTableFindings(GqlCase):
@@ -5086,27 +5093,58 @@ class TestTableFindings(GqlCase):
         super().setUp()
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
 
-    def digest(self, body: str) -> str:
-        self.answer(payload([review(body=body)], prose_threads()))
+    def digest(
+        self, body: str, reviews: list[dict] | None = None, threads: list[dict] | None = None
+    ) -> str:
+        earlier = [*(reviews or []), review(body=body)]
+        self.answer(payload(earlier, [*(threads or []), *prose_threads()]))
         return pr_review.digest("o", "r", 7)[0]
 
-    def test_annotations_matching_the_open_entries_count_none(self) -> None:
+    def test_findings_on_the_files_the_round_s_threads_are_on_count_none(self) -> None:
         out = self.digest(with_table_findings(TABLE_LISTED))
         self.assertIn("overview=2/2", out)
         self.assertNotIn("FINDINGS WITH NO THREAD", out)
 
-    def test_an_annotation_matching_no_open_entry_is_reported(self) -> None:
-        body = with_table_findings(
-            TABLE_LISTED + " **Moderate finding (1 vote):** terminal option exception lost."
-        )
-        out = self.digest(body)
+    def test_a_second_finding_on_a_file_one_thread_is_on_is_reported(self) -> None:
+        """Each thread pairs with one finding, so the second finding on its file has none."""
+        rows = TABLE_LISTED.replace("the limit. |", "the limit. Nit (1 vote): a stale name. |")
+        out = self.digest(with_table_findings(rows))
         self.assertIn("overview=2/2", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("1 of the findings its file table annotates matches no entry", out)
+        self.assertIn(
+            "1 of the findings its file table names pairs with no thread of that round on its file",
+            out,
+        )
 
-    def test_the_annotation_reader_keeps_each_title_whole(self) -> None:
+    def test_a_finding_on_a_file_no_thread_is_on_is_reported(self) -> None:
+        rows = TABLE_LISTED + "\n| `lib/parser.py` | Parses input. Moderate (1 vote): x. |"
+        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(with_table_findings(rows)))
+
+    def test_an_earlier_round_s_thread_does_not_pair_with_a_finding(self) -> None:
+        rows = TABLE_LISTED + "\n| `lib/parser.py` | Parses input. Moderate (1 vote): x. |"
+        old, threads = earlier_round("4000000009")
+        threads[0]["comments"]["nodes"][0]["path"] = "lib/parser.py"
+        out = self.digest(with_table_findings(rows), [old], threads)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_the_wording_around_a_finding_is_not_read(self) -> None:
+        """Code spans, a trailing quotation, and prose after the finding in its cell change nothing."""
+        rows = (
+            "| `lib/reader.py` | `retry()` ignores `--limit` (2 votes). See `Retry.max`. |\n"
+            "| `lib/writer.py` | Writes output. Nit (1 vote): `name_x`. More prose follows. |"
+        )
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_table_findings(rows)))
+
+    def test_one_row_grouping_two_files_pairs_each_finding_with_either(self) -> None:
+        rows = (
+            "| `lib/reader.py`, `lib/writer.py` | Shared I/O. Nit (1 vote): a. "
+            "Moderate (2 votes): b. |"
+        )
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_table_findings(rows)))
+
+    def test_each_finding_is_listed_with_its_row_s_paths(self) -> None:
         self.assertEqual(
-            ["retry loop ignores the limit", "naming drifts from the style"],
+            [["lib/reader.py"], ["lib/writer.py"]],
             pr_review.table_findings(with_table_findings(TABLE_LISTED)),
         )
 
@@ -5115,80 +5153,80 @@ class TestTableFindings(GqlCase):
         quoted = body + "\n```text\n| File | D |\n| a | **Low finding (1 vote):** x |\n```\n"
         self.assertEqual(2, len(pr_review.table_findings(quoted)))
 
-    def test_a_headline_count_above_the_open_entries_is_reported(self) -> None:
+    def test_a_vote_count_quoted_in_a_code_span_is_not_read(self) -> None:
+        rows = TABLE_LISTED.replace("the style. |", "the style. Builds `Nit (1 vote):` inputs. |")
+        self.assertEqual(2, len(pr_review.table_findings(with_table_findings(rows))))
+
+    def test_a_headline_count_above_what_the_round_accounts_for_is_reported(self) -> None:
         body = with_table_findings(
             TABLE_LISTED, "Three unresolved findings remain, including one critical risk."
         )
         out = self.digest(body)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-        self.assertIn("its headline states 3 findings where its open sections list 2", out)
+        self.assertIn(
+            "its headline states 3 findings where the round and earlier rounds' threads "
+            "account for 2",
+            out,
+        )
 
     def test_a_headline_count_equal_to_the_open_entries_counts_none(self) -> None:
         body = with_table_findings(TABLE_LISTED, "Two unresolved findings remain.")
         self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
 
-    def test_a_settled_count_in_the_headline_is_not_read(self) -> None:
-        for headline in (
-            "Three resolved findings were confirmed.",
-            "Three findings were fixed.",
-            "No findings remain.",
-        ):
-            with self.subTest(headline=headline):
-                self.assertIsNone(pr_review.headline_findings(headline))
+    def test_the_round_s_stated_total_accounts_for_the_headline(self) -> None:
+        body = with_table_findings(TABLE_LISTED, "Three findings remain.").replace(
+            "**Findings:** 2", "**Findings:** 3"
+        )
+        out = self.digest(body)
+        self.assertNotIn("its headline states", out)
 
-    def test_a_settled_clause_anywhere_in_the_sentence_is_not_read(self) -> None:
-        for headline in (
-            "All three previously reported findings are resolved.",
-            "Three findings from the last review were resolved.",
-            "The 2 earlier findings are now addressed.",
-        ):
-            with self.subTest(headline=headline):
-                self.assertIsNone(pr_review.headline_findings(headline))
+    def test_the_round_s_previously_missed_findings_account_for_the_headline(self) -> None:
+        missed = (
+            "<details>\n<summary><strong>Previously missed (1)</strong></summary>\n\n"
+            "- **lib/old.py:3** Old code drops an error.\n</details>\n\n"
+        )
+        body = with_table_findings(TABLE_LISTED, "Three findings remain.")
+        opener = "<details>\n<summary><strong>What changed"
+        self.assertIn(opener, body)
+        out = self.digest(body.replace(opener, missed + opener))
+        self.assertIn("previously_missed=1", out)
+        self.assertNotIn("its headline states", out)
+
+    def test_earlier_rounds_threads_resolved_or_not_account_for_the_headline(self) -> None:
+        """A headline counting across rounds counts what earlier rounds raised too."""
+        body = with_table_findings(TABLE_LISTED, "Four unresolved findings remain.")
+        for resolved in (True, False):
+            with self.subTest(resolved=resolved):
+                old, threads = earlier_round("4000000008", "4000000009", resolved=resolved)
+                self.assertNotIn("its headline states", self.digest(body, [old], threads))
+
+    def test_an_earlier_thread_an_open_entry_links_is_counted_once(self) -> None:
+        body = with_table_findings(TABLE_LISTED, "Three unresolved findings remain.")
+        threads = prose_threads()
+        threads[0]["comments"]["nodes"][0]["pullRequestReview"] = {"id": "PRR_old"}
+        self.answer(payload([review(oid=OLD, rid="PRR_old"), review(body=body)], threads))
+        out = pr_review.digest("o", "r", 7)[0]
+        self.assertIn("account for 2", out)
 
     def test_a_clean_round_summing_up_its_resolved_findings_reports_nothing(self) -> None:
-        body = overview_v2_revised()
-        body = body.replace(
+        body = overview_v2_revised().replace(
             "One reader still needs a look.", "All three earlier findings are resolved."
         )
-        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+        old, threads = earlier_round("4000000007", "4000000008", "4000000009")
+        self.answer(payload([old, review(body=body)], threads))
+        self.assertNotIn("FINDINGS WITH NO THREAD", pr_review.digest("o", "r", 7)[0])
 
-    def test_an_entry_in_the_live_markup_matches_a_reworded_annotation(self) -> None:
-        """Entries carry a severity picture and a tag, and the table may word a title differently."""
-        body = with_table_findings(
-            "**Critical finding (2 votes):** the limit is ignored by the retry loop. "
-            "**Moderate finding (1 vote):** naming drifts from the style."
-        )
-        body = body.replace(
-            "[Retry loop ignores the limit](",
-            "<picture><img alt='Critical' src='https://example.test/c.png'></picture> "
-            "[Retry loop ignores the limit](",
-        ).replace("#discussion_r4000000001) New", "#discussion_r4000000001) \u00b7 New")
-        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
-
-    def test_an_annotation_quoted_in_a_code_span_is_not_read(self) -> None:
-        body = with_table_findings(TABLE_LISTED + " Builds `**Low finding (1 vote):** x` inputs.")
-        self.assertEqual(2, len(pr_review.table_findings(body)))
-
-    def test_an_unrelated_annotation_sharing_one_word_is_not_matched(self) -> None:
-        body = with_table_findings(
-            TABLE_LISTED + " **Moderate finding (1 vote):** validation skipped on empty input."
-        )
-        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
-
-    def test_a_title_ends_at_its_cell(self) -> None:
-        match = pr_review.TABLE_FINDING.search(
-            "| a | **Critical finding (2 votes):** x | Modified |"
-        )
-        assert match is not None
-        self.assertEqual("x", match.group(2))
-
-    def test_an_unaddressed_count_in_the_headline(self) -> None:
-        self.assertEqual(3, pr_review.headline_findings("Three findings are not yet addressed."))
-
-    def test_digits_and_the_largest_count_are_read(self) -> None:
-        self.assertEqual(
-            4, pr_review.headline_findings("2 open findings, and 4 unresolved findings in all.")
-        )
+    def test_every_count_in_the_headline_is_read_whatever_its_sentence_says(self) -> None:
+        for headline, count in (
+            ("Three findings have not been addressed.", 3),
+            ("Two findings were fixed; three findings remain.", 3),
+            ("Three findings are not yet addressed.", 3),
+            ("All three previously reported findings are resolved.", 3),
+            ("2 open findings, and 4 unresolved findings in all.", 4),
+            ("No findings remain.", None),
+        ):
+            with self.subTest(headline=headline):
+                self.assertEqual(count, pr_review.headline_findings(headline))
 
 
 class TestProseFindings(GqlCase):
@@ -5209,8 +5247,8 @@ class TestProseFindings(GqlCase):
         self.assertIn("overview=2/2", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
         self.assertIn(
-            "1 of the entries under its `Review findings:` label names no file a thread of that "
-            "round is on",
+            "1 of the entries under its `Review findings:` label pairs with no thread of that "
+            "round on its file",
             out,
         )
 
@@ -5225,6 +5263,11 @@ class TestProseFindings(GqlCase):
             with self.subTest(listed=listed):
                 out = self.digest(with_prose(listed))
                 self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_a_second_entry_on_a_file_one_thread_is_on_is_counted(self) -> None:
+        """Each thread pairs with one entry, so a second entry on its file has none."""
+        out = self.digest(with_prose(PROSE_LISTED + "- `lib/reader.py`: a stale name (1 vote)."))
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
     def test_a_bold_label_is_read(self) -> None:
         body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(
@@ -10952,6 +10995,11 @@ CLEANUP_HEAD = "a" * 40
 CLEANUP_BRANCH = "feature/example-topic"
 
 
+def fork_head(number: int) -> dict:
+    """An open pull request headed on a same-named branch in a fork, not in `o/r`."""
+    return {"number": number, "headRepository": {"nameWithOwner": f"fork{number}/r"}}
+
+
 def cleanup_pr(**overrides: object) -> dict:
     """A merged pull request into `develop` from a head in o/r, every field overridable."""
     pr: dict[str, object] = {
@@ -10989,13 +11037,20 @@ class CleanupCase(unittest.TestCase):
         delete_fails: bool = False,
         heads: list[int] | None = None,
         bases: list[int] | None = None,
-        users: object = None,
+        head_pages: list[list[dict]] | None = None,
+        head_answer: object = None,
+        base_answer: object = None,
     ) -> None:
         """Answer each document in turn, `refs` holding one answer per ref read in order.
 
         A ref answer is a tip, None for no such branch, or an exception the read raises.
+        `head_pages` pages the heads connection, each page its nodes, where `heads` is one page
+        of this repository's own. An answer given whole replaces that read's repository, or is
+        raised where it is an exception.
         """
         pending = list(refs if refs is not None else [CLEANUP_HEAD, None])
+        local = [{"number": n, "headRepository": {"nameWithOwner": "o/r"}} for n in heads or []]
+        pages = head_pages if head_pages is not None else [local]
 
         def fake(query: str, variables: dict, **_: object) -> pr_review.shared.Response:
             self.docs.append((query, variables))
@@ -11004,21 +11059,24 @@ class CleanupCase(unittest.TestCase):
                 return pr_review.shared.Response({"repository": repository}, [])
             if "heads: pullRequests" in query:
                 self.assertEqual(CLEANUP_BRANCH, variables["b"])
-                if isinstance(users, Exception):
-                    raise users
-                if users is not None:
-                    return pr_review.shared.Response({"repository": users}, [])
-                lists = {"heads": heads or [], "bases": bases or []}
-                found = {
-                    k: {
-                        "totalCount": len(v),
-                        "nodes": [
-                            {"number": n, "headRepository": {"nameWithOwner": "o/r"}} for n in v
-                        ],
-                    }
-                    for k, v in lists.items()
-                }
+                if isinstance(head_answer, Exception):
+                    raise head_answer
+                if head_answer is not None:
+                    return pr_review.shared.Response({"repository": head_answer}, [])
+                at = int(variables.get("after", "c0")[1:])
+                more = at + 1 < len(pages)
+                page = {"hasNextPage": more, "endCursor": f"c{at + 1}" if more else None}
+                found = {"heads": {"pageInfo": page, "nodes": pages[at]}}
                 return pr_review.shared.Response({"repository": found}, [])
+            if "bases: pullRequests" in query:
+                self.assertEqual(CLEANUP_BRANCH, variables["b"])
+                if isinstance(base_answer, Exception):
+                    raise base_answer
+                if base_answer is not None:
+                    return pr_review.shared.Response({"repository": base_answer}, [])
+                listed = [{"number": n} for n in bases or []]
+                based = {"bases": {"totalCount": len(listed), "nodes": listed}}
+                return pr_review.shared.Response({"repository": based}, [])
             if "deleteRef" in query:
                 if delete_fails:
                     raise pr_review.shared.GraphQLError("gh graphql reported errors")
@@ -11170,29 +11228,70 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
 
     def test_an_open_pull_request_read_that_does_not_answer_stops_at_2(self) -> None:
         bad = pr_review.shared.GraphQLError("gh graphql failed rc=1")
-        malformed = [
-            bad,
-            {"heads": {"totalCount": 0, "nodes": []}},
-            {"heads": {"totalCount": "0", "nodes": []}, "bases": {"totalCount": 0, "nodes": []}},
+        page = {"hasNextPage": False, "endCursor": None}
+        malformed: list[dict[str, object]] = [
+            {"head_answer": bad},
+            {"head_answer": {"heads": {"nodes": []}}},
+            {"head_answer": {"heads": {"pageInfo": page, "nodes": None}}},
+            {"head_answer": {"heads": {"pageInfo": page, "nodes": ["#9"]}}},
+            {"head_answer": {"heads": {"pageInfo": {"hasNextPage": True}, "nodes": []}}},
+            {"base_answer": bad},
+            {"base_answer": {"bases": {"totalCount": "0", "nodes": []}}},
         ]
-        for users in malformed:
-            with self.subTest(users=users):
+        for answer in malformed:
+            with self.subTest(answer=answer):
                 self.docs.clear()
-                self.wire(cleanup_pr(), users=users)
+                self.wire(
+                    cleanup_pr(),
+                    head_answer=answer.get("head_answer"),
+                    base_answer=answer.get("base_answer"),
+                )
                 self.assert_refused(2, "status=UNREAD")
 
-    def test_more_open_pull_requests_than_the_page_holds_are_refused(self) -> None:
-        full = {"totalCount": 25, "nodes": []}
-        self.wire(cleanup_pr(), users={"heads": full, "bases": {"totalCount": 0, "nodes": []}})
+    def test_an_unread_heads_page_past_the_first_stops_at_2(self) -> None:
+        """A page that does not answer is no pull request missing, however clean the first was."""
+        fork = [{"number": 9, "headRepository": {"nameWithOwner": "x/r"}}]
+        self.wire(cleanup_pr(), head_pages=[fork, fork])
+        request = pr_review.shared.request
+        assert isinstance(request, mock.Mock)
+        answer = request.side_effect
+
+        def second_page_fails(query: str, variables: dict, **kw: object) -> object:
+            if "heads: pullRequests" in query and variables.get("after"):
+                raise pr_review.shared.GraphQLError("gh graphql failed rc=1")
+            return answer(query, variables, **kw)
+
+        request.side_effect = second_page_fails
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_more_open_base_pull_requests_than_the_page_holds_are_refused(self) -> None:
+        full = {"bases": {"totalCount": 25, "nodes": []}}
+        self.wire(cleanup_pr(), base_answer=full)
         self.assert_refused()
-        self.assertIn("25 more with the branch as head", self.out.getvalue())
+        self.assertIn("25 more with the branch as base", self.out.getvalue())
 
     def test_a_forks_pull_request_on_a_same_named_branch_is_not_a_user(self) -> None:
-        node = {"number": 9, "headRepository": {"nameWithOwner": "o/r-fork"}}
-        heads = {"totalCount": 1, "nodes": [node]}
-        self.wire(cleanup_pr(), users={"heads": heads, "bases": {"totalCount": 0, "nodes": []}})
+        self.wire(cleanup_pr(), head_pages=[[fork_head(9)]])
         self.assertEqual(0, self.run_cleanup())
         self.assertTrue(self.deleted())
+
+    def test_fork_pull_requests_filling_every_page_are_not_users(self) -> None:
+        """Past the first page, forks alone sharing the branch name leave nothing to refuse."""
+        pages = [[fork_head(n) for n in range(k, k + 100)] for k in (100, 200, 300)]
+        self.wire(cleanup_pr(), head_pages=pages)
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
+        reads = [v.get("after") for q, v in self.docs if "heads: pullRequests" in q]
+        self.assertEqual([None, "c1", "c2"], reads)
+        self.assertNotIn("more with the branch", self.out.getvalue())
+
+    def test_a_local_pull_request_past_the_first_page_is_refused_and_named(self) -> None:
+        local = {"number": 512, "headRepository": {"nameWithOwner": "O/R"}}
+        pages = [[fork_head(n) for n in range(100, 200)], [fork_head(200), local]]
+        self.wire(cleanup_pr(), head_pages=pages)
+        self.assert_refused()
+        self.assertIn("#512 (head)", self.out.getvalue())
+        self.assertNotIn("#200", self.out.getvalue())
 
     def test_a_rule_read_that_is_not_a_list_stops_at_2(self) -> None:
         self.wire(cleanup_pr(), rules={"message": "Upgrade to GitHub Pro"})
