@@ -588,7 +588,7 @@ def _heredoc_line_tokens(line):
     return _operator_tokens(line)
 
 
-def _context_lex(cmd, comments=True, spans=None):
+def _context_lex(cmd, comments=True):
     """Tokenize `cmd` as `_operator_lex` does, tracking the contexts bash nests rather than only plain
     quotes. Quote state carries across lines, a backslash escapes, and a substitution or `$'...'` span
     is read whole, so a quote inside `"$(...)"` does not end the outer one. A `#` opening a word
@@ -599,8 +599,6 @@ def _context_lex(cmd, comments=True, spans=None):
     subshell rather than a pattern, since bash runs it so unless extglob is on. A `-` glued to `<<`
     is the dash form, where a spaced one is the delimiter itself. Raises ValueError where a quote or
     group never closes, which bash also rejects.
-    With `spans`, a dict, each word's index maps to its (start, end) offsets in `cmd`.
-    A heredoc body's words map to nothing, since each is read from its line alone.
     """
     toks, word, heredocs = [], [], []
     started = quoted = False
@@ -623,8 +621,6 @@ def _context_lex(cmd, comments=True, spans=None):
         at_command = cmd_pos
         cmd_pos = at_command and bare and tok in _COND_PRECEDERS
         toks.append(tok)
-        if spans is not None:
-            spans[len(toks) - 1] = (word_at, i)
         if tag_wanted is not None:
             end, dash = tag_wanted
             if word_at == end and tok.startswith("-"):
@@ -2601,47 +2597,27 @@ def _split_free(x, toks, mask, raw):
 
 _QUOTE_DIR_FIX = (
     'Quote the variable, as in git -C "$dir", so word splitting keeps its value one word, or '
-    "write the directory out."
+    "write the directory out. Where it is already quoted, run that git command on its own, since "
+    "the guard could not read its quoting beside the rest of the command."
 )
 
 
-def _dir_value_split_free(x, k, toks, mask, raw, text):
-    """True when word splitting cannot split the directory value `toks[x]` of the git `toks[k]`.
+def _dir_value_split_free(x, toks, mask, raw, text):
+    """True when word splitting cannot split the directory value `toks[x]`.
 
-    Where the quote-keeping tokens are unknown, the value is spelled as `_context_lex` reads it.
-    That lex reads a comment, a heredoc body, and nested quoting as bash does.
-    It also follows a quoted span inside a word, as in `--format='%H %s'`.
-    Where a `_marked_lex` gives `toks` exactly, it says where `toks[x]` starts in the text.
-    The `_context_lex` word holding that offset is then read, and so is every other spelling below.
-    Every run of words from the git word to the value in `_context_lex` is read too.
-    Every spelling read must be split-free, and one in a heredoc body has none, so it is not.
-    Where none is read, `_split_free` reads the token without its quotes.
+    Where the quote-keeping tokens are unknown, the value is spelled from a `_marked_lex`.
+    That lex follows a quoted span inside a word, as in `--format='%H %s'`.
+    It raises on any syntax whose quoting bash reads in a way it does not model.
+    Its spelling is trusted only where its tokens are `toks` exactly.
+    Elsewhere `_split_free` reads the token without its quotes, which fails closed.
     """
     if raw is None:
-        spans = {}
-        try:
-            words = _context_lex(text, spans=spans)
-        except (ValueError, RecursionError):
-            words = []
         try:
             marked = _marked_lex(text, spelled=True)
         except ValueError:
             marked = None
-        found = []
-        if marked is not None and [t for t, _m, _b in marked] == toks:
-            at = marked[x][2]
-            found = [(a, b) for a, b in spans.values() if a <= at < b][:1]
-        window = toks[k : x + 1]
-        found += [
-            spans.get(p + len(window) - 1)
-            for p in range(len(words) - len(window) + 1)
-            if words[p : p + len(window)] == window
-        ]
-        if found:
-            return all(
-                span is not None and not _expands_unquoted(text[span[0] : span[1]])
-                for span in found
-            )
+        if marked is not None and [t for t, _m, _s in marked] == toks:
+            return not _expands_unquoted(marked[x][2])
     return _split_free(x, toks, mask, raw)
 
 
@@ -2813,7 +2789,7 @@ def _rewritten_git_words(cmd):
                     ):
                         return f"a brace expansion, `{word}`, among the global options of `git`"
                     if not _dir_value_split_free(
-                        x, k, toks, mask, raw, text
+                        x, toks, mask, raw, text
                     ) and _outside_heredoc_data(text, toks[k : x + 1]):
                         form = (
                             f"an unquoted directory value, `{word}`, among the global options of "
@@ -3356,19 +3332,18 @@ def _marked_lex(cmd, spelled=False):
     A `#` starting a word opens a comment, which hides every character up to the newline.
     An unquoted heredoc fed to a shell is read twice, the first unescaping what the second parses.
     Any `<<` outside a `<<<` raises, quoted or in arithmetic too, since no heredoc then goes unseen.
-    With `spelled`, each pair gains a third item, the offset in `cmd` where the token starts.
-    The syntax above that only bash reads is then lexed as POSIX does, so only bad quoting raises.
+    With `spelled`, each pair gains a third item, the token as `cmd` spells it, its quotes kept.
     """
-    if not spelled and _HEREDOC_OPERATOR.search(cmd):
+    if _HEREDOC_OPERATOR.search(cmd):
         raise _UnmodeledSyntax("heredoc")
     out = []
     tok, marked, state, i, begin = "", False, None, 0, 0
     while i < len(cmd):
         ch = cmd[i]
         i += 1
-        if not spelled and state != "'" and ch == "`":
+        if state != "'" and ch == "`":
             raise _UnmodeledSyntax("backtick substitution")
-        if not spelled and state == '"' and ch == "$" and cmd[i : i + 1] in ("(", "{"):
+        if state == '"' and ch == "$" and cmd[i : i + 1] in ("(", "{"):
             raise _UnmodeledSyntax("nested quoting inside double quotes")
         if state in ("'", '"'):
             if ch == state:
@@ -3385,17 +3360,17 @@ def _marked_lex(cmd, spelled=False):
             tok += ch
             continue
         if state is not None and (ch in " \t\r" or state == "op" or ch in _SHELL_OP_CHARS):
-            out.append((tok, marked, begin))
+            out.append((tok, marked, cmd[begin : i - 1]))
             tok, marked, state = "", False, None
         if ch in " \t\r":
             continue
         if state is None:
             begin = i - 1
-        if not spelled and ch == "#" and state is None:
+        if ch == "#" and state is None:
             raise _UnmodeledSyntax("comment")
         if ch in _SHELL_OP_CHARS:
             tok, state = ch, "op"
-        elif not spelled and ch == "'" and tok.endswith("$"):
+        elif ch == "'" and tok.endswith("$"):
             raise _UnmodeledSyntax("ANSI-C quoting")
         elif ch in "'\"":
             marked, state = True, ch
@@ -3409,7 +3384,7 @@ def _marked_lex(cmd, spelled=False):
     if state in ("'", '"'):
         raise ValueError("No closing quotation")
     if state is not None:
-        out.append((tok, marked, begin))
+        out.append((tok, marked, cmd[begin:]))
     return out if spelled else [(t, m) for t, m, _ in out]
 
 
@@ -6658,22 +6633,22 @@ _GIT_CASES = [
         'git -C "$W" log --format=\'%H %s\' -1 && echo "$(date)"',
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a quoted -C value is read as quoted where the quote-keeping lex misaligns",
+        "deny",
+        "a quoted -C value beside a double-quoted substitution fails closed",
     ),
     (
         "git -C \"$W\" commit --author='A B <a@example.com>' -m \"$(cat <<'EOF'\nSubject\nEOF\n)\"",
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a quoted -C value on a heredoc commit message is read as quoted",
+        "deny",
+        "a quoted -C value beside a heredoc fails closed where the quote-keeping lex misaligns",
     ),
     (
         "git -C \"$W\" commit -F - <<'EOF'\nSubject\n\nIt's a body.\nEOF",
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a quoted -C value is spelled from the text its heredoc body leaves",
+        "deny",
+        "a quoted -C value before a heredoc body holding a quote fails closed",
     ),
     (
         "git -C $W commit -F - <<'EOF'\nSubject\n\nIt's a body.\nEOF",
@@ -6686,8 +6661,8 @@ _GIT_CASES = [
         'git -C "$W" status # it\'s a note',
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a quoted -C value is spelled from the text its comment leaves",
+        "deny",
+        "a quoted -C value before a comment holding a quote fails closed",
     ),
     (
         'git -C "$W" status; git -C $W status',
@@ -6791,8 +6766,8 @@ _GIT_CASES = [
         "echo $'a\\'b'; git -C \"$W\" status",
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: an ANSI-C quoted word does not misread a later quoted -C value",
+        "deny",
+        "a quoted -C value beside an ANSI-C quoted word fails closed",
     ),
     (
         "cat <($G push origin develop)",
