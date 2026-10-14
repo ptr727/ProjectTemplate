@@ -1034,6 +1034,13 @@ Q_CLEANUP_REF = """
 query($o:String!,$r:String!,$q:String!){
   repository(owner:$o,name:$r){ ref(qualifiedName:$q){ id target{ oid } } }}
 """
+Q_CLEANUP_USERS = """
+query($o:String!,$r:String!,$b:String!){
+  repository(owner:$o,name:$r){
+    heads: pullRequests(states:OPEN,headRefName:$b,first:20){ totalCount nodes{ number } }
+    bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } }
+  }}
+"""
 M_DELETE_REF = """
 mutation($refId:ID!){
   deleteRef(input:{refId:$refId}){ clientMutationId }}
@@ -5873,6 +5880,32 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     return found
 
 
+def branch_users(owner: str, repo: str, branch: str) -> list[str]:
+    """The open pull requests in this repository whose head or base is the branch.
+
+    Deleting a branch closes every open pull request headed on it and retargets or closes the ones
+    based on it, so each is named where one exists. A pull request past the twenty read is counted
+    rather than named, and an unanswered read is never reported as no pull request.
+    """
+    data = cleanup_read(Q_CLEANUP_USERS, o=owner, r=repo, b=branch)
+    repository = data.get("repository")
+    if not isinstance(repository, dict):
+        raise CleanupUnread(f"{owner}/{repo} returned no repository for the open pull request read")
+    users = []
+    for field, role in (("heads", "head"), ("bases", "base")):
+        found = repository.get(field)
+        nodes = found.get("nodes") if isinstance(found, dict) else None
+        total = found.get("totalCount") if isinstance(found, dict) else None
+        if not isinstance(nodes, list) or not isinstance(total, int):
+            raise CleanupUnread(
+                f"the open pull request read returned no {field} list: {found!r}"[:400]
+            )
+        users += [f"#{n.get('number')} ({role})" for n in nodes if isinstance(n, dict)]
+        if total > len(nodes):
+            users.append(f"{total - len(nodes)} more with the branch as {role}")
+    return users
+
+
 def cleanup(owner: str, repo: str, num: int) -> int:
     """Delete the head branch of merged pull request `num` once every check passes.
 
@@ -5944,6 +5977,13 @@ def _cleanup(owner: str, repo: str, num: int) -> int:
         print(
             f"status=REFUSED nothing was deleted: {branch!r} on {target} is covered by "
             f"{', '.join(rules)}, so its delete is the maintainer's call"
+        )
+        return 1
+    users = branch_users(owner, repo, branch)
+    if users:
+        print(
+            f"status=REFUSED nothing was deleted: open pull requests use {branch!r} on {target}, "
+            f"{', '.join(users)}, and deleting it would close or retarget them"
         )
         return 1
     tip = ref["target"]["oid"]

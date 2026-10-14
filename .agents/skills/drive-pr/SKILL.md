@@ -120,31 +120,12 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
    under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
    which is what lets auto mode complete it.
-   On a host without that rule the hand form below is the fallback, and where this seat cannot
-   run that either, report its commands to the maintainer, paste-ready with the values substituted.
-   Both remote commands of the hand form resolve `origin`,
-   so they hold only where the pull request's head branch lives in this repository, which step 1
-   guarantees by branching here. A pull request opened from a fork follows
-   `upstream-contribution-workflow` instead and neither command applies to it, since `origin` would
-   name the base repository and exit `2` would mean the branch was never there rather than already
-   deleted. The object id in `git ls-remote --heads --exit-code -- origin "refs/heads/<branch>"`,
-   which prints `<oid>\t<ref>` so the id is its first field, matches the `headRefOid` captured above, `--` before `origin` and the fully-qualified ref. `--heads origin
-   "<branch>"` alone still tail-matches a differently-prefixed branch sharing the same suffix, and
-   `--` placed after `origin` instead of before it is not equivalent either, verified empirically
-   against a `refs/heads/other/--` ref: after-origin also matched it, before-origin matched only
-   the one intended. `--exit-code` distinguishes exit `2`, branch genuinely gone, from any other
-   non-zero exit, a failed query, an unreachable remote and a gone branch both print nothing to
-   stdout otherwise. Exit `2` means the remote branch is already gone, so the delete is done and
-   the step is complete. Stop and report either a mismatch or a failed query rather than deleting,
-   someone could have pushed to the branch after the merge, or the name could have been reused.
-   `<branch>` is the real value, substituted as its own quoted argument (a shell variable
-   expansion such as `"$branch"`, or an argv element), never handed to `eval` or `sh -c` for a
-   second round of shell parsing, the only way an embedded `$()` or backtick would actually run.
-   A valid ref can start with `-` or carry a shell metacharacter, which is why it stays quoted
-   regardless. Only once it matches, `git push origin --delete -- "<branch>"`. Never
-   `--force-with-lease` here, git-commit-conventions forbids it
-   unconditionally, this plain verify-then-delete is the safety gate, not a compare-and-swap at
-   delete time. The
+   It also refuses while another open pull request in the repository has the branch as its head or base, naming each, since the delete would close or retarget it.
+   Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.
+   Name the pull request number and `--repo` so the maintainer runs the same command.
+   No direct `git push origin --delete` or ref API delete runs from this skill, because `cleanup` is the one place holding the checks.
+   A pull request opened from a fork follows `upstream-contribution-workflow` instead, and `cleanup` refuses it.
+   The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
    `main` from it, GitHub has no per-branch exception), so nothing deletes an ordinary feature
    branch automatically. Stop here and report the merged PR when the target is develop only.

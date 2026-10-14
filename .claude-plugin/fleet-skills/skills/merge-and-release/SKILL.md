@@ -236,12 +236,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      checkout's own `origin` or that `origin` unreadable, a registry refusal being a `1`. It runs
      under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
      which is what lets auto mode complete it.
-     On a host without that rule the fallback is `git push origin --delete -- "<branch>"` once the
-     tip checks above pass, and where this seat cannot run it, report it to the maintainer,
-     paste-ready with the values substituted.
-     Never `--force-with-lease` here, git-commit-conventions
-     forbids it unconditionally, the GitHub-state check just completed is the verification gate,
-     not a compare-and-swap at delete time. Never apply this sweep to `develop` or `main`
+     It also refuses while another open pull request in the repository has the branch as its head or base, naming each.
+     Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand, naming the pull request number and `--repo`.
+     No direct `git push origin --delete` or ref API delete runs from this skill, because `cleanup` is the one place holding the checks.
+     Never apply this sweep to `develop` or `main`
      themselves, only to feature branches a drive-pr loop created.
 
 ## Mechanics Live Elsewhere

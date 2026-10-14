@@ -10970,7 +10970,7 @@ class CleanupCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
-        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
         self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
         self.enterContext(
@@ -10987,6 +10987,8 @@ class CleanupCase(unittest.TestCase):
         rules: object = (),
         protected: object = False,
         delete_fails: bool = False,
+        heads: list[int] | None = None,
+        bases: list[int] | None = None,
     ) -> None:
         """Answer each document in turn, `refs` holding one answer per ref read in order.
 
@@ -10999,6 +11001,13 @@ class CleanupCase(unittest.TestCase):
             if "pullRequest(number" in query:
                 repository = {"defaultBranchRef": {"name": default}, "pullRequest": pr}
                 return pr_review.shared.Response({"repository": repository}, [])
+            if "heads: pullRequests" in query:
+                lists = {"heads": heads or [], "bases": bases or []}
+                found = {
+                    k: {"totalCount": len(v), "nodes": [{"number": n} for n in v]}
+                    for k, v in lists.items()
+                }
+                return pr_review.shared.Response({"repository": found}, [])
             if "deleteRef" in query:
                 if delete_fails:
                     raise pr_review.shared.GraphQLError("gh graphql reported errors")
@@ -11135,6 +11144,25 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
     def test_an_unread_rule_set_stops_at_2_rather_than_reading_as_none(self) -> None:
         self.wire(cleanup_pr(), rules=RuntimeError("unread"))
         self.assert_refused(2, "status=UNREAD")
+        self.assertIn("HTTP 404", self.err.getvalue())
+        self.assertIn("rc=1", self.out.getvalue())
+
+    def test_an_open_pull_request_headed_on_the_branch_is_refused_and_named(self) -> None:
+        self.wire(cleanup_pr(), heads=[41])
+        self.assert_refused()
+        self.assertIn("#41 (head)", self.out.getvalue())
+
+    def test_an_open_pull_request_based_on_the_branch_is_refused_and_named(self) -> None:
+        self.wire(cleanup_pr(), bases=[42, 43])
+        self.assert_refused()
+        self.assertIn("#42 (base), #43 (base)", self.out.getvalue())
+
+    def test_an_unanswered_open_pull_request_read_stops_at_2(self) -> None:
+        self.wire(cleanup_pr())
+        with mock.patch.object(
+            pr_review, "branch_users", side_effect=pr_review.CleanupUnread("no answer")
+        ):
+            self.assert_refused(2, "status=UNREAD")
 
     def test_a_rule_read_that_is_not_a_list_stops_at_2(self) -> None:
         self.wire(cleanup_pr(), rules={"message": "Upgrade to GitHub Pro"})
