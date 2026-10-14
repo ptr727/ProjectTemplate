@@ -98,18 +98,16 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
-4. Capture the branch's own tip before merging, `gh pr view <number> --repo <owner>/<repo> --json headRefOid --jq
-   .headRefOid`, needed for the verify-then-delete step below since `gh pr merge` itself reports
-   the resulting squash commit on `develop`, not the PR's `headRefOid`. Merge the feature PR into
+4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
    call, it is run from inside the task's own worktree per step 1, where the feature branch is
    checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone, remove
-   the worktree and delete the now-merged local task branch, then verify before deleting the remote
-   one, which is this skill's own step rather than that one's. Delete the remote one with
+   the worktree and delete the now-merged local task branch, then delete the remote one, which is this
+   skill's own step rather than that one's, with
    `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout.
-   It takes the pull request rather than a branch name and does the verify-then-delete below in
+   It takes the pull request rather than a branch name and does the verify-then-delete in
    code. It refuses unless the pull request merged into `develop` from a head in that same
    repository, and refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
@@ -120,31 +118,13 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
    under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
    which is what lets auto mode complete it.
-   On a host without that rule the hand form below is the fallback, and where this seat cannot
-   run that either, report its commands to the maintainer, paste-ready with the values substituted.
-   Both remote commands of the hand form resolve `origin`,
-   so they hold only where the pull request's head branch lives in this repository, which step 1
-   guarantees by branching here. A pull request opened from a fork follows
-   `upstream-contribution-workflow` instead and neither command applies to it, since `origin` would
-   name the base repository and exit `2` would mean the branch was never there rather than already
-   deleted. The object id in `git ls-remote --heads --exit-code -- origin "refs/heads/<branch>"`,
-   which prints `<oid>\t<ref>` so the id is its first field, matches the `headRefOid` captured above, `--` before `origin` and the fully-qualified ref. `--heads origin
-   "<branch>"` alone still tail-matches a differently-prefixed branch sharing the same suffix, and
-   `--` placed after `origin` instead of before it is not equivalent either, verified empirically
-   against a `refs/heads/other/--` ref: after-origin also matched it, before-origin matched only
-   the one intended. `--exit-code` distinguishes exit `2`, branch genuinely gone, from any other
-   non-zero exit, a failed query, an unreachable remote and a gone branch both print nothing to
-   stdout otherwise. Exit `2` means the remote branch is already gone, so the delete is done and
-   the step is complete. Stop and report either a mismatch or a failed query rather than deleting,
-   someone could have pushed to the branch after the merge, or the name could have been reused.
-   `<branch>` is the real value, substituted as its own quoted argument (a shell variable
-   expansion such as `"$branch"`, or an argv element), never handed to `eval` or `sh -c` for a
-   second round of shell parsing, the only way an embedded `$()` or backtick would actually run.
-   A valid ref can start with `-` or carry a shell metacharacter, which is why it stays quoted
-   regardless. Only once it matches, `git push origin --delete -- "<branch>"`. Never
-   `--force-with-lease` here, git-commit-conventions forbids it
-   unconditionally, this plain verify-then-delete is the safety gate, not a compare-and-swap at
-   delete time. The
+   It also refuses while another open pull request in the repository has the branch as its head or base.
+   It names each, since the delete would close or retarget it.
+   Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.
+   Name the pull request number and `--repo` so the maintainer runs the same command.
+   No direct `git push origin --delete` or ref API delete runs here, since `cleanup` holds the checks.
+   A pull request opened from a fork follows `upstream-contribution-workflow` instead, and `cleanup` refuses it.
+   The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
    `main` from it, GitHub has no per-branch exception), so nothing deletes an ordinary feature
    branch automatically. Stop here and report the merged PR when the target is develop only.

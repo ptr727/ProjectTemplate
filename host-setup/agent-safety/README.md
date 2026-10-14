@@ -58,7 +58,7 @@ text says, because the harm it covers was never in the text.
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
-   parses, a wrapper shell's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   parses, a wrapper shell's body and a command substitution's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
@@ -88,8 +88,16 @@ text says, because the harm it covers was never in the text.
    one such as `2>` included. The exception is a git whose first word is an option such as
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
-   stand. They are a directory option's value short of a brace expansion, a commit option's
-   double-quoted value, a commit path after `--`, and a redirection target held in one word. The
+   stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
+   commit path after `--`, and a redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value that word
+   splitting may split, or that holds a brace expansion, is denied on every git subcommand,
+   because the split value may add options or a subcommand the guard cannot see. So is a value holding an
+   expansion whose quoting the guard cannot read. The deny for an unquoted variable names quoting it or writing
+   the directory out as the fix. A command word holding a `$` or a backtick is denied
+   where its subcommand word past git's global options is `push` or `commit`, because the shell
+   decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
+   an unquoted backtick substitution, is read as a command, so this requirement's checks apply
+   inside it. The
    push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other
