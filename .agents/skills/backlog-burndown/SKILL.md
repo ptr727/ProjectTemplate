@@ -255,7 +255,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
-  A brief dispatching an issue returned to the ranking names a new branch where the earlier one is still on the remote.
+  A brief dispatching an issue returned to the ranking names a new branch.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
@@ -308,11 +308,11 @@ what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
-Where that branch is still the head of an open pull request, the report names that pull request too.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
-discards work. A worker still live, a promotion fix included, keeps its worktree until the next
-round's cleanup step.
+discards work.
+On either path, where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
+A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
 ### Choosing the Worker's Model Tier
 
@@ -358,9 +358,7 @@ as an abandoned group's is, per "Cleanup Is the Orchestrator's", which confirms 
 no commit that is not already on develop before anything is removed. A worker that committed its
 fix and then died leaves a clean tree standing over commits develop has never seen, so that check
 is what separates the two. It holds, and the issue returns to the next round's ranking to be
-dispatched fresh, its claim comment released with the worktree.
-That dispatch names a new branch where the dead worker's branch is still on the remote.
-That check fails, and cleanup stops there
+dispatched on a new branch, its claim comment released with the worktree. It fails, and cleanup stops there
 and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
