@@ -275,13 +275,13 @@ finish the procedure from inside its own worktree, since removing that worktree 
 working directory in which to delete its branch.
 
 So the whole procedure moves to the orchestrator, which runs it from the base clone at the round's
-cleanup step, while no worker is live in a tree it touches. It carries the remote half of `drive-pr`'s
-post-merge cleanup too, running `python3 scripts/pr_review.py cleanup <pr> --repo <owner/name>` for each merged group,
-since taking that step from the worker without naming a new owner
-would leave a live remote branch behind every group.
-`cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`,
-and it refuses a branch another open pull request has as its head or base.
-Where the orchestrator's seat cannot run it, the delete is reported to the maintainer with the pull request number and `--repo`, and no hand-typed delete stands in. It covers every group that is done with its tree,
+cleanup step, while no worker is live in a tree it touches.
+It carries the remote half of `drive-pr`'s post-merge cleanup too.
+That half is `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout once for each merged group.
+Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
+`cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`, and it refuses a branch another open pull request has as its head or base.
+Where the orchestrator's seat cannot run it, the delete is reported to the maintainer with the pull request number and `--repo`, and no hand-typed delete stands in.
+The procedure covers every group that is done with its tree,
 which is the finished ones **and the abandoned ones**: a group told to abandon its branch keeps a
 registered worktree until something removes it, and that worktree holds a live claim that would
 collide with the very group the next round re-forms for the same issue. For a merged group the
@@ -305,7 +305,7 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do,
-with no remote branch to delete where none was pushed. Either fails, and cleanup stops there and
+with no remote branch to delete where none was pushed. A pushed branch of an abandoned group has no merged pull request for `cleanup` to read, so its remote delete is reported to the maintainer. Either fails, and cleanup stops there and
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
 discards work. A worker still live, a promotion fix included, keeps its worktree until the next
 round's cleanup step.
