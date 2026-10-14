@@ -144,7 +144,7 @@ except how the question travels. It goes to the maintainer at the end of ranking
 at that moment and in a prompt of its own otherwise, rather than waiting for a stop that may not
 come. It stays unranked until answered.
 
-An issue whose group is stopped, per "Raising a Blocked Question", is counted and is not ranked until the maintainer's answer releases the group.
+An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
 The round's report names it as stopped.
 
 ## Grouping and File Claims
@@ -387,7 +387,7 @@ rather than a decision.
   for a round boundary is what that section forbids, and a boundary can be a long way off or, for
   a group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
-- **The question is also written on its issue**, so it survives the session that asked it.
+- **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim**, and its worktree is left exactly as it
   stands while the question is open, since the answer may be that the work in it continues. Say in
   the prompt whether that worktree holds uncommitted work, because what becomes of it is part of
