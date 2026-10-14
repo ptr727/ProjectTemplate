@@ -3094,7 +3094,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
 
     Options are read as git reads them. A short-option cluster such as `-uf` or `-ud` forces or
     deletes, while `-ofd` is a push option with the value `fd`. A long option cut short, such as
-    `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. A delete with
+    `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. Of `--prune`
+    and `--no-prune`, the later one wins. A delete with
     no refspec is read as a bare push, which git refuses, rather than as nothing. Each push is
     read once per `_push_readings` reading.
     """
@@ -3126,6 +3127,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 delete = True
             if _spells_long_option(t, ("prune",)):
                 prune = True
+            elif _spells_long_option(t, ("no-prune",)):
+                prune = False
             if _spells_long_option(t, _PUSH_ALL_OPTS):
                 push_all = True
             elif _spells_long_option(t, ("mirror",)):
@@ -6352,6 +6355,27 @@ _GIT_CASES = [
         {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
         "allow",
         "control: --no-prune beside a branch pattern only updates",
+    ),
+    (
+        "git push --prune --no-prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: a later --no-prune cancels an earlier --prune",
+    ),
+    (
+        "git push --prune --no-prun origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: a later --no-prune cut short cancels an earlier --prune",
+    ),
+    (
+        "git push --no-prune --prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a later --prune overrides an earlier --no-prune",
     ),
     (
         "git push --prune origin 'refs/heads/*:refs/heads/*'",
