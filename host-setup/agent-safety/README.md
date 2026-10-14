@@ -88,7 +88,7 @@ text says, because the harm it covers was never in the text.
    one such as `2>` included. The exception is a git whose first word is an option such as
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
-   stand. They are a directory option's double-quoted value, a commit option's double-quoted value, a
+   stand. They are a directory option's literal or double-quoted value, a commit option's double-quoted value, a
    commit path after `--`, and a redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value that word
    splitting may split, or that holds a brace expansion, is denied on every git subcommand,
    because the split value may add options or a subcommand the guard cannot see. So is a value
