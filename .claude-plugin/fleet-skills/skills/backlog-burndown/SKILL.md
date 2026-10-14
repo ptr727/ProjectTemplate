@@ -363,6 +363,7 @@ and the group goes to the maintainer, since past that point removal discards wor
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
 replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety".
+Where the dead worker's branch still heads an open pull request, what goes to the maintainer names that pull request.
 Where no other worker remains to bound the wait, the same liveness answer bounds it alone.
 
 ## Raising a Blocked Question
