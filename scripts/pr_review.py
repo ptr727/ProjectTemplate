@@ -2577,7 +2577,7 @@ def open_entry_ids(pr: dict) -> set[str]:
 
 TABLE_FINDING = re.compile(
     r"\*{0,2}[A-Za-z]+ finding \((\d+) votes?\):?\*{0,2}:?\s*"
-    r"(.+?)(?=\s*\*{0,2}[A-Za-z]+ finding \(\d+ votes?\)|\s*\|?\s*$)"
+    r"([^|]+?)(?=\s*\*{0,2}[A-Za-z]+ finding \(\d+ votes?\)|\s*\||\s*$)"
 )
 NUMBER_WORDS = {
     word: n
@@ -2602,7 +2602,10 @@ NUMBER_WORDS = {
 HEADLINE_COUNT = re.compile(
     r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+(?:[a-z-]+\s+){0,2}?findings?\b", re.IGNORECASE
 )
-SETTLED = re.compile(r"\b(?:resolved|fixed|addressed|closed)\b", re.IGNORECASE)
+SETTLED = re.compile(
+    r"(?<!not )(?<!not yet )\b(?:resolved|fixed|addressed|closed|suppressed|previous|earlier|no longer)\b",
+    re.IGNORECASE,
+)
 
 
 def title_key(text: str) -> str:
@@ -2636,15 +2639,16 @@ def entry_text(line: str) -> str:
 def reworded(title: str, text: str) -> bool:
     """Whether an annotation title and an entry's words name one finding.
 
-    Either containing the other matches, and so does an entry holding at least half of the
-    title's words of three letters or more, since the table and the section are one reviewer's
+    Either containing the other matches, and so does an entry holding at least two and half of the
+    title's words of four letters or more, since the table and the section are one reviewer's
     wording of a finding and the words and their order differ between the two.
     """
     if title in text or (text and text in title):
         return True
-    words = [w for w in title.split() if len(w) >= 3]
+    words = [w for w in title.split() if len(w) >= 4]
     have = set(text.split())
-    return bool(words) and 2 * sum(1 for w in words if w in have) >= len(words)
+    shared = sum(1 for w in words if w in have)
+    return shared >= 2 and 2 * shared >= len(words)
 
 
 def open_entry_texts(body: str) -> list[str]:

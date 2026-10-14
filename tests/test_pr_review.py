@@ -5169,6 +5169,25 @@ class TestTableFindings(GqlCase):
         body = with_table_findings(TABLE_LISTED + " Builds `**Low finding (1 vote):** x` inputs.")
         self.assertEqual(2, len(pr_review.table_findings(body)))
 
+    def test_an_unrelated_annotation_sharing_one_word_is_not_matched(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED + " **Moderate finding (1 vote):** off-by-one in the loop."
+        )
+        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
+
+    def test_a_title_ends_at_its_cell(self) -> None:
+        match = pr_review.TABLE_FINDING.search(
+            "| a | **Critical finding (2 votes):** x | Modified |"
+        )
+        assert match is not None
+        self.assertEqual("x", match.group(2))
+
+    def test_an_unaddressed_count_and_a_suppressed_count_in_the_headline(self) -> None:
+        self.assertEqual(3, pr_review.headline_findings("Three findings are not yet addressed."))
+        self.assertIsNone(
+            pr_review.headline_findings("Two low-confidence findings were suppressed.")
+        )
+
     def test_digits_and_the_largest_count_are_read(self) -> None:
         self.assertEqual(
             4, pr_review.headline_findings("2 open findings, and 4 unresolved findings in all.")
