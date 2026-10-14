@@ -38,17 +38,18 @@ Subcommands
            number, never a branch name, and reads the branch from the pull request. It refuses
            unless the pull request is merged into `develop` from a head in `--repo` itself, and
            the head branch is none of `develop`, `main`, or the default branch read live. The
-           owner and repository are bound to `registry/repos.json` the way `handoff.py` binds its
-           writes. It refuses a branch any ruleset or branch protection covers, since the write
-           guard's per-branch check never sees a delete made in here. The ref is read exactly and
-           deleted only where its tip is the pull request's `headRefOid`, and the delete is
-           confirmed by reading the ref back. No `--dry-run` exists, since no other subcommand
+           owner is bound to `registry/repos.json`, and the repository must be registered or a
+           fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or branch protection covers, since the write
+           guard's per-branch check never sees a delete made in here. The ref is read exactly,
+           its tip is checked against the pull request's `headRefOid` before the delete is sent,
+           and the delete is confirmed by reading the ref back. The delete itself carries no
+           expected tip, so this is verify-then-delete rather than a compare-and-swap. No `--dry-run` exists, since no other subcommand
            here has one. Exit 0 = deleted and confirmed gone, or already gone, 1 = refused, a
            moved tip naming both commits among them, 2 = a read did not answer, a partial one
            included, or the delete could not be confirmed, which argparse's own usage error
            shares, 64 = the write scope could not be established or excludes the target, checked
            before the registry and before any read.
-  status  One digest line, any unresolved threads, and any suppressed findings. Read-only.
+  status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
            and full diff coverage is stated for this head, by the round covering it or by the
            carry below, or where nothing states or carries any, a round covering the head names
@@ -5623,15 +5624,11 @@ def cleanup_read(query: str, **variables: object) -> dict:
 
 
 def cleanup_rest(path: str, what: str) -> object:
-    """One REST read for `cleanup`, parsed, where anything but a clean answer raises."""
-    proc = gh_rest(path)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stderr)
-        raise CleanupUnread(f"the {what} read failed rc={proc.returncode}")
-    try:
-        return json.loads(proc.stdout)
-    except ValueError as exc:
-        raise CleanupUnread(f"the {what} read returned no JSON") from exc
+    """One REST read for `cleanup`, parsed and retried by `reread_json`, raising where none came."""
+    data = reread_json(path, ".")
+    if data is None:
+        raise CleanupUnread(f"the {what} read returned nothing parseable")
+    return data
 
 
 def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
@@ -5682,9 +5679,10 @@ def cleanup(owner: str, repo: str, num: int) -> int:
 
     Returns 0 where the branch is deleted and the read back confirms it, or is already gone, 1 on
     a refusal, 2 where a read did not answer or the delete could not be confirmed, and 64 where
-    the write scope `comment` and `reply` check excludes the target. Past that check, the owner and
-    repository are bound to the fleet registry by `handoff.py`'s own write-scope check, reused
-    rather than copied so the two cannot drift apart.
+    the write scope `comment` and `reply` check excludes the target. Past that check, the owner is
+    bound to the fleet registry and the repository must be registered or a fork, by `handoff.py`'s
+    own write-scope check, reused rather than copied so the two cannot drift apart. Its refusal
+    text is printed as `handoff.py` words it.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -5694,7 +5692,7 @@ def cleanup(owner: str, repo: str, num: int) -> int:
     try:
         handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=target))
     except handoff.Refusal as exc:
-        print(f"status=REFUSED nothing was deleted: {exc}")
+        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
         return 1
     except handoff.Execution as exc:
         print(f"status=UNREAD nothing was deleted: {exc}")

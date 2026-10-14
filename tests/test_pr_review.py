@@ -10267,12 +10267,16 @@ class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
                     mock.patch.object(pr_review, "origin_owner", return_value="acme"),
                     mock.patch.object(pr_review, "gql", side_effect=boom) as gql,
                     mock.patch.object(pr_review, "gh_graphql", side_effect=boom) as gh_graphql,
+                    mock.patch.object(pr_review.shared, "request", side_effect=boom) as request,
+                    mock.patch.object(pr_review, "gh_rest", side_effect=boom) as rest,
                 ):
                     code = pr_review.main(argv)
                 self.assertEqual(64, code)
                 self.assertIn("status=OUT_OF_SCOPE", out.getvalue())
                 gql.assert_not_called()
                 gh_graphql.assert_not_called()
+                request.assert_not_called()
+                rest.assert_not_called()
 
 
 class TestRequiredContexts(unittest.TestCase):
@@ -10833,6 +10837,7 @@ class CleanupCase(unittest.TestCase):
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
+        self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
         self.enterContext(
             mock.patch.object(pr_review.handoff, "registry", return_value=("o", {"r"}))
         )
@@ -11036,6 +11041,13 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
         with mock.patch.object(pr_review.handoff, "gh_json", return_value=flags):
             self.assertEqual(1, self.run_cleanup(repo="o/unlisted"))
         self.assertEqual([], self.docs)
+
+    def test_an_unregistered_fork_under_the_owner_is_admitted(self) -> None:
+        self.wire(cleanup_pr(headRepository={"nameWithOwner": "o/forked"}))
+        flags = {"hasIssuesEnabled": True, "isFork": True}
+        with mock.patch.object(pr_review.handoff, "gh_json", return_value=flags):
+            self.assertEqual(0, self.run_cleanup(repo="o/forked"))
+        self.assertTrue(self.deleted())
 
     def test_an_unreadable_registry_stops_at_2(self) -> None:
         self.wire(cleanup_pr())
