@@ -5056,6 +5056,141 @@ def prose_threads(rid: str = "PRR_one") -> list[dict]:
     ]
 
 
+def with_table_findings(annotations: str, headline: str = "The change is narrow.") -> str:
+    """A second-format body whose file table row carries finding annotations, and its headline.
+
+    The two open entries are titled to match the first two annotations `TABLE_LISTED` carries.
+    Titles and paths are constructed, per GOVERNANCE.md "Representative Data in Agent-Authored
+    Text".
+    """
+    body = overview_v2()
+    for i, title in ((1, "Retry loop ignores the limit"), (2, "Naming drifts from the style")):
+        body = body.replace(f"[Finding {i}]", f"[{title}]")
+    assert "Retry loop ignores the limit" in body
+    row = "| a.py | Narrows the reader. |"
+    assert row in body
+    assert "The change is narrow." in body
+    return body.replace(row, f"| a.py | {annotations} |").replace("The change is narrow.", headline)
+
+
+TABLE_LISTED = (
+    "**Critical finding (2 votes):** retry loop ignores the limit. "
+    "**Moderate finding (1 vote):** naming drifts from the style."
+)
+
+
+class TestTableFindings(GqlCase):
+    """A finding named only in the overview's file table or its headline count."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def digest(self, body: str) -> str:
+        self.answer(payload([review(body=body)], prose_threads()))
+        return pr_review.digest("o", "r", 7)[0]
+
+    def test_annotations_matching_the_open_entries_count_none(self) -> None:
+        out = self.digest(with_table_findings(TABLE_LISTED))
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_annotation_matching_no_open_entry_is_reported(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED + " **Moderate finding (1 vote):** terminal option exception lost."
+        )
+        out = self.digest(body)
+        self.assertIn("overview=2/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("1 of the findings its file table annotates matches no entry", out)
+
+    def test_the_annotation_reader_keeps_each_title_whole(self) -> None:
+        self.assertEqual(
+            ["retry loop ignores the limit", "naming drifts from the style"],
+            pr_review.table_findings(with_table_findings(TABLE_LISTED)),
+        )
+
+    def test_a_quoted_table_is_not_read(self) -> None:
+        body = with_table_findings(TABLE_LISTED)
+        quoted = body + "\n```text\n| File | D |\n| a | **Low finding (1 vote):** x |\n```\n"
+        self.assertEqual(2, len(pr_review.table_findings(quoted)))
+
+    def test_a_headline_count_above_the_open_entries_is_reported(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED, "Three unresolved findings remain, including one critical risk."
+        )
+        out = self.digest(body)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("its headline states 3 findings where its open sections list 2", out)
+
+    def test_a_headline_count_equal_to_the_open_entries_counts_none(self) -> None:
+        body = with_table_findings(TABLE_LISTED, "Two unresolved findings remain.")
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_a_settled_count_in_the_headline_is_not_read(self) -> None:
+        for headline in (
+            "Three resolved findings were confirmed.",
+            "Three findings were fixed.",
+            "No findings remain.",
+        ):
+            with self.subTest(headline=headline):
+                self.assertIsNone(pr_review.headline_findings(headline))
+
+    def test_a_settled_clause_anywhere_in_the_sentence_is_not_read(self) -> None:
+        for headline in (
+            "All three previously reported findings are resolved.",
+            "Three findings from the last review were resolved.",
+            "The 2 earlier findings are now addressed.",
+        ):
+            with self.subTest(headline=headline):
+                self.assertIsNone(pr_review.headline_findings(headline))
+
+    def test_a_clean_round_summing_up_its_resolved_findings_reports_nothing(self) -> None:
+        body = overview_v2_revised()
+        body = body.replace(
+            "One reader still needs a look.", "All three earlier findings are resolved."
+        )
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_an_entry_in_the_live_markup_matches_a_reworded_annotation(self) -> None:
+        """Entries carry a severity picture and a tag, and the table may word a title differently."""
+        body = with_table_findings(
+            "**Critical finding (2 votes):** the limit is ignored by the retry loop. "
+            "**Moderate finding (1 vote):** naming drifts from the style."
+        )
+        body = body.replace(
+            "[Retry loop ignores the limit](",
+            "<picture><img alt='Critical' src='https://example.test/c.png'></picture> "
+            "[Retry loop ignores the limit](",
+        ).replace("#discussion_r4000000001) New", "#discussion_r4000000001) \u00b7 New")
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_an_annotation_quoted_in_a_code_span_is_not_read(self) -> None:
+        body = with_table_findings(TABLE_LISTED + " Builds `**Low finding (1 vote):** x` inputs.")
+        self.assertEqual(2, len(pr_review.table_findings(body)))
+
+    def test_an_unrelated_annotation_sharing_one_word_is_not_matched(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED + " **Moderate finding (1 vote):** validation skipped on empty input."
+        )
+        self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
+
+    def test_a_title_ends_at_its_cell(self) -> None:
+        match = pr_review.TABLE_FINDING.search(
+            "| a | **Critical finding (2 votes):** x | Modified |"
+        )
+        assert match is not None
+        self.assertEqual("x", match.group(2))
+
+    def test_an_unaddressed_count_in_the_headline(self) -> None:
+        self.assertEqual(3, pr_review.headline_findings("Three findings are not yet addressed."))
+
+    def test_digits_and_the_largest_count_are_read(self) -> None:
+        self.assertEqual(
+            4, pr_review.headline_findings("2 open findings, and 4 unresolved findings in all.")
+        )
+
+
 class TestProseFindings(GqlCase):
     """A finding a round names only in its overview prose, under a `Review findings:` label."""
 
