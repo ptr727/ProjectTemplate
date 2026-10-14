@@ -7,6 +7,7 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 - [`install-tools.sh`][install-tools] installs and upgrades the host tools. It reports what each is installed at, what upstream carries, where it comes from, and its status. Its `--sudo-timestamp` action is the one thing it does that is about the host rather than a tool.
 - [`upgrade-host.sh`][upgrade-host] upgrades the packages of the current release. Moving to the next release is a separate action behind its own flag.
 - [`setup-github.sh`][setup-github] configures the SSH key, git, and commit signing. It checks both key registrations against what GitHub publishes.
+- [`install-agents.sh`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed, and installs one only when it is named.
 - [`install-skills.sh`][install-skills] drives the hub's skills installer at [`scripts/skills_install.py`][skills-install] from this tree.
 
 Each runs on its own, and each takes `--help`.
@@ -17,6 +18,7 @@ host-setup/linux/install-tools.sh --install
 host-setup/linux/upgrade-host.sh --status
 host-setup/linux/setup-github.sh --status
 host-setup/linux/install-skills.sh --report
+host-setup/linux/install-agents.sh --upgrade
 ```
 
 Each script is LF with a shebang, and its executable bit is tracked in git. A fresh checkout therefore runs each without a `bash` prefix. That is the Linux form of "this will run", and [`tests/test_bootstrap.py`][test-bootstrap] asserts both.
@@ -121,6 +123,12 @@ Two steps cannot be automated, because they happen in a browser. The public key 
 
 **`--gh-ssh-protocol` exists because rewriting a working authentication setup is the operator's call.** A plain run reports gh's github.com git protocol and `--configure` alone leaves it as found. `--configure --gh-ssh-protocol` sets it to ssh. It warns and sets nothing where gh is not installed or not logged in. A protocol set before a login leaves a tokenless entry that gh reports as a failed login.
 
+## install-agents.sh Runs as the User
+
+The agent tools install into the user's home, so this script refuses root rather than reporting root's empty home as every tool absent. A scheduled run that starts as root reaches it through `runuser -u <user> --`. It appends `~/.local/bin` and `~/.opencode/bin` to `PATH`, since such a run carries none of the per-user directories these installers write to.
+
+`--upgrade` runs each installed tool's own updater with standard input closed and a time bound, so an updater that stops to ask fails rather than hanging the run. `--install` takes tool names or `--all`, and with neither it refuses, so nothing is installed by default. herdr refuses to update from inside one of its own panes, so a run there skips that one step and still refreshes the integrations. [`docs/host-setup.md`][host-setup] "Agent Tool Updates" states why the set is opt-in.
+
 ## install-skills.sh Is the Exception
 
 The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it last. Run on a host without one, it stops and names the tools step as its prerequisite.
@@ -174,6 +182,7 @@ CI checks the scripts with `shellcheck` and `shfmt`. It runs both over every `.s
 [bootstrap-ps1]: ../bootstrap.ps1
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
+[install-agents]: ./install-agents.sh
 [install-skills]: ./install-skills.sh
 [install-tools]: ./install-tools.sh
 [setup-github]: ./setup-github.sh

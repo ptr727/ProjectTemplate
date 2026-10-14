@@ -21,6 +21,7 @@ DIR=""
 KEEP=false
 DRY_RUN=false
 ASSUME_YES=false
+AGENTS=()
 RESOLVED=""
 TREE=""
 # Global rather than local, since the lock it holds lasts until this process ends.
@@ -50,7 +51,10 @@ Actions, name one, default --report on a terminal is the menu:
       --host        Share the sudo cache, upgrade packages, install the tools, configure git and
                     GitHub, install the skills
       --dev         As --host, and add the tools a development machine needs
-      --upgrade     Upgrade the packages of the current release only
+      --upgrade     Upgrade the packages of the current release, and this user's coding-agent
+                    tools that are already installed
+      --agents LIST Install the named coding-agent tools for this user only, LIST being names
+                    separated by commas (claude, codex, opencode, herdr, cswap) or "all"
       --tools       Install the host tools only
       --github      Configure git, the SSH key, and commit signing only
       --skills      Install the fleet skills for the current user only
@@ -79,6 +83,7 @@ Examples:
   bootstrap.sh --host --yes             Stand a host up unattended
   bootstrap.sh --ref develop --report   Report using the tooling on develop
   bootstrap.sh --tools --dry-run        Show what installing the tools would run
+  bootstrap.sh --agents herdr,cswap     Install two coding-agent tools
 EOF
 }
 
@@ -289,6 +294,27 @@ report() {
     if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
         info "The fleet skills step did not report a current copy, and the output above says why"
     fi
+    if agents_user && ! run_tool install-agents.sh --report; then
+        info "The agent tools step did not report, and the output above says why"
+    fi
+}
+
+# The agent tools live in a user's home, and root's holds none on a host where a person uses them, so a root run skips them and says so.
+agents_user() {
+    if [[ $EUID -eq 0 ]]; then
+        info "Running as root, so no user's coding-agent tools are read, run this as that user to include them"
+        return 1
+    fi
+    return 0
+}
+
+# Packages first, then the agent tools, which need no root and so keep the root step's prompt apart from them.
+# Only the tools already installed are touched, so an upgrade never adds one.
+upgrade() {
+    run_tool upgrade-host.sh --packages
+    if agents_user; then
+        run_tool install-agents.sh --upgrade
+    fi
 }
 
 # The order is fixed rather than chosen.
@@ -332,7 +358,7 @@ menu() {
     log "Standing up $(host_description)"
     log ""
     log "  1  Report only, change nothing"
-    log "  2  Upgrade the packages of the current release"
+    log "  2  Upgrade the packages of the current release, and the agent tools already installed"
     log "  3  Install the host tools"
     log "  4  Configure git and GitHub"
     log "  5  Install the fleet skills"
@@ -374,6 +400,16 @@ parse_args() {
         --skills) actions+=(skills) ;;
         --sudo) actions+=(sudo) ;;
         --release) actions+=(release) ;;
+        --agents)
+            [[ $# -ge 2 && -n $2 ]] || die "--agents takes the tools to install, separated by commas, or \"all\""
+            actions+=(agents)
+            if [[ $2 == "all" ]]; then
+                AGENTS=(--all)
+            else
+                IFS=',' read -r -a AGENTS <<<"$2"
+            fi
+            shift
+            ;;
         -y | --yes) ASSUME_YES=true ;;
         -n | --dry-run) DRY_RUN=true ;;
         --keep) KEEP=true ;;
@@ -442,7 +478,8 @@ main() {
 
     case "$MODE" in
     report) report ;;
-    upgrade) run_tool upgrade-host.sh --packages ;;
+    upgrade) upgrade ;;
+    agents) run_tool install-agents.sh --install "${AGENTS[@]}" ;;
     tools) run_tool install-tools.sh --install ;;
     github) run_tool setup-github.sh --configure ;;
     skills) install_skills ;;

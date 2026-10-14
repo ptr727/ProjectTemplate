@@ -215,6 +215,14 @@ host-setup\windows\setup-github.ps1 -Configure -GhSshProtocol
 
 The opt-in sets nothing on a host where `gh` is not installed or not logged in, and warns instead. Setting the protocol before a login leaves a tokenless github.com entry that `gh` reports as a failed login, and `gh auth login --hostname github.com --git-protocol ssh` sets both at once.
 
+## Agent Tool Updates
+
+The coding-agent tools, Claude Code, Codex, opencode, herdr, and cswap, are not host requirements. A host carries whichever of them its user chose, so the tooling keeps current only the ones already installed and installs one only when it is named. An upgrade that installed every tool would put an agent on a host where nobody asked for one, which is a larger change than an upgrade is allowed to make.
+
+Each tool lives in its user's home and carries its own updater, so the updater runs as that user, never as root, and drives each tool's own update command rather than replacing it. cswap on Windows is the one exception, upgraded through the `uv tool upgrade` its own updater only prints there, since that updater cannot replace a launcher that is running. A tool a package manager owns, such as an npm or Homebrew install, is reported and left to that manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports one outdated. A herdr server already running keeps its panes on the previous binary until someone restarts it, since stopping it would end every agent inside it, so the report marks that restart as pending rather than taking it.
+
+[`host-setup/linux/install-agents.sh`][install-agents] and [`host-setup/windows/install-agents.ps1`][install-agents-windows] implement this. `bootstrap.sh --upgrade` and `bootstrap.ps1 -Upgrade` run the upgrade after the packages, and `--agents`/`-Agents` installs the named tools. A scheduled run reaches the same script as the user who owns the tools.
+
 ## Agent Host-Safety
 
 Host-level safety guards are required where an agent runs with the maintainer's `gh` credentials, and where it runs unattended on the maintainer's machine. Each provider's implementation stays in its own subsection.
@@ -406,6 +414,8 @@ A host that fails any row is not ready for the procedure that row names, and the
 [host-setup-windows]: ../host-setup/windows/
 [host-setup-windows-readme]: ../host-setup/windows/README.md
 [host-tools]: ../spec/host-tools.json
+[install-agents]: ../host-setup/linux/install-agents.sh
+[install-agents-windows]: ../host-setup/windows/install-agents.ps1
 [install-tools-windows]: ../host-setup/windows/install-tools.ps1
 [issue-483]: https://github.com/ptr727/ProjectTemplate/issues/483
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781

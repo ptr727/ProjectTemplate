@@ -8,6 +8,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 - [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform.
 - [`setup-github.ps1`][setup-github] configures the SSH key, git, and commit signing.
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
+- [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, cswap excepted, which goes through `uv tool upgrade` since its updater cannot replace its own running launcher on Windows, touching only the ones already installed, and installs one only when it is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. codex and opencode document no Windows installer outside a package manager, so it installs neither and names the route their documentation gives.
 
 Each runs on its own, and each takes `-Help`.
 
@@ -17,6 +18,7 @@ host-setup\windows\install-tools.ps1 -Install
 host-setup\windows\upgrade-host.ps1 -Status
 host-setup\windows\setup-github.ps1 -Status
 host-setup\windows\setup-wsl.ps1 -Status
+host-setup\windows\install-agents.ps1 -Upgrade
 ```
 
 `setup-github.ps1` reports gh's github.com git protocol and `-Configure` alone leaves it as found, since rewriting a working authentication setup is the operator's call. `-Configure -GhSshProtocol` sets it to ssh. It warns and sets nothing where gh is not installed or not logged in. A protocol set before a login leaves a tokenless entry that gh reports as a failed login.
@@ -161,6 +163,7 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 [governance]: ../../GOVERNANCE.md
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
+[install-agents]: ./install-agents.ps1
 [install-tools]: ./install-tools.ps1
 [linux-readme]: ../linux/README.md
 [menu]: ../menu.sh
