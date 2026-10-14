@@ -307,13 +307,12 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read, so the check that step gives way to here is
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
-its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do,
-with no remote branch to delete where none was pushed. Either fails, and cleanup stops there and
+its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
+A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
+No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
 discards work. A worker still live, a promotion fix included, keeps its worktree until the next
 round's cleanup step.
-A pushed branch with no merged pull request, an abandoned group's or a dead worker's, is out of `cleanup`'s reach.
-Its remote delete is reported to the maintainer.
 
 ### Choosing the Worker's Model Tier
 
