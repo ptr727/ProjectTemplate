@@ -342,8 +342,8 @@ def _git_stdout(cwd, args):
             capture_output=True,
             text=True,
             encoding="utf-8",
-            # A ref name is bytes like a path, so a strict decode of one that is not UTF-8 raises into the handler below.
-            # That handler answers None, which leaves `_check_push_bypass` with no target to test against the protected branches.
+            # A ref name is bytes like a path, so a strict decode of one that is not UTF-8 would raise into the handler below.
+            # The read would then answer None as if git had failed, and a caller would lose a branch name it could still test.
             errors="surrogateescape",
             timeout=5,
             check=False,
