@@ -2597,8 +2597,8 @@ def _split_free(x, toks, mask, raw):
 
 _QUOTE_DIR_FIX = (
     'Quote the variable, as in git -C "$dir", so word splitting keeps its value one word, or '
-    "write the directory out. Where it is already quoted, run that git command on its own, since "
-    "the guard could not read its quoting beside the rest of the command."
+    "write the directory out. Where it is already quoted, write the directory out, since the "
+    "guard could not read its quoting beside the rest of the command."
 )
 
 
@@ -2607,9 +2607,9 @@ def _dir_value_split_free(x, toks, mask, raw, text):
 
     Where the quote-keeping tokens are unknown, the value is spelled from a `_marked_lex`.
     That lex follows a quoted span inside a word, as in `--format='%H %s'`.
-    It raises on any syntax whose quoting bash reads in a way it does not model.
+    It raises on the syntax it lists whose quoting bash reads differently.
     Its spelling is trusted only where its tokens are `toks` exactly.
-    Elsewhere `_split_free` reads the token without its quotes, which fails closed.
+    Elsewhere `_split_free` decides, denying an expansion other than one whole `$(...)`.
     """
     if raw is None:
         try:
@@ -2792,9 +2792,9 @@ def _rewritten_git_words(cmd):
                         x, toks, mask, raw, text
                     ) and _outside_heredoc_data(text, toks[k : x + 1]):
                         form = (
-                            f"an unquoted directory value, `{word}`, among the global options of "
-                            "`git` that word splitting may split into more options or a "
-                            "subcommand"
+                            f"a directory value, `{word}`, among the global options of `git` that "
+                            "the guard cannot read as quoted, which word splitting may split into "
+                            "more options or a subcommand"
                         )
                         return form, _QUOTE_DIR_FIX
                     continue
