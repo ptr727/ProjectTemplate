@@ -98,9 +98,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
-4. Capture the branch's own tip before merging, `gh pr view <number> --repo <owner>/<repo> --json headRefOid --jq
-   .headRefOid`, for the report, since `gh pr merge` itself reports
-   the resulting squash commit on `develop`, not the PR's `headRefOid`. Merge the feature PR into
+4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
    call, it is run from inside the task's own worktree per step 1, where the feature branch is
    checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
@@ -120,10 +118,11 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
    under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
    which is what lets auto mode complete it.
-   It also refuses while another open pull request in the repository has the branch as its head or base, naming each, since the delete would close or retarget it.
+   It also refuses while another open pull request in the repository has the branch as its head or base.
+   It names each, since the delete would close or retarget it.
    Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.
    Name the pull request number and `--repo` so the maintainer runs the same command.
-   No direct `git push origin --delete` or ref API delete runs from this skill, because `cleanup` is the one place holding the checks.
+   No direct `git push origin --delete` or ref API delete runs here, since `cleanup` holds the checks.
    A pull request opened from a fork follows `upstream-contribution-workflow` instead, and `cleanup` refuses it.
    The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
