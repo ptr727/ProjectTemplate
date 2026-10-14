@@ -318,7 +318,7 @@ def _current_push_branch(cwd):
     return _read_branch(
         cwd,
         (
-            (["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], True),
+            (["rev-parse", "--symbolic-full-name", "@{push}"], True),
             (["rev-parse", "--abbrev-ref", "HEAD"], False),
         ),
     )
@@ -334,33 +334,60 @@ def _branch_names(branch):
     return [branch] if isinstance(branch, str) else list(branch)
 
 
+def _git_stdout(cwd, args):
+    """`git -C cwd <args>`'s stripped output, or None when it fails or cannot run."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd or ".", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            # A ref name is bytes like a path, so a strict decode of one that is not UTF-8 would raise into the handler below.
+            # The read would then answer None as if git had failed, and a caller would lose a branch name it could still test.
+            errors="surrogateescape",
+            timeout=5,
+            check=False,
+        )
+    # The hook must answer on any failure rather than crash.
+    except Exception:  # noqa: BLE001
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _push_ref_branches(ref, remotes):
+    """The remote branch names a full `@{push}` name such as `refs/remotes/up/stream/x` stands for.
+
+    Each of `remotes` whose name prefixes the text after `refs/remotes/` is stripped from it, so a
+    remote named `up/stream` loses both its segments. That text is also read whole and with its
+    first segment dropped, which keeps every name an `--abbrev-ref` read gave. A name outside
+    `refs/remotes/` is read as every tail after a `/`, so the branch is among them.
+    """
+    if not ref.startswith("refs/remotes/"):
+        parts = ref.removeprefix("refs/").split("/")
+        return list(dict.fromkeys("/".join(parts[i:]) for i in range(len(parts))))
+    rest = ref[len("refs/remotes/") :]
+    named = [rest[len(r) + 1 :] for r in remotes if rest.startswith(r + "/")]
+    return list(dict.fromkeys([*named, rest.partition("/")[2], rest]))
+
+
 def _read_branch(cwd, reads):
     """The branch names the first of `reads` that succeeds in `cwd` gives, or None.
 
-    Each read is `(args, remote)`. A remote read gives a remote-tracking name such as
-    `origin/feature/x`, and its first segment is stripped as the remote name. A local read gives a
-    branch name such as `release/1.0`, which is kept whole. That name is also read with its first
-    segment stripped, as this function read every name before, so both names are checked.
+    Each read is `(args, remote)`. A remote read gives a full name such as
+    `refs/remotes/origin/feature/x`, read by `_push_ref_branches` against the remotes `git remote`
+    lists. The full name is read, since `--abbrev-ref` prints `remotes/origin/x` once a local branch
+    is named `origin/x`. A local read gives a branch name such as `release/1.0`, which is kept
+    whole. That name is also read with its first segment stripped, as this function read every
+    name before, so both names are checked.
     """
     for args, remote in reads:
-        try:
-            r = subprocess.run(
-                ["git", "-C", cwd or ".", *args],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                # A ref name is bytes like a path, and a strict decode of one that is not UTF-8 raises into the handler below, which answers None, and None leaves `_check_push_bypass` with no target to test against the protected branches.
-                errors="surrogateescape",
-                timeout=5,
-                check=False,
-            )
-        # The hook must answer on any failure rather than crash.
-        except Exception:  # noqa: BLE001
-            return None
-        ref = r.stdout.strip()
-        if r.returncode == 0 and ref and ref != "HEAD":
+        ref = _git_stdout(cwd, args)
+        if ref and ref != "HEAD":
+            if remote:
+                remotes = _git_stdout(cwd, ["remote"]) or ""
+                return _push_ref_branches(ref, remotes.splitlines())
             stripped = ref.split("/", 1)[1] if "/" in ref else ref
-            return [stripped] if remote else list(dict.fromkeys((ref, stripped)))
+            return list(dict.fromkeys((ref, stripped)))
     return None
 
 
@@ -3029,6 +3056,24 @@ def _pattern_may_name_branch(dst):
     return stem.startswith("refs/heads/") or "refs/heads/".startswith(stem)
 
 
+def _dst_branches(dst):
+    """The branch names a push destination may write, none for a `refs/` name outside `refs/heads/`.
+
+    Git matches a destination outside `refs/` against the remote's refs by six rules. They are
+    `%s`, `refs/%s`, `refs/tags/%s`, `refs/heads/%s`, `refs/remotes/%s`, and `refs/remotes/%s/HEAD`.
+    A name it matches nowhere becomes `refs/heads/%s`. Two of those rules write a branch. One reads
+    the name as given. The other, `refs/%s`, reads a `heads/` name as the branch after `heads/`.
+    So `heads/develop` writes `develop` where that branch exists, and both names are read.
+    """
+    if dst.startswith("refs/heads/"):
+        return [dst[len("refs/heads/") :]]
+    if dst.startswith("refs/"):
+        return []
+    if dst.startswith("heads/"):
+        return [dst, dst[len("heads/") :]]
+    return [dst]
+
+
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update.
 
@@ -3041,12 +3086,17 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     branch its destination literally names, which a ruleset pattern such as `release/*` matches. A
     `HEAD`/`@` destination updates the branch `HEAD` names, read the way a bare push's branch is.
     It is compared without case, since a case-insensitive filesystem resolves `head` to `HEAD`. A
-    differently cased one is also read as the branch it literally names. A push the guard cannot
-    read is an `unreadable` op, and a branch it cannot read is an `unresolved` one.
+    differently cased one is also read as the branch it literally names. Any other destination is
+    read as each branch `_dst_branches` says git may write. `--prune` adds a delete to every
+    branch a pattern, a `:`, `--all`, or a bare push may match. `--mirror` forces and deletes
+    every protected default. A push the guard cannot read is an `unreadable` op, and a branch it
+    cannot read is an `unresolved` one.
 
     Options are read as git reads them. A short-option cluster such as `-uf` or `-ud` forces or
     deletes, while `-ofd` is a push option with the value `fd`. A long option cut short, such as
-    `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. A delete with
+    `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. Of `--prune`
+    and `--no-prune`, the later one wins. A `--no-prune` after `--` or `--end-of-options` is a
+    refspec to git, so it cancels nothing. A delete with
     no refspec is read as a bare push, which git refuses, rather than as nothing. Each push is
     read once per `_push_readings` reading.
     """
@@ -3060,7 +3110,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         for reading in _push_readings(args)
     ]
     for c_dirs, work_tree, leading_cd, cd_unreliable, args in readings:
-        force = delete = push_all = mirror = tags_only = False
+        force = delete = push_all = mirror = tags_only = prune = options_ended = False
         positionals = []
         i = 0
         while i < len(args):
@@ -3076,6 +3126,12 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 force = True
             if "d" in letters or _spells_long_option(t, ("delete",)):
                 delete = True
+            if t in ("--", "--end-of-options"):
+                options_ended = True
+            if _spells_long_option(t, ("prune",)):
+                prune = True
+            elif not options_ended and _spells_long_option(t, ("no-prune",)):
+                prune = False
             if _spells_long_option(t, _PUSH_ALL_OPTS):
                 push_all = True
             elif _spells_long_option(t, ("mirror",)):
@@ -3096,6 +3152,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         push_ops = {"force"} if force else set()
         if delete:
             push_ops.add("delete")
+        pruned = {"delete"} if prune else set()
         targets = []
         matched_ops = set()
         for rs in refspecs:
@@ -3104,14 +3161,14 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 ops.add("force")
                 rs = rs[1:]
             if rs == ":":
-                matched_ops |= ops or {"update"}
+                matched_ops |= (ops or {"update"}) | pruned
                 continue
             if rs.startswith(":"):
                 ops.add("delete")  # `:dst` empty-source refspec deletes dst
             ops = ops or {"update"}
             dst = rs.split(":", 1)[1] if ":" in rs else rs
             if "*" in dst and _pattern_may_name_branch(dst):
-                matched_ops |= ops
+                matched_ops |= ops | pruned
             if dst.upper() in ("HEAD", "@"):
                 if dst not in ("HEAD", "@"):
                     targets.append((ops, dst))
@@ -3125,22 +3182,18 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 elif b:
                     targets.extend((ops, name) for name in _branch_names(b))
                 continue
-            if dst.startswith("refs/heads/"):
-                dst = dst[len("refs/heads/") :]
-            elif dst.startswith("refs/"):
-                continue  # a tag or other non-branch ref
-            if dst:
-                targets.append((ops, dst))
+            targets.extend((ops, name) for name in _dst_branches(dst) if name)
         if not refspecs:
             if mirror:
-                # --mirror force-updates and prunes every ref: a force against the protected defaults
-                # (a non-existent one just returns no rules and is skipped).
-                targets = [({"force"}, br) for br in _PROTECTED_DEFAULT_ORDER]
+                targets = [({"force", "delete"}, br) for br in _PROTECTED_DEFAULT_ORDER]
             elif push_all:
-                targets = [(push_ops or {"update"}, br) for br in _PROTECTED_DEFAULT_ORDER]
+                targets = [
+                    ((push_ops or {"update"}) | pruned, br) for br in _PROTECTED_DEFAULT_ORDER
+                ]
             elif tags_only:
                 targets = []  # tags only, no branch is updated
             else:
+                matched_ops |= pruned
                 b = current_branch
                 if b is None:
                     b = _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable)
@@ -6207,6 +6260,146 @@ _GIT_CASES = [
         {"feature/x": set(), "main": set(), "master": set(), "develop": {"non_fast_forward"}},
         "deny",
         "--mirror cut short still force-updates every branch",
+    ),
+    (
+        "git push origin HEAD:heads/develop",
+        "feature/x",
+        {"feature/x": set(), "develop": {"pull_request"}},
+        "deny",
+        "a heads/ destination git completes under refs/ writes develop",
+    ),
+    (
+        "git push origin :heads/develop",
+        "feature/x",
+        {"feature/x": set(), "develop": {"deletion"}},
+        "deny",
+        "an empty source to a heads/ destination deletes develop",
+    ),
+    (
+        "git push origin heads/develop",
+        "feature/x",
+        {"feature/x": set(), "develop": {"pull_request"}},
+        "deny",
+        "a colon-less heads/ refspec pushes develop",
+    ),
+    (
+        "git push origin feature/x:heads/heads/develop",
+        "feature/x",
+        {"feature/x": set(), "heads/develop": {"pull_request"}},
+        "deny",
+        "only one heads/ is completed away, so heads/heads/develop writes the branch heads/develop",
+    ),
+    (
+        "git push origin HEAD:heads/feature/x",
+        "feature/x",
+        {"feature/x": set(), "heads/feature/x": set(), "develop": {"pull_request"}},
+        "allow",
+        "control: a heads/ destination naming a feature branch is not read as develop",
+    ),
+    (
+        "git push origin HEAD:tags/develop",
+        "feature/x",
+        {"feature/x": set(), "tags/develop": set(), "develop": {"pull_request"}},
+        "allow",
+        "control: git completes no other prefix to a branch, so tags/develop is not develop",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "--prune beside a branch pattern deletes a branch with no local counterpart",
+    ),
+    (
+        "git push --prun origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "--prune cut short still prunes",
+    ),
+    (
+        "git push --prune origin :",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "--prune beside the matching refspec : prunes too",
+    ),
+    (
+        "git push --all --prune origin",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "--prune beside --all prunes every branch",
+    ),
+    (
+        "git push --prune origin",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a bare push with --prune may run a configured pattern, so it may delete develop",
+    ),
+    (
+        "git push --mirror origin",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": {"deletion"}},
+        "deny",
+        "--mirror deletes as well as forces",
+    ),
+    (
+        "git push --prune origin feature/x",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: --prune beside an explicit refspec prunes nothing",
+    ),
+    (
+        "git push --no-prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: --no-prune beside a branch pattern only updates",
+    ),
+    (
+        "git push --prune --no-prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: a later --no-prune cancels an earlier --prune",
+    ),
+    (
+        "git push --prune --no-prun origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "allow",
+        "control: a later --no-prune cut short cancels an earlier --prune",
+    ),
+    (
+        "git push --no-prune --prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a later --prune overrides an earlier --no-prune",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*' -- --no-prune",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a --no-prune after -- is a refspec, so the push still prunes",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*' --end-of-options --no-prune",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a --no-prune after --end-of-options is a refspec, so the push still prunes",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*'",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": {"non_fast_forward"}},
+        "allow",
+        "control: --prune where no default forbids deletion",
     ),
     (
         "git push --branches origin",
@@ -10682,6 +10875,37 @@ _PUSH_DIR_CASES = [
 ]
 
 
+_SELFTEST_GIT = (
+    "git",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "user.name=Example",
+    "-c",
+    "user.email=example@example.com",
+)
+
+
+def _build_selftest_repo(repo, steps):
+    """Create a repository at `repo` on `develop` with one empty commit, then run `steps` in it.
+
+    Each step is the arguments after `git -C <repo>`. It answers True only when every command exits
+    0, so a caller skips rather than fails on a host that cannot build the repository.
+    """
+    commands = [
+        [*_SELFTEST_GIT, "init", "-q", "-b", "develop", repo],
+        [*_SELFTEST_GIT, "-C", repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
+        *([*_SELFTEST_GIT, "-C", repo, *step] for step in steps),
+    ]
+    for command in commands:
+        try:
+            if subprocess.run(command, capture_output=True, check=False).returncode != 0:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def _push_dir_selftest(origin):
     """Run `_PUSH_DIR_CASES` against real temporary repositories, built from constructed names only."""
     import shutil
@@ -10697,29 +10921,13 @@ def _push_dir_selftest(origin):
         wt = os.path.join(root, "wt")
         rel = os.path.join(root, "rel")
         missing = os.path.join(root, "missing")
-        git = [
-            "git",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=Example",
-            "-c",
-            "user.email=example@example.com",
-        ]
         steps = (
-            [*git, "init", "-q", "-b", "develop", base],
-            [*git, "-C", base, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
-            [*git, "-C", base, "worktree", "add", "-q", "-b", "feature/example", wt],
-            [*git, "-C", base, "worktree", "add", "-q", "-b", "release/1.0", rel],
+            ["worktree", "add", "-q", "-b", "feature/example", wt],
+            ["worktree", "add", "-q", "-b", "release/1.0", rel],
         )
-        for step in steps:
-            try:
-                built = subprocess.run(step, capture_output=True, check=False).returncode == 0
-            except OSError:
-                built = False
-            if not built:
-                print("  skip [push ] could not build the temporary repositories")
-                return True
+        if not _build_selftest_repo(base, steps):
+            print("  skip [push ] could not build the temporary repositories")
+            return True
         os.makedirs(os.path.join(wt, "sub"))
         os.symlink(os.path.join(wt, "sub"), os.path.join(base, "s"))
         os.makedirs(os.path.join(base, "sub2"))
@@ -10755,6 +10963,132 @@ def _push_dir_selftest(origin):
             print(f"  {mark} [{got:5}] want={want:5} {label}")
     finally:
         shutil.rmtree(root, ignore_errors=True)
+    return ok
+
+
+_PUSH_NAME_CASES = [
+    (
+        [
+            ["update-ref", "refs/heads/origin/develop", "HEAD"],
+            ["switch", "-q", "-c", "feature/example"],
+            ["branch", "-q", "-u", "refs/remotes/origin/develop"],
+        ],
+        ["develop", "origin/develop"],
+        "a local branch named like the upstream's remote-tracking ref: still develop",
+    ),
+    (
+        [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["update-ref", "refs/remotes/up/stream/develop", "HEAD"],
+            ["switch", "-q", "-c", "feature/two"],
+            ["branch", "-q", "-u", "refs/remotes/up/stream/develop"],
+        ],
+        ["develop", "stream/develop", "up/stream/develop"],
+        "a remote whose name holds a slash loses both its segments",
+    ),
+    (
+        [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["remote", "add", "up", "https://example.invalid/up.git"],
+            ["update-ref", "refs/remotes/up/stream/develop", "HEAD"],
+            ["switch", "-q", "-c", "feature/two"],
+            ["config", "branch.feature/two.remote", "up/stream"],
+            ["config", "branch.feature/two.merge", "refs/heads/develop"],
+        ],
+        ["stream/develop", "develop", "up/stream/develop"],
+        "two remotes whose names both match are each read",
+    ),
+    (
+        [
+            ["remote", "add", "elsewhere-remote", "https://example.invalid/odd.git"],
+            [
+                "config",
+                "remote.elsewhere-remote.fetch",
+                "+refs/heads/*:refs/remotes/elsewhere/*",
+            ],
+            ["update-ref", "refs/remotes/elsewhere/feature/develop", "HEAD"],
+            ["switch", "-q", "-c", "feature/three"],
+            ["branch", "-q", "-u", "refs/remotes/elsewhere/feature/develop"],
+        ],
+        ["feature/develop", "elsewhere/feature/develop"],
+        "control: a fetch refspec matching no remote's name drops its first segment",
+    ),
+    (
+        [
+            ["switch", "-q", "-c", "feature/four"],
+            ["branch", "-q", "-u", "refs/remotes/origin/develop"],
+        ],
+        ["develop", "origin/develop"],
+        "control: an ordinary upstream strips only its remote",
+    ),
+    (
+        [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["update-ref", "refs/remotes/up/stream/feature/develop", "HEAD"],
+            ["switch", "-q", "-c", "feature/five"],
+            ["branch", "-q", "-u", "refs/remotes/up/stream/feature/develop"],
+        ],
+        ["feature/develop", "stream/feature/develop", "up/stream/feature/develop"],
+        "control: a slash-named remote's feature branch is not read as develop",
+    ),
+    (
+        [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["remote", "add", "mirror", "https://example.invalid/mirror.git"],
+            ["config", "remote.mirror.fetch", "+refs/heads/*:refs/remotes/up/*"],
+            ["update-ref", "refs/remotes/up/stream/x", "HEAD"],
+            ["switch", "-q", "-c", "feature/six"],
+            ["config", "branch.feature/six.remote", "mirror"],
+            ["config", "branch.feature/six.merge", "refs/heads/stream/x"],
+        ],
+        ["x", "stream/x", "up/stream/x"],
+        "control: a fetch refspec writing under another remote's name keeps the first-segment read",
+    ),
+]
+
+
+def _push_name_selftest(origin):
+    """Run `_PUSH_NAME_CASES`, each in a fresh temporary repository built from constructed names only.
+
+    A case is the setup steps run with `git -C <repo>`, the branch names a bare push must be read
+    as writing, and a label. Remote-tracking refs are written with `update-ref`, so no case reaches
+    a network or pushes anything. Where `branch -u` refuses a ref two remotes' fetch refspecs both
+    map, a case configures the upstream directly.
+    """
+    import shutil
+    import tempfile
+
+    if os.name == "nt" or os.path.sep != "/":
+        print("  skip [push ] @{push} name cases need POSIX paths")
+        return True
+    ok = True
+    for steps, want, label in _PUSH_NAME_CASES:
+        root = tempfile.mkdtemp(prefix="guard-push-name-")
+        try:
+            repo = os.path.join(root, "repo")
+            setup = [
+                ["remote", "add", "origin", "https://example.invalid/x.git"],
+                ["update-ref", "refs/remotes/origin/develop", "HEAD"],
+                ["config", "push.default", "upstream"],
+                *steps,
+            ]
+            if not _build_selftest_repo(repo, setup):
+                print(f"  skip [push ] could not build the repository for: {label}")
+            else:
+                got = _current_push_branch(repo)
+                verdict, _ = classify(
+                    "git push",
+                    cwd=repo,
+                    origin=origin,
+                    rules_lookup=lambda br: {"pull_request"} if br == "develop" else set(),
+                    environ={},
+                    primary_checkout_lookup=lambda d: False,
+                )
+                good = got == want and verdict == ("deny" if "develop" in want else "allow")
+                ok = ok and good
+                print(f"  {'ok  ' if good else 'FAIL'} [{verdict:5}] {got} {label}")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
     return ok
 
 
@@ -11240,6 +11574,8 @@ def _selftest():
         ok = False
     print(f"  {mark} [{got!s:5}] want=True  a checkout path that is not UTF-8 still resolves")
     if not _push_dir_selftest(origin):
+        ok = False
+    if not _push_name_selftest(origin):
         ok = False
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
