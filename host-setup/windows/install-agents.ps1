@@ -476,7 +476,9 @@ function Invoke-ToolUpgrade {
         $script:FAILED.Add($ToolName)
         return
     }
-    $now = Get-ToolVersion $path
+    # Resolved again, since an updater may put the new binary somewhere that now comes first on PATH.
+    $path = Get-ToolPath $ToolName
+    $now = if ($path) { Get-ToolVersion $path } else { '' }
     if ($now -ne $installed) {
         $before = if ($installed) { $installed } else { '-' }
         $after = if ($now) { $now } else { '-' }

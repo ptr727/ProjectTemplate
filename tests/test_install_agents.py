@@ -39,6 +39,21 @@ exit 0
 """
 
 
+# A stub whose updater installs a newer copy into a directory ahead of it on PATH, as an updater that relocates its binary does.
+RELOCATING_STUB = """#!/bin/bash
+printf '%s %s\\n' "$(basename "$0")" "$*" >>"$CALLS"
+case "$*" in
+--version) printf '%s\\n' '2.1.0 (Claude Code)' ;;
+update)
+    mkdir -p "$STUB_DIR/front"
+    printf '#!/bin/bash\\nprintf "2.2.0 (Claude Code)\\\\n"\\n' >"$STUB_DIR/front/claude"
+    chmod +x "$STUB_DIR/front/claude"
+    ;;
+esac
+exit 0
+"""
+
+
 @unittest.skipUnless(sys.platform == "linux", "runs the Linux updater")
 @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "the updater refuses root by design")
 class TestInstallAgents(unittest.TestCase):
@@ -70,7 +85,7 @@ class TestInstallAgents(unittest.TestCase):
 
     def run_script(self, *arguments: str, pane: bool = False) -> subprocess.CompletedProcess[str]:
         env = {
-            "PATH": f"{self.bin}:/usr/bin:/bin",
+            "PATH": f"{self.dir / 'front'}:{self.bin}:/usr/bin:/bin",
             "HOME": str(self.home),
             "CALLS": str(self.calls),
             "STUB_DIR": str(self.dir),
@@ -108,6 +123,14 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), ["claude update", "cswap upgrade"])
         self.assertIn("codex: not installed, leaving it absent", result.stdout)
+
+    def test_upgrade_reports_the_version_now_first_on_path(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
     def test_a_package_manager_install_is_left_to_its_manager(self) -> None:
         self.stub(
@@ -406,6 +429,14 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIs(herdr["restart_pending"], True)
         self.assertEqual(herdr["path"], "%USERPROFILE%/.local/bin/herdr")
         self.assertTrue(any("previous binary" in n for n in herdr["notes"]))
+
+    def test_upgrade_reports_the_version_now_first_on_path(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
     def test_restart_pending_is_null_when_unreadable(self) -> None:
         self.stub("herdr", "herdr 0.9.4")
