@@ -58,7 +58,7 @@ text says, because the harm it covers was never in the text.
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
-   parses, a wrapper shell's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   parses, a wrapper shell's body and a command substitution's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
@@ -89,18 +89,19 @@ text says, because the harm it covers was never in the text.
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
    stand. They are a commit option's double-quoted value, a commit path after `--`, and a
-   redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value is read as it
-   stands only where word splitting cannot split it, which is a literal path or a double-quoted
-   variable. An unquoted variable there is denied on every git subcommand, because the split
-   value may add options or a subcommand the guard cannot see, and the deny names quoting it or
-   writing the directory out as the fix. A command word holding a `$` or a backtick is denied
+   redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value that word
+   splitting may split is denied on every git subcommand, an unquoted variable being the case,
+   because the split value may add options or a subcommand the guard cannot see. So is a value
+   whose quoting the guard cannot read. The deny names quoting the value or writing the
+   directory out as the fix. A command word holding a `$` or a backtick is denied
    where its subcommand word past git's global options is `push` or `commit`, because the shell
    decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
-   an unquoted backtick substitution, is read as a command the way a wrapper body is read, a
-   heredoc body inside one being data. The
+   an unquoted backtick substitution, is read as a command, so this requirement's checks apply
+   inside it. A heredoc body inside one is data unless a shell is what it is fed to. The
    push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
-   workaround for a refspec is an explicit one run as its own command. Every other
+   workaround for a denied push or commit is an explicit refspec run as its own command, with
+   every word written out. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
