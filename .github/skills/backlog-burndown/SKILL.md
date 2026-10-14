@@ -255,6 +255,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
+  A brief dispatching an issue returned to the ranking names a new branch where the earlier one is still on the remote.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
@@ -284,12 +285,10 @@ It also refuses a branch another open pull request has as its head or base.
 Any exit other than `0` is reported to the maintainer as it stands, since a `2` can mean the delete landed unconfirmed.
 No hand-typed delete stands in.
 Where the orchestrator's seat cannot run it, the delete is reported to the maintainer with the pull request number and `--repo`.
-The procedure covers every group that is done with its tree,
-which is the finished ones **and the abandoned ones**: a group told to abandon its branch keeps a
-registered worktree until something removes it, and that worktree holds a live claim that would
-collide with the very group the next round re-forms for the same issue. For a merged group the
-procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and
-prove-the-cleanup steps run unchanged, just later and in one seat.
+The procedure covers every group that is done with its tree, which is the finished ones **and the abandoned ones**.
+A group told to abandon its branch keeps a registered worktree until something removes it.
+That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
+For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 
 **Retiring a worktree and deleting its branch are two dispositions with two tests**, and citing
 one for the other is how a removal that discards nothing gets routed to the maintainer, or a
@@ -309,6 +308,7 @@ what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
+Where that branch is still the head of an open pull request, the report names that pull request too.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
 discards work. A worker still live, a promotion fix included, keeps its worktree until the next
@@ -358,7 +358,9 @@ as an abandoned group's is, per "Cleanup Is the Orchestrator's", which confirms 
 no commit that is not already on develop before anything is removed. A worker that committed its
 fix and then died leaves a clean tree standing over commits develop has never seen, so that check
 is what separates the two. It holds, and the issue returns to the next round's ranking to be
-dispatched fresh, its claim comment released with the worktree. It fails, and cleanup stops there
+dispatched fresh, its claim comment released with the worktree.
+That dispatch names a new branch where the dead worker's branch is still on the remote.
+That check fails, and cleanup stops there
 and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
