@@ -2471,18 +2471,20 @@ def _holds_attached_value(tok):
     return len(literal) >= 2 and literal[0] == "-" and literal[1] in _COMMIT_VALUE_LETTERS
 
 
-def _expands_unquoted(raw):
+def _expands_unquoted(raw, braces_only=False):
     """True when a token as written holds a `$`, a backtick, or a brace expansion outside double quotes.
 
     Word splitting may split what such an expansion gives into more arguments, and a brace
     expansion gives several words itself. One inside a `$(...)` that double quotes hold is still
-    inside those quotes.
+    inside those quotes. A brace expands where its `{`, its `,` or `..`, and its `}` are unquoted,
+    whatever quoted parts sit between them. With `braces_only`, only a brace expansion counts.
     """
     stack = []
     i = 0
     while i < len(raw):
         ch = raw[i]
         top = stack[-1] if stack else None
+        unquoted = '"' not in stack
         if top == "'":
             if ch == "'":
                 stack.pop()
@@ -2500,7 +2502,14 @@ def _expands_unquoted(raw):
             stack.append(ch)
         elif (top == "(" and ch == ")") or (top == "`" and ch == "`"):
             stack.pop()
-        elif '"' not in stack and (ch in "$`" or (ch == "{" and _BRACE_EXPANSION.match(raw, i))):
+        elif top in ("{", "{,") and ch == "}":
+            if stack.pop() == "{," and unquoted:
+                return True
+        elif top == "{" and (ch == "," or raw.startswith("..", i)):
+            stack[-1] = "{,"
+        elif ch == "{" and raw[i - 1 : i] != "$":
+            stack.append("{")
+        elif unquoted and not braces_only and ch in "$`":
             return True
         elif raw.startswith("$(", i):
             stack.append("(")
@@ -2528,7 +2537,7 @@ def _split_free(x, toks, mask, raw):
 
 
 def _rewritten_git_words(cmd):
-    """Name the form when a git command holds a word the shell rewrites or drops, else None.
+    """Name the form when a git command holds a rewritten word where it can change what git runs, else None.
 
     The guard reads each word as written, while the shell expands a `$`, a backtick, or a brace
     word and drops a comment before git reads any of them. Modeling either is open-ended, so the
@@ -2536,8 +2545,10 @@ def _rewritten_git_words(cmd):
 
     - a run-time word where the subcommand goes, on any git command, since it may expand to `push` or
       to an option that moves the subcommand, as a backtick word ending the global options does
-    - a run-time word that word splitting may split among the options of a `git` with no
-      subcommand word, since `git -c $X` may expand to a commit under an override
+    - a run-time word that word splitting may split among any git command's global options, or
+      before no subcommand word at all, since `git -c $X README.md` may expand to a commit under an
+      override, and a brace expansion in a directory option's value
+    - a redirection where the subcommand goes, since the readings below then see no subcommand
     - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
       `core.hooksPath`
     - a run-time word among a push's arguments, since it may name any refspec or remote
@@ -2550,7 +2561,8 @@ def _rewritten_git_words(cmd):
     A comment on a commit only adds words the guard reads, which can only add a deny, so it is left
     alone. Four kinds of run-time word are left alone too. One is the value of a global option
     naming a directory before a subcommand word, unquoted too, since `-C $dir` is the common
-    spelling, and what word splitting makes of an unquoted one is not read. One is a commit
+    spelling. What word splitting makes of an unquoted one is not read, and a brace expansion in
+    one is denied. One is a commit
     option's value whose expansions sit inside double quotes, since word splitting cannot then make
     it an option, as in `-m "$(cat <<'EOF' ...)"`. One is a commit path after `--`. One is a
     redirection target held in one token, such as `2>"$LOG"`.
@@ -2584,6 +2596,24 @@ def _rewritten_git_words(cmd):
             sub = toks[j]
             if _is_run_time_word(sub):
                 return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
+            if _is_redir_op(sub):
+                return "a redirection where the subcommand of `git` goes"
+            for x in range(k + 1, j):
+                word = toks[x]
+                if not _is_run_time_word(word):
+                    continue
+                if toks[x - 1] in _GIT_DIR_VALUE_OPTS or word.startswith(
+                    ("--git-dir=", "--work-tree=")
+                ):
+                    if (
+                        _expands_unquoted(raw[x], braces_only=True)
+                        if raw is not None
+                        else _BRACE_EXPANSION.search(word)
+                    ):
+                        return f"a brace expansion, `{word}`, among the global options of `git`"
+                    continue
+                if not _split_free(x, toks, mask, raw):
+                    return f"a run-time word, `{word}`, that may split among the global options of `git`"
             if sub not in ("push", "commit"):
                 continue
             if sub == "push" and any(
@@ -6229,6 +6259,48 @@ _GIT_CASES = [
         {"feature/x": set()},
         "allow",
         "control: a run-time redirection target held in one word is not a refspec",
+    ),
+    (
+        "git commit -m {x,'--no-veri'fy}",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion holding a quoted part in a commit value still gives more words",
+    ),
+    (
+        "X='core.hooksPath=/dev/null commit -m x --'; git -c $X README.md",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted config value may split into the subcommand, whatever literal word follows",
+    ),
+    (
+        "git -c {core.hooksPath=/dev/null,commit} -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion in a config value may give the subcommand",
+    ),
+    (
+        "git -C {.,push} origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a brace expansion in a directory value may give the subcommand",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null > a commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a redirection where the subcommand goes hides a commit under an override",
+    ),
+    (
+        'git -C "$W" -c user.name="$N" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: quoted run-time values before a read-only subcommand cannot split",
     ),
     (
         "(git push origin feature/x)",
