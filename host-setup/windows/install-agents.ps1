@@ -101,9 +101,10 @@ With no tool named, -Report and -Upgrade select every managed tool, while -Insta
 none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
-the name of a package manager when one owns it, which -Upgrade leaves to that manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
-one outdated, and a herdr server still running the previous binary is left running and reported
-as needing a restart, since stopping it would end every pane inside it.
+the name of a package manager when one owns it, which -Upgrade leaves to that manager. herdr's
+agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
+herdr server still running the previous binary is left running and reported as needing a
+restart, since stopping it would end every pane inside it.
 
 codex and opencode document no installer on Windows other than a package manager, so -Install
 refuses them here and names the documented route rather than inventing one.
@@ -279,7 +280,8 @@ function Get-HerdrRestartPending {
     if ($status -isnot [pscustomobject] -or -not $status.PSObject.Properties['update']) { return $null }
     $update = $status.update
     if ($update -isnot [pscustomobject] -or -not $update.PSObject.Properties['restart_needed']) { return $null }
-    return [bool]$update.restart_needed
+    if ($update.restart_needed -is [bool]) { return $update.restart_needed }
+    return $null
 }
 
 function Invoke-HerdrPost {

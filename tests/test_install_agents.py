@@ -175,8 +175,14 @@ class TestInstallAgents(unittest.TestCase):
         row = self.report()["herdr"]
         self.assertIs(row["restart_pending"], True)
         self.assertTrue(any("restart" in note for note in row["notes"]))
-        (self.dir / "status.json").write_text('{"server": {}}', encoding="utf-8")
-        self.assertIsNone(self.report()["herdr"]["restart_pending"])
+        for unreadable in (
+            '{"server": {}}',
+            '{"update": {"restart_needed": null}}',
+            '{"update": {"restart_needed": "false"}}',
+        ):
+            with self.subTest(status=unreadable):
+                (self.dir / "status.json").write_text(unreadable, encoding="utf-8")
+                self.assertIsNone(self.report()["herdr"]["restart_pending"])
 
     def test_report_shape(self) -> None:
         self.stub("claude", "2.1.299 (Claude Code)")
@@ -396,6 +402,20 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIs(herdr["restart_pending"], True)
         self.assertEqual(herdr["path"], "%USERPROFILE%/.local/bin/herdr")
         self.assertTrue(any("previous binary" in n for n in herdr["notes"]))
+
+    def test_restart_pending_is_null_when_unreadable(self) -> None:
+        self.stub("herdr", "herdr 0.9.4")
+        for unreadable in (
+            '{"server": {}}',
+            '{"update": {"restart_needed": null}}',
+            '{"update": {"restart_needed": "false"}}',
+        ):
+            with self.subTest(status=unreadable):
+                (self.dir / "status.json").write_text(unreadable, encoding="utf-8")
+                result = self.run_script("-Json")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                tools = {entry["tool"]: entry for entry in json.loads(result.stdout)["tools"]}
+                self.assertIsNone(tools["herdr"]["restart_pending"])
 
     def test_list_and_help_name_the_tools(self) -> None:
         listed = self.run_script("-List")
