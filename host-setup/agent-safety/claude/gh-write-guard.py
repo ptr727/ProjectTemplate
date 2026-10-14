@@ -334,40 +334,40 @@ def _branch_names(branch):
     return [branch] if isinstance(branch, str) else list(branch)
 
 
-def _remote_names(cwd):
-    """The remote names `git remote` lists in `cwd`, or none when it fails or cannot run."""
+def _git_stdout(cwd, args):
+    """`git -C cwd <args>`'s stripped output, or None when it fails or cannot run."""
     try:
         r = subprocess.run(
-            ["git", "-C", cwd or ".", "remote"],
+            ["git", "-C", cwd or ".", *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # A ref name is bytes like a path, so a strict decode of one that is not UTF-8 raises into the handler below.
+            # That handler answers None, which leaves `_check_push_bypass` with no target to test against the protected branches.
             errors="surrogateescape",
             timeout=5,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return r.stdout.splitlines() if r.returncode == 0 else []
+    # The hook must answer on any failure rather than crash.
+    except Exception:  # noqa: BLE001
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
 
 
 def _push_ref_branches(ref, remotes):
     """The remote branch names a full `@{push}` name such as `refs/remotes/up/stream/x` stands for.
 
-    The remote is stripped by matching each of `remotes` against the text after `refs/remotes/`,
-    so a remote named `up/stream` loses both its segments. Where several match, each reading is
-    kept. Where none matches, as with a fetch refspec mapping to another path, or a name outside
-    `refs/remotes/`, every tail of the name after a `/` is read, so the branch is among them.
+    Each of `remotes` whose name prefixes the text after `refs/remotes/` is stripped from it, so a
+    remote named `up/stream` loses both its segments. That text is also read whole and with its
+    first segment dropped, which keeps every name an `--abbrev-ref` read gave. A name outside
+    `refs/remotes/` is read as every tail after a `/`, so the branch is among them.
     """
-    if ref.startswith("refs/remotes/"):
-        rest = ref[len("refs/remotes/") :]
-        named = [rest[len(r) + 1 :] for r in remotes if r and rest.startswith(r + "/")]
-        if named:
-            return list(dict.fromkeys(named))
-    else:
-        rest = ref.removeprefix("refs/")
-    parts = rest.split("/")
-    return list(dict.fromkeys("/".join(parts[i:]) for i in range(len(parts))))
+    if not ref.startswith("refs/remotes/"):
+        parts = ref.removeprefix("refs/").split("/")
+        return list(dict.fromkeys("/".join(parts[i:]) for i in range(len(parts))))
+    rest = ref[len("refs/remotes/") :]
+    named = [rest[len(r) + 1 :] for r in remotes if rest.startswith(r + "/")]
+    return list(dict.fromkeys([*named, rest.partition("/")[2], rest]))
 
 
 def _read_branch(cwd, reads):
@@ -381,24 +381,11 @@ def _read_branch(cwd, reads):
     name before, so both names are checked.
     """
     for args, remote in reads:
-        try:
-            r = subprocess.run(
-                ["git", "-C", cwd or ".", *args],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                # A ref name is bytes like a path, and a strict decode of one that is not UTF-8 raises into the handler below, which answers None, and None leaves `_check_push_bypass` with no target to test against the protected branches.
-                errors="surrogateescape",
-                timeout=5,
-                check=False,
-            )
-        # The hook must answer on any failure rather than crash.
-        except Exception:  # noqa: BLE001
-            return None
-        ref = r.stdout.strip()
-        if r.returncode == 0 and ref and ref != "HEAD":
+        ref = _git_stdout(cwd, args)
+        if ref and ref != "HEAD":
             if remote:
-                return _push_ref_branches(ref, _remote_names(cwd))
+                remotes = _git_stdout(cwd, ["remote"]) or ""
+                return _push_ref_branches(ref, remotes.splitlines())
             stripped = ref.split("/", 1)[1] if "/" in ref else ref
             return list(dict.fromkeys((ref, stripped)))
     return None
@@ -3072,11 +3059,11 @@ def _pattern_may_name_branch(dst):
 def _dst_branches(dst):
     """The branch names a push destination may write, none for a `refs/` name outside `refs/heads/`.
 
-    Git matches a destination outside `refs/` against the remote's refs by the rules `%s`,
-    `refs/%s`, `refs/tags/%s`, `refs/heads/%s`, `refs/remotes/%s`, and `refs/remotes/%s/HEAD`, and
-    a name it matches nowhere becomes `refs/heads/%s`. Two of those rules write a branch. One reads
-    the name as given and the other, `refs/%s`, reads a `heads/` name as the branch after `heads/`,
-    so `heads/develop` writes `develop` where that branch exists. Both names are read.
+    Git matches a destination outside `refs/` against the remote's refs by six rules. They are
+    `%s`, `refs/%s`, `refs/tags/%s`, `refs/heads/%s`, `refs/remotes/%s`, and `refs/remotes/%s/HEAD`.
+    A name it matches nowhere becomes `refs/heads/%s`. Two of those rules write a branch. One reads
+    the name as given. The other, `refs/%s`, reads a `heads/` name as the branch after `heads/`.
+    So `heads/develop` writes `develop` where that branch exists, and both names are read.
     """
     if dst.startswith("refs/heads/"):
         return [dst[len("refs/heads/") :]]
@@ -3101,7 +3088,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     It is compared without case, since a case-insensitive filesystem resolves `head` to `HEAD`. A
     differently cased one is also read as the branch it literally names. Any other destination is
     read as each branch `_dst_branches` says git may write. `--prune` adds a delete to every
-    branch a pattern, a `:`, `--all`, or a bare push may match, and `--mirror` forces and deletes
+    branch a pattern, a `:`, `--all`, or a bare push may match. `--mirror` forces and deletes
     every protected default. A push the guard cannot read is an `unreadable` op, and a branch it
     cannot read is an `unresolved` one.
 
@@ -10847,6 +10834,37 @@ _PUSH_DIR_CASES = [
 ]
 
 
+_SELFTEST_GIT = (
+    "git",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "user.name=Example",
+    "-c",
+    "user.email=example@example.com",
+)
+
+
+def _build_selftest_repo(repo, steps):
+    """Create a repository at `repo` on `develop` with one empty commit, then run `steps` in it.
+
+    Each step is the arguments after `git -C <repo>`. It answers True only when every command exits
+    0, so a caller skips rather than fails on a host that cannot build the repository.
+    """
+    commands = [
+        [*_SELFTEST_GIT, "init", "-q", "-b", "develop", repo],
+        [*_SELFTEST_GIT, "-C", repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
+        *([*_SELFTEST_GIT, "-C", repo, *step] for step in steps),
+    ]
+    for command in commands:
+        try:
+            if subprocess.run(command, capture_output=True, check=False).returncode != 0:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def _push_dir_selftest(origin):
     """Run `_PUSH_DIR_CASES` against real temporary repositories, built from constructed names only."""
     import shutil
@@ -10862,29 +10880,13 @@ def _push_dir_selftest(origin):
         wt = os.path.join(root, "wt")
         rel = os.path.join(root, "rel")
         missing = os.path.join(root, "missing")
-        git = [
-            "git",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=Example",
-            "-c",
-            "user.email=example@example.com",
-        ]
         steps = (
-            [*git, "init", "-q", "-b", "develop", base],
-            [*git, "-C", base, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
-            [*git, "-C", base, "worktree", "add", "-q", "-b", "feature/example", wt],
-            [*git, "-C", base, "worktree", "add", "-q", "-b", "release/1.0", rel],
+            ["worktree", "add", "-q", "-b", "feature/example", wt],
+            ["worktree", "add", "-q", "-b", "release/1.0", rel],
         )
-        for step in steps:
-            try:
-                built = subprocess.run(step, capture_output=True, check=False).returncode == 0
-            except OSError:
-                built = False
-            if not built:
-                print("  skip [push ] could not build the temporary repositories")
-                return True
+        if not _build_selftest_repo(base, steps):
+            print("  skip [push ] could not build the temporary repositories")
+            return True
         os.makedirs(os.path.join(wt, "sub"))
         os.symlink(os.path.join(wt, "sub"), os.path.join(base, "s"))
         os.makedirs(os.path.join(base, "sub2"))
@@ -10930,7 +10932,7 @@ _PUSH_NAME_CASES = [
             ["switch", "-q", "-c", "feature/example"],
             ["branch", "-q", "-u", "refs/remotes/origin/develop"],
         ],
-        ["develop"],
+        ["develop", "origin/develop"],
         "a local branch named like the upstream's remote-tracking ref: still develop",
     ),
     (
@@ -10940,7 +10942,7 @@ _PUSH_NAME_CASES = [
             ["switch", "-q", "-c", "feature/two"],
             ["branch", "-q", "-u", "refs/remotes/up/stream/develop"],
         ],
-        ["develop"],
+        ["develop", "stream/develop", "up/stream/develop"],
         "a remote whose name holds a slash loses both its segments",
     ),
     (
@@ -10952,7 +10954,7 @@ _PUSH_NAME_CASES = [
             ["config", "branch.feature/two.remote", "up/stream"],
             ["config", "branch.feature/two.merge", "refs/heads/develop"],
         ],
-        ["stream/develop", "develop"],
+        ["stream/develop", "develop", "up/stream/develop"],
         "two remotes whose names both match are each read",
     ),
     (
@@ -10967,15 +10969,15 @@ _PUSH_NAME_CASES = [
             ["switch", "-q", "-c", "feature/three"],
             ["branch", "-q", "-u", "refs/remotes/elsewhere/feature/develop"],
         ],
-        ["elsewhere/feature/develop", "feature/develop", "develop"],
-        "a fetch refspec matching no remote's name reads every tail",
+        ["feature/develop", "elsewhere/feature/develop"],
+        "control: a fetch refspec matching no remote's name drops its first segment",
     ),
     (
         [
             ["switch", "-q", "-c", "feature/four"],
             ["branch", "-q", "-u", "refs/remotes/origin/develop"],
         ],
-        ["develop"],
+        ["develop", "origin/develop"],
         "control: an ordinary upstream strips only its remote",
     ),
     (
@@ -10985,8 +10987,21 @@ _PUSH_NAME_CASES = [
             ["switch", "-q", "-c", "feature/five"],
             ["branch", "-q", "-u", "refs/remotes/up/stream/feature/develop"],
         ],
-        ["feature/develop"],
+        ["feature/develop", "stream/feature/develop", "up/stream/feature/develop"],
         "control: a slash-named remote's feature branch is not read as develop",
+    ),
+    (
+        [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["remote", "add", "mirror", "https://example.invalid/mirror.git"],
+            ["config", "remote.mirror.fetch", "+refs/heads/*:refs/remotes/up/*"],
+            ["update-ref", "refs/remotes/up/stream/x", "HEAD"],
+            ["switch", "-q", "-c", "feature/six"],
+            ["config", "branch.feature/six.remote", "mirror"],
+            ["config", "branch.feature/six.merge", "refs/heads/stream/x"],
+        ],
+        ["x", "stream/x", "up/stream/x"],
+        "control: a fetch refspec writing under another remote's name keeps the first-segment read",
     ),
 ]
 
@@ -11005,36 +11020,19 @@ def _push_name_selftest(origin):
     if os.name == "nt" or os.path.sep != "/":
         print("  skip [push ] @{push} name cases need POSIX paths")
         return True
-    git = [
-        "git",
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        "user.name=Example",
-        "-c",
-        "user.email=example@example.com",
-    ]
     ok = True
     for steps, want, label in _PUSH_NAME_CASES:
         root = tempfile.mkdtemp(prefix="guard-push-name-")
         try:
             repo = os.path.join(root, "repo")
             setup = [
-                [*git, "init", "-q", "-b", "develop", repo],
-                [*git, "-C", repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
-                [*git, "-C", repo, "remote", "add", "origin", "https://example.invalid/x.git"],
-                [*git, "-C", repo, "update-ref", "refs/remotes/origin/develop", "HEAD"],
-                [*git, "-C", repo, "config", "push.default", "upstream"],
-                *([*git, "-C", repo, *step] for step in steps),
+                ["remote", "add", "origin", "https://example.invalid/x.git"],
+                ["update-ref", "refs/remotes/origin/develop", "HEAD"],
+                ["config", "push.default", "upstream"],
+                *steps,
             ]
-            for step in setup:
-                try:
-                    built = subprocess.run(step, capture_output=True, check=False).returncode == 0
-                except OSError:
-                    built = False
-                if not built:
-                    print(f"  skip [push ] could not build the repository for: {label}")
-                    break
+            if not _build_selftest_repo(repo, setup):
+                print(f"  skip [push ] could not build the repository for: {label}")
             else:
                 got = _current_push_branch(repo)
                 verdict, _ = classify(
