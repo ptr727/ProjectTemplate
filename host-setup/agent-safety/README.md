@@ -88,11 +88,11 @@ text says, because the harm it covers was never in the text.
    one such as `2>` included. The exception is a git whose first word is an option such as
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
-   stand. They are a directory option's literal or double-quoted value, a commit option's double-quoted value, a
+   stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
    commit path after `--`, and a redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value that word
    splitting may split, or that holds a brace expansion, is denied on every git subcommand,
-   because the split value may add options or a subcommand the guard cannot see. So is a value
-   whose quoting the guard cannot read. The deny for an unquoted variable names quoting it or writing
+   because the split value may add options or a subcommand the guard cannot see. So is a value holding an
+   expansion whose quoting the guard cannot read. The deny for an unquoted variable names quoting it or writing
    the directory out as the fix. A command word holding a `$` or a backtick is denied
    where its subcommand word past git's global options is `push` or `commit`, because the shell
    decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
