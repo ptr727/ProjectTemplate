@@ -84,8 +84,9 @@ text says, because the harm it covers was never in the text.
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A
-   redirection where the subcommand goes, or a redirection target spanning several words on a
-   push or a commit, is denied too. So is a comment among a push's words. Some words are read as
+   redirection where the subcommand goes, a numbered one such as `2>` included, is denied too,
+   short of one after an option such as `--version` that ends git first. So is a redirection
+   target spanning several words on a push or a commit. So is a comment among a push's words. Some words are read as
    they stand. They are a directory option's value short of a brace expansion, a commit option's
    double-quoted value, a commit path after `--`, and a redirection target held in one word. The
    push and include checks also read each command with its quotes and backslashes removed and

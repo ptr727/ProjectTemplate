@@ -2377,6 +2377,7 @@ _COMMIT_LONG_VALUE_OPTS = frozenset(
 )
 _COMMIT_VALUE_OPTS = _COMMIT_LONG_VALUE_OPTS | {"-m", "-F", "-C", "-c", "-t"}
 _COMMIT_VALUE_LETTERS = "mFCct"
+_GIT_TERMINAL_OPTS = frozenset({"--version", "-v", "--help", "-h", "--html-path", "--man-path"})
 _BRACE_EXPANSION = re.compile(r"\{[^{}'\"\s]*(?:,|\.\.)[^{}'\"\s]*\}")
 
 
@@ -2548,7 +2549,8 @@ def _rewritten_git_words(cmd):
     - a run-time word that word splitting may split among any git command's global options, or
       before no subcommand word at all, since `git -c $X README.md` may expand to a commit under an
       override, and a brace expansion in a directory option's value
-    - a redirection where the subcommand goes, since the readings below then see no subcommand
+    - a redirection where the subcommand goes, a file-descriptor number before it included, since
+      the readings below then see no subcommand, unless an option such as `--version` ends git first
     - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
       `core.hooksPath`
     - a run-time word among a push's arguments, since it may name any refspec or remote
@@ -2596,7 +2598,10 @@ def _rewritten_git_words(cmd):
             sub = toks[j]
             if _is_run_time_word(sub):
                 return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
-            if _is_redir_op(sub):
+            redirected = _is_redir_op(sub) or (
+                sub.isdigit() and j + 1 < end and _is_redir_op(toks[j + 1])
+            )
+            if redirected and not any(toks[x] in _GIT_TERMINAL_OPTS for x in range(k + 1, j)):
                 return "a redirection where the subcommand of `git` goes"
             for x in range(k + 1, j):
                 word = toks[x]
@@ -6301,6 +6306,27 @@ _GIT_CASES = [
         {"feature/x": set()},
         "allow",
         "control: quoted run-time values before a read-only subcommand cannot split",
+    ),
+    (
+        "git 2>/dev/null push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a numbered redirection where the subcommand goes hides a push",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null 2>/dev/null commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a numbered redirection where the subcommand goes hides a commit under an override",
+    ),
+    (
+        "git --version >/dev/null 2>&1",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a redirection after --version, which ends git before any subcommand",
     ),
     (
         "(git push origin feature/x)",
