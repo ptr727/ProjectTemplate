@@ -61,11 +61,11 @@ text says, because the harm it covers was never in the text.
    parses, a wrapper shell's body and a command substitution's body among them. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
-   deletes only its own branch. A push's options are read as git reads them. A short-option
-   cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
+   deletes only its own branch. A push's force, delete, all, and mirror options are read as git
+   reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
    `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
-   every branch. A force-push and a delete each write the branch too, so a branch
+   every branch protected by default. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
