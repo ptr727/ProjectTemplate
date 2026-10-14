@@ -2394,19 +2394,20 @@ def _is_run_time_word(tok):
     )
 
 
-def _region_end(toks, k):
+def _region_end(toks, k, quoted=None):
     """The index of the separator after `toks[k]` that ends its command.
 
     A parenthesis the command opens, as a `$(...)` or a `<(...)` in one of its words does, is read
     through to the one closing it, separators inside included. A closing one it did not open ends
-    the command, as a subshell's does.
+    the command, as a subshell's does. A token `quoted` marks as quoted is a word rather than an
+    operator, and with no mask every operator-shaped token is read as one.
     """
     n = len(toks)
     depth = 0
     e = k + 1
     while e < n:
         t = toks[e]
-        if _is_shell_op(t):
+        if _is_shell_op(t) and not (quoted and quoted[e]):
             sep = _is_separator(t)
             if sep and depth == 0 and t[0] not in "()":
                 break
@@ -2581,12 +2582,12 @@ def _rewritten_git_words(cmd):
         for k, t in enumerate(toks):
             if not _is_git_exe(t):
                 continue
-            end = _region_end(toks, k)
+            if not masked:
+                mask, raw, masked = _quoted_mask(text, toks), _quote_kept_tokens(text, toks), True
+            end = _region_end(toks, k, mask)
             j = min(_git_subcommand_index(toks, k), end)
             if j == k + 1 and j >= end:
                 continue
-            if not masked:
-                mask, raw, masked = _quoted_mask(text, toks), _quote_kept_tokens(text, toks), True
             opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
             if not opened and not _runs_as_command(toks, k, mask):
                 continue
@@ -6362,6 +6363,20 @@ _GIT_CASES = [
         {"feature/x": set(), "develop": _CODE_RULES},
         "deny",
         "a redirection after -C leaves the push readable only to the shell",
+    ),
+    (
+        'git push origin feature/x ")" $(echo develop)',
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted parenthesis is a word, so the scan reaches the substitution after it",
+    ),
+    (
+        'git commit -m ")" -m ";"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: quoted operator characters as commit message values are words",
     ),
     (
         "(git push origin feature/x)",
