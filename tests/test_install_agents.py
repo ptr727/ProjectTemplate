@@ -135,8 +135,10 @@ class TestInstallAgents(unittest.TestCase):
     def test_install_dry_run_names_the_installer(self) -> None:
         result = self.run_script("--install", "--dry-run", "claude", "cswap")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("curl -fsSL https://claude.ai/install.sh | bash", result.stdout)
-        self.assertIn("uv tool install claude-swap", result.stdout + result.stderr)
+        self.assertRegex(
+            result.stdout, r"\[dry run\] curl -fsSL https://claude.ai/install.sh -o \S+ && bash \S+"
+        )
+        self.assertIn("[dry run] uv tool install claude-swap", result.stdout)
 
     def test_herdr_upgrade_reinstalls_only_outdated_integrations(self) -> None:
         self.stub("herdr", "herdr 0.9.4")
@@ -159,15 +161,22 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("inside a herdr pane", result.stdout)
 
     def test_restart_pending_reaches_the_report(self) -> None:
+        jq = shutil.which("jq")
+        if jq is None:
+            self.skipTest("herdr's restart state is read with jq")
+        (self.bin / "jq").symlink_to(jq)
         self.stub("herdr", "herdr 0.9.4")
         self.assertIs(self.report()["herdr"]["restart_pending"], False)
-        (self.dir / "status.json").write_text(
-            '{"server":{"restart_needed":true},"update":{"restart_needed":true,"server_binary_stale":true}}',
-            encoding="utf-8",
-        )
+        status = {
+            "server": {"restart_needed": True},
+            "update": {"server_binary_stale": True, "restart_needed": True},
+        }
+        (self.dir / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
         row = self.report()["herdr"]
         self.assertIs(row["restart_pending"], True)
         self.assertTrue(any("restart" in note for note in row["notes"]))
+        (self.dir / "status.json").write_text('{"server": {}}', encoding="utf-8")
+        self.assertIsNone(self.report()["herdr"]["restart_pending"])
 
     def test_report_shape(self) -> None:
         self.stub("claude", "2.1.299 (Claude Code)")
@@ -360,11 +369,12 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("herdr integration install claude-code", calls)
 
     def test_json_report_shape(self) -> None:
-        self.stub("herdr", "herdr 0.9.4")
+        home_bin = self.home / ".local" / "bin"
+        self.stub("herdr", "herdr 0.9.4", home_bin)
         (self.dir / "status.json").write_text(
             '{"update":{"restart_needed":true}}', encoding="utf-8"
         )
-        result = self.run_script("-Json")
+        result = self.run_script("-Json", extra_path=home_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report["schema"], 1)
@@ -384,7 +394,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(herdr["installed"], "0.9.4")
         self.assertEqual(herdr["manager"], "self")
         self.assertIs(herdr["restart_pending"], True)
-        self.assertTrue(herdr["path"].startswith("~") or herdr["path"].startswith(str(self.bin)))
+        self.assertEqual(herdr["path"], "%USERPROFILE%/.local/bin/herdr")
         self.assertTrue(any("previous binary" in n for n in herdr["notes"]))
 
     def test_list_and_help_name_the_tools(self) -> None:

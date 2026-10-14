@@ -8,7 +8,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 - [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform.
 - [`setup-github.ps1`][setup-github] configures the SSH key, git, and commit signing.
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
-- [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed, and installs one only when it is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. codex and opencode document no Windows installer outside a package manager, so it installs neither and names the route their documentation gives.
+- [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, cswap excepted, which goes through `uv tool upgrade` since its updater cannot replace its own running launcher on Windows, touching only the ones already installed, and installs one only when it is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. codex and opencode document no Windows installer outside a package manager, so it installs neither and names the route their documentation gives.
 
 Each runs on its own, and each takes `-Help`.
 

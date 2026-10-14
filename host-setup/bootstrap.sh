@@ -294,8 +294,8 @@ report() {
     if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
         info "The fleet skills step did not report a current copy, and the output above says why"
     fi
-    if agents_user; then
-        run_tool install-agents.sh --report
+    if agents_user && ! run_tool install-agents.sh --report; then
+        info "The agent tools step did not report, and the output above says why"
     fi
 }
 

@@ -56,19 +56,58 @@ hide_home() {
     fi
 }
 
-# Every string this writes is a tool name, a version, a path, or a note this script composed, so escaping the two JSON metacharacters and control bytes is the whole job.
-json_string() {
-    local s="$1" out="" i c
-    for ((i = 0; i < ${#s}; i++)); do
-        c="${s:i:1}"
-        case "$c" in
-        \" | \\) out+="\\$c" ;;
-        [[:cntrl:]]) out+=$(printf '\\u%04x' "'$c") ;;
-        *) out+="$c" ;;
-        esac
+json_string() (
+    export LC_ALL=C
+    local s="$1" out="" i n b c cp need min j hi lo
+    if [[ $s != *[!\ -~]* && $s != *[\"\\]* ]]; then
+        printf '"%s"' "$s"
+        return 0
+    fi
+    n=${#s}
+    for ((i = 0; i < n; i++)); do
+        printf -v b '%d' "'${s:i:1}"
+        b=$((b & 0xff))
+        if ((b == 34 || b == 92)); then
+            out+="\\${s:i:1}"
+        elif ((b < 32)); then
+            printf -v c '\\u%04x' "$b"
+            out+=$c
+        elif ((b < 128)); then
+            out+=${s:i:1}
+        else
+            if ((b >= 0xc2 && b <= 0xdf)); then
+                need=1 cp=$((b & 0x1f)) min=0x80
+            elif ((b >= 0xe0 && b <= 0xef)); then
+                need=2 cp=$((b & 0x0f)) min=0x800
+            elif ((b >= 0xf0 && b <= 0xf4)); then
+                need=3 cp=$((b & 0x07)) min=0x10000
+            else
+                continue
+            fi
+            for ((j = 1; j <= need; j++)); do
+                ((i + j < n)) || break
+                printf -v c '%d' "'${s:i+j:1}"
+                c=$((c & 0xff))
+                ((c >= 0x80 && c <= 0xbf)) || break
+                cp=$(((cp << 6) | (c & 0x3f)))
+            done
+            if ((j <= need || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))); then
+                continue
+            fi
+            i=$((i + need))
+            if ((cp < 0x10000)); then
+                printf -v c '\\u%04x' "$cp"
+            else
+                cp=$((cp - 0x10000))
+                hi=$((0xd800 + (cp >> 10)))
+                lo=$((0xdc00 + (cp & 0x3ff)))
+                printf -v c '\\u%04x\\u%04x' "$hi" "$lo"
+            fi
+            out+=$c
+        fi
     done
     printf '"%s"' "$out"
-}
+)
 
 json_value() {
     if [[ -n $1 ]]; then
@@ -112,9 +151,9 @@ Options:
 With no tool named, --report and --upgrade select every managed tool, while --install selects
 none, so an install always names what it installs, or says --all.
 
-A tool reads as "self" when it was installed by its own installer and so updates itself through
-this script, and as the name of a package manager when one owns it, which --upgrade leaves to
-that manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
+A tool reads as "self" when no package manager owns it, so this script runs the tool's own
+updater, and as the name of a package manager when one owns it, which --upgrade leaves to that
+manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
 
@@ -157,7 +196,7 @@ run_installer() {
     local url="$1" shell="$2" file
     file="$TMP_DIR/$(basename "$url").installer"
     if [[ $DRY_RUN == true ]]; then
-        printf '  [dry run] curl -fsSL %s | %s\n' "$url" "$shell"
+        printf '  [dry run] curl -fsSL %s -o %s && %s %s\n' "$url" "$file" "$shell" "$file"
         return 0
     fi
     command -v curl >/dev/null || {
@@ -253,14 +292,17 @@ herdr_outdated_integrations() {
 }
 
 # Read from herdr's own status rather than from whether a session is open, since a session on the current binary needs no restart however many panes it holds.
-# The pattern reads the "update" object alone, so a host without jq still gets an answer.
+# Returns 0 when a restart is pending, 1 when none is, and 2 when herdr's answer could not be read.
 herdr_restart_pending() {
-    local out
+    local out answer
+    command -v jq >/dev/null || return 2
     out=$(timeout 30 herdr status --json 2>/dev/null </dev/null) || return 2
-    if [[ $out =~ \"update\":\{[^}]*\"restart_needed\":true ]]; then
-        return 0
-    fi
-    return 1
+    answer=$(jq -r '.update.restart_needed | if type == "boolean" then tostring else "unknown" end' <<<"$out" 2>/dev/null) || return 2
+    case "$answer" in
+    true) return 0 ;;
+    false) return 1 ;;
+    *) return 2 ;;
+    esac
 }
 
 herdr_post() {
@@ -562,9 +604,8 @@ main() {
 
     # Root's home holds none of these tools on a host where a person uses them, so a root run would report everything absent and install into the wrong home.
     [[ $EUID -ne 0 ]] ||
-        die "Agent tools live in a user's home, so this runs as that user, for example: runuser -u <user> -- $0 $*"
+        die "Agent tools live in a user's home, so this runs as that user, for example: runuser -u <user> -- install-agents.sh $*"
     [[ -n ${HOME:-} && -d $HOME ]] || die "HOME is not set to a directory, so there is no user's home to read the tools from"
-    command -v timeout >/dev/null || die "timeout is required, install coreutils with this host's package manager"
     extend_path
 
     case "$MODE" in

@@ -69,10 +69,9 @@ function note {
 
 function Hide-Home {
     param([string]$Path)
-    $home_ = $HOME
-    if ($home_ -and $Path.StartsWith($home_, [StringComparison]::OrdinalIgnoreCase)) {
-        $rest = $Path.Substring($home_.TrimEnd('\', '/').Length)
-        if ($rest -eq '' -or $rest[0] -in '\', '/') { return "~$rest" }
+    if (-not $Path -or -not $HOME) { return $Path }
+    if ($Path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) {
+        return '%USERPROFILE%' + $Path.Substring($HOME.Length)
     }
     return $Path
 }
@@ -101,9 +100,8 @@ Options:
 With no tool named, -Report and -Upgrade select every managed tool, while -Install selects
 none, so an install always names what it installs, or says -All.
 
-A tool reads as "self" when it was installed by its own installer and so updates itself through
-this script, and as the name of a package manager when one owns it, which -Upgrade leaves to
-that manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
+A tool reads as "self" when no package manager owns it, so this script runs its update, and as
+the name of a package manager when one owns it, which -Upgrade leaves to that manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
 
@@ -426,7 +424,7 @@ function Show-Report {
             tools    = $rows
             notes    = @()
         }
-        Write-Host (ConvertTo-Json -InputObject $document -Depth 6)
+        ConvertTo-Json -InputObject $document -Depth 6 -EscapeHandling EscapeNonAscii
         return
     }
 

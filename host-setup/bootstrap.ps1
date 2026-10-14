@@ -22,7 +22,6 @@ param(
     [Alias('Host')][switch]$StandUpHost,
     [switch]$Dev,
     [switch]$Upgrade,
-    [string[]]$Agents,
     [switch]$Tools,
     [switch]$Github,
     [switch]$Skills,
@@ -31,6 +30,8 @@ param(
     [Alias('y')][switch]$Yes,
     [string]$Ref,
     [string]$Dir,
+    # Declared after -Ref and -Dir, so the positions those two had before it existed stay theirs.
+    [string[]]$Agents,
     [switch]$Keep,
     [Alias('h')][switch]$Help
 )
