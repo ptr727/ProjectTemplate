@@ -338,10 +338,9 @@ def _read_branch(cwd, reads):
     """The branch names the first of `reads` that succeeds in `cwd` gives, or None.
 
     Each read is `(args, remote)`. A remote read gives a remote-tracking name such as
-    `origin/feature/x`, whose first segment is the remote and is stripped. A local read gives a
-    branch name such as `release/1.0`, which is kept whole. The name with its first segment
-    stripped is read beside it as well, the reading this function gave before it told the two
-    apart, so a branch is checked against the rules for both.
+    `origin/feature/x`, and its first segment is stripped as the remote name. A local read gives a
+    branch name such as `release/1.0`, which is kept whole. That name is also read with its first
+    segment stripped, as this function read every name before, so both names are checked.
     """
     for args, remote in reads:
         try:
@@ -1656,6 +1655,7 @@ def _cd_dot_dot(cmd):
 
 
 _GIT_COMMAND_NAMES: list[set[str]] = []
+_GIT_BUILTIN_NAMES: list[set[str]] = []
 
 
 def _git_command_names():
@@ -1665,10 +1665,23 @@ def _git_command_names():
     possible alias, and the caller fails closed. The self-test pins the set, so its cases do not
     depend on the git that runs them.
     """
-    if not _GIT_COMMAND_NAMES:
+    return _listed_git_commands("builtins,main,others", _GIT_COMMAND_NAMES)
+
+
+def _git_builtin_names():
+    """The commands built into git, which no `--exec-path` or PATH change can hand to an alias.
+
+    It is read and pinned the way `_git_command_names` is.
+    """
+    return _listed_git_commands("builtins", _GIT_BUILTIN_NAMES)
+
+
+def _listed_git_commands(kinds, cache):
+    """The names `git --list-cmds=<kinds>` prints, read once into `cache`, or an empty set on failure."""
+    if not cache:
         try:
             r = subprocess.run(
-                ["git", "--list-cmds=builtins,main,others"],
+                ["git", f"--list-cmds={kinds}"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1679,8 +1692,8 @@ def _git_command_names():
             names = set(r.stdout.split()) if r.returncode == 0 else set()
         except Exception:  # noqa: BLE001
             names = set()
-        _GIT_COMMAND_NAMES.append(names)
-    return _GIT_COMMAND_NAMES[0]
+        cache.append(names)
+    return cache[0]
 
 
 def _check_primary_checkout_mutation(
@@ -2202,6 +2215,7 @@ def _is_short_u(arg):
 
 _INLINE_PUSH_ALIAS = re.compile(r"alias\..*\bpush\b", re.DOTALL | re.IGNORECASE)
 _GIT_INCLUDE = re.compile(r"git\b.*?include", re.DOTALL | re.IGNORECASE)
+_GIT_INCLUDE_KEY = re.compile(r"git\b.*?include(?:\.path|if\.)", re.DOTALL | re.IGNORECASE)
 
 
 def _includes_config_file(value):
@@ -2219,7 +2233,6 @@ def _includes_config_file(value):
 _COMMAND_RUNNING_GIT_SUBS = frozenset(
     {"bisect", "submodule", "rebase", "filter-branch", "difftool", "mergetool"}
 )
-_EVAL_INCLUDE_READ_LIMIT = 8
 
 
 def _unreadable_push(cmd):
@@ -2234,15 +2247,14 @@ def _unreadable_push(cmd):
     - a `-c` config value, an inline alias expanding to a push among them
     - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
       overrides names no command git lists, so it may be an alias that file defines
+    - the same file on a command git does not build in, which an `--exec-path`, a
+      `GIT_EXEC_PATH`, or a PATH change can leave to an alias that file defines
     - the same file on one of `_COMMAND_RUNNING_GIT_SUBS`, whose child git commands it reaches, so
       an alias it defines may push whatever the arguments name
-    - the same file beside an `--exec-path` or a `GIT_EXEC_PATH` anywhere in the command, either of
-      which moves where git finds the commands it does not build in, so a listed name may fall
-      through to an alias that file defines
 
-    An `eval` argument holding an include key is read as the command it runs, so an include
-    override inside one is checked as one written out. The reading stops at
-    `_EVAL_INCLUDE_READ_LIMIT` payloads, and one past it fails closed.
+    An `eval` argument holding an include key is read as the command it runs, for this check
+    alone. It is bounded by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST`, as the wait rule's is.
+    An `eval` holding an include key met once the budget is spent fails closed.
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2252,25 +2264,27 @@ def _unreadable_push(cmd):
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
-    if any(_GIT_PUSH.search(t) for t in overflow):
+    if any(_GIT_PUSH.search(t) or _GIT_INCLUDE_KEY.search(t) for t in overflow):
         return "wrapper shells nested deeper than the guard reads"
-    eval_reads = 0
+    budget = _EVAL_READ_BUDGET
     for text in texts:
         toks = _shell_tokens(text)
         n = len(toks)
+        quoted = _quoted_mask(text, toks) if "eval" in toks else None
+        eval_end = 0
         for k, t in enumerate(toks):
-            if t == "eval":
-                payload, _ = _eval_payload(toks, k)
-                if _GIT_INCLUDE.search(payload):
-                    eval_reads += 1
-                    if eval_reads > _EVAL_INCLUDE_READ_LIMIT:
-                        return (
-                            "an include override inside `eval` nested deeper than the guard reads"
-                        )
-                    texts.append(payload)
-                    texts.extend(_embedded_wrapper_commands(payload, overflow=overflow))
-                    if any(_GIT_PUSH.search(o) or _GIT_INCLUDE.search(o) for o in overflow):
-                        return "wrapper shells nested deeper than the guard reads"
+            if t == "eval" and k >= eval_end:
+                if budget <= 0:
+                    if _GIT_INCLUDE_KEY.search(" ".join(toks[k:])):
+                        return "an include override inside more `eval` text than the guard reads"
+                else:
+                    payload, eval_end = _eval_payload(toks, k, quoted)
+                    budget -= len(payload) + _EVAL_READ_COST
+                    if _GIT_INCLUDE.search(payload):
+                        texts.append(payload)
+                        texts.extend(_embedded_wrapper_commands(payload, overflow=overflow))
+                        if any(_GIT_PUSH.search(o) or _GIT_INCLUDE_KEY.search(o) for o in overflow):
+                            return "wrapper shells nested deeper than the guard reads"
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
                 if _is_shell_wrapper_exe(t):
@@ -2278,6 +2292,11 @@ def _unreadable_push(cmd):
                 if any(_GIT_PUSH.search(a) for a in args):
                     return (
                         f"a push inside an argument of `{t}` the guard does not read as a command"
+                    )
+                if _is_shell_wrapper_exe(t) and any(_GIT_INCLUDE_KEY.search(a) for a in args):
+                    return (
+                        f"an include override inside an argument of `{t}` the guard does not read "
+                        "as a command"
                     )
             if not _is_git_exe(t):
                 continue
@@ -2291,24 +2310,22 @@ def _unreadable_push(cmd):
                 continue
             if toks[j] == "push" and config:
                 return "a push carrying a `-c`/`--config-env` override, which can change what it updates"
-            includes = any(_includes_config_file(v) for v in values)
+            includes = _overrides_include(opts)
             if includes and not _is_shell_op(toks[j]) and toks[j] not in _git_command_names():
                 return (
                     f"`git {toks[j]}` under an `include.path`/`includeIf` override, whose file "
                     "may define it as a push alias"
                 )
+            if includes and not _is_shell_op(toks[j]) and toks[j] not in _git_builtin_names():
+                return (
+                    f"`git {toks[j]}` under an `include.path`/`includeIf` override, a command git "
+                    "does not build in, which an `--exec-path` or a PATH change may leave to an "
+                    "alias that file defines"
+                )
             if includes and toks[j] in _COMMAND_RUNNING_GIT_SUBS:
                 return (
                     f"`git {toks[j]}` under an `include.path`/`includeIf` override, whose file "
                     "may define a push alias the git commands it runs expand"
-                )
-            if includes and (
-                any(o.startswith("--exec-path") for o in opts) or "git_exec_path" in cmd.lower()
-            ):
-                return (
-                    f"`git {toks[j]}` under an `include.path`/`includeIf` override beside an "
-                    "`--exec-path` or `GIT_EXEC_PATH`, which may leave the name to an alias that "
-                    "file defines"
                 )
             if toks[j] in _COMMAND_RUNNING_GIT_SUBS:
                 args, _ = _collect_arglist(toks, j + 1)
@@ -5602,8 +5619,29 @@ _GIT_CASES = [
         "eval " + "eval " * 9 + "'git -c include.path=/example/config status'",
         "feature/x",
         {"feature/x": set()},
+        "allow",
+        "control: a chain of evals is read once per payload, so a listed command at its end passes",
+    ),
+    (
+        "; ".join(["eval 'git -c include.path=/example/config status'"] * 300),
+        "feature/x",
+        {"feature/x": set()},
         "deny",
-        "an include inside more eval arguments than the guard reads fails closed",
+        "an include inside more eval text than the reading budget covers fails closed",
+    ),
+    (
+        "; ".join(["eval 'git -c include.path=/example/config status'"] * 6),
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: evals side by side are each read once",
+    ),
+    (
+        "bash -c '$1' _ 'git -c include.path=/example/config p'",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include key in a wrapper argument the guard does not read fails closed",
     ),
     (
         "git --exec-path=/example/libexec -c include.path=/example/config instaweb",
@@ -5616,8 +5654,15 @@ _GIT_CASES = [
         "git -c include.path=/example/config --exec-path=/example/libexec status",
         "feature/x",
         {"feature/x": set()},
+        "allow",
+        "control: a builtin runs before any alias, so an --exec-path cannot hand it to one",
+    ),
+    (
+        "PATH=/example/bin git -c include.path=/example/config lfs",
+        "feature/x",
+        {"feature/x": set()},
         "deny",
-        "an --exec-path after the include is read the same way",
+        "a command git finds on PATH may fall through to an alias where the PATH differs",
     ),
     (
         "GIT_EXEC_PATH=/example/libexec git -c include.path=/example/config instaweb",
@@ -5637,8 +5682,8 @@ _GIT_CASES = [
         "git -c include.path=/example/config instaweb",
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a listed name with no --exec-path cannot fall through to an alias",
+        "deny",
+        "a command git does not build in is read as one an exec-path or PATH change may hand to an alias",
     ),
     (
         "git --exec-path=/example/libexec status",
@@ -8438,6 +8483,16 @@ def _nested_wrapper(body, depth):
 
 _PUSH_DIR_CASES = [
     (
+        "@wt " + _nested_wrapper("git -c include.path=/example/config p", 6),
+        "deny",
+        "an include key in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git -c user.name=Example status", 6),
+        "allow",
+        "control: a body past the nesting cap holding no push and no include key passes",
+    ),
+    (
         "@rel git push",
         "deny",
         "a local branch with no push target is read whole, so release/1.0 is checked as itself",
@@ -9038,8 +9093,22 @@ def _selftest():
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     saved_names = list(_GIT_COMMAND_NAMES)
+    saved_builtins = list(_GIT_BUILTIN_NAMES)
     _GIT_COMMAND_NAMES[:] = [
-        {"checkout", "commit", "instaweb", "rebase", "reset", "status", "submodule", "worktree"}
+        {
+            "checkout",
+            "commit",
+            "instaweb",
+            "lfs",
+            "rebase",
+            "reset",
+            "status",
+            "submodule",
+            "worktree",
+        }
+    ]
+    _GIT_BUILTIN_NAMES[:] = [
+        {"checkout", "commit", "rebase", "reset", "status", "submodule", "worktree"}
     ]
     for cmd, cur, rmap, want, label in _GIT_CASES:
         got, _ = classify(
@@ -9089,6 +9158,7 @@ def _selftest():
         primary_checkout_lookup=lambda _d: False,
     )
     _GIT_COMMAND_NAMES[:] = saved_names
+    _GIT_BUILTIN_NAMES[:] = saved_builtins
     mark = "ok  " if got == "deny" else "FAIL"
     if got != "deny":
         ok = False
