@@ -2607,7 +2607,9 @@ def _rewritten_git_words(cmd):
             )
             redirected = redirected or any(_is_redir_op(toks[x]) for x in range(k + 1, j))
             if redirected and toks[k + 1] not in _GIT_TERMINAL_OPTS:
-                return "a redirection where the subcommand of `git` goes"
+                return (
+                    "a redirection where the subcommand of `git` goes or among its global options"
+                )
             for x in range(k + 1, j):
                 word = toks[x]
                 if not _is_run_time_word(word):
