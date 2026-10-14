@@ -2596,7 +2596,8 @@ def _split_free(x, toks, mask, raw):
 
 
 _QUOTE_DIR_FIX = (
-    'Quote the variable, as in git -C "$dir", so word splitting keeps its value one word, or '
+    "Word splitting may split an unquoted value into more options or a subcommand, so the guard "
+    'cannot tell what git runs. Failing closed. Quote the variable, as in git -C "$dir", or '
     "write the directory out. Where it is already quoted, write the directory out, since the "
     "guard could not read its quoting beside the rest of the command."
 )
@@ -2605,11 +2606,12 @@ _QUOTE_DIR_FIX = (
 def _dir_value_split_free(x, toks, mask, raw, text):
     """True when word splitting cannot split the directory value `toks[x]`.
 
-    Where the quote-keeping tokens are unknown, the value is spelled from a `_marked_lex`.
+    Where the quote-keeping tokens are known, `_split_free` reads the value's token from them.
+    Where they are not, the value is spelled from a `_marked_lex`.
     That lex follows a quoted span inside a word, as in `--format='%H %s'`.
     It raises on the syntax it lists whose quoting bash reads differently.
     Its spelling is trusted only where its tokens are `toks` exactly.
-    Elsewhere `_split_free` decides, denying an expansion other than one whole `$(...)`.
+    Elsewhere `_split_free` denies any expansion other than one whole `$(...)`.
     """
     if raw is None:
         try:
@@ -2715,7 +2717,8 @@ def _rewritten_git_words(cmd):
       `commit`, since `G=git; $G push` and `` `which git` push `` each run git
 
     The form comes back as a string.
-    For an unquoted directory value it comes back as a (form, fix) pair whose fix names quoting it.
+    For a directory value it cannot read as quoted, it comes back as a (form, fix) pair.
+    The fix then replaces the rest of the deny after the form.
 
     A comment on a commit only adds words the guard reads, which can only add a deny, so it is left
     alone. Four kinds of run-time word are left alone too.
@@ -2792,9 +2795,8 @@ def _rewritten_git_words(cmd):
                         x, toks, mask, raw, text
                     ) and _outside_heredoc_data(text, toks[k : x + 1]):
                         form = (
-                            f"a directory value, `{word}`, among the global options of `git` that "
-                            "the guard cannot read as quoted, which word splitting may split into "
-                            "more options or a subcommand"
+                            f"a directory value, `{word}`, before the subcommand of `git`, and "
+                            "the guard cannot read that value as quoted"
                         )
                         return form, _QUOTE_DIR_FIX
                     continue
@@ -4710,15 +4712,13 @@ def classify(
     rewritten = _rewritten_git_words(cmd)
     if rewritten:
         form, fix = rewritten if isinstance(rewritten, tuple) else (rewritten, None)
+        if fix:
+            return "deny", f"This command holds {form}. {fix}" + _handoff(cmd)
         return "deny", (
             f"This command holds {form}, which the shell rewrites or drops before git reads "
-            "it, so the guard cannot tell what the command runs. Failing closed. "
-            + (
-                fix
-                or "Run the push or commit as its own command with every word written out, and a "
-                "push with an explicit refspec (git push origin <branch>:refs/heads/<branch>)."
-            )
-            + _handoff(cmd)
+            "it, so the guard cannot tell what the command runs. Failing closed. Run the push or "
+            "commit as its own command with every word written out, and a push with an explicit "
+            "refspec (git push origin <branch>:refs/heads/<branch>)." + _handoff(cmd)
         )
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
