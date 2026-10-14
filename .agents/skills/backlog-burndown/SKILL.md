@@ -311,7 +311,7 @@ A remote branch that was pushed is reported to the maintainer rather than delete
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
 discards work.
-On either path, where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
+Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
 ### Choosing the Worker's Model Tier
