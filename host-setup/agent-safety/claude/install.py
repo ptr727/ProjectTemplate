@@ -212,8 +212,9 @@ def at(data, path):
 # Ownership needs a delimiter after the prefix, so a longer path such as `pr_review.py-custom` is not claimed.
 # These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
 MANAGED_PERMISSIONS = [
-    # The review loop's reply and resolve, the one write in that loop an agent performs.
-    # Driving it by hand needs a raw GraphQL mutation carrying a node id, which is the shape to avoid.
+    # The review loop's reply and resolve, and the `cleanup` delete of a merged pull request's head branch.
+    # Driving either by hand needs a raw mutation carrying an id, which is the shape to avoid.
+    # The `:*` rule approves any arguments, so every check the delete makes lives inside the `cleanup` subcommand.
     # The rule decides which command skips a prompt, and it bounds no checkout, since it matches the text.
     ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
 ]

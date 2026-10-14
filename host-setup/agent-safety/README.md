@@ -55,7 +55,10 @@ text says, because the harm it covers was never in the text.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
-   `--no-verify` or a `-c core.hooksPath=` override on a commit/push). Judge branch-rule cases against that branch's *live* rules, so a
+   `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
+   override on a commit or push is denied as one too. The file it pulls in may set
+   `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
+   parses, a wrapper shell's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
@@ -68,8 +71,27 @@ text says, because the harm it covers was never in the text.
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
    That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
    override. It covers a git command under an `include.path`/`includeIf` override too, where git
-   lists no such subcommand, since the included file may define it as a push alias. It also covers
-   a bare push or a `HEAD`/`@` refspec whose directory or branch may change before it runs. The
+   lists no such subcommand, since the included file may define it as a push alias. The same holds
+   where git does not build the subcommand in. An `--exec-path`, a `GIT_EXEC_PATH`, or a PATH
+   change can leave such a name to an alias. The override is also unreadable on a git command that
+   runs other git commands (`rebase`, `submodule`, `bisect`, `filter-branch`, `difftool`,
+   `mergetool`), whatever its arguments say. It reaches every git command that one runs. An `eval`
+   argument holding an include key is read as the command it runs. It also covers a bare push or a
+   `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
+   branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
+   segment dropped. A remote-tracking push target such as `origin/feature/x` is checked with its
+   remote dropped. A word the shell rewrites or drops before git reads it is denied where it can
+   change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
+   where any git command's subcommand goes, and among a push's words or a commit's. On any git
+   command it is denied among the global options where word splitting may split it. A
+   redirection where the subcommand goes or among the global options is denied too, a numbered
+   one such as `2>` included. The exception is a git whose first word is an option such as
+   `--version` that ends git there. A redirection target spanning several words on a push or a
+   commit is denied, and so is a comment among a push's words. Some words are read as they
+   stand. They are a directory option's value short of a brace expansion, a commit option's
+   double-quoted value, a commit path after `--`, and a redirection target held in one word. The
+   push and include checks also read each command with its quotes and backslashes removed and
+   `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
@@ -464,9 +486,10 @@ opt-in per clone, visible to anyone reading the repo, and bypassable on purpose,
 rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
-The two layers meet at requirement 4, which denies `--no-verify` and a `-c core.hooksPath=`
-override unconditionally, so a Claude Code session meets a committed hook it
-cannot wave through with either while a human keeps the escape hatch. They do not compose into a
+The two layers meet at requirement 4, which denies `--no-verify`, a `-c core.hooksPath=`
+override, and an include override on a commit or push unconditionally, wherever it reads them. So
+a Claude Code session meets a committed hook it
+cannot wave through with any of them while a human keeps the escape hatch. They do not compose into a
 seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
 invocation, and `--no-verify` is the documented route rather than the only one. This requirement

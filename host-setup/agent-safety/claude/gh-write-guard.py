@@ -314,24 +314,35 @@ def _live_branch_rules(owner, repo, branch):
 
 
 def _current_push_branch(cwd):
-    """Resolve the destination branch of a bare `git push` from the branch's configured push target."""
+    """Resolve the destination branches of a bare `git push` from the branch's configured push target."""
     return _read_branch(
         cwd,
         (
-            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
-            ["rev-parse", "--abbrev-ref", "HEAD"],
+            (["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], True),
+            (["rev-parse", "--abbrev-ref", "HEAD"], False),
         ),
     )
 
 
 def _head_branch(cwd):
     """Resolve the branch `HEAD` names, which a `git push <remote> HEAD` updates under the same name."""
-    return _read_branch(cwd, (["rev-parse", "--abbrev-ref", "HEAD"],))
+    return _read_branch(cwd, ((["rev-parse", "--abbrev-ref", "HEAD"], False),))
+
+
+def _branch_names(branch):
+    """The branch names a bare push's resolved branch stands for, a seam's single string included."""
+    return [branch] if isinstance(branch, str) else list(branch)
 
 
 def _read_branch(cwd, reads):
-    """The branch the first of `reads` that succeeds in `cwd` names, or None."""
-    for args in reads:
+    """The branch names the first of `reads` that succeeds in `cwd` gives, or None.
+
+    Each read is `(args, remote)`. A remote read gives a remote-tracking name such as
+    `origin/feature/x`, and its first segment is stripped as the remote name. A local read gives a
+    branch name such as `release/1.0`, which is kept whole. That name is also read with its first
+    segment stripped, as this function read every name before, so both names are checked.
+    """
+    for args, remote in reads:
         try:
             r = subprocess.run(
                 ["git", "-C", cwd or ".", *args],
@@ -348,7 +359,8 @@ def _read_branch(cwd, reads):
             return None
         ref = r.stdout.strip()
         if r.returncode == 0 and ref and ref != "HEAD":
-            return ref.split("/", 1)[1] if "/" in ref else ref
+            stripped = ref.split("/", 1)[1] if "/" in ref else ref
+            return [stripped] if remote else list(dict.fromkeys((ref, stripped)))
     return None
 
 
@@ -981,6 +993,15 @@ def _config_key(value):
 def _overrides_hooks_path(global_opts):
     """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
     return any(_config_key(v) == "core.hookspath" for v in _git_config_overrides(global_opts))
+
+
+def _overrides_include(global_opts):
+    """True when the global options pull in a config file by `include.path` or `includeIf`.
+
+    That file may set `core.hooksPath` where the guard cannot read it, so a commit or push under
+    one is read as a hooks-path override.
+    """
+    return any(_includes_config_file(v) for v in _git_config_overrides(global_opts))
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1634,6 +1655,7 @@ def _cd_dot_dot(cmd):
 
 
 _GIT_COMMAND_NAMES: list[set[str]] = []
+_GIT_BUILTIN_NAMES: list[set[str]] = []
 
 
 def _git_command_names():
@@ -1643,10 +1665,23 @@ def _git_command_names():
     possible alias, and the caller fails closed. The self-test pins the set, so its cases do not
     depend on the git that runs them.
     """
-    if not _GIT_COMMAND_NAMES:
+    return _listed_git_commands("builtins,main,others", _GIT_COMMAND_NAMES)
+
+
+def _git_builtin_names():
+    """The commands built into git, which no `--exec-path` or PATH change can hand to an alias.
+
+    It is read and pinned the way `_git_command_names` is.
+    """
+    return _listed_git_commands("builtins", _GIT_BUILTIN_NAMES)
+
+
+def _listed_git_commands(kinds, cache):
+    """The names `git --list-cmds=<kinds>` prints, read once into `cache`, or an empty set on failure."""
+    if not cache:
         try:
             r = subprocess.run(
-                ["git", "--list-cmds=builtins,main,others"],
+                ["git", f"--list-cmds={kinds}"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1657,8 +1692,8 @@ def _git_command_names():
             names = set(r.stdout.split()) if r.returncode == 0 else set()
         except Exception:  # noqa: BLE001
             names = set()
-        _GIT_COMMAND_NAMES.append(names)
-    return _GIT_COMMAND_NAMES[0]
+        cache.append(names)
+    return cache[0]
 
 
 def _check_primary_checkout_mutation(
@@ -2180,6 +2215,28 @@ def _is_short_u(arg):
 
 _INLINE_PUSH_ALIAS = re.compile(r"alias\..*\bpush\b", re.DOTALL | re.IGNORECASE)
 _GIT_INCLUDE = re.compile(r"git\b.*?include", re.DOTALL | re.IGNORECASE)
+_GIT_INCLUDE_KEY = re.compile(r"git\b.*?include(?:\.path|if\.)", re.DOTALL | re.IGNORECASE)
+_GIT_PUSH_UNQUOTED = re.compile(r"(?i:git)\b.*?\bpush\b", re.DOTALL)
+_QUOTING_CHARS = re.compile(r"[\"'\\]")
+
+
+def _unquoted(text):
+    """`text` with every quote and backslash removed, which joins the words the shell joins."""
+    return _QUOTING_CHARS.sub("", text)
+
+
+def _names_push(text):
+    """True when `text` spells a git push as written, or once its quoting is removed.
+
+    The shell joins `p''ush` into `push` before git reads it. The second reading matches `git`
+    without case, as `_is_git_exe` does, since a case-insensitive filesystem resolves `GIT` to git.
+    """
+    return bool(_GIT_PUSH.search(text) or _GIT_PUSH_UNQUOTED.search(_unquoted(text)))
+
+
+def _names_include(text, pattern=_GIT_INCLUDE):
+    """True when `pattern` matches `text` as written, or once its quoting is removed."""
+    return bool(pattern.search(text) or pattern.search(_unquoted(text)))
 
 
 def _includes_config_file(value):
@@ -2211,6 +2268,17 @@ def _unreadable_push(cmd):
     - a `-c` config value, an inline alias expanding to a push among them
     - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
       overrides names no command git lists, so it may be an alias that file defines
+    - the same file on a command git does not build in, which an `--exec-path`, a
+      `GIT_EXEC_PATH`, or a PATH change can leave to an alias that file defines
+    - the same file on one of `_COMMAND_RUNNING_GIT_SUBS`, whose child git commands it reaches, so
+      an alias it defines may push whatever the arguments name
+    - an include key in a wrapper shell argument other than the `-c` body, or in a wrapper body
+      nested past the reading cap
+
+    An `eval` argument holding an include key is read as the command it runs, for this check
+    alone. It is bounded by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST`, as the wait rule's is.
+    Once the budget is spent, the text from the next `eval` on is searched once for an include
+    key, which fails closed, and no later `eval` in that text is read.
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2220,47 +2288,392 @@ def _unreadable_push(cmd):
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
-    if any(_GIT_PUSH.search(t) for t in overflow):
+    if any(_names_push(t) or _names_include(t, _GIT_INCLUDE_KEY) for t in overflow):
         return "wrapper shells nested deeper than the guard reads"
+    budget = _EVAL_READ_BUDGET
     for text in texts:
         toks = _shell_tokens(text)
         n = len(toks)
+        quoted = _quoted_mask(text, toks) if "eval" in toks else None
+        eval_end = 0
         for k, t in enumerate(toks):
+            if t == "eval" and k >= eval_end:
+                if budget <= 0:
+                    if _names_include(" ".join(toks[k:]), _GIT_INCLUDE_KEY):
+                        return "an include override inside more `eval` text than the guard reads"
+                    eval_end = n
+                else:
+                    payload, eval_end = _eval_payload(toks, k, quoted)
+                    budget -= len(payload) + _EVAL_READ_COST
+                    if _names_include(payload):
+                        texts.append(payload)
+                        texts.extend(_embedded_wrapper_commands(payload, overflow=overflow))
+                        if any(
+                            _names_push(o) or _names_include(o, _GIT_INCLUDE_KEY) for o in overflow
+                        ):
+                            return "wrapper shells nested deeper than the guard reads"
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
                 if _is_shell_wrapper_exe(t):
                     args = _wrapper_unread_args(args)
-                if any(_GIT_PUSH.search(a) for a in args):
+                if any(_names_push(a) for a in args):
                     return (
                         f"a push inside an argument of `{t}` the guard does not read as a command"
+                    )
+                if _is_shell_wrapper_exe(t) and any(
+                    _names_include(a, _GIT_INCLUDE_KEY) for a in args
+                ):
+                    return (
+                        f"an include override inside an argument of `{t}` the guard does not read "
+                        "as a command"
                     )
             if not _is_git_exe(t):
                 continue
             j = _git_subcommand_index(toks, k)
             opts = toks[k + 1 : j]
             values = _git_config_overrides(opts)
-            if any(_GIT_PUSH.search(v) or _INLINE_PUSH_ALIAS.match(v) for v in values):
+            if any(
+                _names_push(v)
+                or _INLINE_PUSH_ALIAS.match(v)
+                or _INLINE_PUSH_ALIAS.match(_unquoted(v))
+                for v in values
+            ):
                 return "a push inside a git `-c` config value"
             config = bool(values)
             if j >= n:
                 continue
             if toks[j] == "push" and config:
                 return "a push carrying a `-c`/`--config-env` override, which can change what it updates"
-            if (
-                any(_includes_config_file(v) for v in values)
-                and not _is_shell_op(toks[j])
-                and toks[j] not in _git_command_names()
-            ):
+            includes = _overrides_include(opts)
+            if includes and not _is_shell_op(toks[j]) and toks[j] not in _git_command_names():
                 return (
                     f"`git {toks[j]}` under an `include.path`/`includeIf` override, whose file "
                     "may define it as a push alias"
                 )
+            if includes and not _is_shell_op(toks[j]) and toks[j] not in _git_builtin_names():
+                return (
+                    f"`git {toks[j]}` under an `include.path`/`includeIf` override, a command git "
+                    "does not build in, which an `--exec-path` or a PATH change may leave to an "
+                    "alias that file defines"
+                )
+            if includes and toks[j] in _COMMAND_RUNNING_GIT_SUBS:
+                return (
+                    f"`git {toks[j]}` under an `include.path`/`includeIf` override, whose file "
+                    "may define a push alias the git commands it runs expand"
+                )
             if toks[j] in _COMMAND_RUNNING_GIT_SUBS:
                 args, _ = _collect_arglist(toks, j + 1)
-                if config and any(a == "push" or _GIT_PUSH.search(a) for a in args):
+                if config and any(a == "push" or _names_push(a) for a in args):
                     return f"a push run by `git {toks[j]}` under a `-c`/`--config-env` override"
-                if any(_GIT_PUSH.search(a) for a in args):
+                if any(_names_push(a) for a in args):
                     return f"a push inside one quoted argument of `git {toks[j]}`"
+    return None
+
+
+_GIT_DIR_VALUE_OPTS = frozenset({"-C", "--git-dir", "--work-tree"})
+_COMMIT_LONG_VALUE_OPTS = frozenset(
+    {"--message", "--file", "--reuse-message", "--reedit-message", "--author", "--date"}
+    | {"--template", "--cleanup", "--fixup", "--squash", "--trailer", "--pathspec-from-file"}
+)
+_COMMIT_VALUE_OPTS = _COMMIT_LONG_VALUE_OPTS | {"-m", "-F", "-C", "-c", "-t"}
+_COMMIT_VALUE_LETTERS = "mFCct"
+_GIT_TERMINAL_OPTS = frozenset({"--version", "-v", "--help", "-h", "--html-path", "--man-path"})
+_BRACE_EXPANSION = re.compile(r"\{[^{}'\"\s]*(?:,|\.\.)[^{}'\"\s]*\}")
+
+
+def _is_run_time_word(tok):
+    """True when the shell may rewrite a token at run time.
+
+    That is a `$` or a backtick in it, a brace expansion such as `{a,b}`, or a lone parenthesis run.
+    """
+    return (
+        "$" in tok
+        or "`" in tok
+        or (tok != "" and set(tok) <= {"(", ")"})
+        or bool(_BRACE_EXPANSION.search(tok))
+    )
+
+
+def _region_end(toks, k, quoted=None):
+    """The index of the separator after `toks[k]` that ends its command.
+
+    A parenthesis the command opens, as a `$(...)` or a `<(...)` in one of its words does, is read
+    through to the one closing it, separators inside included. A closing one it did not open ends
+    the command, as a subshell's does. A token `quoted` marks as quoted is a word rather than an
+    operator, and with no mask every operator-shaped token is read as one.
+    """
+    n = len(toks)
+    depth = 0
+    e = k + 1
+    while e < n:
+        t = toks[e]
+        if _is_shell_op(t) and not (quoted and quoted[e]):
+            sep = _is_separator(t)
+            if sep and depth == 0 and t[0] not in "()":
+                break
+            depth += t.count("(") - t.count(")")
+            if depth < 0 or (sep and depth == 0 and not set(t) <= {"(", ")"}):
+                break
+        e += 1
+    return e
+
+
+def _span_end(toks, i, end):
+    """The index after a run-time word starting at `toks[i]` that spans several tokens, or `i + 1`.
+
+    A `$(...)` and a backtick substitution holding a space each lex as several tokens. The token at
+    `end` is read too, since a fused `))` closes the span and the group holding the command at once.
+    None says the span does not close by then.
+    """
+    t = toks[i]
+    if t.endswith("$") and i + 1 < end and toks[i + 1].startswith("("):
+        depth = 0
+        for x in range(i + 1, min(end + 1, len(toks))):
+            if _is_shell_op(toks[x]):
+                depth += toks[x].count("(") - toks[x].count(")")
+                if depth <= 0:
+                    return min(x + 1, end)
+        return None
+    if t.count("`") % 2:
+        for x in range(i + 1, end):
+            if toks[x].count("`") % 2:
+                return x + 1
+        return None
+    return i + 1
+
+
+def _is_commit_value_option(tok):
+    """True when a commit argument takes the next word as its value.
+
+    That is `-m`, a cluster such as `-am`, or a long value option or an abbreviation of one, since
+    git reads `--mess` as `--message` and takes a following `--` as its value.
+    """
+    if tok in _COMMIT_VALUE_OPTS:
+        return True
+    if tok.startswith("--") and len(tok) > 2 and "=" not in tok:
+        return any(o.startswith(tok) for o in _COMMIT_LONG_VALUE_OPTS)
+    return (
+        len(tok) > 1
+        and tok[0] == "-"
+        and tok[1] != "-"
+        and tok[1:].isalpha()
+        and tok[-1] in _COMMIT_VALUE_LETTERS
+    )
+
+
+def _holds_attached_value(tok):
+    """True when a run-time word sits after an option name that takes it as an attached value.
+
+    That is `--name=<value>`, or a short commit value option such as `-m<value>`.
+    """
+    cut = min((tok.index(c) for c in "$`" if c in tok), default=len(tok))
+    literal = tok[:cut]
+    if literal.startswith("--") and "=" in literal:
+        return True
+    return len(literal) >= 2 and literal[0] == "-" and literal[1] in _COMMIT_VALUE_LETTERS
+
+
+def _expands_unquoted(raw, braces_only=False):
+    """True when a token as written holds a `$`, a backtick, or a brace expansion outside double quotes.
+
+    Word splitting may split what such an expansion gives into more arguments, and a brace
+    expansion gives several words itself. One inside a `$(...)` that double quotes hold is still
+    inside those quotes. A brace expands where its `{`, its `,` or `..`, and its `}` are unquoted,
+    whatever quoted parts sit between them. With `braces_only`, only a brace expansion counts.
+    """
+    stack = []
+    i = 0
+    while i < len(raw):
+        ch = raw[i]
+        top = stack[-1] if stack else None
+        unquoted = '"' not in stack
+        if top == "'":
+            if ch == "'":
+                stack.pop()
+        elif ch == "\\":
+            i += 1
+        elif top == '"':
+            if ch == '"':
+                stack.pop()
+            elif raw.startswith("$(", i):
+                stack.append("(")
+                i += 1
+            elif ch == "`":
+                stack.append("`")
+        elif ch in "'\"":
+            stack.append(ch)
+        elif (top == "(" and ch == ")") or (top == "`" and ch == "`"):
+            stack.pop()
+        elif top in ("{", "{,") and ch == "}":
+            if stack.pop() == "{," and unquoted:
+                return True
+        elif top == "{" and (ch == "," or raw.startswith("..", i)):
+            stack[-1] = "{,"
+        elif ch == "{" and raw[i - 1 : i] != "$":
+            stack.append("{")
+        elif unquoted and not braces_only and ch in "$`":
+            return True
+        elif raw.startswith("$(", i):
+            stack.append("(")
+            i += 1
+        elif ch == "`":
+            stack.append("`")
+        i += 1
+    return False
+
+
+def _split_free(x, toks, mask, raw):
+    """True when word splitting cannot split `toks[x]`, read from the quote-keeping token where known.
+
+    Where that token is unknown, a token holding an expansion is split-free only where it opens
+    with `$(` and ends with the `)` closing it. The operator lex and `_context_lex` each split an
+    unquoted `$(` at its parenthesis, and the token union `_shell_tokens` returns then holds a
+    reading that denies it. Any other spelling, such as `"a"$Y`, is read as one that may split.
+    """
+    if raw is not None:
+        return not _expands_unquoted(raw[x])
+    tok = toks[x]
+    return not _expands_unquoted(tok) or (
+        len(tok) > 3 and tok.startswith("$(") and tok.endswith(")")
+    )
+
+
+def _rewritten_git_words(cmd):
+    """Name the form when a git command holds a rewritten word where it can change what git runs, else None.
+
+    The guard reads each word as written, while the shell expands a `$`, a backtick, or a brace
+    word and drops a comment before git reads any of them. Modeling either is open-ended, so the
+    command fails closed.
+
+    - a run-time word where the subcommand goes, on any git command, since it may expand to `push` or
+      to an option that moves the subcommand, as a backtick word ending the global options does
+    - a run-time word that word splitting may split among any git command's global options, or
+      before no subcommand word at all, since `git -c $X README.md` may expand to a commit under an
+      override, and a brace expansion in a directory option's value
+    - a redirection where the subcommand goes or among the global options, a file-descriptor number
+      or a `{name}` before it included, since the readings below then see no subcommand or pair an
+      option with the wrong value, unless git's first word is an option such as `--version` that
+      ends git there
+    - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
+      `core.hooksPath`
+    - a run-time word among a push's arguments, since it may name any refspec or remote
+    - a run-time word among a commit's arguments, since it may expand to `--no-verify`
+    - a redirection target spanning several tokens on a push or a commit, since the push and
+      bypass readings stop at its parenthesis and every later word goes unread
+    - a comment among a push's words, since the shell drops what the guard reads as a refspec or a
+      flag there, which can turn a bare push into one naming another branch
+
+    A comment on a commit only adds words the guard reads, which can only add a deny, so it is left
+    alone. Four kinds of run-time word are left alone too. One is the value of a global option
+    naming a directory before a subcommand word, unquoted too, since `-C $dir` is the common
+    spelling. What word splitting makes of an unquoted one is not read, and a brace expansion in
+    one is denied. One is a commit
+    option's value whose expansions sit inside double quotes, since word splitting cannot then make
+    it an option, as in `-m "$(cat <<'EOF' ...)"`. One is a commit path after `--`. One is a
+    redirection target held in one token, such as `2>"$LOG"`.
+    Only a git word in a command's position counts, so a `grep git "$dir"` is no git command, and
+    that test is `_runs_as_command`'s. A git word right after an unquoted `(` counts too, since a
+    process substitution such as `<(git ...)` runs it whatever command reads the result.
+    """
+    for text in [cmd, *_embedded_wrapper_commands(cmd)]:
+        toks = _shell_tokens(text)
+        mask = raw = None
+        masked = False
+        for k, t in enumerate(toks):
+            if not _is_git_exe(t):
+                continue
+            if not masked:
+                mask, raw, masked = _quoted_mask(text, toks), _quote_kept_tokens(text, toks), True
+            end = _region_end(toks, k, mask)
+            j = min(_git_subcommand_index(toks, k), end)
+            if j == k + 1 and j >= end:
+                continue
+            opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
+            if not opened and not _runs_as_command(toks, k, mask):
+                continue
+            if j >= end:
+                if any(
+                    _is_run_time_word(toks[x]) and not _split_free(x, toks, mask, raw)
+                    for x in range(k + 1, end)
+                ):
+                    return "a run-time word among the options of a `git` with no subcommand word"
+                continue
+            sub = toks[j]
+            if _is_run_time_word(sub):
+                return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
+            redirected = _is_redir_op(sub) or (
+                (sub.isdigit() or _NAMED_FD_RE.match(sub))
+                and j + 1 < end
+                and _is_redir_op(toks[j + 1])
+            )
+            redirected = redirected or any(_is_redir_op(toks[x]) for x in range(k + 1, j))
+            if redirected and toks[k + 1] not in _GIT_TERMINAL_OPTS:
+                return (
+                    "a redirection where the subcommand of `git` goes or among its global options"
+                )
+            for x in range(k + 1, j):
+                word = toks[x]
+                if not _is_run_time_word(word):
+                    continue
+                if toks[x - 1] in _GIT_DIR_VALUE_OPTS or word.startswith(
+                    ("--git-dir=", "--work-tree=")
+                ):
+                    if (
+                        _expands_unquoted(raw[x], braces_only=True)
+                        if raw is not None
+                        else _BRACE_EXPANSION.search(word)
+                    ):
+                        return f"a brace expansion, `{word}`, among the global options of `git`"
+                    continue
+                if not _split_free(x, toks, mask, raw):
+                    return f"a run-time word, `{word}`, that may split among the global options of `git`"
+            if sub not in ("push", "commit"):
+                continue
+            if sub == "push" and any(
+                toks[x].startswith("#") and not (mask and mask[x]) for x in range(k + 1, end)
+            ):
+                return "a comment among the words of `git push`"
+            x = k + 1
+            while x < j:
+                opt = toks[x]
+                if opt in _GIT_DIR_VALUE_OPTS and x + 1 < j and _span_end(toks, x + 1, j) == x + 2:
+                    x += 2
+                    continue
+                if not opt.startswith(("--git-dir=", "--work-tree=")) and _is_run_time_word(opt):
+                    return f"a run-time word, `{opt}`, among the global options of `git {sub}`"
+                x += 1
+            x = j + 1
+            after_dashes = False
+            while x < end:
+                arg = toks[x]
+                if _is_redir_op(arg):
+                    x += 1
+                    if x < end and not _is_shell_op(toks[x]):
+                        if _span_end(toks, x, end) != x + 1:
+                            return (
+                                f"a redirection target spanning several words among the words of "
+                                f"`git {sub}`"
+                            )
+                        x += 1
+                    continue
+                if sub == "commit":
+                    after_dashes = after_dashes or arg == "--"
+                    if after_dashes:
+                        x += 1
+                        continue
+                    if (
+                        _is_commit_value_option(arg)
+                        and x + 1 < end
+                        and _split_free(x + 1, toks, mask, raw)
+                    ):
+                        x += 2
+                        continue
+                    if _holds_attached_value(arg) and _split_free(x, toks, mask, raw):
+                        x += 1
+                        continue
+                if _is_run_time_word(arg):
+                    return f"a run-time word, `{arg}`, among the arguments of `git {sub}`"
+                x += 1
     return None
 
 
@@ -2326,7 +2739,7 @@ def _push_invocations(cmd):
 
 
 def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=False):
-    """The branch a bare push in the directory it runs in targets, or `_UNRESOLVED`.
+    """The branch names a bare push in the directory it runs in targets, or `_UNRESOLVED`.
 
     A directory the command moves to is read, never the session's own, and one that does not
     resolve to a directory, or that a later `cd` may have changed, is unresolved. The shell runs the
@@ -2428,7 +2841,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 if b is _UNRESOLVED:
                     results.append(("unresolved", leading_cd or " ".join(c_dirs)))
                 elif b:
-                    targets.append((ops, b))
+                    targets.extend((ops, name) for name in _branch_names(b))
                 continue
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/") :]
@@ -2453,7 +2866,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                     results.append(("unresolved", leading_cd or " ".join(c_dirs)))
                     continue
                 if b:
-                    targets = [(push_ops or {"update"}, b)]
+                    targets = [(push_ops or {"update"}, name) for name in _branch_names(b)]
         results.extend((op, br) for ops, br in targets for op in sorted(ops))
         if matched_ops:
             matched = [*_PROTECTED_DEFAULT_ORDER, *(br for _ops, br in targets)]
@@ -2518,6 +2931,17 @@ def _check_bypass_flags(cmd):
             "This overrides core.hooksPath for a commit or push, which runs whatever hooks that directory "
             "holds instead of the repository's, and none where it holds none. That is a hook bypass; run "
             "the command without the override." + _handoff(cmd)
+        )
+    if any(
+        _overrides_include(opts)
+        for sub in ("commit", "push")
+        for t in texts
+        for opts, _ in _git_subcommand_invocations(t, sub)
+    ):
+        return "deny", (
+            "This pulls a config file into a commit or push by an include.path or includeIf override. "
+            "The guard does not read that file, which may set core.hooksPath and so bypass the "
+            "repository's hooks. Run the command without the override." + _handoff(cmd)
         )
     return "allow", ""
 
@@ -4106,10 +4530,19 @@ def classify(
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
+    # A word the shell rewrites before git reads it can hide a push target or a commit bypass, so it fails closed.
+    rewritten = _rewritten_git_words(cmd)
+    if rewritten:
+        return "deny", (
+            f"This command holds {rewritten}, which the shell rewrites or drops before git reads "
+            "it, so the guard cannot tell what the command runs. Failing closed. Run the push or "
+            "commit as its own command with every word written out, and a push with an explicit "
+            "refspec (git push origin <branch>:refs/heads/<branch>)." + _handoff(cmd)
+        )
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
-    if _GIT_PUSH.search(cmd) or _GIT_INCLUDE.search(cmd):
-        if split_word and _GIT_PUSH.search(cmd):
+    if _names_push(cmd) or _names_include(cmd):
+        if split_word and _names_push(cmd):
             return "deny", (
                 "This push sits in a command with a word split by a backslash-newline, which the shell joins "
                 "into one word the guard cannot read, so a hidden cd could redirect the push. Write each "
@@ -5440,6 +5873,517 @@ _GIT_CASES = [
         {"develop": _CODE_RULES},
         "allow",
         "control: an alias cannot shadow a command git lists, so an include on status defines no push alias",
+    ),
+    (
+        "git -c include.path=/example/config commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an included file may set core.hooksPath for a commit, read as the hooks-path override it may be",
+    ),
+    (
+        "git -c includeIf.gitdir:/example/.path=/example/config commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an includeIf file on a commit is read the same way",
+    ),
+    (
+        "git --config-env=include.path=EXAMPLE_CONFIG commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include set through --config-env on a commit is read the same way",
+    ),
+    (
+        "bash -c 'git -c include.path=/example/config commit -m x'",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include on a commit inside a wrapper body is read too",
+    ),
+    (
+        "git -c user.name=Example commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: an override that pulls in no file leaves a commit's hooks readable",
+    ),
+    (
+        "git -c include.path=/example/config rebase --exec 'git p origin develop' HEAD~1",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "an include reaches the git commands rebase runs, so an alias it defines may push",
+    ),
+    (
+        "git -c include.path=/example/config submodule foreach 'git p origin develop'",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "an include reaches the git commands submodule foreach runs too",
+    ),
+    (
+        "git -c include.path=/example/config rebase --continue",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include on a command-running subcommand is unreadable whatever its arguments say",
+    ),
+    (
+        "git -c user.name=Example rebase --exec 'make test' HEAD~1",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a plain override on rebase with no push word stays allowed",
+    ),
+    (
+        "eval 'git -c include.path=/example/config p'",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an eval argument holding an include key is read as the command it runs",
+    ),
+    (
+        "eval 'git -c include.path=/example/config rebase --exec true HEAD~1'",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include on rebase inside an eval argument is read too",
+    ),
+    (
+        "eval \"bash -c 'git -c include.path=/example/config p'\"",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a wrapper body inside an eval argument is read too",
+    ),
+    (
+        "eval 'git -c include.path=/example/config status'",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: an eval argument read as a command holds no push alias where the command is listed",
+    ),
+    (
+        "eval " + "eval " * 9 + "'git -c include.path=/example/config status'",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a chain of evals is read once per payload, so a listed command at its end passes",
+    ),
+    (
+        "; ".join(["eval 'git -c include.path=/example/config status'"] * 300),
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include inside more eval text than the reading budget covers fails closed",
+    ),
+    (
+        "; ".join(["eval 'git -c include.path=/example/config status'"] * 6),
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: evals side by side are each read once",
+    ),
+    (
+        "bash -c '$1' _ 'git -c include.path=/example/config p'",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include key in a wrapper argument the guard does not read fails closed",
+    ),
+    (
+        "git --exec-path=/example/libexec -c include.path=/example/config instaweb",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an --exec-path does not make a command git does not build in readable",
+    ),
+    (
+        "git -c include.path=/example/config --exec-path=/example/libexec status",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a builtin runs before any alias, so an --exec-path cannot hand it to one",
+    ),
+    (
+        "PATH=/example/bin git -c include.path=/example/config lfs",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a PATH prefix does not make a command git does not build in readable",
+    ),
+    (
+        "GIT_EXEC_PATH=/example/libexec git -c include.path=/example/config instaweb",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a GIT_EXEC_PATH prefix does not make a command git does not build in readable",
+    ),
+    (
+        "export GIT_EXEC_PATH=/example/libexec; bash -c 'git -c include.path=/example/config instaweb'",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "nor does an exported GIT_EXEC_PATH before a wrapper body",
+    ),
+    (
+        "git -c include.path=/example/config instaweb",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a command git does not build in is read as one an exec-path or PATH change may hand to an alias",
+    ),
+    (
+        "git --exec-path=/example/libexec status",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: an --exec-path with no include pulls in no alias",
+    ),
+    (
+        "git p''ush origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push word split by quotes is read as the push the shell joins it into",
+    ),
+    (
+        'git "pu"sh origin develop',
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push word split by a double-quoted part is read the same way",
+    ),
+    (
+        "GIT push origin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an uppercase GIT reaches the push check, as a case-insensitive filesystem resolves it to git",
+    ),
+    (
+        "git -c 'inc''lude.path=/example/config' p",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an include key split by quotes reaches the include check",
+    ),
+    (
+        "eval \"git p''ush origin develop\"",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quote-split push inside an eval argument is still a push the guard does not read",
+    ),
+    (
+        "git push origin $(echo develop)",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a substitution as a refspec is a run-time word the guard cannot read",
+    ),
+    (
+        "git push origin `echo develop`",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a backtick refspec is a run-time word too",
+    ),
+    (
+        "B=develop; git push origin $B",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a variable refspec is a run-time word too",
+    ),
+    (
+        'git push origin "$B"',
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted variable refspec still expands at run time",
+    ),
+    (
+        "git push origin dev${X}elop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "an empty expansion inside a refspec is a run-time word",
+    ),
+    (
+        "git push origin $'develop'",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "an ANSI-C quoted refspec is a run-time word",
+    ),
+    (
+        "bash -c 'git push origin \"$1\"' _ develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a positional parameter as a refspec in a wrapper body is a run-time word",
+    ),
+    (
+        "git $(echo push) origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a substitution where the subcommand goes may expand to push",
+    ),
+    (
+        "git push # feature/y",
+        "develop",
+        {"develop": _CODE_RULES, "feature/y": set()},
+        "deny",
+        "a comment's words are not read as the refspecs of a bare push of develop",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null `true` commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a backtick word ending the global options does not hide a hooks-path override on a commit",
+    ),
+    (
+        "git commit $(echo --no-verify) -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a substitution among a commit's arguments may expand to --no-verify",
+    ),
+    (
+        "git commit -m $MSG",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted commit message variable may split into more options",
+    ),
+    (
+        'git -c "$X" commit -m x',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a run-time config override on a commit may set core.hooksPath",
+    ),
+    (
+        'git -C "$W" push origin feature/x',
+        None,
+        {"feature/x": set()},
+        "allow",
+        "control: a run-time directory value leaves an explicit push readable",
+    ),
+    (
+        "git commit -m \"$(cat <<'EOF'\nFix the example's edge\n\nCo-Authored-By: Example <noreply@example.com>\nEOF\n)\"",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a double-quoted heredoc commit message cannot split into options",
+    ),
+    (
+        'git commit -m "$(cat <<\'EOF\'\nQuote " once\nEOF\n)"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a heredoc commit message holding one double quote is still read as quoted",
+    ),
+    (
+        'git commit -m "$MSG" -- "$F"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a quoted message variable and a path after -- leave a commit readable",
+    ),
+    (
+        'git commit -m "fix" # note',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a comment on a commit only adds words the guard reads",
+    ),
+    (
+        'grep -rn git "$W"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: git as an argument of grep is no git command",
+    ),
+    (
+        'git push origin feature/x 2>&1 | tee "$LOG"',
+        None,
+        {"feature/x": set()},
+        "allow",
+        "control: a run-time word in a command the push pipes into is not a refspec",
+    ),
+    (
+        "Y=' --no-veri'fy; git commit -m \"a\"$Y",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted expansion after a quoted part of a commit message may split into more options",
+    ),
+    (
+        "X='core.hooksPath=/dev/null commit -m x'; git -c $X",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted option value on a git with no subcommand word may split into a commit",
+    ),
+    (
+        "git commit --mess -- $(printf -- --no-veri%s fy)",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an abbreviated value option takes a following -- as its value, so later words are options",
+    ),
+    (
+        "git {push,origin} develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a brace expansion where the subcommand goes may expand to push",
+    ),
+    (
+        "git commit -m x {--no-verify,--quiet}",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion among a commit's arguments may expand to --no-verify",
+    ),
+    (
+        "git push origin feature/x > $(printf a) develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a redirection target spanning several words hides the push's later refspecs",
+    ),
+    (
+        "git push origin feature/x < <(printf a) develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a process substitution redirection hides the push's later refspecs too",
+    ),
+    (
+        'git push origin feature/x 2>"$LOG"',
+        None,
+        {"feature/x": set()},
+        "allow",
+        "control: a run-time redirection target held in one word is not a refspec",
+    ),
+    (
+        "git commit -m {x,'--no-veri'fy}",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion holding a quoted part in a commit value still gives more words",
+    ),
+    (
+        "X='core.hooksPath=/dev/null commit -m x --'; git -c $X README.md",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted config value may split into the subcommand, whatever literal word follows",
+    ),
+    (
+        "git -c {core.hooksPath=/dev/null,commit} -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion in a config value may give the subcommand",
+    ),
+    (
+        "git -C {.,push} origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a brace expansion in a directory value may give the subcommand",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null > a commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a redirection where the subcommand goes hides a commit under an override",
+    ),
+    (
+        'git -C "$W" -c user.name="$N" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: quoted run-time values before a read-only subcommand cannot split",
+    ),
+    (
+        "git 2>/dev/null push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a numbered redirection where the subcommand goes hides a push",
+    ),
+    (
+        "git -c core.hooksPath=/dev/null 2>/dev/null commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a numbered redirection where the subcommand goes hides a commit under an override",
+    ),
+    (
+        "git --version >/dev/null 2>&1",
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a redirection after --version, which ends git before any subcommand",
+    ),
+    (
+        "git --namespace -h > a commit --no-verify -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a terminal option taken as another option's value does not end git",
+    ),
+    (
+        "git {fd}>/dev/null push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a named file descriptor redirection where the subcommand goes hides a push",
+    ),
+    (
+        "git -c > a core.hooksPath=/dev/null commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a redirection among the global options pairs an option with the word after its target",
+    ),
+    (
+        "git -C > a . push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a redirection after -C leaves the push readable only to the shell",
+    ),
+    (
+        'git push origin feature/x ")" $(echo develop)',
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted parenthesis is a word, so the scan reaches the substitution after it",
+    ),
+    (
+        'git commit -m ")" -m ";"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: quoted operator characters as commit message values are words",
+    ),
+    (
+        "(git push origin feature/x)",
+        None,
+        {"feature/x": set()},
+        "allow",
+        "control: a subshell's closing parenthesis ends the push",
     ),
 ]
 
@@ -8232,6 +9176,36 @@ def _nested_wrapper(body, depth):
 
 _PUSH_DIR_CASES = [
     (
+        "@wt " + _nested_wrapper("git -c include.path=/example/config p", 6),
+        "deny",
+        "an include key in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git -c user.name=Example status", 6),
+        "allow",
+        "control: a body past the nesting cap holding no push and no include key passes",
+    ),
+    (
+        "@rel git push",
+        "deny",
+        "a local branch with no push target is read whole, so release/1.0 is checked as itself",
+    ),
+    (
+        "@rel git push origin HEAD",
+        "deny",
+        "the branch HEAD names is read whole too",
+    ),
+    (
+        "cd {rel} && git push",
+        "deny",
+        "a leading cd into the release worktree reads its branch whole",
+    ),
+    (
+        "@wt git push origin HEAD",
+        "allow",
+        "control: a feature branch read whole and stripped matches no protected rule",
+    ),
+    (
         "@wt cd -P {base} && git push",
         "deny",
         "an option-bearing cd is not modeled, so the push is unresolved",
@@ -8689,6 +9663,7 @@ def _push_dir_selftest(origin):
     try:
         base = os.path.join(root, "base")
         wt = os.path.join(root, "wt")
+        rel = os.path.join(root, "rel")
         missing = os.path.join(root, "missing")
         git = [
             "git",
@@ -8703,6 +9678,7 @@ def _push_dir_selftest(origin):
             [*git, "init", "-q", "-b", "develop", base],
             [*git, "-C", base, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
             [*git, "-C", base, "worktree", "add", "-q", "-b", "feature/example", wt],
+            [*git, "-C", base, "worktree", "add", "-q", "-b", "release/1.0", rel],
         )
         for step in steps:
             try:
@@ -8717,13 +9693,22 @@ def _push_dir_selftest(origin):
         os.makedirs(os.path.join(base, "sub2"))
         os.symlink(os.path.join(base, "sub2"), os.path.join(wt, "t"))
         rules = lambda br: (
-            {"pull_request", "non_fast_forward"} if br in ("develop", "main") else set()
+            {"pull_request", "non_fast_forward"}
+            if br in ("develop", "main", "release/1.0")
+            else set()
         )
         for template, want, label in _PUSH_DIR_CASES:
             session = base
             if template.startswith("@wt "):
                 template, session = template[4:], wt
-            cmd = template.replace("{wt}", wt).replace("{base}", base).replace("{missing}", missing)
+            elif template.startswith("@rel "):
+                template, session = template[5:], rel
+            cmd = (
+                template.replace("{wt}", wt)
+                .replace("{rel}", rel)
+                .replace("{base}", base)
+                .replace("{missing}", missing)
+            )
             got, _ = classify(
                 cmd,
                 cwd=session,
@@ -8801,7 +9786,23 @@ def _selftest():
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
     saved_names = list(_GIT_COMMAND_NAMES)
-    _GIT_COMMAND_NAMES[:] = [{"checkout", "commit", "reset", "status", "worktree"}]
+    saved_builtins = list(_GIT_BUILTIN_NAMES)
+    _GIT_COMMAND_NAMES[:] = [
+        {
+            "checkout",
+            "commit",
+            "instaweb",
+            "lfs",
+            "rebase",
+            "reset",
+            "status",
+            "submodule",
+            "worktree",
+        }
+    ]
+    _GIT_BUILTIN_NAMES[:] = [
+        {"checkout", "commit", "rebase", "reset", "status", "submodule", "worktree"}
+    ]
     for cmd, cur, rmap, want, label in _GIT_CASES:
         got, _ = classify(
             cmd,
@@ -8850,6 +9851,7 @@ def _selftest():
         primary_checkout_lookup=lambda _d: False,
     )
     _GIT_COMMAND_NAMES[:] = saved_names
+    _GIT_BUILTIN_NAMES[:] = saved_builtins
     mark = "ok  " if got == "deny" else "FAIL"
     if got != "deny":
         ok = False
