@@ -134,7 +134,13 @@ function Invoke-Captured {
         if (-not $found) { return [pscustomobject]@{ ExitCode = 127; Output = "$Command not found"; TimedOut = $false } }
         $resolved = $found.Source
     }
-    $psi = [Diagnostics.ProcessStartInfo]::new($resolved)
+    # A batch shim, the form npm installs a command as, cannot be started directly, so cmd.exe runs it.
+    if ($resolved -match '\.(cmd|bat)$') {
+        $psi = [Diagnostics.ProcessStartInfo]::new($(if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' }))
+        foreach ($argument in @('/d', '/c', $resolved)) { $psi.ArgumentList.Add($argument) }
+    } else {
+        $psi = [Diagnostics.ProcessStartInfo]::new($resolved)
+    }
     foreach ($argument in $Arguments) { $psi.ArgumentList.Add($argument) }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -197,7 +203,7 @@ function Invoke-Installer {
     }
     $file = Join-Path $script:TMP_DIR (([Uri]$Url).Host + '.installer.ps1')
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $file
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $file -TimeoutSec $script:STEP_TIMEOUT
     } catch {
         warn "Could not fetch ${Url}: $($_.Exception.Message)"
         return 1
@@ -305,8 +311,11 @@ function Add-HerdrNote {
     } elseif ($names.Count -gt 0) {
         note 'herdr' "integrations outdated: $($names -join ' '), -Upgrade reinstalls them"
     }
-    if ((Get-HerdrRestartPending) -eq $true) {
+    $pending = Get-HerdrRestartPending
+    if ($pending -eq $true) {
         note 'herdr' 'a running server is on the previous binary, restart it when no pane needs it: herdr server stop'
+    } elseif ($null -eq $pending) {
+        note 'herdr' 'could not read whether a running server needs a restart'
     }
 }
 
@@ -477,8 +486,13 @@ function Invoke-ToolUpgrade {
     # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
     if ($ToolName -eq 'herdr') {
         if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
-        if (-not $script:DRY_RUN -and (Get-HerdrRestartPending) -eq $true) {
-            log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
+        if (-not $script:DRY_RUN) {
+            $pending = Get-HerdrRestartPending
+            if ($pending -eq $true) {
+                log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
+            } elseif ($null -eq $pending) {
+                log 'herdr: could not read whether a running server needs a restart'
+            }
         }
     }
 }

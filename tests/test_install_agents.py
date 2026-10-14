@@ -40,7 +40,7 @@ exit 0
 
 
 @unittest.skipUnless(sys.platform == "linux", "runs the Linux updater")
-@unittest.skipIf(os.geteuid() == 0, "the updater refuses root by design")
+@unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "the updater refuses root by design")
 class TestInstallAgents(unittest.TestCase):
     """`install-agents.sh`, run whole against stub tools."""
 
@@ -183,6 +183,8 @@ class TestInstallAgents(unittest.TestCase):
             with self.subTest(status=unreadable):
                 (self.dir / "status.json").write_text(unreadable, encoding="utf-8")
                 self.assertIsNone(self.report()["herdr"]["restart_pending"])
+        text = self.run_script("--report")
+        self.assertIn("could not read whether a running server needs a restart", text.stdout)
 
     def test_report_shape(self) -> None:
         self.stub("claude", "2.1.299 (Claude Code)")
@@ -243,6 +245,8 @@ SCRIPT_PS = ROOT / "host-setup" / "windows" / "install-agents.ps1"
 
 
 @unittest.skipUnless(PWSH, "needs pwsh to run the Windows updater")
+# The stubs are bash scripts, and a hosted Windows runner is elevated, which the updater refuses by design, so this harness runs the Windows script under pwsh on a POSIX host.
+@unittest.skipIf(sys.platform == "win32", "drives the Windows updater with POSIX stub tools")
 class TestInstallAgentsWindows(unittest.TestCase):
     """`install-agents.ps1`, run whole under pwsh on this host against stub tools.
 
@@ -416,6 +420,8 @@ class TestInstallAgentsWindows(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 tools = {entry["tool"]: entry for entry in json.loads(result.stdout)["tools"]}
                 self.assertIsNone(tools["herdr"]["restart_pending"])
+        text = self.run_script("-Report")
+        self.assertIn("could not read whether a running server needs a restart", text.stdout)
 
     def test_list_and_help_name_the_tools(self) -> None:
         listed = self.run_script("-List")

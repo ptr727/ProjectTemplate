@@ -203,7 +203,7 @@ run_installer() {
         warn "curl is not installed, so $url cannot be fetched"
         return 1
     }
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 "$url" -o "$file" || return 1
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 --max-time "$STEP_TIMEOUT" "$url" -o "$file" || return 1
     timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
 }
 
@@ -325,9 +325,12 @@ herdr_note() {
     elif [[ -n $names ]]; then
         note herdr "integrations outdated: ${names//$'\n'/ }, --upgrade reinstalls them"
     fi
-    if herdr_restart_pending; then
-        note herdr "a running server is on the previous binary, restart it when no pane needs it: herdr server stop"
-    fi
+    local rc=0
+    herdr_restart_pending || rc=$?
+    case $rc in
+    0) note herdr "a running server is on the previous binary, restart it when no pane needs it: herdr server stop" ;;
+    2) note herdr "could not read whether a running server needs a restart" ;;
+    esac
 }
 
 # --- cswap ---
@@ -451,8 +454,13 @@ upgrade_tool() {
     # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
     if [[ $tool == "herdr" ]]; then
         herdr_post || FAILED+=("herdr integrations")
-        if [[ $DRY_RUN == false ]] && herdr_restart_pending; then
-            log "herdr: a running server is on the previous binary and is left running, restart it when no pane needs it"
+        if [[ $DRY_RUN == false ]]; then
+            local rc=0
+            herdr_restart_pending || rc=$?
+            case $rc in
+            0) log "herdr: a running server is on the previous binary and is left running, restart it when no pane needs it" ;;
+            2) log "herdr: could not read whether a running server needs a restart" ;;
+            esac
         fi
     fi
 }
