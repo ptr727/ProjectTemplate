@@ -203,7 +203,7 @@ run_installer() {
         warn "curl is not installed, so $url cannot be fetched"
         return 1
     }
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 --max-time "$STEP_TIMEOUT" "$url" -o "$file" || return 1
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 --max-time "$STEP_TIMEOUT" --retry-max-time "$STEP_TIMEOUT" "$url" -o "$file" || return 1
     timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
 }
 
