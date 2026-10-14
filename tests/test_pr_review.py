@@ -5171,7 +5171,7 @@ class TestTableFindings(GqlCase):
 
     def test_an_unrelated_annotation_sharing_one_word_is_not_matched(self) -> None:
         body = with_table_findings(
-            TABLE_LISTED + " **Moderate finding (1 vote):** off-by-one in the loop."
+            TABLE_LISTED + " **Moderate finding (1 vote):** validation skipped on empty input."
         )
         self.assertIn("FINDINGS WITH NO THREAD (1)", self.digest(body))
 
@@ -5182,7 +5182,7 @@ class TestTableFindings(GqlCase):
         assert match is not None
         self.assertEqual("x", match.group(2))
 
-    def test_an_unaddressed_count_and_a_suppressed_count_in_the_headline(self) -> None:
+    def test_an_unaddressed_count_in_the_headline(self) -> None:
         self.assertEqual(3, pr_review.headline_findings("Three findings are not yet addressed."))
         self.assertIsNone(
             pr_review.headline_findings("Two low-confidence findings were suppressed.")
