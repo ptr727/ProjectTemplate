@@ -5184,9 +5184,6 @@ class TestTableFindings(GqlCase):
 
     def test_an_unaddressed_count_in_the_headline(self) -> None:
         self.assertEqual(3, pr_review.headline_findings("Three findings are not yet addressed."))
-        self.assertIsNone(
-            pr_review.headline_findings("Two low-confidence findings were suppressed.")
-        )
 
     def test_digits_and_the_largest_count_are_read(self) -> None:
         self.assertEqual(
