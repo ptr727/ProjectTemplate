@@ -2608,14 +2608,23 @@ _QUOTE_DIR_FIX = (
 def _dir_value_split_free(x, k, toks, mask, raw, text):
     """True when word splitting cannot split the directory value `toks[x]` of the git `toks[k]`.
 
-    Where the quote-keeping tokens are unknown, the value is spelled from `_context_lex`.
+    Where the quote-keeping tokens are unknown, the value is spelled by index from a `_marked_lex`.
+    That lex follows a quoted span inside a word, as in `--format='%H %s'`.
+    It spells by index only where its tokens are `toks` exactly, the POSIX lex having read them.
+    Where they are not, `toks` holds the tokens of `_context_lex` too, among others.
+    The value is then spelled from that lex at every run of words from the git word to the value.
     That lex reads a comment, a heredoc body, and nested quoting as bash does.
-    It also follows a quoted span inside a word, as in `--format='%H %s'`.
-    The value is spelled at every run of words from the git word to the value.
     Every spelling found must be split-free, and one in a heredoc body has none, so it is not.
+    A run of words spelled differently there is read through its own `_context_lex` copy in `toks`.
     Where none is found, `_split_free` reads the token without its quotes.
     """
     if raw is None:
+        try:
+            spelled = _marked_lex(text, spelled=True)
+        except ValueError:
+            spelled = None
+        if spelled is not None and [t for t, _m, _s in spelled] == toks:
+            return not _expands_unquoted(spelled[x][2])
         window = toks[k : x + 1]
         spans = {}
         try:
@@ -3329,7 +3338,7 @@ class _UnmodeledSyntax(ValueError):
 _HEREDOC_OPERATOR = re.compile(r"(?<!<)<<(?!<)")
 
 
-def _marked_lex(cmd):
+def _marked_lex(cmd, spelled=False):
     """Tokenize `cmd` as `_operator_lex` does, pairing each token with whether any of it was quoted.
 
     It reads quotes and escapes as that POSIX lex does, so an escape cannot shift its tokens.
@@ -3343,17 +3352,19 @@ def _marked_lex(cmd):
     A `#` starting a word opens a comment, which hides every character up to the newline.
     An unquoted heredoc fed to a shell is read twice, the first unescaping what the second parses.
     Any `<<` outside a `<<<` raises, quoted or in arithmetic too, since no heredoc then goes unseen.
+    With `spelled`, each pair also carries the token as `cmd` spells it, its quotes kept.
+    The syntax above that only bash reads is then read as the POSIX lex reads it, raising nothing.
     """
-    if _HEREDOC_OPERATOR.search(cmd):
+    if not spelled and _HEREDOC_OPERATOR.search(cmd):
         raise _UnmodeledSyntax("heredoc")
     out = []
-    tok, marked, state, i = "", False, None, 0
+    tok, marked, state, i, begin = "", False, None, 0, 0
     while i < len(cmd):
         ch = cmd[i]
         i += 1
-        if state != "'" and ch == "`":
+        if not spelled and state != "'" and ch == "`":
             raise _UnmodeledSyntax("backtick substitution")
-        if state == '"' and ch == "$" and cmd[i : i + 1] in ("(", "{"):
+        if not spelled and state == '"' and ch == "$" and cmd[i : i + 1] in ("(", "{"):
             raise _UnmodeledSyntax("nested quoting inside double quotes")
         if state in ("'", '"'):
             if ch == state:
@@ -3370,15 +3381,17 @@ def _marked_lex(cmd):
             tok += ch
             continue
         if state is not None and (ch in " \t\r" or state == "op" or ch in _SHELL_OP_CHARS):
-            out.append((tok, marked))
+            out.append((tok, marked, cmd[begin : i - 1]))
             tok, marked, state = "", False, None
         if ch in " \t\r":
             continue
-        if ch == "#" and state is None:
+        if state is None:
+            begin = i - 1
+        if not spelled and ch == "#" and state is None:
             raise _UnmodeledSyntax("comment")
         if ch in _SHELL_OP_CHARS:
             tok, state = ch, "op"
-        elif ch == "'" and tok.endswith("$"):
+        elif not spelled and ch == "'" and tok.endswith("$"):
             raise _UnmodeledSyntax("ANSI-C quoting")
         elif ch in "'\"":
             marked, state = True, ch
@@ -3392,8 +3405,8 @@ def _marked_lex(cmd):
     if state in ("'", '"'):
         raise ValueError("No closing quotation")
     if state is not None:
-        out.append((tok, marked))
-    return out
+        out.append((tok, marked, cmd[begin:]))
+    return out if spelled else [(t, m) for t, m, _ in out]
 
 
 def _quoted_mask(cmd, toks):
@@ -6727,6 +6740,20 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "a quote in a heredoc body does not hide an unquoted -C value behind a quoted one",
+    ),
+    (
+        "git log --format='%H %s' -1; git -C \"\\$.\\$D\" status; git -C $'.'$D status",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a differently spelled quoted decoy does not vouch for an unquoted -C value",
+    ),
+    (
+        "echo a'b c'; git -C \"\\`echo\" status; git -C `echo . commit -n -m` status",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a quoted backtick decoy does not vouch for an unquoted backtick -C value",
     ),
     (
         "echo $'a\\'b'; git -C \"$W\" status",
