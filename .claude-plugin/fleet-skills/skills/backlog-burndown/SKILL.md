@@ -144,6 +144,10 @@ except how the question travels. It goes to the maintainer at the end of ranking
 at that moment and in a prompt of its own otherwise, rather than waiting for a stop that may not
 come. It stays unranked until answered.
 
+An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
+The round's report names it as stopped.
+That release is recorded in the group's claim comment before the issue is ranked again.
+
 ## Grouping and File Claims
 
 Group so that **no file is claimed by two live groups at once.** This is the rule the skill exists
@@ -208,10 +212,10 @@ for, and it binds harder than any throughput target.
   neither read is available the set is unknown rather than empty, and an unknown set collides with
   every group, so ask the maintainer what that branch holds per "Raising a Blocked Question".
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
-  needing a file another group holds stops and reports rather than editing it, and the
-  orchestrator decides which group keeps the file, then tells the loser which of three things to
-  do rather than leaving it to choose: narrow its change to drop that file, park until the holder
-  merges, or abandon its branch and return the issue to the next round's ranking. Where the loser
+  needing a file another group holds stops and reports rather than editing it. The orchestrator
+  decides which group keeps the file and tells the loser what to do rather than leaving it to
+  choose. The loser narrows its change to drop that file, parks until the holder merges, or
+  abandons its branch per "Cleanup Is the Orchestrator's". Where the loser
   has already opened a pull request, say whether it closes or waits, since one left open on an
   abandoned branch reads to every later round as a live claim. **Update the claim comment whenever
   the adjudication changes what a group holds**, in either direction, or the durable record drifts
@@ -307,9 +311,10 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
+Its claim comment is released and its issue returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
-the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
+the group is stopped for the maintainer per "Raising a Blocked Question", since past that point removal
 discards work.
 Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
@@ -383,7 +388,7 @@ rather than a decision.
   for a round boundary is what that section forbids, and a boundary can be a long way off or, for
   a group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
-- **The question is also written on its issue**, so it survives the session that asked it.
+- **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim**, and its worktree is left exactly as it
   stands while the question is open, since the answer may be that the work in it continues. Say in
   the prompt whether that worktree holds uncommitted work, because what becomes of it is part of
