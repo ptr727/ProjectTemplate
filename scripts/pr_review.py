@@ -41,7 +41,8 @@ Subcommands
            owner is bound to `registry/repos.json`, and the repository must be registered or a
            fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or
            branch protection covers, since the write guard's per-branch check never sees a delete
-           made in here. The ref is read exactly, its tip is checked against the pull request's
+           made in here. It refuses a branch an open pull request in `--repo` has as its head or
+           base, naming each. The ref is read exactly, its tip is checked against the pull request's
            `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
            back. The delete itself carries no expected tip, so this is verify-then-delete rather
            than a compare-and-swap. No `--dry-run` exists, since no other subcommand here has
@@ -1037,7 +1038,8 @@ query($o:String!,$r:String!,$q:String!){
 Q_CLEANUP_USERS = """
 query($o:String!,$r:String!,$b:String!){
   repository(owner:$o,name:$r){
-    heads: pullRequests(states:OPEN,headRefName:$b,first:20){ totalCount nodes{ number } }
+    heads: pullRequests(states:OPEN,headRefName:$b,first:20){
+      totalCount nodes{ number headRepository{ nameWithOwner } } }
     bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } }
   }}
 """
@@ -5880,6 +5882,12 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     return found
 
 
+def in_repository(node: dict, owner: str, repo: str) -> bool:
+    """Whether a pull request's head lives in `owner/repo`, a fork's same-named branch being none."""
+    name = (node.get("headRepository") or {}).get("nameWithOwner") or ""
+    return name.lower() == f"{owner}/{repo}".lower()
+
+
 def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     """The open pull requests in this repository whose head or base is the branch.
 
@@ -5900,7 +5908,11 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
             raise CleanupUnread(
                 f"the open pull request read returned no {field} list: {found!r}"[:400]
             )
-        users += [f"#{n.get('number')} ({role})" for n in nodes if isinstance(n, dict)]
+        users += [
+            f"#{n.get('number')} ({role})"
+            for n in nodes
+            if isinstance(n, dict) and (role == "base" or in_repository(n, owner, repo))
+        ]
         if total > len(nodes):
             users.append(f"{total - len(nodes)} more with the branch as {role}")
     return users

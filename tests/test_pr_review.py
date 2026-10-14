@@ -10989,6 +10989,7 @@ class CleanupCase(unittest.TestCase):
         delete_fails: bool = False,
         heads: list[int] | None = None,
         bases: list[int] | None = None,
+        users: object = None,
     ) -> None:
         """Answer each document in turn, `refs` holding one answer per ref read in order.
 
@@ -11002,9 +11003,19 @@ class CleanupCase(unittest.TestCase):
                 repository = {"defaultBranchRef": {"name": default}, "pullRequest": pr}
                 return pr_review.shared.Response({"repository": repository}, [])
             if "heads: pullRequests" in query:
+                self.assertEqual(CLEANUP_BRANCH, variables["b"])
+                if isinstance(users, Exception):
+                    raise users
+                if users is not None:
+                    return pr_review.shared.Response({"repository": users}, [])
                 lists = {"heads": heads or [], "bases": bases or []}
                 found = {
-                    k: {"totalCount": len(v), "nodes": [{"number": n} for n in v]}
+                    k: {
+                        "totalCount": len(v),
+                        "nodes": [
+                            {"number": n, "headRepository": {"nameWithOwner": "o/r"}} for n in v
+                        ],
+                    }
                     for k, v in lists.items()
                 }
                 return pr_review.shared.Response({"repository": found}, [])
@@ -11157,12 +11168,31 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
         self.assert_refused()
         self.assertIn("#42 (base), #43 (base)", self.out.getvalue())
 
-    def test_an_unanswered_open_pull_request_read_stops_at_2(self) -> None:
-        self.wire(cleanup_pr())
-        with mock.patch.object(
-            pr_review, "branch_users", side_effect=pr_review.CleanupUnread("no answer")
-        ):
-            self.assert_refused(2, "status=UNREAD")
+    def test_an_open_pull_request_read_that_does_not_answer_stops_at_2(self) -> None:
+        bad = pr_review.shared.GraphQLError("gh graphql failed rc=1")
+        malformed = [
+            bad,
+            {"heads": {"totalCount": 0, "nodes": []}},
+            {"heads": {"totalCount": "0", "nodes": []}, "bases": {"totalCount": 0, "nodes": []}},
+        ]
+        for users in malformed:
+            with self.subTest(users=users):
+                self.docs.clear()
+                self.wire(cleanup_pr(), users=users)
+                self.assert_refused(2, "status=UNREAD")
+
+    def test_more_open_pull_requests_than_the_page_holds_are_refused(self) -> None:
+        full = {"totalCount": 25, "nodes": []}
+        self.wire(cleanup_pr(), users={"heads": full, "bases": {"totalCount": 0, "nodes": []}})
+        self.assert_refused()
+        self.assertIn("25 more with the branch as head", self.out.getvalue())
+
+    def test_a_forks_pull_request_on_a_same_named_branch_is_not_a_user(self) -> None:
+        node = {"number": 9, "headRepository": {"nameWithOwner": "o/r-fork"}}
+        heads = {"totalCount": 1, "nodes": [node]}
+        self.wire(cleanup_pr(), users={"heads": heads, "bases": {"totalCount": 0, "nodes": []}})
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
 
     def test_a_rule_read_that_is_not_a_list_stops_at_2(self) -> None:
         self.wire(cleanup_pr(), rules={"message": "Upgrade to GitHub Pro"})

@@ -99,17 +99,17 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
    "Disposing of Every Finding" below.
 4. Capture the branch's own tip before merging, `gh pr view <number> --repo <owner>/<repo> --json headRefOid --jq
-   .headRefOid`, needed for the verify-then-delete step below since `gh pr merge` itself reports
+   .headRefOid`, for the report, since `gh pr merge` itself reports
    the resulting squash commit on `develop`, not the PR's `headRefOid`. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
    call, it is run from inside the task's own worktree per step 1, where the feature branch is
    checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone, remove
-   the worktree and delete the now-merged local task branch, then verify before deleting the remote
-   one, which is this skill's own step rather than that one's. Delete the remote one with
+   the worktree and delete the now-merged local task branch, then delete the remote one, which is this
+   skill's own step rather than that one's, with
    `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout.
-   It takes the pull request rather than a branch name and does the verify-then-delete below in
+   It takes the pull request rather than a branch name and does the verify-then-delete in
    code. It refuses unless the pull request merged into `develop` from a head in that same
    repository, and refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
