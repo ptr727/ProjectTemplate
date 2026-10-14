@@ -211,9 +211,11 @@ Subcommands
            earlier threads account for, those threads resolved or not, since a headline counts
            across rounds and counts a settled finding as readily as an owed one.
            A round can also list its findings in prose under a `Review findings:` label, each
-           entry naming the files it concerns in code spans. An entry that pairs with no thread
-           of that round, paired by file the way a table row is, is a finding with no thread, so
-           where those entries outnumber the shortfall above, the block counts them instead.
+           entry naming the files it concerns in code spans, a trailing part of a path or a
+           directory holding it included. An entry that pairs with no thread of that round, one
+           thread per entry, is a finding with no thread. Where those entries outnumber the
+           shortfall above, the block counts them instead. A thread an open entry links counts as
+           that round's in both pairings, since the entry names a finding the round still holds.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -2618,18 +2620,18 @@ HEADLINE_COUNT = re.compile(
 def table_findings(body: str) -> list[list[str]]:
     """The first cell's paths of the file table row naming each finding, one list per finding.
 
-    A row names a finding by the vote count written beside it, so one row can name several, and
-    each is listed with the paths its row is about, as `cell_paths` reads them. The wording is not
-    read, since a finding is paired with a thread by its file rather than by its title. A count
-    inside a code span is a quotation and is not read.
+    A row names a finding by the vote count written beside it, so one row can name several. Each
+    is listed with the paths the row's first cell names, as `cell_paths` reads them. The wording
+    is not read, since a finding is paired with a thread by its file rather than by its title.
+    A count inside a code span is a quotation and is not read.
     """
     found = []
     for row in table_rows(body):
         first = TABLE_ROW.match(row)
-        cells = cell_paths(bare_path(first.group(1))) if first else []
+        named = cell_paths(bare_path(first.group(1))) if first else []
         quoted = [span.span() for span in CODE_SPAN.finditer(row)]
         found += [
-            cells
+            named
             for match in TABLE_VOTES.finditer(row)
             if not any(a <= match.start() < b for a, b in quoted)
         ]
@@ -2639,10 +2641,10 @@ def table_findings(body: str) -> list[list[str]]:
 def unpaired(named: list[list[str]], paths: list[str]) -> int:
     """How many findings, each read as the paths it names, pair with no thread's path.
 
-    A finding pairs with a thread on a file it names, per `names_path`, and each thread pairs with
-    one finding at most, so two findings on a file one thread is on leave one unpaired. The
-    pairing is the largest there is, found by augmenting paths, so no order of listing leaves a
-    finding unpaired that some other pairing would place.
+    A finding pairs with a thread on a file it names, per `names_path`. Each thread pairs with one
+    finding at most, so two findings on a file one thread is on leave one unpaired. The pairing is
+    the largest there is, found by augmenting paths. So no order of listing leaves a finding
+    unpaired that some other pairing would place.
     """
     owner: dict[int, int] = {}
 
@@ -2660,19 +2662,27 @@ def unpaired(named: list[list[str]], paths: list[str]) -> int:
 
 
 def round_thread_paths(pr: dict, review: dict) -> list[str]:
-    """The file of each thread the round opened, one per thread, so a file is listed per thread."""
+    """The file of each thread the round accounts for, one per thread, so a file can repeat.
+
+    That is each thread the round opened and each its open entries link by their title anchor.
+    An open entry standing for an earlier round's thread is a finding the round still names.
+    """
+    linked = open_entry_ids(pr)
+    own = round_thread_nodes(pr, review)
     return [
         bare_path(first_comment(thread).get("path") or "")
-        for thread in round_thread_nodes(pr, review)
+        for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
+        if thread in own or str(first_comment(thread).get("fullDatabaseId")) in linked
     ]
 
 
 def unthreaded_table_findings(pr: dict) -> int:
     """How many findings the head round's file table names that pair with no thread of that round.
 
-    A finding is paired by the file its row is about, as `unpaired` pairs it. Each of the row's
-    cells names the round's thread files as `row_paths` reads a cell against a diff. A finding left
-    unpaired is named only in a table row, which no thread poll reaches.
+    A finding is paired by the file its row is about, as `unpaired` pairs it, against the threads
+    `round_thread_paths` lists. Each path the row's first cell names is read against those threads'
+    files as `row_paths` reads one against a diff. That is exactly, or through a gap or a wildcard. A
+    finding left unpaired is named only in a table row, which no thread poll reaches.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2680,8 +2690,8 @@ def unthreaded_table_findings(pr: dict) -> int:
     paths = round_thread_paths(pr, newest)
     files = set(paths)
     named = [
-        [path for cell in cells for path in row_paths(cell, files)[0]]
-        for cells in table_findings(newest.get("body") or "")
+        [path for name in names for path in row_paths(name, files)[0]]
+        for names in table_findings(newest.get("body") or "")
     ]
     return unpaired(named, paths)
 
@@ -2689,9 +2699,9 @@ def unthreaded_table_findings(pr: dict) -> int:
 def headline_findings(headline: str) -> int | None:
     """The largest count of findings a headline spells out, or None where it states none.
 
-    Every count is read, whatever its sentence says about it. Whether a count is settled or owed is
-    the prose's to say, so `headline_shortfall` compares it against every finding the pull request
-    accounts for, settled ones included. The largest wins, so an ambiguous headline overstates.
+    Every count is read, whatever its sentence says about it. Whether a count is settled or owed
+    is the prose's to say. So `headline_shortfall` compares it against every finding the pull
+    request accounts for, settled ones included. The largest wins, so a headline overstates.
     """
     counts = []
     for match in HEADLINE_COUNT.finditer(headline):
@@ -2701,13 +2711,18 @@ def headline_findings(headline: str) -> int | None:
 
 
 def earlier_round_threads(pr: dict, review: dict) -> set[str]:
-    """The first-comment ids of the threads the reviewer's other rounds opened, resolved or not."""
-    rounds = {n.get("id") for n in reviewer_nodes(pr, "reviews")} - {review.get("id"), None}
+    """The first-comment ids of the threads the reviewer's other rounds opened, resolved or not.
+
+    Read by the thread's own author and round rather than from the review list. That list's window
+    holds the newest reviews, while the thread window holds the oldest threads.
+    """
     return thread_comment_ids(
         [
             thread
             for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
-            if (first_comment(thread).get("pullRequestReview") or {}).get("id") in rounds
+            if ((first_comment(thread).get("author") or {}).get("login")) == REVIEWER
+            and (first_comment(thread).get("pullRequestReview") or {}).get("id")
+            not in (None, review.get("id"))
         ]
     )
 
@@ -2798,10 +2813,10 @@ def names_path(named: str, path: str) -> bool:
 def unthreaded_prose_findings(pr: dict) -> int:
     """How many `Review findings:` entries in the head round pair with no thread of that round.
 
-    Paired by file, as `unpaired` pairs them, because an entry names a file and a thread carries
-    one, where its wording shares nothing a match could key on. An entry naming no path is
-    counted. An entry paired with a thread on some other finding the list leaves out is not, which
-    is the case this cannot see.
+    Paired by file, as `unpaired` pairs them, against the threads `round_thread_paths` lists. An
+    entry names a file and a thread carries one, where its wording shares nothing a match could key
+    on. An entry naming no path is counted. An entry paired with a thread on some other finding
+    the list leaves out is not, which is the case this cannot see.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -5900,10 +5915,10 @@ def in_repository(node: dict, owner: str, repo: str) -> bool:
 def local_heads(owner: str, repo: str, branch: str) -> list[object]:
     """The number of each open pull request whose head is the branch in `owner/repo`.
 
-    The connection also holds forks' pull requests on a same-named branch, so every page is read
-    and filtered before anything is decided, and a fork's pull request past the first page is
-    never counted as one here. A page that does not answer, or one that cannot be followed to the
-    next, raises rather than reading as no pull request.
+    The connection also holds forks' pull requests on a same-named branch. So every page is read
+    and filtered to this repository's own before anything is decided, and a fork's is never
+    counted. A page that does not answer, or one that cannot be followed to the next, raises rather
+    than reading as no pull request.
     """
 
     def fetch(cursor: str | None) -> dict:
@@ -5927,10 +5942,10 @@ def local_heads(owner: str, repo: str, branch: str) -> list[object]:
 def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     """The open pull requests in this repository whose head or base is the branch.
 
-    Deleting a branch closes every open pull request headed on it and retargets or closes the ones
+    Deleting a branch closes every open pull request headed on it. It retargets or closes the ones
     based on it, so each is named where one exists. Every head is read, per `local_heads`. A base
-    past the twenty read is counted rather than named, every one being this repository's own, and
-    an unanswered read is never reported as no pull request.
+    past the twenty read is counted rather than named, every one being this repository's own. An
+    unanswered read is never reported as no pull request.
     """
     users = [f"#{number} (head)" for number in local_heads(owner, repo, branch)]
     data = cleanup_read(Q_CLEANUP_BASES, o=owner, r=repo, b=branch)

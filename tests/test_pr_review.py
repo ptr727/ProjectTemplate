@@ -5133,7 +5133,24 @@ class TestTableFindings(GqlCase):
             "| `lib/reader.py` | `retry()` ignores `--limit` (2 votes). See `Retry.max`. |\n"
             "| `lib/writer.py` | Writes output. Nit (1 vote): `name_x`. More prose follows. |"
         )
-        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_table_findings(rows)))
+        body = with_table_findings(rows)
+        self.assertEqual([["lib/reader.py"], ["lib/writer.py"]], pr_review.table_findings(body))
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_a_thread_an_open_entry_links_pairs_though_an_earlier_round_opened_it(self) -> None:
+        """An open entry standing for an earlier round's thread is a finding the round still names."""
+        old, threads = earlier_round("4000000002")
+        threads[0]["comments"]["nodes"][0]["path"] = "lib/writer.py"
+        mine = [t for t in prose_threads() if t["id"] == "T1"]
+        body = with_table_findings(TABLE_LISTED)
+        pr = payload([old, review(body=body)], [*threads, *mine])
+        self.assertEqual(0, pr_review.unthreaded_table_findings(pr))
+
+    def test_the_pairing_places_every_finding_some_pairing_can_place(self) -> None:
+        """A finding naming two files gives way to one naming only the file both could take."""
+        named = [["lib/reader.py", "lib/writer.py"], ["lib/reader.py"]]
+        self.assertEqual(0, pr_review.unpaired(named, ["lib/reader.py", "lib/writer.py"]))
+        self.assertEqual(1, pr_review.unpaired(named, ["lib/reader.py"]))
 
     def test_one_row_grouping_two_files_pairs_each_finding_with_either(self) -> None:
         rows = (
@@ -5199,6 +5216,21 @@ class TestTableFindings(GqlCase):
             with self.subTest(resolved=resolved):
                 old, threads = earlier_round("4000000008", "4000000009", resolved=resolved)
                 self.assertNotIn("its headline states", self.digest(body, [old], threads))
+
+    def test_an_earlier_round_past_the_review_window_still_accounts_for_the_headline(
+        self,
+    ) -> None:
+        """The thread's own author and round decide, not whether its review is still in view."""
+        body = with_table_findings(TABLE_LISTED, "Four unresolved findings remain.")
+        _, threads = earlier_round("4000000008", "4000000009")
+        self.assertNotIn("its headline states", self.digest(body, [], threads))
+
+    def test_another_reviewer_s_threads_do_not_account_for_the_headline(self) -> None:
+        body = with_table_findings(TABLE_LISTED, "Four unresolved findings remain.")
+        old, threads = earlier_round("4000000008", "4000000009")
+        for t in threads:
+            t["comments"]["nodes"][0]["author"] = {"login": "another-reviewer"}
+        self.assertIn("its headline states 4", self.digest(body, [old], threads))
 
     def test_an_earlier_thread_an_open_entry_links_is_counted_once(self) -> None:
         body = with_table_findings(TABLE_LISTED, "Three unresolved findings remain.")
@@ -11250,8 +11282,7 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
 
     def test_an_unread_heads_page_past_the_first_stops_at_2(self) -> None:
         """A page that does not answer is no pull request missing, however clean the first was."""
-        fork = [{"number": 9, "headRepository": {"nameWithOwner": "x/r"}}]
-        self.wire(cleanup_pr(), head_pages=[fork, fork])
+        self.wire(cleanup_pr(), head_pages=[[fork_head(9)], [fork_head(10)]])
         request = pr_review.shared.request
         assert isinstance(request, mock.Mock)
         answer = request.side_effect
