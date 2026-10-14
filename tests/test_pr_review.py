@@ -10970,7 +10970,7 @@ class CleanupCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
-        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
         self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
         self.enterContext(
@@ -10987,6 +10987,9 @@ class CleanupCase(unittest.TestCase):
         rules: object = (),
         protected: object = False,
         delete_fails: bool = False,
+        heads: list[int] | None = None,
+        bases: list[int] | None = None,
+        users: object = None,
     ) -> None:
         """Answer each document in turn, `refs` holding one answer per ref read in order.
 
@@ -10999,6 +11002,23 @@ class CleanupCase(unittest.TestCase):
             if "pullRequest(number" in query:
                 repository = {"defaultBranchRef": {"name": default}, "pullRequest": pr}
                 return pr_review.shared.Response({"repository": repository}, [])
+            if "heads: pullRequests" in query:
+                self.assertEqual(CLEANUP_BRANCH, variables["b"])
+                if isinstance(users, Exception):
+                    raise users
+                if users is not None:
+                    return pr_review.shared.Response({"repository": users}, [])
+                lists = {"heads": heads or [], "bases": bases or []}
+                found = {
+                    k: {
+                        "totalCount": len(v),
+                        "nodes": [
+                            {"number": n, "headRepository": {"nameWithOwner": "o/r"}} for n in v
+                        ],
+                    }
+                    for k, v in lists.items()
+                }
+                return pr_review.shared.Response({"repository": found}, [])
             if "deleteRef" in query:
                 if delete_fails:
                     raise pr_review.shared.GraphQLError("gh graphql reported errors")
@@ -11135,6 +11155,44 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
     def test_an_unread_rule_set_stops_at_2_rather_than_reading_as_none(self) -> None:
         self.wire(cleanup_pr(), rules=RuntimeError("unread"))
         self.assert_refused(2, "status=UNREAD")
+        self.assertIn("HTTP 404", self.err.getvalue())
+        self.assertIn("rc=1", self.out.getvalue())
+
+    def test_an_open_pull_request_headed_on_the_branch_is_refused_and_named(self) -> None:
+        self.wire(cleanup_pr(), heads=[41])
+        self.assert_refused()
+        self.assertIn("#41 (head)", self.out.getvalue())
+
+    def test_an_open_pull_request_based_on_the_branch_is_refused_and_named(self) -> None:
+        self.wire(cleanup_pr(), bases=[42, 43])
+        self.assert_refused()
+        self.assertIn("#42 (base), #43 (base)", self.out.getvalue())
+
+    def test_an_open_pull_request_read_that_does_not_answer_stops_at_2(self) -> None:
+        bad = pr_review.shared.GraphQLError("gh graphql failed rc=1")
+        malformed = [
+            bad,
+            {"heads": {"totalCount": 0, "nodes": []}},
+            {"heads": {"totalCount": "0", "nodes": []}, "bases": {"totalCount": 0, "nodes": []}},
+        ]
+        for users in malformed:
+            with self.subTest(users=users):
+                self.docs.clear()
+                self.wire(cleanup_pr(), users=users)
+                self.assert_refused(2, "status=UNREAD")
+
+    def test_more_open_pull_requests_than_the_page_holds_are_refused(self) -> None:
+        full = {"totalCount": 25, "nodes": []}
+        self.wire(cleanup_pr(), users={"heads": full, "bases": {"totalCount": 0, "nodes": []}})
+        self.assert_refused()
+        self.assertIn("25 more with the branch as head", self.out.getvalue())
+
+    def test_a_forks_pull_request_on_a_same_named_branch_is_not_a_user(self) -> None:
+        node = {"number": 9, "headRepository": {"nameWithOwner": "o/r-fork"}}
+        heads = {"totalCount": 1, "nodes": [node]}
+        self.wire(cleanup_pr(), users={"heads": heads, "bases": {"totalCount": 0, "nodes": []}})
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
 
     def test_a_rule_read_that_is_not_a_list_stops_at_2(self) -> None:
         self.wire(cleanup_pr(), rules={"message": "Upgrade to GitHub Pro"})
