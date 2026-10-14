@@ -107,7 +107,19 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone, remove
    the worktree and delete the now-merged local task branch, then verify before deleting the remote
-   one, which is this skill's own step rather than that one's. Both remote commands resolve `origin`,
+   one, which is this skill's own step rather than that one's. Delete the remote one with
+   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout.
+   It takes the pull request rather than a branch name and does the verify-then-delete below in
+   code. It refuses unless the pull request merged into `develop` from a head in that same
+   repository, and refuses a permanent branch or one any ruleset or branch protection covers. It
+   deletes only a tip still at the pull request's `headRefOid` and reads the ref back to confirm.
+   Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
+   than deleting by hand: `1` is a refusal, a moved tip among them, `2` a read that did not answer
+   or a delete it could not confirm, and `64` a target outside the write scope. It runs under the host-safety installer's
+   `Bash(python3 scripts/pr_review.py:*)` allow rule, which is what lets auto mode complete it.
+   On a host without that rule the hand form below is the fallback, and where this seat cannot
+   run that either, report its commands to the maintainer, paste-ready with the values substituted.
+   Both remote commands of the hand form resolve `origin`,
    so they hold only where the pull request's head branch lives in this repository, which step 1
    guarantees by branching here. A pull request opened from a fork follows
    `upstream-contribution-workflow` instead and neither command applies to it, since `origin` would

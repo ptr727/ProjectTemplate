@@ -9665,17 +9665,19 @@ class TestContract(unittest.TestCase):
         self.assertIn("A round reporting partial coverage of the diff blocks the merge", text)
         self.assertIn("a coverage statement that does not reach this head", text)
 
-    def test_the_only_writes_are_the_four_named_here(self) -> None:
-        """Every write this script makes is one of four, and each arrived as a reviewed change.
+    def test_the_only_writes_are_the_five_named_here(self) -> None:
+        """Every write this script makes is one of five, and each arrived as a reviewed change.
 
         The read subcommands are the bulk of it and a mutation reaching them is a digest that
         writes, so the whole-source guard stays and is narrowed to the documents the script
         actually needs rather than dropped when the first of them arrived. `requestReviews`
         closes the gap where `wait` only polled and never asked. `addComment` owns body-only
-        finding responses. The reply and resolve pair owns inline threads. `union:true` only
+        finding responses. The reply and resolve pair owns inline threads. `deleteRef` is
+        `cleanup`'s, by an id read in the same run, so no REST verb enters for it. `union:true` only
         adds to the request set, so it cannot drop a requested human reviewer.
         `docs/pr-reviewer-reference.md` keeps the `union:false` clear-and-recover form as a
-        manual operation, the runbook carrying no mutation of its own.
+        manual operation, the runbook carrying no mutation of its own. A sixth document arriving
+        is a write nobody reviewed as one rather than a style drift.
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         for verb in (
@@ -9702,8 +9704,8 @@ class TestContract(unittest.TestCase):
             "reviewer is pending, which no script can decide",
         )
         # `mutation(` opens a document, so the count is the number of documents.
-        # A fifth arriving is a write nobody reviewed as one rather than a style drift.
-        self.assertEqual(4, source.count("mutation("))
+        self.assertEqual(5, source.count("mutation("))
+        self.assertIn("deleteRef", source)
         self.assertIn("addComment", source)
         self.assertIn("addPullRequestReviewThreadReply", source)
         self.assertIn("resolveReviewThread", source)
@@ -10236,6 +10238,7 @@ WRITE_COMMANDS: dict[str, list[str]] = {
     ],
     "wait": ["wait", "7", "--repo", "someone-else/r"],
     "attest": ["attest", "7", "--repo", "someone-else/r"],
+    "cleanup": ["cleanup", "7", "--repo", "someone-else/r"],
 }
 
 # The parser's remaining `cmd` choices, none of which write.
@@ -10804,6 +10807,242 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
         nodes = pr_review.check_nodes(payload([review()], checks=[old, new, other]))
         kept = sorted((n["name"], n["conclusion"]) for n in nodes)
         self.assertEqual([("lint", "FAILURE"), ("lint", "SUCCESS")], kept)
+
+
+CLEANUP_HEAD = "a" * 40
+CLEANUP_BRANCH = "feature/example-topic"
+
+
+def cleanup_pr(**overrides: object) -> dict:
+    """A merged pull request into `develop` from a head in o/r, every field overridable."""
+    pr: dict[str, object] = {
+        "merged": True,
+        "baseRefName": "develop",
+        "headRefName": CLEANUP_BRANCH,
+        "headRefOid": CLEANUP_HEAD,
+        "headRepository": {"nameWithOwner": "o/r"},
+    }
+    pr.update(overrides)
+    return pr
+
+
+class CleanupCase(unittest.TestCase):
+    """Drive `cleanup` against crafted reads, so no case reaches GitHub or deletes anything."""
+
+    def setUp(self) -> None:
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
+        self.enterContext(
+            mock.patch.object(pr_review.handoff, "registry", return_value=("o", {"r"}))
+        )
+        self.docs: list[tuple[str, dict]] = []
+        self.rest: list[str] = []
+
+    def wire(
+        self,
+        pr: dict | None = None,
+        default: str = "main",
+        refs: list[object] | None = None,
+        rules: object = (),
+        protected: object = False,
+        delete_fails: bool = False,
+    ) -> None:
+        """Answer each document in turn, `refs` holding one answer per ref read in order.
+
+        A ref answer is a tip, None for no such branch, or an exception the read raises.
+        """
+        pending = list(refs if refs is not None else [CLEANUP_HEAD, None])
+
+        def fake(query: str, variables: dict, **_: object) -> pr_review.shared.Response:
+            self.docs.append((query, variables))
+            if "pullRequest(number" in query:
+                repository = {"defaultBranchRef": {"name": default}, "pullRequest": pr}
+                return pr_review.shared.Response({"repository": repository}, [])
+            if "deleteRef" in query:
+                if delete_fails:
+                    raise pr_review.shared.GraphQLError("gh graphql reported errors")
+                return pr_review.shared.Response({"deleteRef": {"clientMutationId": None}}, [])
+            if "qualifiedName" in query:
+                answer = pending.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+                ref = None if answer is None else {"id": "REF_read", "target": {"oid": answer}}
+                return pr_review.shared.Response({"repository": {"ref": ref}}, [])
+            raise AssertionError(f"unexpected document: {query[:60]}")
+
+        def rest(
+            path: str, jq: str | None = None, raw: bool = False
+        ) -> subprocess.CompletedProcess:
+            self.rest.append(path)
+            if "/rules/branches/" in path:
+                body = rules
+            else:
+                body = {"name": CLEANUP_BRANCH, "protected": protected}
+            if isinstance(body, Exception):
+                return subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")
+            text = json.dumps(list(body) if isinstance(body, tuple) else body)
+            return subprocess.CompletedProcess([], 0, text, "")
+
+        self.enterContext(mock.patch.object(pr_review.shared, "request", side_effect=fake))
+        self.enterContext(mock.patch.object(pr_review, "gh_rest", side_effect=rest))
+
+    def run_cleanup(self, repo: str = "o/r") -> int:
+        return pr_review.main(["cleanup", "7", "--repo", repo])
+
+    def deleted(self) -> bool:
+        return any("deleteRef" in q for q, _ in self.docs)
+
+
+class TestCleanupDeletesOnlyAVerifiedMergedBranch(CleanupCase):
+    def test_a_matching_tip_is_deleted_by_the_id_just_read_and_confirmed_gone(self) -> None:
+        """Two exact reads by qualified name, the tip before the delete and the read back after."""
+        self.wire(cleanup_pr())
+        self.assertEqual(0, self.run_cleanup())
+        delete = next(v for q, v in self.docs if "deleteRef" in q)
+        self.assertEqual({"refId": "REF_read"}, delete)
+        reads = [v for q, v in self.docs if "qualifiedName" in q]
+        self.assertEqual([f"refs/heads/{CLEANUP_BRANCH}"] * 2, [v["q"] for v in reads])
+        self.assertIn("status=DELETED", self.out.getvalue())
+
+    def test_a_branch_already_gone_is_done_and_deletes_nothing(self) -> None:
+        self.wire(cleanup_pr(), refs=[None])
+        self.assertEqual(0, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertIn("status=ALREADY_GONE", self.out.getvalue())
+
+    def test_a_moved_tip_refuses_and_names_both_commits(self) -> None:
+        moved = "b" * 40
+        self.wire(cleanup_pr(), refs=[moved])
+        self.assertEqual(1, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        out = self.out.getvalue()
+        self.assertIn("status=TIP_MOVED", out)
+        self.assertIn(moved, out)
+        self.assertIn(CLEANUP_HEAD, out)
+
+    def test_a_ref_still_there_after_the_delete_is_not_reported_deleted(self) -> None:
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, CLEANUP_HEAD])
+        self.assertEqual(2, self.run_cleanup())
+        self.assertTrue(self.deleted())
+        self.assertIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
+        self.assertNotIn("status=DELETED", self.out.getvalue())
+
+    def test_a_read_back_that_does_not_answer_is_not_reported_deleted(self) -> None:
+        unread = pr_review.shared.GraphQLError("gh graphql failed rc=1")
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, unread])
+        self.assertEqual(2, self.run_cleanup())
+        self.assertTrue(self.deleted())
+        self.assertIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
+
+    def test_a_delete_reporting_failure_is_decided_by_the_read_back(self) -> None:
+        """A failed-looking delete may have landed, so the ref read decides rather than the error."""
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, None], delete_fails=True)
+        self.assertEqual(0, self.run_cleanup())
+        out = self.out.getvalue()
+        self.assertIn("the delete reported a failure", out)
+        self.assertIn("status=DELETED", out)
+
+    def test_a_delete_reporting_failure_with_the_ref_still_there_exits_2(self) -> None:
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, CLEANUP_HEAD], delete_fails=True)
+        self.assertEqual(2, self.run_cleanup())
+        self.assertIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
+
+
+class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
+    def assert_refused(self, code: int = 1, status: str = "status=REFUSED") -> None:
+        self.assertEqual(code, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertIn(status, self.out.getvalue())
+
+    def test_an_unmerged_pull_request_is_refused(self) -> None:
+        self.wire(cleanup_pr(merged=False))
+        self.assert_refused()
+
+    def test_a_base_other_than_develop_is_refused(self) -> None:
+        self.wire(cleanup_pr(baseRefName="main"))
+        self.assert_refused()
+
+    def test_a_head_in_another_repository_is_refused(self) -> None:
+        self.wire(cleanup_pr(headRepository={"nameWithOwner": "o/r-fork"}))
+        self.assert_refused()
+
+    def test_a_head_repository_gone_is_refused(self) -> None:
+        self.wire(cleanup_pr(headRepository=None))
+        self.assert_refused()
+
+    def test_a_develop_head_is_refused(self) -> None:
+        self.wire(cleanup_pr(headRefName="develop"))
+        self.assert_refused()
+
+    def test_a_main_head_is_refused_where_main_is_not_the_default(self) -> None:
+        self.wire(cleanup_pr(headRefName="main"), default="trunk")
+        self.assert_refused()
+
+    def test_the_default_branch_read_live_is_refused(self) -> None:
+        self.wire(cleanup_pr(headRefName="trunk"), default="trunk")
+        self.assert_refused()
+
+    def test_a_ruleset_on_the_branch_is_refused(self) -> None:
+        self.wire(cleanup_pr(), rules=[{"type": "deletion"}])
+        self.assert_refused()
+        self.assertIn("deletion", self.out.getvalue())
+
+    def test_classic_branch_protection_is_refused(self) -> None:
+        self.wire(cleanup_pr(), protected=True)
+        self.assert_refused()
+
+    def test_an_unread_rule_set_stops_at_2_rather_than_reading_as_none(self) -> None:
+        self.wire(cleanup_pr(), rules=RuntimeError("unread"))
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_a_rule_read_that_is_not_a_list_stops_at_2(self) -> None:
+        self.wire(cleanup_pr(), rules={"message": "Upgrade to GitHub Pro"})
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_an_unread_protection_flag_stops_at_2(self) -> None:
+        self.wire(cleanup_pr(), protected=None)
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_a_branch_name_that_changes_the_rest_path_stops_at_2(self) -> None:
+        self.wire(cleanup_pr(headRefName="feature/a?b"), refs=[CLEANUP_HEAD])
+        self.assert_refused(2, "status=UNREAD")
+        self.assertEqual([], self.rest)
+
+    def test_an_unread_pull_request_stops_at_2(self) -> None:
+        self.wire(None)
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_an_unread_tip_stops_at_2(self) -> None:
+        self.wire(cleanup_pr(), refs=[pr_review.shared.GraphQLError("gh graphql failed rc=1")])
+        self.assert_refused(2, "status=UNREAD")
+
+    def test_an_owner_other_than_the_checkout_is_out_of_scope_before_any_read(self) -> None:
+        self.wire(cleanup_pr())
+        self.assertEqual(64, self.run_cleanup(repo="x/r"))
+        self.assertEqual([], self.docs)
+        self.assertIn("status=OUT_OF_SCOPE", self.out.getvalue())
+
+    def test_an_owner_other_than_the_registry_is_refused_before_any_read(self) -> None:
+        self.wire(cleanup_pr())
+        with mock.patch.object(pr_review.handoff, "registry", return_value=("p", {"r"})):
+            self.assertEqual(1, self.run_cleanup())
+        self.assertEqual([], self.docs)
+        self.assertIn("status=REFUSED", self.out.getvalue())
+
+    def test_an_unregistered_repository_that_is_not_a_fork_is_refused(self) -> None:
+        self.wire(cleanup_pr())
+        flags = {"hasIssuesEnabled": True, "isFork": False}
+        with mock.patch.object(pr_review.handoff, "gh_json", return_value=flags):
+            self.assertEqual(1, self.run_cleanup(repo="o/unlisted"))
+        self.assertEqual([], self.docs)
+
+    def test_an_unreadable_registry_stops_at_2(self) -> None:
+        self.wire(cleanup_pr())
+        failure = pr_review.handoff.Execution("could not read the fleet registry")
+        with mock.patch.object(pr_review.handoff, "registry", side_effect=failure):
+            self.assertEqual(2, self.run_cleanup())
+        self.assertEqual([], self.docs)
 
 
 if __name__ == "__main__":
