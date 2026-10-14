@@ -2600,11 +2600,9 @@ NUMBER_WORDS = {
     )
 }
 HEADLINE_COUNT = re.compile(
-    r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+((?:[a-z-]+\s+){0,2}?)findings?\b"
-    r"(?!\s+(?:were|was|have been|has been)\b)",
-    re.IGNORECASE,
+    r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+(?:[a-z-]+\s+){0,2}?findings?\b", re.IGNORECASE
 )
-SETTLED_WORDS = frozenset({"resolved", "fixed", "addressed", "closed"})
+SETTLED = re.compile(r"\b(?:resolved|fixed|addressed|closed)\b", re.IGNORECASE)
 
 
 def title_key(text: str) -> str:
@@ -2620,15 +2618,33 @@ def table_findings(body: str) -> list[str]:
     """
     titles = []
     for row in table_rows(body):
+        quoted = [span.span() for span in CODE_SPAN.finditer(row)]
         for match in TABLE_FINDING.finditer(row):
+            if any(a <= match.start() < b for a, b in quoted):
+                continue
             if title := title_key(match.group(2)):
                 titles.append(title)
     return titles
 
 
 def entry_text(line: str) -> str:
-    """One open-section entry as the words it reads, a link replaced by its label."""
-    return title_key(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", ENTRY_LINE.sub("", line, count=1)))
+    """One open-section entry as the words it reads, markup dropped and a link kept as its label."""
+    plain = re.sub(r"<picture>.*?</picture>|<[^>]*>", " ", ENTRY_LINE.sub("", line, count=1))
+    return title_key(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain))
+
+
+def reworded(title: str, text: str) -> bool:
+    """Whether an annotation title and an entry's words name one finding.
+
+    Either containing the other matches, and so does an entry holding at least half of the
+    title's words of three letters or more, since the table and the section are one reviewer's
+    wording of a finding and the words and their order differ between the two.
+    """
+    if title in text or (text and text in title):
+        return True
+    words = [w for w in title.split() if len(w) >= 3]
+    have = set(text.split())
+    return bool(words) and 2 * sum(1 for w in words if w in have) >= len(words)
 
 
 def open_entry_texts(body: str) -> list[str]:
@@ -2644,10 +2660,8 @@ def open_entry_texts(body: str) -> list[str]:
 def unmatched_table_findings(pr: dict) -> int:
     """How many distinct file-table annotations the head round's open sections have no entry for.
 
-    A title matches an entry where either contains the other once both are reduced to lowercase
-    words, since the table and the section are the same reviewer's wording of one finding but not
-    always the same words. An annotation matching nothing is a finding named only in a table row,
-    which no thread poll and no open section reaches.
+    A title matches an entry as `reworded` states. An annotation matching nothing is a finding
+    named only in a table row, which no thread poll and no open section reaches.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2657,22 +2671,24 @@ def unmatched_table_findings(pr: dict) -> int:
     return sum(
         1
         for title in dict.fromkeys(table_findings(body))
-        if not any(title in text or (text and text in title) for text in entries)
+        if not any(reworded(title, text) for text in entries)
     )
 
 
 def headline_findings(headline: str) -> int | None:
     """The count of findings a headline spells out, or None where it states none.
 
-    The largest wins, so an ambiguous headline overstates rather than suppresses. A count
-    qualified as resolved or fixed counts what is settled rather than what is owed.
+    The largest wins, so an ambiguous headline overstates rather than suppresses. A sentence
+    saying anything is resolved, fixed, addressed, or closed counts what is settled rather than
+    what is owed, and `unresolved` is a different word so it does not.
     """
     counts = []
-    for match in HEADLINE_COUNT.finditer(headline):
-        if SETTLED_WORDS & set(match.group(2).casefold().split()):
+    for sentence in re.split(r"(?<=[.!?])\s+", headline):
+        if SETTLED.search(sentence):
             continue
-        word = match.group(1).casefold()
-        counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
+        for match in HEADLINE_COUNT.finditer(sentence):
+            word = match.group(1).casefold()
+            counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
     return max(counts, default=None)
 
 

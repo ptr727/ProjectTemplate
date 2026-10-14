@@ -5136,6 +5136,39 @@ class TestTableFindings(GqlCase):
             with self.subTest(headline=headline):
                 self.assertIsNone(pr_review.headline_findings(headline))
 
+    def test_a_settled_clause_anywhere_in_the_sentence_is_not_read(self) -> None:
+        for headline in (
+            "All three previously reported findings are resolved.",
+            "Three findings from the last review were resolved.",
+            "The 2 earlier findings are now addressed.",
+        ):
+            with self.subTest(headline=headline):
+                self.assertIsNone(pr_review.headline_findings(headline))
+
+    def test_a_clean_round_summing_up_its_resolved_findings_reports_nothing(self) -> None:
+        body = overview_v2_revised()
+        body = body.replace(
+            "One reader still needs a look.", "All three earlier findings are resolved."
+        )
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_an_entry_in_the_live_markup_matches_a_reworded_annotation(self) -> None:
+        """Entries carry a severity picture and a tag, and the table may word a title differently."""
+        body = with_table_findings(
+            "**Critical finding (2 votes):** the limit is ignored by the retry loop. "
+            "**Moderate finding (1 vote):** naming drifts from the style."
+        )
+        body = body.replace(
+            "[Retry loop ignores the limit](",
+            "<picture><img alt='Critical' src='https://example.test/c.png'></picture> "
+            "[Retry loop ignores the limit](",
+        ).replace("#discussion_r4000000001) New", "#discussion_r4000000001) \u00b7 New")
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_an_annotation_quoted_in_a_code_span_is_not_read(self) -> None:
+        body = with_table_findings(TABLE_LISTED + " Builds `**Low finding (1 vote):** x` inputs.")
+        self.assertEqual(2, len(pr_review.table_findings(body)))
+
     def test_digits_and_the_largest_count_are_read(self) -> None:
         self.assertEqual(
             4, pr_review.headline_findings("2 open findings, and 4 unresolved findings in all.")
