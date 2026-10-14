@@ -39,12 +39,13 @@ Subcommands
            unless the pull request is merged into `develop` from a head in `--repo` itself, and
            the head branch is none of `develop`, `main`, or the default branch read live. The
            owner is bound to `registry/repos.json`, and the repository must be registered or a
-           fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or branch protection covers, since the write
-           guard's per-branch check never sees a delete made in here. The ref is read exactly,
-           its tip is checked against the pull request's `headRefOid` before the delete is sent,
-           and the delete is confirmed by reading the ref back. The delete itself carries no
-           expected tip, so this is verify-then-delete rather than a compare-and-swap. No `--dry-run` exists, since no other subcommand
-           here has one. Exit 0 = deleted and confirmed gone, or already gone, 1 = refused, a
+           fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or
+           branch protection covers, since the write guard's per-branch check never sees a delete
+           made in here. The ref is read exactly, its tip is checked against the pull request's
+           `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
+           back. The delete itself carries no expected tip, so this is verify-then-delete rather
+           than a compare-and-swap. No `--dry-run` exists, since no other subcommand here has
+           one. Exit 0 = deleted and confirmed gone, or already gone, 1 = refused, a
            moved tip naming both commits among them, 2 = a read did not answer, a partial one
            included, or the delete could not be confirmed, which argparse's own usage error
            shares, 64 = the write scope could not be established or excludes the target, checked
@@ -2104,23 +2105,28 @@ def reread_json(path: str, jq: str) -> object:
     None wherever nothing parseable came back, an absence GitHub answered included, so the caller
     has one value to refuse on.
     """
+    return parsed_json(reread(path, jq))
 
-    def parsed(proc: subprocess.CompletedProcess) -> object:
-        if proc.returncode != 0:
-            return None
-        try:
-            return json.loads(proc.stdout.strip())
-        except json.JSONDecodeError:
-            return None
 
+def reread(path: str, jq: str) -> subprocess.CompletedProcess:
+    """The last of `reread_json`'s reads, whole, so a caller can say why nothing parsed."""
     read = functools.partial(gh_rest, path, jq)
-    proc = backoff(
+    return backoff(
         read(),
         read,
-        lambda p: not answered_absent(p) and parsed(p) is None,
+        lambda p: not answered_absent(p) and parsed_json(p) is None,
         delays=READ_RETRY_DELAYS,
     )
-    return parsed(proc)
+
+
+def parsed_json(proc: subprocess.CompletedProcess) -> object:
+    """The read's JSON, or None where it failed or printed nothing parseable."""
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
 
 
 def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
@@ -5624,10 +5630,12 @@ def cleanup_read(query: str, **variables: object) -> dict:
 
 
 def cleanup_rest(path: str, what: str) -> object:
-    """One REST read for `cleanup`, parsed and retried by `reread_json`, raising where none came."""
-    data = reread_json(path, ".")
+    """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
+    proc = reread(path, ".")
+    data = parsed_json(proc)
     if data is None:
-        raise CleanupUnread(f"the {what} read returned nothing parseable")
+        sys.stderr.write(proc.stderr)
+        raise CleanupUnread(f"the {what} read failed rc={proc.returncode} or printed no JSON")
     return data
 
 

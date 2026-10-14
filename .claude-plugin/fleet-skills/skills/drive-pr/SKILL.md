@@ -117,8 +117,9 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
    than deleting by hand: `1` is a refusal, a moved tip among them, `2` a read that did not answer
    or a delete it could not confirm, and `64` a target under an owner other than the hub
-   checkout's own `origin`. A registry refusal is a `1`. It runs under the host-safety installer's
-   `Bash(python3 scripts/pr_review.py:*)` allow rule, which is what lets auto mode complete it.
+   checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
+   under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
+   which is what lets auto mode complete it.
    On a host without that rule the hand form below is the fallback, and where this seat cannot
    run that either, report its commands to the maintainer, paste-ready with the values substituted.
    Both remote commands of the hand form resolve `origin`,

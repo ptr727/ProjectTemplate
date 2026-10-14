@@ -233,8 +233,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      code, refuses a permanent or protected branch, and confirms the delete by reading the ref
      back. Exit `0` is done, and any other exit stops and reports: `1` is a refusal, `2` an
      unanswered read or an unconfirmed delete, and `64` a target under an owner other than the hub
-     checkout's own `origin`, a registry refusal being a `1`. It runs under the host-safety installer's
-     `Bash(python3 scripts/pr_review.py:*)` allow rule, which is what lets auto mode complete it.
+     checkout's own `origin` or that `origin` unreadable, a registry refusal being a `1`. It runs
+     under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
+     which is what lets auto mode complete it.
      On a host without that rule the fallback is `git push origin --delete -- "<branch>"` once the
      tip checks above pass, and where this seat cannot run it, report it to the maintainer,
      paste-ready with the values substituted.
