@@ -211,7 +211,7 @@ for, and it binds harder than any throughput target.
   needing a file another group holds stops and reports rather than editing it, and the
   orchestrator decides which group keeps the file, then tells the loser which of three things to
   do rather than leaving it to choose: narrow its change to drop that file, park until the holder
-  merges, or abandon its branch and return the issue to the next round's ranking. Where the loser
+  merges, or abandon its branch per "Cleanup Is the Orchestrator's". Where the loser
   has already opened a pull request, say whether it closes or waits, since one left open on an
   abandoned branch reads to every later round as a live claim. **Update the claim comment whenever
   the adjudication changes what a group holds**, in either direction, or the durable record drifts
@@ -307,10 +307,12 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
 its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
+Its issue then returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
-the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
+the group is stopped for the maintainer per "Raising a Blocked Question", since past that point removal
 discards work.
+Its issue stays out of the ranking until the maintainer's answer releases the group.
 Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
