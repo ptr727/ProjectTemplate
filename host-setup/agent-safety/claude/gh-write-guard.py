@@ -2251,10 +2251,13 @@ def _unreadable_push(cmd):
       `GIT_EXEC_PATH`, or a PATH change can leave to an alias that file defines
     - the same file on one of `_COMMAND_RUNNING_GIT_SUBS`, whose child git commands it reaches, so
       an alias it defines may push whatever the arguments name
+    - an include key in a wrapper shell argument other than the `-c` body, or in a wrapper body
+      nested past the reading cap
 
     An `eval` argument holding an include key is read as the command it runs, for this check
     alone. It is bounded by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST`, as the wait rule's is.
-    An `eval` holding an include key met once the budget is spent fails closed.
+    Once the budget is spent, the text from the next `eval` on is searched once for an include
+    key, which fails closed, and no later `eval` in that text is read.
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2277,6 +2280,7 @@ def _unreadable_push(cmd):
                 if budget <= 0:
                     if _GIT_INCLUDE_KEY.search(" ".join(toks[k:])):
                         return "an include override inside more `eval` text than the guard reads"
+                    eval_end = n
                 else:
                     payload, eval_end = _eval_payload(toks, k, quoted)
                     budget -= len(payload) + _EVAL_READ_COST
@@ -5648,7 +5652,7 @@ _GIT_CASES = [
         "feature/x",
         {"feature/x": set()},
         "deny",
-        "an --exec-path may leave a listed name to an alias the included file defines",
+        "an --exec-path does not make a command git does not build in readable",
     ),
     (
         "git -c include.path=/example/config --exec-path=/example/libexec status",
@@ -5662,21 +5666,21 @@ _GIT_CASES = [
         "feature/x",
         {"feature/x": set()},
         "deny",
-        "a command git finds on PATH may fall through to an alias where the PATH differs",
+        "a PATH prefix does not make a command git does not build in readable",
     ),
     (
         "GIT_EXEC_PATH=/example/libexec git -c include.path=/example/config instaweb",
         "feature/x",
         {"feature/x": set()},
         "deny",
-        "a GIT_EXEC_PATH prefix moves the command search the same way",
+        "a GIT_EXEC_PATH prefix does not make a command git does not build in readable",
     ),
     (
         "export GIT_EXEC_PATH=/example/libexec; bash -c 'git -c include.path=/example/config instaweb'",
         "feature/x",
         {"feature/x": set()},
         "deny",
-        "an exported GIT_EXEC_PATH reaches a git command inside a wrapper body too",
+        "nor does an exported GIT_EXEC_PATH before a wrapper body",
     ),
     (
         "git -c include.path=/example/config instaweb",

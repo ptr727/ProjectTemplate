@@ -474,10 +474,10 @@ opt-in per clone, visible to anyone reading the repo, and bypassable on purpose,
 rule whose harm is a quality miss rather than a destruction, which the host layer's bar excludes.
 The hub's own `.husky/pre-push` is the worked example there, refusing a branch push that no
 recorded local review pass covers, per [`GOVERNANCE.md`][governance] "Verification Discipline".
-The two layers meet at requirement 4, which denies `--no-verify` and a `-c core.hooksPath=`
-override unconditionally, an include override on a commit or push among them, so a Claude Code
-session meets a committed hook it
-cannot wave through with either while a human keeps the escape hatch. They do not compose into a
+The two layers meet at requirement 4, which denies `--no-verify`, a `-c core.hooksPath=`
+override, and an include override on a commit or push unconditionally. So a Claude Code session
+meets a committed hook it
+cannot wave through with any of them while a human keeps the escape hatch. They do not compose into a
 seal, and saying so would be the more comfortable claim rather
 than the true one. A committed hook is bypassable by construction, since it cannot police its own
 invocation, and `--no-verify` is the documented route rather than the only one. This requirement
