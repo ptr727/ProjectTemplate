@@ -898,7 +898,12 @@ def _collect_arglist(toks, start, split_fused=False):
         t = toks[k]
         if _is_separator(t) or (split_fused and _opens_with_separator(t)):
             break  # a command separator ends this invocation
-        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
+        if (
+            t.isdigit()
+            and k + 1 < n
+            and _is_redir_op(toks[k + 1])
+            and not (split_fused and _opens_with_separator(toks[k + 1]))
+        ):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
@@ -2183,7 +2188,7 @@ def _includes_config_file(value):
     is the cheap pre-filter that sends a command holding one to the push check.
     """
     key = _config_key(value)
-    return key == "include.path" or key.startswith("includeif.")
+    return key == "include.path" or (key.startswith("includeif.") and key.endswith(".path"))
 
 
 _COMMAND_RUNNING_GIT_SUBS = frozenset(
@@ -2577,7 +2582,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
             )
         if "pull_request" in rules:
             return "deny", (
-                f"This is a direct push to '{br}', whose branch rules require a pull request "
+                f"This push writes '{br}', whose branch rules require a pull request "
                 f"(rule: pull_request); it only lands by bypassing that rule with admin power. Use the "
                 f"protocol path - commit on a feature branch and open a PR (feature -> squash -> develop, "
                 f"or develop -> merge -> main)." + _handoff(cmd)
@@ -5411,6 +5416,20 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "a fused separator inside a backtick substitution does not hide a later --no-verify",
+    ),
+    (
+        "git push 2;</dev/null origin feature/x",
+        "develop",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a number before a fused separator is a word of the push, not the separator's descriptor",
+    ),
+    (
+        "git -c includeIf.gitdir:/example/.other=x p",
+        None,
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an includeIf key other than its path includes no file",
     ),
     (
         "git -c include.path=/example/config status",
