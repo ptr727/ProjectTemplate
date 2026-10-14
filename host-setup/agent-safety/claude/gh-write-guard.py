@@ -887,7 +887,8 @@ def _collect_arglist(toks, start, split_fused=False):
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
     The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`, and drops
     quoting, so such a token may also be a quoted word or text inside an expansion. It is read as a
-    redirection, and with `split_fused` as the end of the invocation at its separator instead.
+    redirection, and with `split_fused` as the end of the invocation at its separator instead,
+    where a number before it is then a word rather than a file descriptor.
 
     Returns (args, index_after_this_invocation).
     """
@@ -2182,13 +2183,15 @@ _GIT_INCLUDE = re.compile(r"git\b.*?include", re.DOTALL | re.IGNORECASE)
 
 
 def _includes_config_file(value):
-    """True when a `-c`/`--config-env` value sets `include.path` or an `includeIf.<condition>.path`.
+    """True when a `-c`/`--config-env` value sets `include.path` or any `includeIf.` key.
 
-    Either one reads a config file the guard never reads, which may define an alias. `_GIT_INCLUDE`
+    Either one reads a config file the guard never reads, which may define an alias. Any
+    `includeIf.` key counts, since `--config-env` splits at the last `=` and a condition such as
+    `gitdir:[!=]**/` holds one, which cuts the key read here short of its `.path`. `_GIT_INCLUDE`
     is the cheap pre-filter that sends a command holding one to the push check.
     """
     key = _config_key(value)
-    return key == "include.path" or (key.startswith("includeif.") and key.endswith(".path"))
+    return key == "include.path" or key.startswith("includeif.")
 
 
 _COMMAND_RUNNING_GIT_SUBS = frozenset(
@@ -5425,11 +5428,11 @@ _GIT_CASES = [
         "a number before a fused separator is a word of the push, not the separator's descriptor",
     ),
     (
-        "git -c includeIf.gitdir:/example/.other=x p",
+        "git --config-env='includeIf.gitdir:[!=]**/.path=EXAMPLE_CONFIG' p",
         None,
         {"develop": _CODE_RULES},
-        "allow",
-        "control: an includeIf key other than its path includes no file",
+        "deny",
+        "an includeIf condition holding an = still reads as an include",
     ),
     (
         "git -c include.path=/example/config status",
