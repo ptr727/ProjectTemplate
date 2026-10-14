@@ -2302,8 +2302,8 @@ def _push_readings(args):
     """The argument lists a push is read as, each checked on its own so either may deny.
 
     The first is the argv as given, which `_push_targets` reads with only `_PUSH_VALUE_FLAGS`
-    taking a value. In git a cluster ending in `-o`, or a value option cut short as `--rep`, takes
-    the next word as its value too. So where one appears, a second list is built in one pass from
+    taking a value. In git a cluster ending in `-o`, or a `_PUSH_LONG_VALUE_OPTS` option whole or
+    cut short as `--rep`, takes the next word as its value too. So where one appears, a second list is built in one pass from
     the left. Each option taking a value keeps that value, unless it is itself another's value.
     """
 
@@ -2591,7 +2591,7 @@ def _holds_attached_value(tok):
     return len(literal) >= 2 and literal[0] == "-" and literal[1] in _COMMIT_VALUE_LETTERS
 
 
-_LIST_EXPANSION = re.compile(r"\$[@*]|\$\{!?(?:[@*]|[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|[@*]))")
+_LIST_EXPANSION = re.compile(r"\$@|\$\{(?:@|!|[A-Za-z_][A-Za-z0-9_]*\[@\])")
 
 
 def _expands_unquoted(raw, braces_only=False):
@@ -2602,7 +2602,8 @@ def _expands_unquoted(raw, braces_only=False):
     inside those quotes. A brace expands where its `{`, its `,` or `..`, and its `}` are unquoted,
     whatever quoted parts sit between them. With `braces_only`, only a brace expansion counts.
     A list expansion such as `"$@"` or `"${a[@]}"` counts inside double quotes too, since it gives
-    one word per element there (see `_LIST_EXPANSION`).
+    one word per element there. So does an indirect `${!name...}`, whose name may hold `a[@]`. One
+    inside a `$(...)` does not, since the substitution's output stays one word.
     """
     stack = []
     i = 0
@@ -2618,7 +2619,7 @@ def _expands_unquoted(raw, braces_only=False):
         elif top == '"':
             if ch == '"':
                 stack.pop()
-            elif not braces_only and _LIST_EXPANSION.match(raw, i):
+            elif not braces_only and stack == ['"'] and _LIST_EXPANSION.match(raw, i):
                 return True
             elif raw.startswith("$(", i):
                 stack.append("(")
@@ -2667,8 +2668,8 @@ _QUOTE_DIR_FIX = (
     "Word splitting may split an unquoted value into more options or a subcommand, so the guard "
     'cannot tell what git runs. Failing closed. Quote the value, as in git -C "$dir", or '
     "write the directory out. Where it is already quoted, write the directory out, since the "
-    "guard cannot read its quoting beside the rest of the command, or it is a list expansion "
-    'such as "$@" that gives one word per element.'
+    "guard cannot read its quoting beside the rest of the command, or it is an expansion such "
+    'as "$@" that may give one word per element.'
 )
 
 
@@ -3168,19 +3169,21 @@ def _gh_admin_merge(args):
 
     The shell drops the quotes of `"--admin"` before gh reads it, so the argv is read rather than
     the text. A word that is another option's value is text, as in `--body "--admin"`. A repo
-    flag may sit between `pr` and `merge`, as in `gh pr -R example/repo merge`.
+    flag may sit before `pr` or `merge`, as in `gh pr -R example/repo merge`.
     """
-    if args[:1] != ["pr"]:
+    k = 0
+    for word in ("pr", "merge"):
+        while k < len(args) and args[k] != word:
+            if args[k] in _REPO_FLAG_BARE:
+                k += 2
+            elif args[k].startswith(("--repo=", "-R")):
+                k += 1
+            else:
+                return False
+        k += 1
+    if k > len(args):
         return False
-    k = 1
-    while k < len(args) and args[k] != "merge":
-        if args[k] in _REPO_FLAG_BARE:
-            k += 2
-        elif args[k].startswith(("--repo=", "-R")):
-            k += 1
-        else:
-            return False
-    rest = iter(args[k + 1 :])
+    rest = iter(args[k:])
     for a in rest:
         if a in _GH_MERGE_VALUE_FLAGS:
             next(rest, None)
@@ -3244,6 +3247,7 @@ def _check_bypass_flags(cmd):
         any(_GH_ADMIN_MERGE.search(_QUOTED_SPAN.sub("", t)) for t in admin_texts)
         or any(_gh_admin_merge(a) for t in admin_texts for a in _gh_arg_lists(t))
         or any(_GH_ADMIN_MERGE.search(r) for t in overflow + unread for r in (t, _unquoted(t)))
+        or any(_gh_admin_merge(a) for t in overflow + unread for a in _gh_arg_lists(t))
     ):
         return "deny", (
             "This uses `gh pr merge --admin`, which merges past required reviews and status checks using "
@@ -6264,6 +6268,20 @@ _GIT_CASES = [
         "a repo flag between pr and merge does not hide --admin",
     ),
     (
+        "gh -R example/repo pr merge 5 --admin",
+        None,
+        {},
+        "deny",
+        "a repo flag before pr does not hide --admin",
+    ),
+    (
+        "; ".join(["eval 'echo x'"] * 300 + ["eval 'gh pr -R example/repo merge 5 --admin'"]),
+        None,
+        {},
+        "deny",
+        "an --admin past the eval reading budget is read as an argv too",
+    ),
+    (
         'gh pr merge 5 --squash --body "--admin"',
         None,
         {},
@@ -7018,6 +7036,41 @@ _GIT_CASES = [
         {"feature/x": set()},
         "allow",
         "control: a double-quoted suffix trim holding a star is not a list expansion",
+    ),
+    (
+        'git -C "${!r}" status',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an indirect expansion may name an array's every element, so it may split",
+    ),
+    (
+        'git -C "$*" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a double-quoted $* joins every parameter into one word",
+    ),
+    (
+        'git -C "${W@Q}" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a parameter transformation of one name gives one word",
+    ),
+    (
+        'git -C "$(dirname "$@")" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a list expansion inside a quoted substitution leaves its output one word",
+    ),
+    (
+        'git commit -m "$(cat <<\'EOF\'\nQuote "$@" in the wrapper\nEOF\n)"',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a commit message naming a quoted $@ inside a heredoc is one word",
     ),
     (
         'git -C "$W" log --format=\'%H %s\' -1 && echo "$(date)"',
