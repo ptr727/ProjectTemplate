@@ -2303,8 +2303,9 @@ def _push_readings(args):
 
     The first is the argv as given, which `_push_targets` reads with only `_PUSH_VALUE_FLAGS`
     taking a value. In git a cluster ending in `-o`, or a `_PUSH_LONG_VALUE_OPTS` option whole or
-    cut short as `--rep`, takes the next word as its value too. So where one appears, a second list is built in one pass from
-    the left. Each option taking a value keeps that value, unless it is itself another's value.
+    cut short as `--rep`, takes the next word as its value too. So where one appears, a second
+    list is built in one pass from the left. Each option taking a value keeps that value, unless
+    it is itself another's value.
     """
 
     def takes_next(a):
@@ -2619,7 +2620,12 @@ def _expands_unquoted(raw, braces_only=False):
         elif top == '"':
             if ch == '"':
                 stack.pop()
-            elif not braces_only and stack == ['"'] and _LIST_EXPANSION.match(raw, i):
+            elif (
+                not braces_only
+                and "(" not in stack
+                and "`" not in stack
+                and _LIST_EXPANSION.match(raw, i)
+            ):
                 return True
             elif raw.startswith("$(", i):
                 stack.append("(")
@@ -3168,22 +3174,12 @@ def _gh_admin_merge(args):
     """True when a `gh` argv is `pr merge` carrying `--admin`, however the shell quoted it.
 
     The shell drops the quotes of `"--admin"` before gh reads it, so the argv is read rather than
-    the text. A word that is another option's value is text, as in `--body "--admin"`. A repo
-    flag may sit before `pr` or `merge`, as in `gh pr -R example/repo merge`.
+    the text. A word that is another option's value is text, as in `--body "--admin"`. Any words
+    may sit before `pr` or `merge`, as a flag and its value do in `gh pr -R example/repo merge`.
     """
-    k = 0
-    for word in ("pr", "merge"):
-        while k < len(args) and args[k] != word:
-            if args[k] in _REPO_FLAG_BARE:
-                k += 2
-            elif args[k].startswith(("--repo=", "-R")):
-                k += 1
-            else:
-                return False
-        k += 1
-    if k > len(args):
+    if "pr" not in args or "merge" not in args[args.index("pr") :]:
         return False
-    rest = iter(args[k:])
+    rest = iter(args[args.index("merge", args.index("pr")) + 1 :])
     for a in rest:
         if a in _GH_MERGE_VALUE_FLAGS:
             next(rest, None)
@@ -6275,6 +6271,13 @@ _GIT_CASES = [
         "a repo flag before pr does not hide --admin",
     ),
     (
+        "gh --hostname example.com pr merge 5 --admin",
+        None,
+        {},
+        "deny",
+        "any flag before pr does not hide --admin",
+    ),
+    (
         "; ".join(["eval 'echo x'"] * 300 + ["eval 'gh pr -R example/repo merge 5 --admin'"]),
         None,
         {},
@@ -7043,6 +7046,13 @@ _GIT_CASES = [
         {"feature/x": set()},
         "deny",
         "an indirect expansion may name an array's every element, so it may split",
+    ),
+    (
+        'git -C {"$@"} commit -m x',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a list expansion inside a literal brace still gives one word per element",
     ),
     (
         'git -C "$*" status',
