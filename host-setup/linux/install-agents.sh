@@ -448,7 +448,10 @@ upgrade_tool() {
         FAILED+=("$tool")
         return 0
     fi
-    now=$(tool_version "$path")
+    # Resolved again, since an updater may put the new binary somewhere that now comes first on PATH.
+    path=$(tool_path "$tool")
+    now=""
+    [[ -z $path ]] || now=$(tool_version "$path")
     [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
 
     # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.

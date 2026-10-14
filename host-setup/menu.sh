@@ -383,12 +383,10 @@ install_skills_locked() {
 
 # Asks which tools to install, since the agent tools are installed only by name and never as a set someone did not choose.
 install_agents() {
-    local names
-    read -r -p "Agent tools to install, separated by spaces (claude codex opencode herdr cswap): " names
-    # Split on spaces deliberately, since each word is one tool name.
-    # shellcheck disable=SC2086
-    if [[ -n $names ]]; then
-        host_tool install-agents.sh --install $names
+    local -a names=()
+    read -r -a names -p "Agent tools to install, separated by spaces (claude codex opencode herdr cswap): "
+    if [[ ${#names[@]} -gt 0 ]]; then
+        host_tool install-agents.sh --install "${names[@]}"
     fi
 }
 
