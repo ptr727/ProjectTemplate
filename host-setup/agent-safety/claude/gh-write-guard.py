@@ -2549,9 +2549,10 @@ def _rewritten_git_words(cmd):
     - a run-time word that word splitting may split among any git command's global options, or
       before no subcommand word at all, since `git -c $X README.md` may expand to a commit under an
       override, and a brace expansion in a directory option's value
-    - a redirection where the subcommand goes, a file-descriptor number or a `{name}` before it
-      included, since the readings below then see no subcommand, unless git's first word is an
-      option such as `--version` that ends git there
+    - a redirection where the subcommand goes or among the global options, a file-descriptor number
+      or a `{name}` before it included, since the readings below then see no subcommand or pair an
+      option with the wrong value, unless git's first word is an option such as `--version` that
+      ends git there
     - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
       `core.hooksPath`
     - a run-time word among a push's arguments, since it may name any refspec or remote
@@ -2604,6 +2605,7 @@ def _rewritten_git_words(cmd):
                 and j + 1 < end
                 and _is_redir_op(toks[j + 1])
             )
+            redirected = redirected or any(_is_redir_op(toks[x]) for x in range(k + 1, j))
             if redirected and toks[k + 1] not in _GIT_TERMINAL_OPTS:
                 return "a redirection where the subcommand of `git` goes"
             for x in range(k + 1, j):
@@ -6344,6 +6346,20 @@ _GIT_CASES = [
         {"feature/x": set(), "develop": _CODE_RULES},
         "deny",
         "a named file descriptor redirection where the subcommand goes hides a push",
+    ),
+    (
+        "git -c > a core.hooksPath=/dev/null commit -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a redirection among the global options pairs an option with the word after its target",
+    ),
+    (
+        "git -C > a . push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a redirection after -C leaves the push readable only to the shell",
     ),
     (
         "(git push origin feature/x)",
