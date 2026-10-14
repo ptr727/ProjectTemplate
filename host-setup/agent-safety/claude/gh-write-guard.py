@@ -3095,7 +3095,8 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     Options are read as git reads them. A short-option cluster such as `-uf` or `-ud` forces or
     deletes, while `-ofd` is a push option with the value `fd`. A long option cut short, such as
     `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. Of `--prune`
-    and `--no-prune`, the later one wins. A delete with
+    and `--no-prune`, the later one wins. A `--no-prune` after `--` or `--end-of-options` is a
+    refspec to git, so it cancels nothing. A delete with
     no refspec is read as a bare push, which git refuses, rather than as nothing. Each push is
     read once per `_push_readings` reading.
     """
@@ -3109,7 +3110,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         for reading in _push_readings(args)
     ]
     for c_dirs, work_tree, leading_cd, cd_unreliable, args in readings:
-        force = delete = push_all = mirror = tags_only = prune = False
+        force = delete = push_all = mirror = tags_only = prune = options_ended = False
         positionals = []
         i = 0
         while i < len(args):
@@ -3125,9 +3126,11 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 force = True
             if "d" in letters or _spells_long_option(t, ("delete",)):
                 delete = True
+            if t in ("--", "--end-of-options"):
+                options_ended = True
             if _spells_long_option(t, ("prune",)):
                 prune = True
-            elif _spells_long_option(t, ("no-prune",)):
+            elif not options_ended and _spells_long_option(t, ("no-prune",)):
                 prune = False
             if _spells_long_option(t, _PUSH_ALL_OPTS):
                 push_all = True
@@ -6376,6 +6379,20 @@ _GIT_CASES = [
         {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
         "deny",
         "a later --prune overrides an earlier --no-prune",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*' -- --no-prune",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a --no-prune after -- is a refspec, so the push still prunes",
+    ),
+    (
+        "git push --prune origin 'refs/heads/*:refs/heads/*' --end-of-options --no-prune",
+        "feature/x",
+        {"feature/x": set(), "main": set(), "master": set(), "develop": _CONFIG_RULES},
+        "deny",
+        "a --no-prune after --end-of-options is a refspec, so the push still prunes",
     ),
     (
         "git push --prune origin 'refs/heads/*:refs/heads/*'",
