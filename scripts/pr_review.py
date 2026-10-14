@@ -2680,9 +2680,9 @@ def unthreaded_table_findings(pr: dict) -> int:
     """How many findings the head round's file table names that pair with no thread of that round.
 
     A finding is paired by the file its row is about, as `unpaired` pairs it, against the threads
-    `round_thread_paths` lists. Each path the row's first cell names is read against those threads'
-    files as `row_paths` reads one against a diff. That is exactly, or through a gap or a wildcard. A
-    finding left unpaired is named only in a table row, which no thread poll reaches.
+    `round_thread_paths` lists. Each path the row's first cell names is read against those
+    threads' files as `row_paths` reads one against a diff. That is exactly, or through a gap or a
+    wildcard. A finding left unpaired is named only in a table row, which no thread poll reaches.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2720,7 +2720,7 @@ def earlier_round_threads(pr: dict, review: dict) -> set[str]:
         [
             thread
             for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
-            if ((first_comment(thread).get("author") or {}).get("login")) == REVIEWER
+            if thread_author(thread) == REVIEWER
             and (first_comment(thread).get("pullRequestReview") or {}).get("id")
             not in (None, review.get("id"))
         ]

@@ -5128,7 +5128,7 @@ class TestTableFindings(GqlCase):
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
     def test_the_wording_around_a_finding_is_not_read(self) -> None:
-        """Code spans, a trailing quotation, and prose after the finding in its cell change nothing."""
+        """Code spans, a quotation, and prose after the finding in its cell change nothing."""
         rows = (
             "| `lib/reader.py` | `retry()` ignores `--limit` (2 votes). See `Retry.max`. |\n"
             "| `lib/writer.py` | Writes output. Nit (1 vote): `name_x`. More prose follows. |"
@@ -5138,7 +5138,7 @@ class TestTableFindings(GqlCase):
         self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
 
     def test_a_thread_an_open_entry_links_pairs_though_an_earlier_round_opened_it(self) -> None:
-        """An open entry standing for an earlier round's thread is a finding the round still names."""
+        """An open entry standing for an earlier round's thread is a finding the round names."""
         old, threads = earlier_round("4000000002")
         threads[0]["comments"]["nodes"][0]["path"] = "lib/writer.py"
         mine = [t for t in prose_threads() if t["id"] == "T1"]
@@ -5316,6 +5316,13 @@ class TestProseFindings(GqlCase):
         threads = [*prose_threads(), thread("T3", rid="PRR_old", path="lib/parser.py")]
         out = self.digest(with_prose(PROSE_LISTED + "- `lib/parser.py`: issue (1 vote)."), threads)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_earlier_round_s_thread_an_open_entry_links_covers_an_entry(self) -> None:
+        """An open entry standing for that thread makes it a finding this round still names."""
+        carried = thread("T3", rid="PRR_old", cid="4000000002", path="lib/parser.py")
+        threads = [prose_threads()[0], carried]
+        listed = "- `lib/reader.py`: retry issue (2 votes).\n- `lib/parser.py`: issue (1 vote)."
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_prose(listed), threads))
 
     def test_a_quoted_list_is_not_read(self) -> None:
         listed = "- `lib/parser.py`: validation issue (1 vote)."
