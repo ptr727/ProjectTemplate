@@ -2597,9 +2597,9 @@ def _split_free(x, toks, mask, raw):
 
 _QUOTE_DIR_FIX = (
     "Word splitting may split an unquoted value into more options or a subcommand, so the guard "
-    'cannot tell what git runs. Failing closed. Quote the variable, as in git -C "$dir", or '
+    'cannot tell what git runs. Failing closed. Quote the value, as in git -C "$dir", or '
     "write the directory out. Where it is already quoted, write the directory out, since the "
-    "guard could not read its quoting beside the rest of the command."
+    "guard cannot read its quoting beside the rest of the command."
 )
 
 
@@ -2711,19 +2711,20 @@ def _rewritten_git_words(cmd):
       bypass readings stop at its parenthesis and every later word goes unread
     - a comment among a push's words, since the shell drops what the guard reads as a refspec or a
       flag there, which can turn a bare push into one naming another branch
-    - a directory option's value that word splitting may split, on any git command, since
-      `D='. commit -n -m'; git -C $D status` runs a commit while `status` reads as the subcommand
+    - a directory value that may split, or whose quoting the guard cannot read, on any git
+      command, since `git -C $D status` can hide a commit
     - a run-time command word whose subcommand word, read past git's global options, is `push` or
       `commit`, since `G=git; $G push` and `` `which git` push `` each run git
 
     The form comes back as a string.
     For a directory value it cannot read as quoted, it comes back as a (form, fix) pair.
-    The fix then replaces the rest of the deny after the form.
+    The fix then stands in for the reason and the advice the deny gives after other forms.
 
     A comment on a commit only adds words the guard reads, which can only add a deny, so it is left
     alone. Four kinds of run-time word are left alone too.
     One is a directory option's value before a subcommand, where word splitting cannot split it.
-    That is a literal path or a double-quoted `-C "$dir"`, and a brace expansion in one is denied.
+    That is a literal path, or a double-quoted `-C "$dir"` whose quoting the guard can read.
+    A brace expansion in one is denied.
     One is a commit
     option's value whose expansions sit inside double quotes, since word splitting cannot then make
     it an option, as in `-m "$(cat <<'EOF' ...)"`. One is a commit path after `--`. One is a
