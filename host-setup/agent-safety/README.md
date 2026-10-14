@@ -88,11 +88,19 @@ text says, because the harm it covers was never in the text.
    one such as `2>` included. The exception is a git whose first word is an option such as
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
-   stand. They are a directory option's value short of a brace expansion, a commit option's
-   double-quoted value, a commit path after `--`, and a redirection target held in one word. The
+   stand. They are a commit option's double-quoted value, a commit path after `--`, and a
+   redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value is read as it
+   stands only where word splitting cannot split it, which is a literal path or a double-quoted
+   variable. An unquoted variable there is denied on every git subcommand, because the split
+   value may add options or a subcommand the guard cannot see, and the deny names quoting it or
+   writing the directory out as the fix. A command word holding a `$` or a backtick is denied
+   where its subcommand word past git's global options is `push` or `commit`, because the shell
+   decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
+   an unquoted backtick substitution, is read as a command the way a wrapper body is read, a
+   heredoc body inside one being data. The
    push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
-   workaround is an explicit refspec run as its own command. Every other
+   workaround for a refspec is an explicit one run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks
    legitimate work far more often than it catches a real bypass.
