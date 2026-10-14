@@ -2549,8 +2549,9 @@ def _rewritten_git_words(cmd):
     - a run-time word that word splitting may split among any git command's global options, or
       before no subcommand word at all, since `git -c $X README.md` may expand to a commit under an
       override, and a brace expansion in a directory option's value
-    - a redirection where the subcommand goes, a file-descriptor number before it included, since
-      the readings below then see no subcommand, unless an option such as `--version` ends git first
+    - a redirection where the subcommand goes, a file-descriptor number or a `{name}` before it
+      included, since the readings below then see no subcommand, unless git's first word is an
+      option such as `--version` that ends git there
     - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
       `core.hooksPath`
     - a run-time word among a push's arguments, since it may name any refspec or remote
@@ -2599,9 +2600,11 @@ def _rewritten_git_words(cmd):
             if _is_run_time_word(sub):
                 return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
             redirected = _is_redir_op(sub) or (
-                sub.isdigit() and j + 1 < end and _is_redir_op(toks[j + 1])
+                (sub.isdigit() or _NAMED_FD_RE.match(sub))
+                and j + 1 < end
+                and _is_redir_op(toks[j + 1])
             )
-            if redirected and not any(toks[x] in _GIT_TERMINAL_OPTS for x in range(k + 1, j)):
+            if redirected and toks[k + 1] not in _GIT_TERMINAL_OPTS:
                 return "a redirection where the subcommand of `git` goes"
             for x in range(k + 1, j):
                 word = toks[x]
@@ -6327,6 +6330,20 @@ _GIT_CASES = [
         {"feature/x": set()},
         "allow",
         "control: a redirection after --version, which ends git before any subcommand",
+    ),
+    (
+        "git --namespace -h > a commit --no-verify -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a terminal option taken as another option's value does not end git",
+    ),
+    (
+        "git {fd}>/dev/null push origin develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a named file descriptor redirection where the subcommand goes hides a push",
     ),
     (
         "(git push origin feature/x)",
