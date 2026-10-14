@@ -15,8 +15,10 @@ non-zero without a crash, with a refusal naming it as an unknown option. A scrip
 subcommand or a positional refuses on the missing argument before it reaches the flag. So
 BEFORE_FLAG gives it arguments that satisfy its parser, and the run with them must name the flag.
 Those arguments alone exit 0 or leave an effect, so a listed script that warns and carries on still
-fails. An unlisted script must still name the flag, but nothing runs it without the flag. So one
-that warns on the flag and then stops on a missing argument passes until it is listed.
+fails. Every other entry point is declared in NO_REQUIRED_ARGUMENT, or in REFUSES_A_LEADING_FLAG
+where its parser reads a leading flag before its required argument. Its run with the flag alone
+must name the flag. An entry point declared nowhere fails, since one needing an argument could warn
+on the flag and then stop on the missing argument.
 
 No run reaches a stub or the listener, leaves a process running, or changes the working tree. The
 tree check covers ignored paths and a directory created or emptied anywhere in the tree.
@@ -52,6 +54,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import carry
 from host_capability import bash_or_skip
 from test_configure_archived import lift, run_bash
 
@@ -77,9 +81,49 @@ BEFORE_FLAG = {
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
 }
 
+NO_REQUIRED_ARGUMENT = frozenset(
+    {
+        ".github/actions/prose-gate/prose_lint.py",
+        ".github/actions/python-directories/python_directories.py",
+        ".github/actions/repo-gate/repo_gate.py",
+        "host-setup/agent-safety/claude/install.ps1",
+        "host-setup/agent-safety/claude/install.py",
+        "host-setup/agent-safety/claude/install.sh",
+        "host-setup/bootstrap.ps1",
+        "host-setup/bootstrap.sh",
+        "host-setup/linux/install-skills.sh",
+        "host-setup/linux/install-tools.sh",
+        "host-setup/linux/setup-github.sh",
+        "host-setup/linux/upgrade-host.sh",
+        "host-setup/menu.ps1",
+        "host-setup/menu.sh",
+        "host-setup/windows/install-skills.ps1",
+        "host-setup/windows/install-tools.ps1",
+        "host-setup/windows/setup-github.ps1",
+        "host-setup/windows/setup-wsl.ps1",
+        "host-setup/windows/upgrade-host.ps1",
+        "scripts/build_dist.py",
+        "scripts/docker_lint.py",
+        "scripts/host_gate.py",
+        "scripts/prose_lint.py",
+        "scripts/repo_gate.py",
+        "scripts/skills_install.ps1",
+        "scripts/skills_install.py",
+        "scripts/skills_install.sh",
+        "spec/audit.py",
+        "spec/fidelity_honesty.py",
+        "spec/validate.py",
+        "spec/workflow_reuse.py",
+    }
+)
+
+REFUSES_A_LEADING_FLAG = {
+    "catalog/snippets/hub-fetch-run.py": "forwards every argument after its hub path",
+}
+
 REFUSED_AS_OPTION = re.compile(
-    r"(unrecogni[sz]ed (argument|option)|unknown (option|argument|flag|parameter)"
-    r"|cannot be found that matches parameter name)[^\n]*bogus-flag",
+    r"((unknown|unrecogni[sz]ed) (option|argument|flag|parameter)"
+    r"|cannot be found that matches parameter name)[^\n]*(?<![\w-])-{0,2}bogus-flag(?![\w-])",
     re.IGNORECASE,
 )
 
@@ -162,6 +206,12 @@ def entry_points(root: Path = ROOT) -> list[str]:
     return sorted(found)
 
 
+def undeclared(paths: list[str]) -> list[str]:
+    """The entry points declared in none of the sets that say how the flag alone is refused."""
+    declared = BEFORE_FLAG.keys() | NO_REQUIRED_ARGUMENT | REFUSES_A_LEADING_FLAG.keys()
+    return [path for path in paths if path not in declared]
+
+
 def interpreter(root: Path, path: str) -> str | None:
     """The runtime an entry point needs, from its extension or else its shebang, or None.
 
@@ -201,22 +251,8 @@ def tree_state() -> dict[str, tuple[str, int, int]]:
     alone would not show. A directory's time moves when an entry in it is created or removed, which
     is what catches an empty directory, since git lists none.
     """
-    listed = subprocess.run(
-        ["git", "-C", str(ROOT), "status", "--porcelain=v1", "-z", "-uall", "--ignored"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        check=True,
-    ).stdout
-    records = iter(listed.split("\0"))
     state = {}
-    for record in records:
-        if not record:
-            continue
-        status, path = record[:2], record[3:]
-        if "R" in status or "C" in status:
-            next(records, None)
+    for status, path in carry.git_status_records(ROOT, ignored=True):
         try:
             stat = os.lstat(ROOT / path)
         except FileNotFoundError:
@@ -483,6 +519,22 @@ class EntryPointCase(unittest.TestCase):
                     (ROOT / excluded).is_file(), "an exclusion names a file the tree no longer has"
                 )
 
+    def test_each_entry_point_declares_how_the_flag_alone_is_refused(self) -> None:
+        found = entry_points()
+        self.assertEqual(
+            undeclared(found),
+            [],
+            "declare each entry point above in BEFORE_FLAG if it needs an argument,"
+            " or in NO_REQUIRED_ARGUMENT if it takes none, or in REFUSES_A_LEADING_FLAG if it"
+            " refuses a leading flag before reading its required argument",
+        )
+        sets = (BEFORE_FLAG.keys(), NO_REQUIRED_ARGUMENT, REFUSES_A_LEADING_FLAG.keys())
+        for index, declared in enumerate(sets):
+            with self.subTest(index=index):
+                self.assertEqual(sorted(set(declared) - set(found)), [], "a stale declaration")
+                for other in sets[index + 1 :]:
+                    self.assertEqual(sorted(set(declared) & set(other)), [], "declared twice")
+
     def test_discovery_finds_an_extensionless_shebang_script(self) -> None:
         """The hub tracks no such script yet, so a constructed tree stands in for one."""
         files = {
@@ -504,6 +556,9 @@ class EntryPointCase(unittest.TestCase):
 class ControlCase(unittest.TestCase):
     """The controls for the hardened checks: each catches the shape it exists for."""
 
+    def test_an_undeclared_entry_point_is_named(self) -> None:
+        self.assertEqual(undeclared(["scripts/carry.py", "bin/example"]), ["bin/example"])
+
     def test_a_global_git_config_write_is_seen(self) -> None:
         write = "import os; open(os.environ['GIT_CONFIG_GLOBAL'], 'w')"
         _, effects = run_sandboxed([sys.executable, "-c", write])
@@ -515,6 +570,14 @@ class ControlCase(unittest.TestCase):
             REFUSED_AS_OPTION.search("error: unrecognized arguments: --bogus-flag")
         )
         self.assertIsNotNone(REFUSED_AS_OPTION.search("getopt: unrecognized option '--bogus-flag'"))
+        self.assertIsNotNone(REFUSED_AS_OPTION.search("unrecognized flag '--bogus-flag'"))
+        self.assertIsNotNone(
+            REFUSED_AS_OPTION.search(
+                "A parameter cannot be found that matches parameter name 'bogus-flag'."
+            )
+        )
+        self.assertIsNone(REFUSED_AS_OPTION.search("unknown option --bogus-flag-extra"))
+        self.assertIsNone(REFUSED_AS_OPTION.search("unrecognized flag --not-bogus-flag"))
 
     def test_help_must_open_on_a_usage_line_naming_the_script(self) -> None:
         self.assertFalse(opens_on_usage("Disk usage report: nothing to do\n", "bin/example.py"))

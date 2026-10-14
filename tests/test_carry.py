@@ -865,5 +865,74 @@ class CarrySectionTests(unittest.TestCase):
                     self.assertIsNotNone(carry.section_span(lines, name))
 
 
+class CarryStatusTests(unittest.TestCase):
+    """The porcelain parser carry.py and the CLI usage gate share."""
+
+    def repository(self) -> pathlib.Path:
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+        def git(*args: str) -> None:
+            subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+        git("init", "-q")
+        git("config", "commit.gpgsign", "false")
+        git("config", "user.name", "Example")
+        git("config", "user.email", "example@example.invalid")
+        (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (root / "moved.txt").write_text("moved\n", encoding="utf-8")
+        (root / "edited.txt").write_text("edited\n", encoding="utf-8")
+        git("add", ".gitignore", "moved.txt", "edited.txt")
+        git("commit", "-q", "-m", "Example")
+        git("mv", "moved.txt", "renamed.txt")
+        (root / "edited.txt").write_text("changed\n", encoding="utf-8")
+        (root / "new.txt").write_text("new\n", encoding="utf-8")
+        (root / "ignored.txt").write_text("ignored\n", encoding="utf-8")
+        return root
+
+    def test_records_pair_each_path_with_its_status(self) -> None:
+        root = self.repository()
+        self.assertEqual(
+            sorted(carry.git_status_records(root)),
+            [(" M", "edited.txt"), ("??", "new.txt"), ("R ", "moved.txt"), ("R ", "renamed.txt")],
+        )
+        records = carry.git_status_records(root)
+        destination = records.index(("R ", "renamed.txt"))
+        self.assertEqual(records[destination + 1], ("R ", "moved.txt"))
+
+    def test_ignored_paths_are_listed_only_when_asked(self) -> None:
+        root = self.repository()
+        self.assertNotIn("ignored.txt", carry.git_status_paths(root))
+        self.assertIn(("!!", "ignored.txt"), carry.git_status_records(root, ignored=True))
+
+    def test_paths_keep_both_sides_of_a_rename(self) -> None:
+        root = self.repository()
+        self.assertEqual(
+            sorted(carry.git_status_paths(root)),
+            ["edited.txt", "moved.txt", "new.txt", "renamed.txt"],
+        )
+
+    def test_a_malformed_or_incomplete_record_is_refused(self) -> None:
+        for output, message in (
+            (b"?? \0", "malformed"),
+            (b"??new.txt\0", "malformed"),
+            (b"R  renamed.txt\0", "incomplete rename"),
+        ):
+            with self.subTest(output=output):
+                listed = subprocess.CompletedProcess([], 0, stdout=output, stderr=b"")
+                with (
+                    mock.patch.object(carry.subprocess, "run", return_value=listed),
+                    self.assertRaisesRegex(carry.CarryError, message),
+                ):
+                    carry.git_status_records(pathlib.Path("."))
+
+    def test_a_failed_status_is_refused(self) -> None:
+        failed = subprocess.CompletedProcess([], 128, stdout=b"", stderr=b"not a git repository")
+        with (
+            mock.patch.object(carry.subprocess, "run", return_value=failed),
+            self.assertRaisesRegex(carry.CarryError, "not a git repository"),
+        ):
+            carry.git_status_paths(pathlib.Path("."))
+
+
 if __name__ == "__main__":
     unittest.main()

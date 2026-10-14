@@ -880,11 +880,15 @@ def _is_gh_exe(tok):
     return base in ("gh", "gh.exe")
 
 
-def _collect_arglist(toks, start):
+def _collect_arglist(toks, start, split_fused=False):
     """Collect argv tokens from `start` up to the next shell separator (|, &&, ;, newline), skipping a
     redirection operator and the file-descriptor number or target token attached to it. Shared by
     `_git_subcommand_arglists` and `_gh_arg_lists` so a command's own argv, not text living inside an
     unrelated --body/--title/-f value elsewhere in the line, is what either scans for a target.
+    The tokenizer fuses a separator with a redirection after it, such as `;<` or `&<`, and drops
+    quoting, so such a token may also be a quoted word or text inside an expansion. It is read as a
+    redirection, and with `split_fused` as the end of the invocation at its separator instead,
+    where a number before it is then a word rather than a file descriptor.
 
     Returns (args, index_after_this_invocation).
     """
@@ -893,9 +897,14 @@ def _collect_arglist(toks, start):
     args = []
     while k < n:
         t = toks[k]
-        if _is_separator(t):
+        if _is_separator(t) or (split_fused and _opens_with_separator(t)):
             break  # a command separator ends this invocation
-        if t.isdigit() and k + 1 < n and _is_redir_op(toks[k + 1]):
+        if (
+            t.isdigit()
+            and k + 1 < n
+            and _is_redir_op(toks[k + 1])
+            and not (split_fused and _opens_with_separator(toks[k + 1]))
+        ):
             k += 1  # a file-descriptor number before a redirection is shell syntax, not argv
             continue
         if _is_redir_op(t):
@@ -964,11 +973,14 @@ def _git_config_overrides(global_opts):
     return values
 
 
+def _config_key(value):
+    """The key a `-c`/`--config-env` value sets, lowercased, since git matches a key without case."""
+    return value.split("=", 1)[0].lower()
+
+
 def _overrides_hooks_path(global_opts):
     """True when the global options set `core.hooksPath` for this one invocation, by `-c` or `--config-env`."""
-    return any(
-        v.split("=", 1)[0].lower() == "core.hookspath" for v in _git_config_overrides(global_opts)
-    )
+    return any(_config_key(v) == "core.hookspath" for v in _git_config_overrides(global_opts))
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -2167,6 +2179,21 @@ def _is_short_u(arg):
 
 
 _INLINE_PUSH_ALIAS = re.compile(r"alias\..*\bpush\b", re.DOTALL | re.IGNORECASE)
+_GIT_INCLUDE = re.compile(r"git\b.*?include", re.DOTALL | re.IGNORECASE)
+
+
+def _includes_config_file(value):
+    """True when a `-c`/`--config-env` value sets `include.path` or any `includeIf.` key.
+
+    Either one reads a config file the guard never reads, which may define an alias. Any
+    `includeIf.` key counts, since `--config-env` splits at the last `=` and a condition such as
+    `gitdir:[!=]**/` holds one, which cuts the key read here short of its `.path`. `_GIT_INCLUDE`
+    is the cheap pre-filter that sends a command holding one to the push check.
+    """
+    key = _config_key(value)
+    return key == "include.path" or key.startswith("includeif.")
+
+
 _COMMAND_RUNNING_GIT_SUBS = frozenset(
     {"bisect", "submodule", "rebase", "filter-branch", "difftool", "mergetool"}
 )
@@ -2182,6 +2209,8 @@ def _unreadable_push(cmd):
     - a wrapper nested past the reading cap
     - a quoted word handed to a git command that runs it, one of `_COMMAND_RUNNING_GIT_SUBS`
     - a `-c` config value, an inline alias expanding to a push among them
+    - a config file an `include.path`/`includeIf` override pulls in, read when the git command it
+      overrides names no command git lists, so it may be an alias that file defines
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
     `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
@@ -2217,6 +2246,15 @@ def _unreadable_push(cmd):
                 continue
             if toks[j] == "push" and config:
                 return "a push carrying a `-c`/`--config-env` override, which can change what it updates"
+            if (
+                any(_includes_config_file(v) for v in values)
+                and not _is_shell_op(toks[j])
+                and toks[j] not in _git_command_names()
+            ):
+                return (
+                    f"`git {toks[j]}` under an `include.path`/`includeIf` override, whose file "
+                    "may define it as a push alias"
+                )
             if toks[j] in _COMMAND_RUNNING_GIT_SUBS:
                 args, _ = _collect_arglist(toks, j + 1)
                 if config and any(a == "push" or _GIT_PUSH.search(a) for a in args):
@@ -2235,6 +2273,9 @@ def _push_invocations(cmd):
     (`find -execdir`, `sudo -D`), or read startup files that change it. So is a push after a
     command that may move `HEAD` (see `_head_may_move`). That scan runs for each push on its own.
     A move written after a push leaves it alone unless it may run first (see `_push_scan_end`).
+    A push whose words hold a separator fused with a redirection is read twice. One reading ends
+    the push at that separator, and the other reads the token as a redirection, since the guard
+    cannot tell a fused separator from a quoted word or one inside an expansion.
     """
     out = []
     for text in [cmd]:
@@ -2250,6 +2291,8 @@ def _push_invocations(cmd):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
             first = len(out)
+            splits = []
+            body_toks = outer_toks if body is text else _shell_tokens(body)
             for word, inv in _git_invocations_at(body):
                 c_dirs, _work_tree, git_dir, _aliases, sub, args = inv
                 if sub == "push":
@@ -2266,13 +2309,19 @@ def _push_invocations(cmd):
                     else:
                         head_moves = whole_moves
                     moved = extra > 0 or head_moves
-                    out.append((c_dirs, None, leading_cd, moved or redirected or wrapped_cd, args))
+                    unreliable = moved or redirected or wrapped_cd
+                    out.append((c_dirs, None, leading_cd, unreliable, args))
+                    j = _git_subcommand_index(body_toks, word)
+                    split, _ = _collect_arglist(body_toks, j + 1, split_fused=True)
+                    if split != args:
+                        splits.append((c_dirs, None, leading_cd, unreliable, split))
             unmatched = [a for _c, _w, _l, _u, a in out[first:]]
             for _opts, args in _git_subcommand_invocations(body, "push"):
                 if args in unmatched:
                     unmatched.remove(args)
                 else:
                     out.append(([], None, leading_cd, True, args))
+            out.extend(splits)
     return out
 
 
@@ -2306,9 +2355,13 @@ def _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=Fa
 def _push_targets(cmd, cwd=None, current_branch=None):
     """Parse every push in the command into a list of (op, branch); op is delete | force | update.
 
-    A lone `:` refspec pushes every branch that exists on both sides. So it is read as an update
-    of every protected default and of each other branch named beside it. It deletes nothing, so
-    it leaves the aggregate delete flag as the other refspecs set it. A `HEAD`/`@` destination
+    Each refspec's op is read on its own. A `+src` refspec forces only its own branch and a `:dst`
+    one deletes only its own, while `--force` and `--delete` apply to every refspec in the push. A
+    refspec both forced and deleted yields both ops. A lone `:` refspec pushes every branch that
+    exists on both sides, and a branch pattern such as `refs/heads/*` may match any of them. So
+    each is read as writing every protected default and each other branch named beside it, with
+    its own ops. A pattern is also read as the branch its destination literally names, which a
+    ruleset pattern such as `release/*` matches. A `HEAD`/`@` destination
     updates the branch `HEAD` names, read the way a bare push's branch is. It is compared without
     case, since a case-insensitive filesystem resolves `head` to `HEAD`. A differently cased one is
     also read as the branch it literally names. A push the guard cannot read is an `unreadable` op, and a
@@ -2319,7 +2372,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     if unreadable:
         results.append(("unreadable", unreadable))
     for c_dirs, work_tree, leading_cd, cd_unreliable, args in _push_invocations(cmd):
-        force = delete = push_all = mirror = tags_only = matching = False
+        force = delete = push_all = mirror = tags_only = False
         positionals = []
         i = 0
         while i < len(args):
@@ -2345,18 +2398,28 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             i += 1
         # The positionals are the remote followed by any refspecs, and a lone positional is the remote, meaning a bare push.
         refspecs = positionals[1:] if len(positionals) >= 2 else []
-        branches = []
+        push_ops = {"force"} if force else set()
+        if delete:
+            push_ops.add("delete")
+        targets = []
+        matched_ops = set()
         for rs in refspecs:
+            ops = set(push_ops)
             if rs.startswith("+"):
-                force = True
+                ops.add("force")
                 rs = rs[1:]
-            matching = matching or rs == ":"
-            if rs.startswith(":") and rs != ":":
-                delete = True  # `:dst` empty-source refspec deletes dst
+            if rs == ":":
+                matched_ops |= ops or {"update"}
+                continue
+            if rs.startswith(":"):
+                ops.add("delete")  # `:dst` empty-source refspec deletes dst
+            ops = ops or {"update"}
             dst = rs.split(":", 1)[1] if ":" in rs else rs
+            if "*" in dst and (not dst.startswith("refs/") or dst.startswith("refs/heads/")):
+                matched_ops |= ops
             if dst.upper() in ("HEAD", "@"):
                 if dst not in ("HEAD", "@"):
-                    branches.append(dst)
+                    targets.append((ops, dst))
                 b = current_branch
                 if b is None:
                     b = _bare_push_branch(
@@ -2365,26 +2428,23 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 if b is _UNRESOLVED:
                     results.append(("unresolved", leading_cd or " ".join(c_dirs)))
                 elif b:
-                    branches.append(b)
+                    targets.append((ops, b))
                 continue
             if dst.startswith("refs/heads/"):
                 dst = dst[len("refs/heads/") :]
             elif dst.startswith("refs/"):
                 continue  # a tag or other non-branch ref
             if dst:
-                branches.append(dst)
+                targets.append((ops, dst))
         if not refspecs and not delete:
             if mirror:
                 # --mirror force-updates and prunes every ref: a force against the protected defaults
                 # (a non-existent one just returns no rules and is skipped).
-                force = True
-                branches = list(_PROTECTED_DEFAULT_ORDER)
+                targets = [({"force"}, br) for br in _PROTECTED_DEFAULT_ORDER]
             elif push_all:
-                branches = list(
-                    _PROTECTED_DEFAULT_ORDER
-                )  # updates every local branch, protected included
+                targets = [(push_ops or {"update"}, br) for br in _PROTECTED_DEFAULT_ORDER]
             elif tags_only:
-                branches = []  # tags only, no branch is updated
+                targets = []  # tags only, no branch is updated
             else:
                 b = current_branch
                 if b is None:
@@ -2393,12 +2453,11 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                     results.append(("unresolved", leading_cd or " ".join(c_dirs)))
                     continue
                 if b:
-                    branches = [b]
-        op = "delete" if delete else ("force" if force else "update")
-        results.extend((op, br) for br in branches)
-        if matching:
-            matched = [*_PROTECTED_DEFAULT_ORDER, *branches]
-            results.extend(("force" if force else "update", br) for br in matched)
+                    targets = [(push_ops or {"update"}, b)]
+        results.extend((op, br) for ops, br in targets for op in sorted(ops))
+        if matched_ops:
+            matched = [*_PROTECTED_DEFAULT_ORDER, *(br for _ops, br in targets)]
+            results.extend((op, br) for br in matched for op in sorted(matched_ops))
     return results
 
 
@@ -2464,7 +2523,11 @@ def _check_bypass_flags(cmd):
 
 
 def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None):
-    """Deny a git push that would only succeed by bypassing an active branch rule."""
+    """Deny a git push that would only succeed by bypassing an active branch rule.
+
+    A force and a delete each write the branch too, so a pull_request rule denies them as it
+    denies an update.
+    """
     targets = _push_targets(cmd, cwd, current_branch)
     if not targets:
         return (
@@ -2509,13 +2572,6 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                     + _handoff(cmd)
                 )
             continue  # an unknown-rules feature/other branch: nothing to bypass, let it through
-        if op == "update" and "pull_request" in rules:
-            return "deny", (
-                f"This is a direct push to '{br}', whose branch rules require a pull request "
-                f"(rule: pull_request); it only lands by bypassing that rule with admin power. Use the "
-                f"protocol path - commit on a feature branch and open a PR (feature -> squash -> develop, "
-                f"or develop -> merge -> main)." + _handoff(cmd)
-            )
         if op == "force" and (rules & {"non_fast_forward", "required_linear_history"}):
             return "deny", (
                 f"This force-pushes '{br}', whose rules forbid rewriting history "
@@ -2526,6 +2582,13 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
             return "deny", (
                 f"This deletes '{br}', whose rules forbid deletion (rule: deletion)."
                 + _handoff(cmd)
+            )
+        if "pull_request" in rules:
+            return "deny", (
+                f"This push writes '{br}', whose branch rules require a pull request "
+                f"(rule: pull_request); it only lands by bypassing that rule with admin power. Use the "
+                f"protocol path - commit on a feature branch and open a PR (feature -> squash -> develop, "
+                f"or develop -> merge -> main)." + _handoff(cmd)
             )
     return "allow", ""
 
@@ -3444,6 +3507,8 @@ def _forks_out_of_reach(toks):
     of narrowing that scan each closed the shapes they were shown and left the next one: a statement
     between the loop and its group's closer, a `disown` before a `wait`, a subshell the sequencing
     had already reaped.
+    A separator fused with a redirection, such as `&<`, is read by its separator part alone (see
+    `_leading_separator`).
     A command that forks anything away is read as bounding nothing. That costs a false deny on
     `<loop> & wait`, which is a bound this rule cannot verify anyway.
     """
@@ -3452,10 +3517,13 @@ def _forks_out_of_reach(toks):
             return True
         if tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower() in ("setsid", "setsid.exe"):
             return True
-        if not _is_separator(tok):
+        if _is_separator(tok):
+            run = tok.strip()
+        elif _opens_with_separator(tok):
+            run = _leading_separator(tok)
+        else:
             continue
         # The tokenizer fuses a run of operator characters, so one token can hold a closer and an `&`.
-        run = tok.strip()
         i = 0
         while i < len(run):
             # `&&` is a separator rather than a background operator.
@@ -3646,6 +3714,21 @@ def _opens_with_separator(tok):
     if not _is_shell_op(tok):
         return False
     return tok[0] in ";|()\n" or tok.startswith("&&") or (tok[0] == "&" and tok[1:2] != ">")
+
+
+def _leading_separator(tok):
+    """The separator part of an operator token that fuses a separator with a redirection.
+
+    That is the text before its first `<` or `>`. The shell pairs a run of `&` from the left, so
+    an odd run ending at a `>` leaves its last `&` to the `&>` redirection. `)&>` is then a `)`
+    and an `&>`, while `&<` is a background `&` and a `<`.
+    """
+    cut = min((i for i, c in enumerate(tok) if c in "<>"), default=len(tok))
+    run = tok[:cut]
+    amps = len(run) - len(run.rstrip("&"))
+    if amps % 2 and tok[cut : cut + 1] == ">":
+        run = run[:-1]
+    return run
 
 
 def _unbounded_wait_loop(cmd, inherited_timeout=False, _depth=0, _budget=None):
@@ -4025,8 +4108,8 @@ def classify(
         return dec, reason
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
-    if _GIT_PUSH.search(cmd):
-        if split_word:
+    if _GIT_PUSH.search(cmd) or _GIT_INCLUDE.search(cmd):
+        if split_word and _GIT_PUSH.search(cmd):
             return "deny", (
                 "This push sits in a command with a word split by a backslash-newline, which the shell joins "
                 "into one word the guard cannot read, so a hidden cd could redirect the push. Write each "
@@ -5147,6 +5230,216 @@ _GIT_CASES = [
         {"feature/x": set(), "develop": _CODE_RULES},
         "deny",
         "the degraded path keeps the newline: a push on the next line is still read",
+    ),
+    (
+        "git push --force origin develop",
+        None,
+        {"develop": {"pull_request"}},
+        "deny",
+        "a force push writes the branch too, so a pull_request rule alone denies it",
+    ),
+    (
+        "git push -f",
+        "develop",
+        {"develop": {"pull_request"}},
+        "deny",
+        "a bare force push to a pull_request branch is denied",
+    ),
+    (
+        "git push origin :develop",
+        None,
+        {"develop": {"pull_request"}},
+        "deny",
+        "a deletion writes the branch too, so a pull_request rule alone denies it",
+    ),
+    (
+        "git push --delete origin develop",
+        None,
+        {"develop": {"pull_request"}},
+        "deny",
+        "a --delete push to a pull_request branch is denied",
+    ),
+    (
+        "git push origin +feature/x develop",
+        None,
+        {"feature/x": set(), "develop": {"pull_request"}},
+        "deny",
+        "another refspec's + does not turn develop's update into a force the pull_request check skips",
+    ),
+    (
+        "git push origin +feature/x develop",
+        None,
+        {"feature/x": set(), "develop": {"non_fast_forward"}},
+        "allow",
+        "control: another refspec's + does not force develop, an ordinary update a no-force rule allows",
+    ),
+    (
+        "git push origin :feature/z develop",
+        None,
+        {"feature/z": set(), "develop": {"pull_request"}},
+        "deny",
+        "another refspec's deletion does not turn develop's update into a delete",
+    ),
+    (
+        "git push origin :feature/z develop",
+        None,
+        {"feature/z": set(), "develop": {"deletion"}},
+        "allow",
+        "control: another refspec's : does not delete develop, an ordinary update a no-deletion rule allows",
+    ),
+    (
+        "git push origin develop +feature/x",
+        None,
+        {"feature/x": {"non_fast_forward"}, "develop": set()},
+        "deny",
+        "the + on its own refspec still forces that branch",
+    ),
+    (
+        "git push origin : +feature/y",
+        None,
+        {"main": set(), "master": set(), "develop": {"non_fast_forward"}, "feature/y": set()},
+        "allow",
+        "control: a + on a named refspec does not force the branches a lone : matches",
+    ),
+    (
+        "git push origin +: feature/y",
+        None,
+        {"main": set(), "master": set(), "develop": {"non_fast_forward"}, "feature/y": set()},
+        "deny",
+        "a forced lone : forces every branch it matches",
+    ),
+    (
+        "git push origin : '+refs/heads/*:refs/heads/*'",
+        None,
+        {"main": set(), "master": set(), "develop": {"non_fast_forward"}},
+        "deny",
+        "a forced branch pattern forces every branch it matches",
+    ),
+    (
+        "git push origin 'refs/heads/*:refs/heads/*'",
+        None,
+        {"main": set(), "master": set(), "develop": {"pull_request"}},
+        "deny",
+        "a branch pattern updates the protected branches it matches",
+    ),
+    (
+        "git push origin '+refs/heads/release/*:refs/heads/release/*'",
+        None,
+        {"main": set(), "master": set(), "develop": set(), "release/*": {"non_fast_forward"}},
+        "deny",
+        "a branch pattern is still checked against the rules for the name it spells",
+    ),
+    (
+        "git push origin 'refs/tags/*:refs/tags/*'",
+        None,
+        {"main": set(), "master": set(), "develop": {"pull_request"}},
+        "allow",
+        "control: a tag pattern writes no branch",
+    ),
+    (
+        "git -c include.path=/example/config p",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include.path override on a command git does not list may define it as a push alias",
+    ),
+    (
+        "git -c include.path=/example/config p origin feature/x",
+        None,
+        {"feature/x": set()},
+        "deny",
+        "the alias the included file defines may push anything, so the named branch does not vouch for it",
+    ),
+    (
+        "git --config-env=include.path=EXAMPLE_CONFIG p",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include.path set through --config-env is read the same way",
+    ),
+    (
+        "git -c includeIf.gitdir:/example/.path=/example/config p",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an includeIf path is a config file the guard never reads too",
+    ),
+    (
+        "git -c Include.Path=/example/config p",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a config key is matched without case, as git matches it",
+    ),
+    (
+        "bash -c 'git -c include.path=/example/config p'",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include override inside a wrapper body is read too",
+    ),
+    (
+        "git push origin >';<' feature/x develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted operator word is a redirection target, not a separator, so develop is still read",
+    ),
+    (
+        "git push origin <<<';<' feature/y develop",
+        "feature/x",
+        {"feature/y": set(), "develop": _CODE_RULES},
+        "deny",
+        "a quoted operator word as a here-string is not a separator either",
+    ),
+    (
+        "git push ;</dev/null origin feature/x # it's",
+        "develop",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a fused separator is read both ways, so the bare push of develop it may end is checked",
+    ),
+    (
+        "git push origin `true;</dev/null` develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a fused separator inside a backtick substitution does not end the push's own words",
+    ),
+    (
+        "git push origin >$'\\';<' 2>\\' develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "nor does one inside a $'...' quote",
+    ),
+    (
+        "git commit `true;</dev/null` --no-verify -m x",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a fused separator inside a backtick substitution does not hide a later --no-verify",
+    ),
+    (
+        "git push 2;</dev/null origin feature/x",
+        "develop",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a number before a fused separator is a word of the push, not the separator's descriptor",
+    ),
+    (
+        "git --config-env='includeIf.gitdir:[!=]**/.path=EXAMPLE_CONFIG' p",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "an includeIf condition holding an = still reads as an include",
+    ),
+    (
+        "git -c include.path=/example/config status",
+        None,
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an alias cannot shadow a command git lists, so an include on status defines no push alias",
     ),
 ]
 
@@ -7726,6 +8019,16 @@ _WAIT_CASES = [
         "while the ampersand in a pipe-both operator backgrounds nothing",
     ),
     (
+        "timeout 600 bash -c 'while true; do sleep 30; done &</dev/null'",
+        "deny",
+        "a background & fused with a redirection backgrounds the loop",
+    ),
+    (
+        "timeout 600 bash -c '(while true; do sleep 30; done)&>/dev/null'",
+        "allow",
+        "while the & of an &> redirection after a closer backgrounds nothing",
+    ),
+    (
         "timeout 600 bash -c 'case $x in a) foo ;& b) bar ;; esac; while true; do sleep 30; done'",
         "allow",
         "nor does the one in a case arm that falls through to the next",
@@ -8325,6 +8628,51 @@ _PUSH_DIR_CASES = [
         "deny",
         "a bare push run by another git command may run elsewhere, so it is unresolved",
     ),
+    (
+        "git push ;</dev/null origin feature/example",
+        "deny",
+        "a bare push before a ; fused with a redirection pushes develop, and origin is the next command",
+    ),
+    (
+        "git push &</dev/null origin feature/example",
+        "deny",
+        "a bare push before a & fused with a redirection pushes develop",
+    ),
+    (
+        "git push &&</dev/null origin feature/example",
+        "deny",
+        "a bare push before an && fused with a redirection pushes develop",
+    ),
+    (
+        "git push\n</dev/null origin feature/example",
+        "deny",
+        "a bare push before a newline fused with a redirection pushes develop",
+    ),
+    (
+        "git push |</dev/null git config push.default matching",
+        "deny",
+        "a bare push piped into a config change through a fused redirection",
+    ),
+    (
+        "@wt git push |</dev/null gh pr checkout 5",
+        "deny",
+        "a bare push piped into a branch switch through a fused redirection",
+    ),
+    (
+        "@wt git push ;</dev/null gh pr checkout 5 && git push origin feature/example",
+        "deny",
+        "the later command's words are not the bare push's refspecs, so its HEAD is read",
+    ),
+    (
+        "@wt git push ;</dev/null origin feature/example ; git status ;</dev/null X=y git -C {base} push",
+        "deny",
+        "a split reading does not stand in for a push only the whole-command scan finds",
+    ),
+    (
+        "@wt git push ;</dev/null origin develop",
+        "deny",
+        "the words after a fused separator are still read as the push's own, since they may be quoted",
+    ),
 ]
 
 
@@ -8452,6 +8800,8 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
+    saved_names = list(_GIT_COMMAND_NAMES)
+    _GIT_COMMAND_NAMES[:] = [{"checkout", "commit", "reset", "status", "worktree"}]
     for cmd, cur, rmap, want, label in _GIT_CASES:
         got, _ = classify(
             cmd,
@@ -8465,8 +8815,6 @@ def _selftest():
         if got != want:
             ok = False
         print(f"  {mark} [{got:5}] want={want:5} {label}")
-    saved_names = list(_GIT_COMMAND_NAMES)
-    _GIT_COMMAND_NAMES[:] = [{"checkout", "commit", "reset", "status", "worktree"}]
     for cmd, cwd, pmap, refmap, want, label in _PRIMARY_CHECKOUT_CASES:
         # A None refmap means every ref-check resolves True (an ordinary branch name).
         # A real map defaults a pair it does not name to True too, since only the pathspec-disambiguation cases care about a False answer.
