@@ -146,6 +146,7 @@ come. It stays unranked until answered.
 
 An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
 The round's report names it as stopped.
+That release is recorded in the group's claim comment before the issue is ranked again.
 
 ## Grouping and File Claims
 
