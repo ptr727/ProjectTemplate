@@ -5056,6 +5056,92 @@ def prose_threads(rid: str = "PRR_one") -> list[dict]:
     ]
 
 
+def with_table_findings(annotations: str, headline: str = "The change is narrow.") -> str:
+    """A second-format body whose file table row carries finding annotations, and its headline.
+
+    The two open entries are titled to match the first two annotations `TABLE_LISTED` carries.
+    Titles and paths are constructed, per GOVERNANCE.md "Representative Data in Agent-Authored
+    Text".
+    """
+    body = overview_v2()
+    for i, title in ((1, "Retry loop ignores the limit"), (2, "Naming drifts from the style")):
+        body = body.replace(f"[Finding {i}]", f"[{title}]")
+    assert "Retry loop ignores the limit" in body
+    row = "| a.py | Narrows the reader. |"
+    assert row in body
+    assert "The change is narrow." in body
+    return body.replace(row, f"| a.py | {annotations} |").replace("The change is narrow.", headline)
+
+
+TABLE_LISTED = (
+    "**Critical finding (2 votes):** retry loop ignores the limit. "
+    "**Moderate finding (1 vote):** naming drifts from the style."
+)
+
+
+class TestTableFindings(GqlCase):
+    """A finding named only in the overview's file table or its headline count."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def digest(self, body: str) -> str:
+        self.answer(payload([review(body=body)], prose_threads()))
+        return pr_review.digest("o", "r", 7)[0]
+
+    def test_annotations_matching_the_open_entries_count_none(self) -> None:
+        out = self.digest(with_table_findings(TABLE_LISTED))
+        self.assertIn("overview=2/2", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+
+    def test_an_annotation_matching_no_open_entry_is_reported(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED + " **Moderate finding (1 vote):** terminal option exception lost."
+        )
+        out = self.digest(body)
+        self.assertIn("overview=2/2", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("1 of the findings its file table annotates matches no entry", out)
+
+    def test_the_annotation_reader_keeps_each_title_whole(self) -> None:
+        self.assertEqual(
+            ["retry loop ignores the limit", "naming drifts from the style"],
+            pr_review.table_findings(with_table_findings(TABLE_LISTED)),
+        )
+
+    def test_a_quoted_table_is_not_read(self) -> None:
+        body = with_table_findings(TABLE_LISTED)
+        quoted = body + "\n```text\n| File | D |\n| a | **Low finding (1 vote):** x |\n```\n"
+        self.assertEqual(2, len(pr_review.table_findings(quoted)))
+
+    def test_a_headline_count_above_the_open_entries_is_reported(self) -> None:
+        body = with_table_findings(
+            TABLE_LISTED, "Three unresolved findings remain, including one critical risk."
+        )
+        out = self.digest(body)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("its headline states 3 findings where its open sections list 2", out)
+
+    def test_a_headline_count_equal_to_the_open_entries_counts_none(self) -> None:
+        body = with_table_findings(TABLE_LISTED, "Two unresolved findings remain.")
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(body))
+
+    def test_a_settled_count_in_the_headline_is_not_read(self) -> None:
+        for headline in (
+            "Three resolved findings were confirmed.",
+            "Three findings were fixed.",
+            "No findings remain.",
+        ):
+            with self.subTest(headline=headline):
+                self.assertIsNone(pr_review.headline_findings(headline))
+
+    def test_digits_and_the_largest_count_are_read(self) -> None:
+        self.assertEqual(
+            4, pr_review.headline_findings("2 open findings, and 4 unresolved findings in all.")
+        )
+
+
 class TestProseFindings(GqlCase):
     """A finding a round names only in its overview prose, under a `Review findings:` label."""
 

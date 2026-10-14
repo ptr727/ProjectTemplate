@@ -203,6 +203,10 @@ Subcommands
            round's thread is no finding without one, while a finding that section's count names
            and no entry links is still counted. Entries are counted rather than links, so a
            back-reference beside an entry's own link covers no other entry.
+           The block also counts each finding the file table annotates as `<Severity> finding (N
+           votes): <title>` that matches no entry of an open section, and a headline spelling
+           out more findings than the open sections list, since either names a finding no thread
+           and no section carries.
            A round can also list its findings in prose under a `Review findings:` label, each
            entry naming the files it concerns in code spans. An entry naming no file a thread of
            that round is on is a finding with no thread, so where those entries outnumber the
@@ -2329,8 +2333,25 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
             break
         elif verdict and line.strip():
             headline.append(raw.strip())
-    roles = {k.casefold(): v for k, v in OVERVIEW_SECTIONS.items()}
     sections: list[OverviewSection] = []
+    for role, count, entries in section_entries(body):
+        ids = [found for line in entries if (found := DISCUSSION_LINK.findall(line))]
+        linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
+        sections.append((role, count, ids, linked))
+    return verdict, " ".join(headline), sections
+
+
+def section_entries(body: str) -> list[tuple[str, int | None, list[str]]]:
+    """Each counted overview section as its role, its stated count, and its entry lines.
+
+    The entry lines are the bullets at the section's margin, outside any block collapsed within
+    it, as `read_overview` documents. Quotations are masked first, so a body quoting a section is
+    not read as carrying one.
+    """
+    masked = mask_quotations(body or "")
+    tags = mask_quotations(body or "", MARKUP_MASK)
+    roles = {k.casefold(): v for k, v in OVERVIEW_SECTIONS.items()}
+    found: list[tuple[str, int | None, list[str]]] = []
     for start, end in details_spans(tags)[0]:
         summary = heading_of(masked[start:end])
         role = roles.get(normal(summary).casefold())
@@ -2340,11 +2361,8 @@ def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
         count = counted(digits.group()) if digits else None
         text = masked[start:end]
         own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
-        entries = [line for line in own.splitlines() if ENTRY_LINE.match(line)]
-        ids = [found for line in entries if (found := DISCUSSION_LINK.findall(line))]
-        linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
-        sections.append((role, count, ids, linked))
-    return verdict, " ".join(headline), sections
+        found.append((role, count, [ln for ln in own.splitlines() if ENTRY_LINE.match(ln)]))
+    return found
 
 
 def stated_total(body: str, preamble_only: bool = False) -> int | None:
@@ -2555,6 +2573,129 @@ def open_entry_ids(pr: dict) -> set[str]:
         return set()
     sections = read_overview(newest.get("body") or "")[2]
     return {entry[0] for role, _, ids, _ in sections if role != RESOLVED for entry in ids}
+
+
+TABLE_FINDING = re.compile(
+    r"\*{0,2}[A-Za-z]+ finding \((\d+) votes?\):?\*{0,2}:?\s*"
+    r"(.+?)(?=\s*\*{0,2}[A-Za-z]+ finding \(\d+ votes?\)|\s*\|?\s*$)"
+)
+NUMBER_WORDS = {
+    word: n
+    for n, word in enumerate(
+        [
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "eleven",
+            "twelve",
+        ],
+        start=1,
+    )
+}
+HEADLINE_COUNT = re.compile(
+    r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+((?:[a-z-]+\s+){0,2}?)findings?\b"
+    r"(?!\s+(?:were|was|have been|has been)\b)",
+    re.IGNORECASE,
+)
+SETTLED_WORDS = frozenset({"resolved", "fixed", "addressed", "closed"})
+
+
+def title_key(text: str) -> str:
+    """A finding title reduced to lowercase words, the form two spellings of one title compare in."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.casefold()).split())
+
+
+def table_findings(body: str) -> list[str]:
+    """The titles the file table's rows annotate as findings, in the order the table names them.
+
+    Each is a `<Severity> finding (N votes): <title>` annotation, which is where a round can name
+    a finding that its open sections and threads never carry.
+    """
+    titles = []
+    for row in table_rows(body):
+        for match in TABLE_FINDING.finditer(row):
+            if title := title_key(match.group(2)):
+                titles.append(title)
+    return titles
+
+
+def entry_text(line: str) -> str:
+    """One open-section entry as the words it reads, a link replaced by its label."""
+    return title_key(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", ENTRY_LINE.sub("", line, count=1)))
+
+
+def open_entry_texts(body: str) -> list[str]:
+    """The entry lines of every open section of a round, as `entry_text` reads them."""
+    return [
+        entry_text(line)
+        for role, _, entries in section_entries(body)
+        if role != RESOLVED
+        for line in entries
+    ]
+
+
+def unmatched_table_findings(pr: dict) -> int:
+    """How many distinct file-table annotations the head round's open sections have no entry for.
+
+    A title matches an entry where either contains the other once both are reduced to lowercase
+    words, since the table and the section are the same reviewer's wording of one finding but not
+    always the same words. An annotation matching nothing is a finding named only in a table row,
+    which no thread poll and no open section reaches.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    body = newest.get("body") or ""
+    entries = open_entry_texts(body)
+    return sum(
+        1
+        for title in dict.fromkeys(table_findings(body))
+        if not any(title in text or (text and text in title) for text in entries)
+    )
+
+
+def headline_findings(headline: str) -> int | None:
+    """The count of findings a headline spells out, or None where it states none.
+
+    The largest wins, so an ambiguous headline overstates rather than suppresses. A count
+    qualified as resolved or fixed counts what is settled rather than what is owed.
+    """
+    counts = []
+    for match in HEADLINE_COUNT.finditer(headline):
+        if SETTLED_WORDS & set(match.group(2).casefold().split()):
+            continue
+        word = match.group(1).casefold()
+        counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
+    return max(counts, default=None)
+
+
+def headline_shortfall(pr: dict) -> tuple[int, int]:
+    """The headline's finding count beside the findings the head round's open sections list.
+
+    The listed count is the larger of what an open section states and what it lists, so a section
+    stating its count without its entries still counts. Both are zero where the head round is not
+    in the second format or its headline states no count.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0, 0
+    body = newest.get("body") or ""
+    stated = headline_findings(read_overview(body)[1])
+    if stated is None:
+        return 0, 0
+    listed = sum(
+        max(count or 0, len(entries))
+        for role, count, entries in section_entries(body)
+        if role != RESOLVED
+    )
+    return stated, listed
 
 
 PROSE_FINDINGS = re.compile(
@@ -2841,17 +2982,31 @@ def file_table(body: str) -> list[str]:
 
     Each cell is reduced by `bare_path`, for the reason it states, and read by `cell_paths`.
     """
-    paths, reading = [], False
+    paths: list[str] = []
+    for row in table_rows(body):
+        if first := TABLE_ROW.match(row):
+            paths.extend(cell_paths(bare_path(first.group(1))))
+    return [p for p in paths if p]
+
+
+def table_rows(body: str) -> list[str]:
+    """The data rows of the round's file summary table, each as its whole line.
+
+    The header is what opens the table and any line that is not a row closes it, so a second
+    table later in the body is read as a second table rather than as more of the first. The
+    alignment row is not a data row, and quotations are dropped as `file_table` states.
+    """
+    rows, reading = [], False
     for line in strip_fences(body or "", to_end=True).splitlines():
         if code_indented(line):
             reading = False
         elif TABLE_HEADER.match(line):
             reading = True
-        elif (row := TABLE_ROW.match(line)) is None:
+        elif TABLE_ROW.match(line) is None:
             reading = False
         elif reading and not TABLE_RULE.match(line):
-            paths.extend(cell_paths(bare_path(row.group(1))))
-    return [p for p in paths if p]
+            rows.append(line)
+    return rows
 
 
 def cell_paths(cell: str) -> list[str]:
@@ -4338,11 +4493,15 @@ def digest(
     linked = total_section_entries(pr)
     restated = carried_open_threads(pr)
     prose = unthreaded_prose_findings(pr)
+    in_table = unmatched_table_findings(pr)
+    headlined, headline_listed = headline_shortfall(pr)
     unlisted = max(
         max((stated or 0) - linked, 0) + unthreaded
         if sectional
         else max(unlisted_findings((stated, listed + restated)), unthreaded),
         prose,
+        in_table,
+        max(headlined - headline_listed, 0),
     )
     flagged = uncounted_verdict(pr)
 
@@ -4528,6 +4687,18 @@ def digest(
                 f", and {prose} of the entries under its `Review findings:` label "
                 f"{'names' if prose == 1 else 'name'} no file a thread of that round is on"
                 if prose
+                else ""
+            )
+            + (
+                f", and {in_table} of the findings its file table annotates "
+                f"{'matches' if in_table == 1 else 'match'} no entry of its open sections"
+                if in_table
+                else ""
+            )
+            + (
+                f", and its headline states {headlined} finding{'' if headlined == 1 else 's'} "
+                f"where its open sections list {headline_listed}"
+                if headlined > headline_listed
                 else ""
             )
             + f", so {unlisted} "
