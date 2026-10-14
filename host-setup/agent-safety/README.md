@@ -80,13 +80,14 @@ text says, because the harm it covers was never in the text.
    `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
    segment dropped. A remote-tracking push target such as `origin/feature/x` is checked with its
-   remote dropped. A push or commit holding a word the shell rewrites or drops before git reads it
-   is denied too. That is a `$` or backtick word among a push's words, among a commit's global
-   options and arguments, or where any git command's subcommand goes, or a comment among a push's
-   words. A directory option's value, a commit option's double-quoted value, and a commit path
-   after `--` are read as they stand. The push and include checks also read each command with its
-   quotes and backslashes removed and `git` in any case, so a `p''ush` or an uppercase `GIT`
-   reaches them. The
+   remote dropped. A git command holding a word the shell rewrites or drops before git reads it
+   is denied too. That word is a `$`, backtick, or brace-expansion word. It is denied where any
+   git command's subcommand goes, and among a push's words or a commit's. A redirection target
+   spanning several words on either is denied too. So is a comment among a push's words. Some
+   words are read as they stand. They are a directory option's value, a commit option's
+   double-quoted value, a commit path after `--`, and a redirection target held in one word. The
+   push and include checks also read each command with its quotes and backslashes removed and
+   `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other
    requirement here favors precision over recall throughout, denying only a positively-identified
    dangerous shape, since a hook that fails closed on an unrelated resolution failure blocks

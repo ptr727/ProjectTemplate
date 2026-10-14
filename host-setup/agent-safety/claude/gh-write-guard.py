@@ -2229,7 +2229,7 @@ def _names_push(text):
     """True when `text` spells a git push as written, or once its quoting is removed.
 
     The shell joins `p''ush` into `push` before git reads it. The second reading matches `git`
-    without case, as `_is_git_exe` does, since a case-insensitive shell runs `GIT` as git.
+    without case, as `_is_git_exe` does, since a case-insensitive filesystem resolves `GIT` to git.
     """
     return bool(_GIT_PUSH.search(text) or _GIT_PUSH_UNQUOTED.search(_unquoted(text)))
 
@@ -2371,35 +2371,46 @@ def _unreadable_push(cmd):
 
 
 _GIT_DIR_VALUE_OPTS = frozenset({"-C", "--git-dir", "--work-tree"})
-_COMMIT_VALUE_OPTS = frozenset(
-    {"-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message"}
-    | {"--author", "--date", "-t", "--template", "--cleanup", "--fixup", "--squash", "--trailer"}
+_COMMIT_LONG_VALUE_OPTS = frozenset(
+    {"--message", "--file", "--reuse-message", "--reedit-message", "--author", "--date"}
+    | {"--template", "--cleanup", "--fixup", "--squash", "--trailer", "--pathspec-from-file"}
 )
+_COMMIT_VALUE_OPTS = _COMMIT_LONG_VALUE_OPTS | {"-m", "-F", "-C", "-c", "-t"}
 _COMMIT_VALUE_LETTERS = "mFCct"
+_BRACE_EXPANSION = re.compile(r"\{[^{}'\"\s]*(?:,|\.\.)[^{}'\"\s]*\}")
 
 
 def _is_run_time_word(tok):
-    """True when the shell may rewrite a token at run time, a `$` or a backtick in it or a lone parenthesis run."""
-    return "$" in tok or "`" in tok or (tok != "" and set(tok) <= {"(", ")"})
+    """True when the shell may rewrite a token at run time.
+
+    That is a `$` or a backtick in it, a brace expansion such as `{a,b}`, or a lone parenthesis run.
+    """
+    return (
+        "$" in tok
+        or "`" in tok
+        or (tok != "" and set(tok) <= {"(", ")"})
+        or bool(_BRACE_EXPANSION.search(tok))
+    )
 
 
 def _region_end(toks, k):
     """The index of the separator after `toks[k]` that ends its command.
 
-    A parenthesis the command opens, as a `$(...)` in one of its words does, is read through to the
-    one closing it, separators inside included. A closing one it did not open ends the command, as
-    a subshell's does.
+    A parenthesis the command opens, as a `$(...)` or a `<(...)` in one of its words does, is read
+    through to the one closing it, separators inside included. A closing one it did not open ends
+    the command, as a subshell's does.
     """
     n = len(toks)
     depth = 0
     e = k + 1
     while e < n:
         t = toks[e]
-        if _is_separator(t):
-            if depth == 0 and t[0] not in "()":
+        if _is_shell_op(t):
+            sep = _is_separator(t)
+            if sep and depth == 0 and t[0] not in "()":
                 break
             depth += t.count("(") - t.count(")")
-            if depth < 0 or (depth == 0 and not set(t) <= {"(", ")"}):
+            if depth < 0 or (sep and depth == 0 and not set(t) <= {"(", ")"}):
                 break
         e += 1
     return e
@@ -2430,9 +2441,15 @@ def _span_end(toks, i, end):
 
 
 def _is_commit_value_option(tok):
-    """True when a commit argument takes the next word as its value, as `-m` or a cluster such as `-am` does."""
+    """True when a commit argument takes the next word as its value.
+
+    That is `-m`, a cluster such as `-am`, or a long value option or an abbreviation of one, since
+    git reads `--mess` as `--message` and takes a following `--` as its value.
+    """
     if tok in _COMMIT_VALUE_OPTS:
         return True
+    if tok.startswith("--") and len(tok) > 2 and "=" not in tok:
+        return any(o.startswith(tok) for o in _COMMIT_LONG_VALUE_OPTS)
     return (
         len(tok) > 1
         and tok[0] == "-"
@@ -2455,10 +2472,11 @@ def _holds_attached_value(tok):
 
 
 def _expands_unquoted(raw):
-    """True when a token as written holds a `$` or a backtick outside double quotes.
+    """True when a token as written holds a `$`, a backtick, or a brace expansion outside double quotes.
 
-    Word splitting may split what such an expansion gives into more arguments. One inside a
-    `$(...)` that double quotes hold is still inside those quotes.
+    Word splitting may split what such an expansion gives into more arguments, and a brace
+    expansion gives several words itself. One inside a `$(...)` that double quotes hold is still
+    inside those quotes.
     """
     stack = []
     i = 0
@@ -2482,7 +2500,7 @@ def _expands_unquoted(raw):
             stack.append(ch)
         elif (top == "(" and ch == ")") or (top == "`" and ch == "`"):
             stack.pop()
-        elif ch in "$`" and '"' not in stack:
+        elif '"' not in stack and (ch in "$`" or (ch == "{" and _BRACE_EXPANSION.match(raw, i))):
             return True
         elif raw.startswith("$(", i):
             stack.append("(")
@@ -2496,41 +2514,46 @@ def _expands_unquoted(raw):
 def _split_free(x, toks, mask, raw):
     """True when word splitting cannot split `toks[x]`, read from the quote-keeping token where known.
 
-    Where that token is unknown, a token opening with `$(` and holding more is read as quoted. The
-    operator lex and `_context_lex` each split an unquoted `$(` at its parenthesis, and the token
-    union `_shell_tokens` returns then holds a reading that denies it.
+    Where that token is unknown, a token holding an expansion is split-free only where it opens
+    with `$(` and ends with the `)` closing it. The operator lex and `_context_lex` each split an
+    unquoted `$(` at its parenthesis, and the token union `_shell_tokens` returns then holds a
+    reading that denies it. Any other spelling, such as `"a"$Y`, is read as one that may split.
     """
     if raw is not None:
         return not _expands_unquoted(raw[x])
     tok = toks[x]
-    return (
-        bool(mask and mask[x])
-        or not _expands_unquoted(tok)
-        or (len(tok) > 2 and tok.startswith("$("))
+    return not _expands_unquoted(tok) or (
+        len(tok) > 3 and tok.startswith("$(") and tok.endswith(")")
     )
 
 
 def _rewritten_git_words(cmd):
-    """Name the form when a git push or commit holds a word the shell rewrites or drops, else None.
+    """Name the form when a git command holds a word the shell rewrites or drops, else None.
 
-    The guard reads each word as written, while the shell expands a `$` or a backtick word and drops
-    a comment before git reads any of them. Modeling either is open-ended, so the command fails closed.
+    The guard reads each word as written, while the shell expands a `$`, a backtick, or a brace
+    word and drops a comment before git reads any of them. Modeling either is open-ended, so the
+    command fails closed.
 
     - a run-time word where the subcommand goes, on any git command, since it may expand to `push` or
       to an option that moves the subcommand, as a backtick word ending the global options does
+    - a run-time word that word splitting may split among the options of a `git` with no
+      subcommand word, since `git -c $X` may expand to a commit under an override
     - a run-time word among a push's or a commit's global options, since `-c "$X"` may set
       `core.hooksPath`
     - a run-time word among a push's arguments, since it may name any refspec or remote
     - a run-time word among a commit's arguments, since it may expand to `--no-verify`
+    - a redirection target spanning several tokens on a push or a commit, since the push and
+      bypass readings stop at its parenthesis and every later word goes unread
     - a comment among a push's words, since the shell drops what the guard reads as a refspec or a
       flag there, which can turn a bare push into one naming another branch
 
     A comment on a commit only adds words the guard reads, which can only add a deny, so it is left
     alone. Four kinds of run-time word are left alone too. One is the value of a global option
-    naming a directory, unquoted too, since `-C $dir` is the common spelling, and what word
-    splitting makes of an unquoted one is not read. One is a commit option's value
-    whose expansions sit inside double quotes, since word splitting cannot then make it an option,
-    as in `-m "$(cat <<'EOF' ...)"`. One is a commit path after `--`. One is a redirection target.
+    naming a directory before a subcommand word, unquoted too, since `-C $dir` is the common
+    spelling, and what word splitting makes of an unquoted one is not read. One is a commit
+    option's value whose expansions sit inside double quotes, since word splitting cannot then make
+    it an option, as in `-m "$(cat <<'EOF' ...)"`. One is a commit path after `--`. One is a
+    redirection target held in one token, such as `2>"$LOG"`.
     Only a git word in a command's position counts, so a `grep git "$dir"` is no git command, and
     that test is `_runs_as_command`'s. A git word right after an unquoted `(` counts too, since a
     process substitution such as `<(git ...)` runs it whatever command reads the result.
@@ -2544,12 +2567,19 @@ def _rewritten_git_words(cmd):
                 continue
             end = _region_end(toks, k)
             j = min(_git_subcommand_index(toks, k), end)
-            if j >= end:
+            if j == k + 1 and j >= end:
                 continue
             if not masked:
                 mask, raw, masked = _quoted_mask(text, toks), _quote_kept_tokens(text, toks), True
             opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
             if not opened and not _runs_as_command(toks, k, mask):
+                continue
+            if j >= end:
+                if any(
+                    _is_run_time_word(toks[x]) and not _split_free(x, toks, mask, raw)
+                    for x in range(k + 1, end)
+                ):
+                    return "a run-time word among the options of a `git` with no subcommand word"
                 continue
             sub = toks[j]
             if _is_run_time_word(sub):
@@ -2569,15 +2599,19 @@ def _rewritten_git_words(cmd):
                 if not opt.startswith(("--git-dir=", "--work-tree=")) and _is_run_time_word(opt):
                     return f"a run-time word, `{opt}`, among the global options of `git {sub}`"
                 x += 1
-
             x = j + 1
             after_dashes = False
-            while x is not None and x < end:
+            while x < end:
                 arg = toks[x]
                 if _is_redir_op(arg):
                     x += 1
                     if x < end and not _is_shell_op(toks[x]):
-                        x = _span_end(toks, x, end)
+                        if _span_end(toks, x, end) != x + 1:
+                            return (
+                                f"a redirection target spanning several words among the words of "
+                                f"`git {sub}`"
+                            )
+                        x += 1
                     continue
                 if sub == "commit":
                     after_dashes = after_dashes or arg == "--"
@@ -2597,8 +2631,6 @@ def _rewritten_git_words(cmd):
                 if _is_run_time_word(arg):
                     return f"a run-time word, `{arg}`, among the arguments of `git {sub}`"
                 x += 1
-            if x is None:
-                return f"a redirection target that does not close among the words of `git {sub}`"
     return None
 
 
@@ -4455,7 +4487,7 @@ def classify(
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
-    # A word the shell rewrites or drops before git reads it hides what a push targets or what a commit skips, so it fails closed beside the readings below.
+    # A word the shell rewrites before git reads it can hide a push target or a commit bypass, so it fails closed.
     rewritten = _rewritten_git_words(cmd)
     if rewritten:
         return "deny", (
@@ -5986,7 +6018,7 @@ _GIT_CASES = [
         None,
         {"develop": _CODE_RULES},
         "deny",
-        "an uppercase GIT reaches the push check, as a case-insensitive shell runs it as git",
+        "an uppercase GIT reaches the push check, as a case-insensitive filesystem resolves it to git",
     ),
     (
         "git -c 'inc''lude.path=/example/config' p",
@@ -6140,7 +6172,63 @@ _GIT_CASES = [
         None,
         {"feature/x": set()},
         "allow",
-        "control: a run-time redirection target is not a refspec",
+        "control: a run-time word in a command the push pipes into is not a refspec",
+    ),
+    (
+        "Y=' --no-veri'fy; git commit -m \"a\"$Y",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted expansion after a quoted part of a commit message may split into more options",
+    ),
+    (
+        "X='core.hooksPath=/dev/null commit -m x'; git -c $X",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an unquoted option value on a git with no subcommand word may split into a commit",
+    ),
+    (
+        "git commit --mess -- $(printf -- --no-veri%s fy)",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "an abbreviated value option takes a following -- as its value, so later words are options",
+    ),
+    (
+        "git {push,origin} develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a brace expansion where the subcommand goes may expand to push",
+    ),
+    (
+        "git commit -m x {--no-verify,--quiet}",
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a brace expansion among a commit's arguments may expand to --no-verify",
+    ),
+    (
+        "git push origin feature/x > $(printf a) develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a redirection target spanning several words hides the push's later refspecs",
+    ),
+    (
+        "git push origin feature/x < <(printf a) develop",
+        "feature/x",
+        {"feature/x": set(), "develop": _CODE_RULES},
+        "deny",
+        "a process substitution redirection hides the push's later refspecs too",
+    ),
+    (
+        'git push origin feature/x 2>"$LOG"',
+        None,
+        {"feature/x": set()},
+        "allow",
+        "control: a run-time redirection target held in one word is not a refspec",
     ),
     (
         "(git push origin feature/x)",
