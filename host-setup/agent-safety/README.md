@@ -58,7 +58,7 @@ text says, because the harm it covers was never in the text.
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
-   parses, a wrapper shell's body among them, and not inside an `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   parses, a wrapper shell's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A force-push and a delete each write the branch too, so a branch
